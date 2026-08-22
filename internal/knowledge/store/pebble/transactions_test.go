@@ -2,6 +2,8 @@ package pebble
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"testing"
@@ -68,6 +70,15 @@ func txEvidence() knowledge.Evidence {
 	}
 }
 
+func txAsset() knowledgeStore.PackageAsset {
+	data := []byte("asset data\n")
+	digest := sha256.Sum256(data)
+	return knowledgeStore.PackageAsset{
+		ChunkID: txChunkID, Path: "assets/note.txt", MediaType: "text/plain; charset=utf-8",
+		SHA256: hex.EncodeToString(digest[:]), Data: data,
+	}
+}
+
 func TestTransactionCommitsAtomicallyAndDurably(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -78,6 +89,9 @@ func TestTransactionCommitsAtomicallyAndDurably(t *testing.T) {
 	}
 	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error {
 		if err := tx.PutChunk(ctx, txChunk(1), 0); err != nil {
+			return err
+		}
+		if err := tx.PutAsset(ctx, txAsset()); err != nil {
 			return err
 		}
 		if err := tx.PutEntry(ctx, txEntry(), 0); err != nil {
@@ -127,6 +141,9 @@ func TestTransactionCallbackErrorLeavesNoPartialRecords(t *testing.T) {
 		if err := tx.PutChunk(ctx, txChunk(1), 0); err != nil {
 			return err
 		}
+		if err := tx.PutAsset(ctx, txAsset()); err != nil {
+			return err
+		}
 		if err := tx.PutEvidence(ctx, txEvidence()); err != nil {
 			return err
 		}
@@ -148,6 +165,9 @@ func TestTransactionCallbackErrorLeavesNoPartialRecords(t *testing.T) {
 		}
 		if _, err := tx.Evidence(ctx, txEvidenceID); !errors.Is(err, knowledgeStore.ErrNotFound) {
 			return fmt.Errorf("evidence error = %v, want ErrNotFound", err)
+		}
+		if _, err := tx.Asset(ctx, txChunkID, "assets/note.txt"); !errors.Is(err, knowledgeStore.ErrNotFound) {
+			return fmt.Errorf("asset error = %v, want ErrNotFound", err)
 		}
 		return nil
 	}); err != nil {
@@ -191,7 +211,12 @@ func TestTransactionEnforcesRevisionPreconditions(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error { return tx.PutChunk(ctx, txChunk(1), 0) }); err != nil {
+	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+		if err := tx.PutChunk(ctx, txChunk(1), 0); err != nil {
+			return err
+		}
+		return tx.PutAsset(ctx, txAsset())
+	}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	for name, mutate := range map[string]func(knowledgeStore.WriteTx) error{
@@ -232,6 +257,7 @@ func TestTransactionDeleteRemovesCanonicalAndRevisionHistory(t *testing.T) {
 		chunkKey(string(txChunkID)),
 		revisionKey(recordChunk, string(txChunkID), 1),
 		revisionKey(recordChunk, string(txChunkID), 2),
+		assetKey(txChunkID, "assets/note.txt"),
 	} {
 		_, closer, err := s.db.Get(key)
 		if err == nil {
@@ -473,6 +499,14 @@ func expectAllRecords(ctx context.Context, s *Store) error {
 		}
 		if _, err := tx.Evidence(ctx, txEvidenceID); err != nil {
 			return err
+		}
+		asset, err := tx.Asset(ctx, txChunkID, "assets/note.txt")
+		if err != nil || string(asset.Data) != "asset data\n" {
+			return fmt.Errorf("read durable asset: %#v, %w", asset, err)
+		}
+		assets, err := tx.ListAssets(ctx, txChunkID)
+		if err != nil || len(assets) != 1 {
+			return fmt.Errorf("list durable assets: %#v, %w", assets, err)
 		}
 		return nil
 	})

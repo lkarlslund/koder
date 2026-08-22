@@ -24,6 +24,8 @@ const (
 	ImportImpactMissingDependency ImportImpactAction = "missing_dependency"
 )
 
+const importImpactAssetKind knowledgeStore.RecordKind = "asset"
+
 // ImportImpact is one stable, content-free preview row. ExistingID is omitted when
 // disclosing it could reveal an object the caller did not name.
 type ImportImpact struct {
@@ -106,6 +108,12 @@ func (s *Service) PreviewImport(ctx context.Context, pkg kpackage.ValidatedPacka
 				}
 			}
 			if impactErr := previewRecordImpact(existing, readErr, entry, knowledgeStore.RecordKindEntry, string(entry.ID), &preview); impactErr != nil {
+				return impactErr
+			}
+		}
+		for _, asset := range packageAssets(pkg) {
+			existing, readErr := tx.Asset(ctx, asset.ChunkID, asset.Path)
+			if impactErr := previewRecordImpact(existing, readErr, asset, importImpactAssetKind, asset.Path, &preview); impactErr != nil {
 				return impactErr
 			}
 		}
@@ -383,4 +391,21 @@ func sortedEvidence(values []knowledge.Evidence) []knowledge.Evidence {
 	values = slices.Clone(values)
 	slices.SortFunc(values, func(left, right knowledge.Evidence) int { return strings.Compare(string(left.ID), string(right.ID)) })
 	return values
+}
+
+func packageAssets(pkg kpackage.ValidatedPackage) []knowledgeStore.PackageAsset {
+	result := make([]knowledgeStore.PackageAsset, 0, len(pkg.Assets))
+	chunkID := knowledge.ChunkID(pkg.Manifest.Chunk.ID)
+	for path, data := range pkg.Assets {
+		asset := knowledgeStore.PackageAsset{ChunkID: chunkID, Path: path, Data: slices.Clone(data)}
+		for _, file := range pkg.Manifest.Files {
+			if file.Path == path {
+				asset.MediaType, asset.SHA256 = file.MediaType, file.SHA256
+				break
+			}
+		}
+		result = append(result, asset)
+	}
+	slices.SortFunc(result, func(left, right knowledgeStore.PackageAsset) int { return strings.Compare(left.Path, right.Path) })
+	return result
 }

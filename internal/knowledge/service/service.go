@@ -22,17 +22,18 @@ type ActorSource func(context.Context) (knowledge.Actor, error)
 type IDSource func() string
 
 type Config struct {
-	Store        knowledgeStore.Store
-	Classifier   knowledge.Classifier
-	ChunkPolicy  ChunkPolicy
-	ToolPolicy   ToolOfferPolicy
-	Actor        ActorSource
-	Now          func() time.Time
-	NewID        IDSource
-	RankSignals  RankingSignalSource
-	Semantic     SemanticIndexProvider
-	ScoreBlender SearchScoreBlender
-	Operational  OperationalPolicy
+	Store          knowledgeStore.Store
+	Classifier     knowledge.Classifier
+	ChunkPolicy    ChunkPolicy
+	ToolPolicy     ToolOfferPolicy
+	Actor          ActorSource
+	Now            func() time.Time
+	NewID          IDSource
+	RankSignals    RankingSignalSource
+	Semantic       SemanticIndexProvider
+	ScoreBlender   SearchScoreBlender
+	Operational    OperationalPolicy
+	ImportStageTTL time.Duration
 }
 
 type Service struct {
@@ -59,6 +60,9 @@ type Service struct {
 	operationsCancel context.CancelFunc
 	operationsClosed bool
 	operationsWG     sync.WaitGroup
+	importMu         sync.Mutex
+	importStages     map[string]*stagedImport
+	importStageTTL   time.Duration
 }
 
 func New(cfg Config) (*Service, error) {
@@ -90,6 +94,12 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Operational == nil {
 		cfg.Operational = AllowAllOperationalPolicy{}
 	}
+	if cfg.ImportStageTTL == 0 {
+		cfg.ImportStageTTL = 15 * time.Minute
+	}
+	if cfg.ImportStageTTL < 0 {
+		return nil, fmt.Errorf("knowledge import stage TTL must be positive")
+	}
 	operationsCtx, operationsCancel := context.WithCancel(context.Background())
 	return &Service{
 		store: cfg.Store, classifier: cfg.Classifier, chunkPolicy: cfg.ChunkPolicy, toolPolicy: cfg.ToolPolicy, actor: cfg.Actor,
@@ -98,6 +108,7 @@ func New(cfg Config) (*Service, error) {
 		mutationStreamID: id.New(), mutationSubs: make(map[uint64]chan MutationEvent),
 		operational:   cfg.Operational,
 		operationsCtx: operationsCtx, operationsCancel: operationsCancel,
+		importStages: make(map[string]*stagedImport), importStageTTL: cfg.ImportStageTTL,
 	}, nil
 }
 

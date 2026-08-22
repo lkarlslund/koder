@@ -2,6 +2,8 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
@@ -68,6 +70,15 @@ func evidence() knowledge.Evidence {
 	}
 }
 
+func asset() knowledgeStore.PackageAsset {
+	data := []byte("asset data\n")
+	digest := sha256.Sum256(data)
+	return knowledgeStore.PackageAsset{
+		ChunkID: chunkID, Path: "assets/note.txt", MediaType: "text/plain; charset=utf-8",
+		SHA256: hex.EncodeToString(digest[:]), Data: data,
+	}
+}
+
 func TestStoreReadWriteAndReadYourWrites(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -76,6 +87,9 @@ func TestStoreReadWriteAndReadYourWrites(t *testing.T) {
 
 	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error {
 		if err := tx.PutChunk(ctx, chunk(1), 0); err != nil {
+			return err
+		}
+		if err := tx.PutAsset(ctx, asset()); err != nil {
 			return err
 		}
 		if err := tx.PutEntry(ctx, entry(), 0); err != nil {
@@ -112,6 +126,15 @@ func TestStoreReadWriteAndReadYourWrites(t *testing.T) {
 		if _, err := tx.Evidence(ctx, evidenceID); err != nil {
 			return err
 		}
+		stored, err := tx.Asset(ctx, chunkID, "assets/note.txt")
+		if err != nil || string(stored.Data) != "asset data\n" {
+			return fmt.Errorf("read asset: %#v, %w", stored, err)
+		}
+		stored.Data[0] = 'X'
+		assets, err := tx.ListAssets(ctx, chunkID)
+		if err != nil || len(assets) != 1 || string(assets[0].Data) != "asset data\n" {
+			return fmt.Errorf("list cloned assets: %#v, %w", assets, err)
+		}
 		return nil
 	}); err != nil {
 		t.Fatalf("View() error = %v", err)
@@ -128,12 +151,18 @@ func TestStoreUpdateRollsBack(t *testing.T) {
 		if err := tx.PutChunk(ctx, chunk(1), 0); err != nil {
 			return err
 		}
+		if err := tx.PutAsset(ctx, asset()); err != nil {
+			return err
+		}
 		return wantErr
 	}); !errors.Is(err, wantErr) {
 		t.Fatalf("Update() error = %v, want %v", err, wantErr)
 	}
 	if err := s.View(ctx, func(tx knowledgeStore.ReadTx) error {
-		_, err := tx.Chunk(ctx, chunkID)
+		if _, err := tx.Chunk(ctx, chunkID); !errors.Is(err, knowledgeStore.ErrNotFound) {
+			return fmt.Errorf("chunk error = %v, want ErrNotFound", err)
+		}
+		_, err := tx.Asset(ctx, chunkID, "assets/note.txt")
 		return err
 	}); !errors.Is(err, knowledgeStore.ErrNotFound) {
 		t.Fatalf("View() after rollback error = %v, want ErrNotFound", err)
@@ -147,6 +176,9 @@ func TestStoreEnforcesRevisionPreconditions(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error { return tx.PutChunk(ctx, chunk(1), 0) }); err != nil {
 		t.Fatalf("create: %v", err)
+	}
+	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error { return tx.PutAsset(ctx, asset()) }); err != nil {
+		t.Fatalf("create asset: %v", err)
 	}
 	for name, update := range map[string]func(knowledgeStore.WriteTx) error{
 		"duplicate create": func(tx knowledgeStore.WriteTx) error { return tx.PutChunk(ctx, chunk(1), 0) },
@@ -165,6 +197,12 @@ func TestStoreEnforcesRevisionPreconditions(t *testing.T) {
 	}
 	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error { return tx.DeleteChunk(ctx, chunkID, 2) }); err != nil {
 		t.Fatalf("valid delete: %v", err)
+	}
+	if err := s.View(ctx, func(tx knowledgeStore.ReadTx) error {
+		_, err := tx.Asset(ctx, chunkID, "assets/note.txt")
+		return err
+	}); !errors.Is(err, knowledgeStore.ErrNotFound) {
+		t.Fatalf("asset survived chunk delete: %v", err)
 	}
 }
 

@@ -178,6 +178,28 @@ func TestScanHonorsCancellation(t *testing.T) {
 	}
 }
 
+func TestValidatedPackageCloneDetachesNestedData(t *testing.T) {
+	t.Parallel()
+	request := canonicalExampleRequest(t)
+	request.Assets = []Asset{{Path: "assets/note.txt", MediaType: "text/plain", Data: []byte("asset\n")}}
+	for index := range request.Entries {
+		request.Entries[index].Tags = []string{"clone-test"}
+	}
+	for index := range request.Links {
+		request.Links[index].EvidenceIDs = []knowledge.EvidenceID{request.Evidence[0].ID}
+	}
+	original := validatedExample(t, request)
+	clone := original.Clone()
+	clone.Manifest.Chunk.Tags[0] = "mutated"
+	clone.Entries[0].Tags[0] = "mutated"
+	clone.Links[0].EvidenceIDs[0] = "01a02b00-0000-7000-8000-000000000099"
+	clone.Assets["assets/note.txt"][0] = 'X'
+	if original.Manifest.Chunk.Tags[0] == "mutated" || original.Entries[0].Tags[0] == "mutated" ||
+		original.Links[0].EvidenceIDs[0] == clone.Links[0].EvidenceIDs[0] || original.Assets["assets/note.txt"][0] == 'X' {
+		t.Fatal("ValidatedPackage.Clone() aliases nested package data")
+	}
+}
+
 func validatedExample(t *testing.T, request ExportRequest) ValidatedPackage {
 	t.Helper()
 	validated, err := Validate(exportAndParse(t, request), ValidationOptions{CurrentKoderVersion: "r1847"})

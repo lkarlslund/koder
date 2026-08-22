@@ -52,6 +52,8 @@ type ReadTx interface {
 	EquivalentLink(context.Context, knowledge.Link) (knowledge.Link, error)
 	Evidence(context.Context, knowledge.EvidenceID) (knowledge.Evidence, error)
 	EvidenceBySource(context.Context, string, string) (knowledge.Evidence, error)
+	Asset(context.Context, knowledge.ChunkID, string) (PackageAsset, error)
+	ListAssets(context.Context, knowledge.ChunkID) ([]PackageAsset, error)
 }
 
 // WriteTx atomically mutates canonical records. For Put methods, expectedRevision zero
@@ -72,6 +74,8 @@ type WriteTx interface {
 	DeleteLink(context.Context, knowledge.LinkID, uint64) error
 	PutEvidence(context.Context, knowledge.Evidence) error
 	DeleteEvidence(context.Context, knowledge.EvidenceID) error
+	PutAsset(context.Context, PackageAsset) error
+	DeleteAsset(context.Context, knowledge.ChunkID, string) error
 }
 
 // Store owns one independent knowledge database lifecycle.

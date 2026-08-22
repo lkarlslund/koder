@@ -18,14 +18,23 @@ const (
 )
 
 var (
-	storeMetadataKey = []byte(keyFormatPrefix + "meta/store")
-	canonicalPrefix  = []byte(keyFormatPrefix + "record/")
-	revisionsPrefix  = []byte(keyFormatPrefix + "revision/")
-	indexesPrefix    = []byte(keyFormatPrefix + "index/")
-	entryUsagePrefix = []byte(keyFormatPrefix + "usage/entry/")
-	usageEventPrefix = []byte(keyFormatPrefix + "usage-event/entry/")
-	graphViewPrefix  = []byte(keyFormatPrefix + "user-view/graph/")
+	storeMetadataKey   = []byte(keyFormatPrefix + "meta/store")
+	canonicalPrefix    = []byte(keyFormatPrefix + "record/")
+	revisionsPrefix    = []byte(keyFormatPrefix + "revision/")
+	indexesPrefix      = []byte(keyFormatPrefix + "index/")
+	entryUsagePrefix   = []byte(keyFormatPrefix + "usage/entry/")
+	usageEventPrefix   = []byte(keyFormatPrefix + "usage-event/entry/")
+	graphViewPrefix    = []byte(keyFormatPrefix + "user-view/graph/")
+	packageAssetPrefix = []byte(keyFormatPrefix + "package-asset/")
 )
+
+func assetChunkPrefix(chunkID knowledge.ChunkID) []byte {
+	return append(append([]byte(nil), packageAssetPrefix...), encodeIndexTuple(string(chunkID))...)
+}
+
+func assetKey(chunkID knowledge.ChunkID, path string) []byte {
+	return append(assetChunkPrefix(chunkID), encodeIndexTuple(path)...)
+}
 
 func metadataKey() []byte {
 	return append([]byte(nil), storeMetadataKey...)

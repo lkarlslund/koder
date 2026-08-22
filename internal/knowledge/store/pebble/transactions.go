@@ -309,6 +309,37 @@ func (tx *transaction) EvidenceBySource(ctx context.Context, sourceID, contentHa
 	return knowledge.Evidence{}, fmt.Errorf("%w: evidence source %q hash %q", knowledgeStore.ErrNotFound, sourceID, contentHash)
 }
 
+func (tx *transaction) Asset(ctx context.Context, chunkID knowledge.ChunkID, path string) (knowledgeStore.PackageAsset, error) {
+	if err := tx.check(ctx, false); err != nil {
+		return knowledgeStore.PackageAsset{}, err
+	}
+	return readRecord[knowledgeStore.PackageAsset](tx.reader, assetKey(chunkID, path), "asset", string(chunkID)+"/"+path)
+}
+
+func (tx *transaction) ListAssets(ctx context.Context, chunkID knowledge.ChunkID) ([]knowledgeStore.PackageAsset, error) {
+	if err := tx.check(ctx, false); err != nil {
+		return nil, err
+	}
+	lower, upper := prefixBounds(assetChunkPrefix(chunkID))
+	iter, err := tx.reader.NewIter(&cockroachpebble.IterOptions{LowerBound: lower, UpperBound: upper})
+	if err != nil {
+		return nil, fmt.Errorf("list package assets for chunk %s: %w", chunkID, err)
+	}
+	defer func() { _ = iter.Close() }()
+	result := make([]knowledgeStore.PackageAsset, 0)
+	for valid := iter.First(); valid; valid = iter.Next() {
+		value, err := decodeRecord[knowledgeStore.PackageAsset](iter.Value(), "asset", string(chunkID))
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, knowledgeStore.ClonePackageAsset(value))
+	}
+	if err := iter.Error(); err != nil {
+		return nil, fmt.Errorf("iterate package assets for chunk %s: %w", chunkID, err)
+	}
+	return result, ctx.Err()
+}
+
 func (tx *transaction) PutChunk(ctx context.Context, value knowledge.Chunk, expectedRevision uint64) error {
 	if err := tx.check(ctx, true); err != nil {
 		return err
@@ -422,6 +453,13 @@ func (tx *transaction) DeleteChunk(ctx context.Context, id knowledge.ChunkID, ex
 	}
 	if err := tx.replaceChunkIndexes(ctx, &current, nil); err != nil {
 		return err
+	}
+	assetLower, assetUpper := prefixBounds(assetChunkPrefix(id))
+	if assetUpper == nil {
+		return fmt.Errorf("delete package assets for chunk %s: invalid prefix", id)
+	}
+	if err := tx.batch.DeleteRange(assetLower, assetUpper, nil); err != nil {
+		return fmt.Errorf("delete package assets for chunk %s: %w", id, err)
 	}
 	tx.derivedDirty = true
 	return tx.deleteRevisioned(chunkKey(string(id)), revisionPrefix(recordChunk, string(id)))
@@ -688,6 +726,44 @@ func (tx *transaction) DeleteEvidence(ctx context.Context, id knowledge.Evidence
 		return fmt.Errorf("delete evidence %s: %w", id, err)
 	}
 	tx.derivedDirty = true
+	return nil
+}
+
+func (tx *transaction) PutAsset(ctx context.Context, value knowledgeStore.PackageAsset) error {
+	if err := tx.check(ctx, true); err != nil {
+		return err
+	}
+	if err := value.Validate(); err != nil {
+		return err
+	}
+	if _, err := tx.Chunk(ctx, value.ChunkID); err != nil {
+		return err
+	}
+	if _, err := tx.Asset(ctx, value.ChunkID, value.Path); err == nil {
+		return fmt.Errorf("%w: asset %s/%s already exists", knowledgeStore.ErrConflict, value.ChunkID, value.Path)
+	} else if !errors.Is(err, knowledgeStore.ErrNotFound) {
+		return err
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("encode asset %s/%s: %w", value.ChunkID, value.Path, err)
+	}
+	if err := tx.batch.Set(assetKey(value.ChunkID, value.Path), encoded, nil); err != nil {
+		return fmt.Errorf("put asset %s/%s: %w", value.ChunkID, value.Path, err)
+	}
+	return nil
+}
+
+func (tx *transaction) DeleteAsset(ctx context.Context, chunkID knowledge.ChunkID, path string) error {
+	if err := tx.check(ctx, true); err != nil {
+		return err
+	}
+	if _, err := tx.Asset(ctx, chunkID, path); err != nil {
+		return err
+	}
+	if err := tx.batch.Delete(assetKey(chunkID, path), nil); err != nil {
+		return fmt.Errorf("delete asset %s/%s: %w", chunkID, path, err)
+	}
 	return nil
 }
 

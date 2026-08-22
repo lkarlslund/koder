@@ -3,6 +3,7 @@ package kpackage
 
 import (
 	"crypto/ed25519"
+	"slices"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
@@ -137,4 +138,35 @@ type ExportResult struct {
 	Manifest Manifest
 	SHA256   string
 	Size     int64
+}
+
+// Clone returns a detached copy suitable for short-lived import staging. Callers can
+// mutate either package without aliasing record slices or asset bytes.
+func (p ValidatedPackage) Clone() ValidatedPackage {
+	result := ValidatedPackage{
+		Manifest: cloneValidatedManifest(p.Manifest), SignatureState: p.SignatureState,
+		Entries: make([]knowledge.Entry, len(p.Entries)), Links: make([]knowledge.Link, len(p.Links)),
+		Evidence: slices.Clone(p.Evidence), Assets: make(map[string][]byte, len(p.Assets)),
+	}
+	for index, entry := range p.Entries {
+		entry.Aliases = slices.Clone(entry.Aliases)
+		entry.Tags = slices.Clone(entry.Tags)
+		entry.Risk = slices.Clone(entry.Risk)
+		entry.EvidenceIDs = slices.Clone(entry.EvidenceIDs)
+		entry.Verification.EvidenceIDs = slices.Clone(entry.Verification.EvidenceIDs)
+		entry.Applicability.OperatingSystems = slices.Clone(entry.Applicability.OperatingSystems)
+		entry.Applicability.Architectures = slices.Clone(entry.Applicability.Architectures)
+		entry.Applicability.Software = slices.Clone(entry.Applicability.Software)
+		entry.Applicability.Locales = slices.Clone(entry.Applicability.Locales)
+		entry.Applicability.Conditions = slices.Clone(entry.Applicability.Conditions)
+		result.Entries[index] = entry
+	}
+	for index, link := range p.Links {
+		link.EvidenceIDs = slices.Clone(link.EvidenceIDs)
+		result.Links[index] = link
+	}
+	for path, data := range p.Assets {
+		result.Assets[path] = slices.Clone(data)
+	}
+	return result
 }

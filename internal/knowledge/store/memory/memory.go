@@ -31,11 +31,17 @@ type data struct {
 	entries      map[knowledge.EntryID]knowledge.Entry
 	links        map[knowledge.LinkID]knowledge.Link
 	evidence     map[knowledge.EvidenceID]knowledge.Evidence
+	assets       map[assetKey]knowledgeStore.PackageAsset
 	chunkHistory map[knowledge.ChunkID][]knowledge.Chunk
 	entryHistory map[knowledge.EntryID][]knowledge.Entry
 	linkHistory  map[knowledge.LinkID][]knowledge.Link
 	usage        map[knowledge.EntryID]knowledgeStore.EntryUsage
 	usageEvents  map[string]struct{}
+}
+
+type assetKey struct {
+	chunkID knowledge.ChunkID
+	path    string
 }
 
 type transaction struct {
@@ -64,6 +70,7 @@ func newData() data {
 		entries:      make(map[knowledge.EntryID]knowledge.Entry),
 		links:        make(map[knowledge.LinkID]knowledge.Link),
 		evidence:     make(map[knowledge.EvidenceID]knowledge.Evidence),
+		assets:       make(map[assetKey]knowledgeStore.PackageAsset),
 		chunkHistory: make(map[knowledge.ChunkID][]knowledge.Chunk),
 		entryHistory: make(map[knowledge.EntryID][]knowledge.Entry),
 		linkHistory:  make(map[knowledge.LinkID][]knowledge.Link),
@@ -386,6 +393,31 @@ func (tx *transaction) EvidenceBySource(ctx context.Context, sourceID, contentHa
 	return knowledge.Evidence{}, fmt.Errorf("%w: evidence source %q hash %q", knowledgeStore.ErrNotFound, sourceID, contentHash)
 }
 
+func (tx *transaction) Asset(ctx context.Context, chunkID knowledge.ChunkID, path string) (knowledgeStore.PackageAsset, error) {
+	if err := tx.check(ctx, false); err != nil {
+		return knowledgeStore.PackageAsset{}, err
+	}
+	value, exists := tx.data.assets[assetKey{chunkID: chunkID, path: path}]
+	if !exists {
+		return knowledgeStore.PackageAsset{}, fmt.Errorf("%w: asset %s/%s", knowledgeStore.ErrNotFound, chunkID, path)
+	}
+	return knowledgeStore.ClonePackageAsset(value), nil
+}
+
+func (tx *transaction) ListAssets(ctx context.Context, chunkID knowledge.ChunkID) ([]knowledgeStore.PackageAsset, error) {
+	if err := tx.check(ctx, false); err != nil {
+		return nil, err
+	}
+	result := make([]knowledgeStore.PackageAsset, 0)
+	for key, value := range tx.data.assets {
+		if key.chunkID == chunkID {
+			result = append(result, knowledgeStore.ClonePackageAsset(value))
+		}
+	}
+	slices.SortFunc(result, func(left, right knowledgeStore.PackageAsset) int { return strings.Compare(left.Path, right.Path) })
+	return result, nil
+}
+
 func (tx *transaction) PutChunk(ctx context.Context, value knowledge.Chunk, expectedRevision uint64) error {
 	if err := tx.check(ctx, true); err != nil {
 		return err
@@ -482,6 +514,11 @@ func (tx *transaction) DeleteChunk(ctx context.Context, id knowledge.ChunkID, ex
 	}
 	delete(tx.data.chunks, id)
 	delete(tx.data.chunkHistory, id)
+	for key := range tx.data.assets {
+		if key.chunkID == id {
+			delete(tx.data.assets, key)
+		}
+	}
 	tx.derivedDirty = true
 	return nil
 }
@@ -592,12 +629,43 @@ func (tx *transaction) DeleteEvidence(ctx context.Context, id knowledge.Evidence
 	return nil
 }
 
+func (tx *transaction) PutAsset(ctx context.Context, value knowledgeStore.PackageAsset) error {
+	if err := tx.check(ctx, true); err != nil {
+		return err
+	}
+	if err := value.Validate(); err != nil {
+		return err
+	}
+	if _, exists := tx.data.chunks[value.ChunkID]; !exists {
+		return fmt.Errorf("%w: asset chunk %s", knowledgeStore.ErrNotFound, value.ChunkID)
+	}
+	key := assetKey{chunkID: value.ChunkID, path: value.Path}
+	if _, exists := tx.data.assets[key]; exists {
+		return fmt.Errorf("%w: asset %s/%s already exists", knowledgeStore.ErrConflict, value.ChunkID, value.Path)
+	}
+	tx.data.assets[key] = knowledgeStore.ClonePackageAsset(value)
+	return nil
+}
+
+func (tx *transaction) DeleteAsset(ctx context.Context, chunkID knowledge.ChunkID, path string) error {
+	if err := tx.check(ctx, true); err != nil {
+		return err
+	}
+	key := assetKey{chunkID: chunkID, path: path}
+	if _, exists := tx.data.assets[key]; !exists {
+		return fmt.Errorf("%w: asset %s/%s", knowledgeStore.ErrNotFound, chunkID, path)
+	}
+	delete(tx.data.assets, key)
+	return nil
+}
+
 func cloneData(source data) data {
 	return data{
 		chunks:       cloneMap(source.chunks, cloneChunk),
 		entries:      cloneMap(source.entries, cloneEntry),
 		links:        cloneMap(source.links, cloneLink),
 		evidence:     cloneMap(source.evidence, func(value knowledge.Evidence) knowledge.Evidence { return value }),
+		assets:       cloneMap(source.assets, knowledgeStore.ClonePackageAsset),
 		chunkHistory: cloneHistoryMap(source.chunkHistory, cloneChunk),
 		entryHistory: cloneHistoryMap(source.entryHistory, cloneEntry),
 		linkHistory:  cloneHistoryMap(source.linkHistory, cloneLink),
