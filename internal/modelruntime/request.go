@@ -82,7 +82,11 @@ func (r *Runtime) ParseProviderToolCallsForTranscript(raw []provider.ToolCall, s
 			}
 			continue
 		}
-		r.RecordLifecycle(sessionID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": call.Tool.String(), "tool_call_id": call.ToolCallID})
+		meta := map[string]string{"tool": call.Tool.String(), "tool_call_id": call.ToolCallID, "tool_identity": call.Identity()}
+		if action := strings.TrimSpace(call.Args["action"]); action != "" {
+			meta["action"] = action
+		}
+		r.RecordLifecycle(sessionID, "tool_call_parsed", call.ContextString(), meta)
 		out.Requests = append(out.Requests, call)
 		out.ToolCalls = append(out.ToolCalls, toolCallRecord(call))
 	}

@@ -131,6 +131,18 @@ func (r Request) ContextString() string {
 	return string(data)
 }
 
+// Identity returns the permission and observability identity for a request.
+// Resource tools include their selected action so materially different effects
+// remain distinguishable even though they share one model-facing tool name.
+func (r Request) Identity() string {
+	tool := strings.TrimSpace(r.Tool.String())
+	action := strings.TrimSpace(r.Args["action"])
+	if tool == "" || action == "" {
+		return tool
+	}
+	return tool + "." + action
+}
+
 type Result = domain.ToolResult
 
 type Presentation struct {
@@ -630,6 +642,165 @@ func (t ActionTool) delegatedRequest(req Request) (Request, Tool, error) {
 		args[key] = value
 	}
 	return Request{Tool: legacy, ToolCallID: req.ToolCallID, Args: args}, delegate, nil
+}
+
+// CanonicalRequest translates a historical operation call into the current
+// resource/action shape for provider replay. Persisted data and execution keep
+// their original identity; only newly built model context is canonicalized.
+func CanonicalRequest(req Request) Request {
+	if req.Args == nil {
+		req.Args = map[string]string{}
+	}
+	if canonical, ok := canonicalPhoneRequest(req); ok {
+		return canonical
+	}
+	if req.Tool == Bash {
+		canonical := req
+		canonical.Tool = ExecCommand
+		canonical.Args = maps.Clone(req.Args)
+		if command := strings.TrimSpace(canonical.Args["command"]); command != "" {
+			canonical.Args["cmd"] = command
+		}
+		delete(canonical.Args, "command")
+		return canonical
+	}
+
+	regMu.RLock()
+	registered := make([]Tool, 0, len(order))
+	for _, kind := range order {
+		registered = append(registered, registry[kind])
+	}
+	regMu.RUnlock()
+	for _, registeredTool := range registered {
+		actionTool, ok := registeredTool.(ActionTool)
+		if !ok {
+			continue
+		}
+		if req.Tool == actionTool.Kind && strings.TrimSpace(req.Args["action"]) == "" && actionTool.DefaultAction != "" {
+			canonical := req
+			canonical.Args = maps.Clone(req.Args)
+			canonical.Args["action"] = actionTool.DefaultAction
+			return canonical
+		}
+		if canonical, ok := actionTool.canonicalizeLegacy(req); ok {
+			return canonical
+		}
+	}
+	return req
+}
+
+func (t ActionTool) canonicalizeLegacy(req Request) (Request, bool) {
+	best := -1
+	for index, route := range t.Routes {
+		if route.Tool != req.Tool || !fixedArgsMatch(req.Args, route.FixedArgs) {
+			continue
+		}
+		if best < 0 || len(route.FixedArgs) > len(t.Routes[best].FixedArgs) {
+			best = index
+		}
+	}
+	if best < 0 {
+		return Request{}, false
+	}
+	route := t.Routes[best]
+	canonical := req
+	canonical.Tool = t.Kind
+	canonical.Args = maps.Clone(req.Args)
+	for key := range route.FixedArgs {
+		delete(canonical.Args, key)
+	}
+	canonical.Args["action"] = route.Action
+	return canonical, true
+}
+
+func fixedArgsMatch(args, fixed map[string]string) bool {
+	for key, value := range fixed {
+		if strings.TrimSpace(args[key]) != value {
+			return false
+		}
+	}
+	return true
+}
+
+func canonicalPhoneRequest(req Request) (Request, bool) {
+	if req.Tool != Phone {
+		return Request{}, false
+	}
+	action := strings.TrimSpace(req.Args["action"])
+	target, canonicalAction := ID(""), ""
+	switch action {
+	case "device_status":
+		target, canonicalAction = PhoneDevice, "status"
+	case "get_location":
+		target, canonicalAction = PhoneLocation, "get"
+	case "search_contacts":
+		target, canonicalAction = PhoneContacts, "search"
+	case "create_contact":
+		target, canonicalAction = PhoneContacts, "create"
+	case "edit_contact":
+		target, canonicalAction = PhoneContacts, "edit"
+	case "upcoming_calendar":
+		target, canonicalAction = PhoneCalendar, "list"
+	case "create_calendar_event":
+		target, canonicalAction = PhoneCalendar, "create"
+	case "edit_calendar_event":
+		target, canonicalAction = PhoneCalendar, strings.TrimSpace(req.Args["operation"])
+		if canonicalAction != "cancel" {
+			canonicalAction = "edit"
+		}
+	case "search_sms":
+		target, canonicalAction = PhoneMessages, "search"
+	case "send_sms":
+		target, canonicalAction = PhoneMessages, "send"
+	case "search_call_history":
+		target, canonicalAction = PhoneCalls, "history"
+	case "place_call":
+		target, canonicalAction = PhoneCalls, "place"
+	case "recent_notifications":
+		target, canonicalAction = PhoneNotifications, "list"
+	case "set_alarm":
+		target, canonicalAction = PhoneClock, "set_alarm"
+	case "set_timer":
+		target, canonicalAction = PhoneClock, "set_timer"
+	case "read_clipboard":
+		target, canonicalAction = PhoneClipboard, "read"
+	case "write_clipboard":
+		target, canonicalAction = PhoneClipboard, "write"
+	case "list_apps":
+		target, canonicalAction = PhoneApps, "list"
+	case "open_app":
+		target, canonicalAction = PhoneApps, "open"
+	case "media_control":
+		target, canonicalAction = PhoneMedia, strings.TrimSpace(req.Args["media_action"])
+	case "compose_email":
+		target, canonicalAction = PhoneShare, "compose_email"
+	case "share_text":
+		target, canonicalAction = PhoneShare, "share_text"
+	case "open_map":
+		target, canonicalAction = PhoneOpen, "map"
+	case "open_url":
+		target, canonicalAction = PhoneOpen, "url"
+	case "phone_photos_search":
+		target, canonicalAction = PhonePhotos, "search"
+	case "phone_photos_thumbs":
+		target, canonicalAction = PhonePhotos, "thumbnails"
+	case "phone_photo_view":
+		target, canonicalAction = PhonePhotos, "view"
+	case "phone_photo_transfer":
+		target, canonicalAction = PhonePhotos, "transfer"
+	default:
+		return Request{}, false
+	}
+	if canonicalAction == "" {
+		return Request{}, false
+	}
+	canonical := req
+	canonical.Tool = target
+	canonical.Args = maps.Clone(req.Args)
+	canonical.Args["action"] = canonicalAction
+	delete(canonical.Args, "operation")
+	delete(canonical.Args, "media_action")
+	return canonical, true
 }
 
 func legacyOperationAvailable(kind ID, runtime Runtime) bool {

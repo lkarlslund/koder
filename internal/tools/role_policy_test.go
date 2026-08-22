@@ -163,6 +163,46 @@ func TestBypassPermissionToolStillObeysDisabledState(t *testing.T) {
 	}
 }
 
+func TestCanonicalRequestTranslatesLegacyOperations(t *testing.T) {
+	tests := []struct {
+		name       string
+		request    tools.Request
+		wantTool   tools.ID
+		wantAction string
+		absentArg  string
+	}{
+		{name: "bash", request: tools.Request{Tool: tools.Bash, Args: map[string]string{"command": "pwd"}}, wantTool: tools.ExecCommand},
+		{name: "browser", request: tools.Request{Tool: tools.BrowserTabClose, Args: map[string]string{"tab_id": "tab-1"}}, wantTool: tools.BrowserTabs, wantAction: "close"},
+		{name: "milestone restore", request: tools.Request{Tool: tools.MilestoneArchive, Args: map[string]string{"milestone_key": "M001", "archived": "false"}}, wantTool: tools.Milestones, wantAction: "restore", absentArg: "archived"},
+		{name: "chat archive", request: tools.Request{Tool: tools.ChatArchive, Args: map[string]string{"chat_id": "child", "archived": "true"}}, wantTool: tools.Chats, wantAction: "archive", absentArg: "archived"},
+		{name: "phone media", request: tools.Request{Tool: tools.Phone, Args: map[string]string{"action": "media_control", "media_action": "pause"}}, wantTool: tools.PhoneMedia, wantAction: "pause", absentArg: "media_action"},
+		{name: "present default", request: tools.Request{Tool: tools.Present, Args: map[string]string{"content": "hello"}}, wantTool: tools.Present, wantAction: "content"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tools.CanonicalRequest(tt.request)
+			if got.Tool != tt.wantTool || got.Args["action"] != tt.wantAction {
+				t.Fatalf("canonical request = %#v, want tool=%s action=%q", got, tt.wantTool, tt.wantAction)
+			}
+			if tt.request.Tool == tools.Bash && got.Args["cmd"] != "pwd" {
+				t.Fatalf("bash command was not translated: %#v", got.Args)
+			}
+			if tt.absentArg != "" {
+				if _, ok := got.Args[tt.absentArg]; ok {
+					t.Fatalf("fixed legacy argument %q remained in %#v", tt.absentArg, got.Args)
+				}
+			}
+		})
+	}
+}
+
+func TestRequestIdentityIncludesResourceAction(t *testing.T) {
+	req := tools.Request{Tool: tools.BrowserTabs, Args: map[string]string{"action": "close"}}
+	if got := req.Identity(); got != "browser_tabs.close" {
+		t.Fatalf("identity = %q", got)
+	}
+}
+
 func executionForbiddenToolNames() []string {
 	names := []string{
 		domain.ToolKindRequestUserInput.String(),

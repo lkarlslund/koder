@@ -25,6 +25,9 @@ func TestCommandSpecGuidesMinimalExecutableCommand(t *testing.T) {
 }
 
 func TestExecSessionDefinitionAndWaitDispatch(t *testing.T) {
+	if _, enabled := tools.DefinitionFor(tools.ExecCommand, tools.Runtime{}); !enabled {
+		t.Fatal("exec_command starter is not model-visible")
+	}
 	def, enabled := tools.DefinitionFor(tools.ExecSession, tools.Runtime{})
 	if !enabled {
 		t.Fatal("exec_session definition is disabled")

@@ -17,14 +17,11 @@ import (
 // native coding, shell, filesystem, search, and MCP tools.
 var codexAdditionalTools = map[tools.ID]struct{}{
 	tools.Milestones: {}, tools.Tasks: {},
-	tools.MilestoneList: {}, tools.MilestoneAdd: {}, tools.MilestoneUpdate: {}, tools.MilestoneDepend: {}, tools.MilestonePlan: {}, tools.MilestoneWrite: {},
-	tools.TaskList: {}, tools.TaskAddItems: {}, tools.TaskUpdateItem: {}, tools.TaskFetchNext: {}, tools.TasksAdd: {}, tools.TasksUpdate: {},
-	tools.Chats: {}, tools.ChatList: {}, tools.ChatStart: {}, tools.ChatSend: {}, tools.ChatCancel: {}, tools.ChatArchive: {}, tools.ChatRename: {}, tools.ChatCleanup: {}, tools.ChatStatus: {},
-	tools.Sessions: {}, tools.SessionList: {}, tools.SessionDelegate: {}, tools.SessionStart: {},
-	tools.Present: {}, tools.ShowMedia: {}, tools.ShowImage: {}, tools.OfferFile: {},
+	tools.Chats: {}, tools.ChatStatus: {},
+	tools.Sessions:    {},
+	tools.Present:     {},
 	tools.PhoneDevice: {}, tools.PhoneLocation: {}, tools.PhoneContacts: {}, tools.PhoneCalendar: {}, tools.PhoneMessages: {}, tools.PhoneCalls: {}, tools.PhoneNotifications: {},
 	tools.PhoneClock: {}, tools.PhoneClipboard: {}, tools.PhoneApps: {}, tools.PhoneMedia: {}, tools.PhoneShare: {}, tools.PhoneOpen: {}, tools.PhonePhotos: {},
-	tools.PhonePhotosSearch: {}, tools.PhonePhotosThumbs: {}, tools.PhonePhotoView: {},
 }
 
 // CodexAdditionalToolIDs returns the Koder tools that may complement Codex's

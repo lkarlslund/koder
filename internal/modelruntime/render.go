@@ -211,11 +211,11 @@ func (r *Runtime) ConversationMessagesForTimelineItem(session domain.Session, ch
 			if strings.TrimSpace(string(tool.ToolCallID)) == "" {
 				return nil, fmt.Errorf("assistant item %s has tool call without id", item.ID)
 			}
-			toolCalls = append(toolCalls, tools.ToolCall(tools.Request{
+			toolCalls = append(toolCalls, tools.ToolCall(tools.CanonicalRequest(tools.Request{
 				Tool:       tool.Tool,
 				ToolCallID: string(tool.ToolCallID),
 				Args:       tool.Args,
-			}))
+			})))
 		}
 		textChunks := []string{}
 		reasoningChunks := []string{}

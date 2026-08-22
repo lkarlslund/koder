@@ -2967,7 +2967,7 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	requestsMu.Lock()
 	joinedRequests := strings.Join(requests, "\n")
 	requestsMu.Unlock()
-	if !strings.Contains(joinedRequests, `"name":"chat_send"`) || strings.Contains(joinedRequests, `"name":"session_delegate"`) {
+	if !strings.Contains(joinedRequests, `"name":"chats"`) || strings.Contains(joinedRequests, `"name":"sessions"`) {
 		t.Fatalf("voice chat did not receive native chat coordination tools: %s", joinedRequests)
 	}
 	if !strings.Contains(joinedRequests, "Response pacing for this call is detailed") {

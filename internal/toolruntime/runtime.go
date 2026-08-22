@@ -187,7 +187,7 @@ func (r *Runtime) ToolExecutionStarted(_ context.Context, rt *chatpkg.Chat, req 
 		return
 	}
 	snapshot := rt.Snapshot()
-	r.recordLifecycle(snapshot.Session.ID, "tool_execution_started", req.ContextString(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
+	r.recordLifecycle(snapshot.Session.ID, "tool_execution_started", req.ContextString(), toolLifecycleMeta(req))
 }
 
 func (r *Runtime) ToolExecutionFinished(_ context.Context, rt *chatpkg.Chat, req tools.Request) {
@@ -195,7 +195,7 @@ func (r *Runtime) ToolExecutionFinished(_ context.Context, rt *chatpkg.Chat, req
 		return
 	}
 	snapshot := rt.Snapshot()
-	r.recordLifecycle(snapshot.Session.ID, "tool_execution_finished", req.ContextString(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
+	r.recordLifecycle(snapshot.Session.ID, "tool_execution_finished", req.ContextString(), toolLifecycleMeta(req))
 }
 
 func (r *Runtime) ToolExecutionFailed(_ context.Context, rt *chatpkg.Chat, req tools.Request, err error) {
@@ -203,7 +203,15 @@ func (r *Runtime) ToolExecutionFailed(_ context.Context, rt *chatpkg.Chat, req t
 		return
 	}
 	snapshot := rt.Snapshot()
-	r.recordLifecycle(snapshot.Session.ID, "tool_execution_failed", err.Error(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
+	r.recordLifecycle(snapshot.Session.ID, "tool_execution_failed", err.Error(), toolLifecycleMeta(req))
+}
+
+func toolLifecycleMeta(req tools.Request) map[string]string {
+	meta := map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID, "tool_identity": req.Identity()}
+	if action := strings.TrimSpace(req.Args["action"]); action != "" {
+		meta["action"] = action
+	}
+	return meta
 }
 
 func (r *Runtime) ApproveToolForTurn(ctx context.Context, rt *chatpkg.Chat, toolCallID string, rule *accesssettings.PermissionOverride, out chan<- domain.Event) (bool, error) {
