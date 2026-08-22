@@ -104,8 +104,12 @@
 
     reset() {
       this.assertActive();
+      const hadHiddenItems = this.state().hidden > 0;
       this.history.length = 0;
-      this.apply({hiddenNodes: [], hiddenEdges: []});
+      // A freshly replaced Graphology graph has no local visibility state. Avoid
+      // emitting attribute-update events in that case: Sigma may still be assigning
+      // render-program slots to the newly added nodes and cannot partially repaint yet.
+      if (hadHiddenItems) this.apply({hiddenNodes: [], hiddenEdges: []});
       this.emit('reset');
     }
 

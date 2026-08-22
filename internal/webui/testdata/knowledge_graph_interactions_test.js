@@ -39,3 +39,10 @@ assert.strictEqual(view.state().canUndo, false);
 assert.deepStrictEqual(events.map(value => value[0]), ['hide', 'undo', 'isolate', 'reveal', 'isolate', 'reset']);
 view.destroy();
 assert.throws(() => view.reveal(), /destroyed/);
+
+const pristineStore = new graphAPI.Store();
+new adapterAPI.Adapter(pristineStore).replaceSnapshot(fixture.apiSnapshot);
+let pristineAttributeUpdates = 0;
+pristineStore.graph.on('nodeAttributesUpdated', () => pristineAttributeUpdates++);
+new interactions.LocalViewHistory({graph: pristineStore.graph}).reset();
+assert.strictEqual(pristineAttributeUpdates, 0, 'resetting a replacement graph must not trigger partial Sigma repaints');
