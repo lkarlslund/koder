@@ -60,6 +60,15 @@ assert.strictEqual(browser.graphKeyboardAction({key: 'h'}), 'hide');
 assert.strictEqual(browser.graphKeyboardAction({key: 'Delete'}), 'hide');
 assert.strictEqual(browser.graphKeyboardAction({key: 'z', ctrlKey: true}), 'undo');
 assert.strictEqual(browser.graphKeyboardAction({key: 'h', ctrlKey: true}), '');
+assert.deepStrictEqual(browser.applicabilityRows({operating_systems: ['Linux'], software: [{name: 'Go', version_range: '>=1.24'}]}), [
+  {label: 'Systems', value: 'Linux'}, {label: 'Software', value: 'Go >=1.24'},
+]);
+assert.deepStrictEqual(browser.inspectorWarnings('entry', {
+  state: 'superseded', superseded_by_id: 'entry-8', valid_until: '2025-01-01T00:00:00Z', review_after: '2025-02-01T00:00:00Z',
+  verification: {status: 'disputed'},
+}, [{link: {kind: 'contradicts'}}], new Date('2026-01-01T00:00:00Z')).map(item => item.level), ['danger', 'danger', 'warning', 'danger', 'danger']);
+assert.strictEqual(browser.safeExternalURL('https://example.com/source'), 'https://example.com/source');
+assert.strictEqual(browser.safeExternalURL('javascript:alert(1)'), '');
 assert.strictEqual(browser.graphDebugEnabled('?graph_debug=1'), true);
 assert.strictEqual(browser.graphDebugEnabled('?graph_debug=true'), false);
 const webglDocument = {createElement: () => ({getContext: name => name === 'webgl2' ? {} : null})};

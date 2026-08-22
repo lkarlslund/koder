@@ -167,8 +167,18 @@
             <p data-knowledge-inspector-summary hidden></p>
           </header>
           <div class="knowledge-inspector-badges" data-knowledge-inspector-badges></div>
+          <section class="knowledge-inspector-warnings" data-knowledge-inspector-warnings hidden aria-label="Knowledge warnings"></section>
           <dl class="knowledge-inspector-meta" data-knowledge-inspector-meta></dl>
           <section class="knowledge-inspector-markdown markdown-body" data-knowledge-inspector-markdown hidden></section>
+          <section class="knowledge-inspector-section" data-knowledge-inspector-applicability hidden>
+            <h3><i class="bi bi-funnel" aria-hidden="true"></i> Applies when</h3>
+            <div class="knowledge-applicability-list" data-knowledge-applicability-list></div>
+          </section>
+          <section class="knowledge-inspector-section" data-knowledge-inspector-evidence hidden>
+            <h3><i class="bi bi-shield-check" aria-hidden="true"></i> Evidence <span data-knowledge-evidence-count></span></h3>
+            <div class="knowledge-evidence-list" data-knowledge-evidence-list></div>
+            <span class="knowledge-support-status" data-knowledge-support-status></span>
+          </section>
           <footer class="knowledge-inspector-actions">
             <div class="knowledge-expand-actions" data-knowledge-expand-actions hidden>
               <button type="button" class="btn btn-sm btn-outline-info" data-knowledge-expand-incoming><i class="bi bi-box-arrow-in-down" aria-hidden="true"></i> Incoming</button>

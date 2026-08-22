@@ -39,6 +39,7 @@ func TestServerServesStandaloneKnowledgeExplorerShell(t *testing.T) {
 		`data-knowledge-search-form`, `data-knowledge-search`, `data-knowledge-filter="kind"`, `data-knowledge-filter="scope_kind"`,
 		`data-knowledge-results`, `data-knowledge-load-more`,
 		`data-knowledge-inspector-empty`, `data-knowledge-inspector-content`, `data-knowledge-inspector-markdown`,
+		`data-knowledge-inspector-warnings`, `data-knowledge-inspector-applicability`, `data-knowledge-inspector-evidence`,
 		`data-knowledge-expand-actions`, `data-knowledge-expand-incoming`, `data-knowledge-expand-outgoing`, `data-knowledge-expand-status`,
 		`data-knowledge-send-chat`, `data-knowledge-send-status`,
 		`/assets/vendor/marked/marked.umd.js`, `/assets/vendor/dompurify/purify.min.js`,

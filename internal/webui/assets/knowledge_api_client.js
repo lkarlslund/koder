@@ -176,6 +176,7 @@
     getChunk(id, options) { return this.request('/chunks/' + encodeID(id), options); }
     listEntries(query, options) { return this.request('/entries', {...options, query}); }
     getEntry(id, options) { return this.request('/entries/' + encodeID(id), options); }
+    entryEvidence(id, query, options) { return this.request('/entries/' + encodeID(id) + '/evidence', {...options, query}); }
     getLink(id, options) { return this.request('/links/' + encodeID(id), options); }
     search(body, options) { return this.request('/search', {...options, method: 'POST', body}); }
     graphSnapshot(body, options) { return this.request('/graph/snapshot', {...options, method: 'POST', body}); }

@@ -173,6 +173,48 @@
     return ({enter: 'inspect', delete: 'hide', backspace: 'hide', h: 'hide', i: 'isolate', r: 'reveal', c: 'center', p: 'pin', '[': 'incoming', ']': 'outgoing'})[key] || '';
   }
 
+  function applicabilityRows(value) {
+    value = value || {};
+    const rows = [];
+    const add = (label, values) => { if (Array.isArray(values) && values.length) rows.push({label, value: values.map(String).join(', ')}); };
+    add('Systems', value.operating_systems);
+    add('Architectures', value.architectures);
+    add('Locales', value.locales);
+    add('Conditions', value.conditions);
+    if (Array.isArray(value.software) && value.software.length) {
+      rows.push({label: 'Software', value: value.software.map(item => [item && item.name, item && item.version_range].filter(Boolean).join(' ')).filter(Boolean).join(', ')});
+    }
+    return rows;
+  }
+
+  function inspectorWarnings(objectKind, record, neighbors, now) {
+    record = record || {};
+    const warnings = [];
+    const add = (text, level) => warnings.push({text, level: level || 'warning'});
+    const timestamp = value => { const date = new Date(String(value || '')); return Number.isNaN(date.getTime()) ? null : date; };
+    now = now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
+    if (record.state === 'invalid') add('This knowledge has been marked invalid and should not be used.', 'danger');
+    if (record.state === 'superseded') add(record.superseded_by_id ? `This entry was superseded by ${record.superseded_by_id}.` : 'This knowledge has been superseded.', 'danger');
+    const validFrom = timestamp(record.valid_from);
+    const validUntil = timestamp(record.valid_until);
+    const reviewAfter = timestamp(record.review_after);
+    if (validFrom && now < validFrom) add(`This entry does not become valid until ${formatTimestamp(record.valid_from)}.`);
+    if (validUntil && now >= validUntil) add(`This entry expired ${formatTimestamp(record.valid_until)}.`, 'danger');
+    if (reviewAfter && now >= reviewAfter) add(`Review was due ${formatTimestamp(record.review_after)}; treat this knowledge as stale.`);
+    const verification = record.verification && record.verification.status;
+    if (verification === 'disputed') add('The current verification assessment is disputed.', 'danger');
+    const contradictions = (neighbors || []).filter(item => item && item.link && item.link.kind === 'contradicts');
+    if (contradictions.length) add(`${contradictions.length} active ${contradictions.length === 1 ? 'relationship contradicts' : 'relationships contradict'} this ${objectKind}.`, 'danger');
+    return warnings;
+  }
+
+  function safeExternalURL(value) {
+    try {
+      const url = new URL(String(value || ''));
+      return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+    } catch (_) { return ''; }
+  }
+
   function graphDebugEnabled(search) {
     try { return new URLSearchParams(String(search || '')).get('graph_debug') === '1'; } catch (_) { return false; }
   }
@@ -261,8 +303,15 @@
         title: shell.querySelector('[data-knowledge-inspector-title]'),
         summary: shell.querySelector('[data-knowledge-inspector-summary]'),
         badges: shell.querySelector('[data-knowledge-inspector-badges]'),
+        warnings: shell.querySelector('[data-knowledge-inspector-warnings]'),
         meta: shell.querySelector('[data-knowledge-inspector-meta]'),
         markdown: shell.querySelector('[data-knowledge-inspector-markdown]'),
+        applicability: shell.querySelector('[data-knowledge-inspector-applicability]'),
+        applicabilityList: shell.querySelector('[data-knowledge-applicability-list]'),
+        evidence: shell.querySelector('[data-knowledge-inspector-evidence]'),
+        evidenceList: shell.querySelector('[data-knowledge-evidence-list]'),
+        evidenceCount: shell.querySelector('[data-knowledge-evidence-count]'),
+        supportStatus: shell.querySelector('[data-knowledge-support-status]'),
         sendButton: shell.querySelector('[data-knowledge-send-chat]'),
         sendStatus: shell.querySelector('[data-knowledge-send-status]'),
       };
@@ -817,10 +866,18 @@
       }
       if (mode === 'error' && this.inspector.error) this.inspector.error.textContent = String(message || 'Knowledge could not load this selection.');
       if (mode !== 'content') {
+        this.cancelInspectorSupport();
         this.inspectedObject = null;
+        this.inspectedRecord = null;
         if (this.inspector.sendButton) this.inspector.sendButton.disabled = true;
         if (this.graphExpandActions) this.graphExpandActions.hidden = true;
       }
+    }
+
+    cancelInspectorSupport() {
+      if (!this.client || typeof this.client.cancel !== 'function') return;
+      this.client.cancel('inspector-evidence');
+      this.client.cancel('inspector-relations');
     }
 
     async loadSelection() {
@@ -967,6 +1024,8 @@
         }
       }
       this.inspectedObject = {kind: objectKind, id: String(record.id || '')};
+      this.inspectedRecord = record;
+      this.renderInspectorSupport(objectKind, record, [], [], []);
       const expandable = ['chunk', 'entry'].includes(objectKind);
       if (this.graphExpandActions) this.graphExpandActions.hidden = !expandable;
       if (this.graphExpandIncoming) this.graphExpandIncoming.disabled = !expandable;
@@ -979,9 +1038,106 @@
           : 'Open Knowledge from a chat to send context back.';
       }
       this.setInspectorMode('content');
+      this.loadInspectorSupport(objectKind, record);
       this.shell.dispatchEvent(new CustomEvent('koder:knowledge-inspected', {
         detail: {objectKind, id: String(record.id || ''), record, label: plainTextLabel(title)}
       }));
+    }
+
+    async loadInspectorSupport(objectKind, record) {
+      this.cancelInspectorSupport();
+      const id = String(record && record.id || '');
+      if (!id) return;
+      const evidenceTask = objectKind === 'entry' && typeof this.client.entryEvidence === 'function'
+        ? this.client.entryEvidence(id, {limit: 50}, {channel: 'inspector-evidence'}).then(response => ({response})).catch(error => ({error}))
+        : Promise.resolve({response: {evidence: [], page: {}}});
+      const relationsTask = ['chunk', 'entry'].includes(objectKind) && typeof this.client.neighbors === 'function'
+        ? this.client.neighbors({object: {kind: objectKind, id}, kinds: ['contradicts'], limit: 25}, {channel: 'inspector-relations'}).then(response => ({response})).catch(error => ({error}))
+        : Promise.resolve({response: {neighbors: [], page: {}}});
+      const [evidenceResult, relationsResult] = await Promise.all([evidenceTask, relationsTask]);
+      if (!this.inspectedObject || this.inspectedObject.kind !== objectKind || this.inspectedObject.id !== id) return;
+      const evidence = Array.isArray(evidenceResult.response && evidenceResult.response.evidence) ? evidenceResult.response.evidence : [];
+      const neighbors = Array.isArray(relationsResult.response && relationsResult.response.neighbors) ? relationsResult.response.neighbors : [];
+      const errors = [evidenceResult.error, relationsResult.error].filter(error => error && !['canceled', 'stale_response'].includes(error.code));
+      const truncated = !!(evidenceResult.response && evidenceResult.response.page && evidenceResult.response.page.next_cursor) ||
+        !!(relationsResult.response && relationsResult.response.page && relationsResult.response.page.next_cursor);
+      this.renderInspectorSupport(objectKind, record, evidence, neighbors, errors, truncated);
+    }
+
+    renderInspectorSupport(objectKind, record, evidence, neighbors, errors, truncated) {
+      const warnings = inspectorWarnings(objectKind, record, neighbors, new Date());
+      if (this.inspector.warnings) {
+        this.inspector.warnings.replaceChildren();
+        this.inspector.warnings.hidden = !warnings.length;
+        for (const warning of warnings) {
+          const item = this.shell.ownerDocument.createElement('div');
+          item.className = 'knowledge-inspector-warning' + (warning.level === 'danger' ? ' is-danger' : '');
+          const icon = this.shell.ownerDocument.createElement('i');
+          icon.className = warning.level === 'danger' ? 'bi bi-exclamation-octagon' : 'bi bi-clock-history';
+          icon.setAttribute('aria-hidden', 'true');
+          const text = this.shell.ownerDocument.createElement('span');
+          text.textContent = warning.text;
+          item.append(icon, text);
+          this.inspector.warnings.appendChild(item);
+        }
+      }
+      const rows = objectKind === 'entry' ? applicabilityRows(record.applicability) : [];
+      if (this.inspector.applicability && this.inspector.applicabilityList) {
+        this.inspector.applicability.hidden = !rows.length;
+        this.inspector.applicabilityList.replaceChildren();
+        for (const row of rows) {
+          const item = this.shell.ownerDocument.createElement('div');
+          item.className = 'knowledge-applicability-item';
+          const label = this.shell.ownerDocument.createElement('strong');
+          const value = this.shell.ownerDocument.createElement('span');
+          label.textContent = row.label;
+          value.textContent = row.value;
+          item.append(label, value);
+          this.inspector.applicabilityList.appendChild(item);
+        }
+      }
+      if (this.inspector.evidence && this.inspector.evidenceList) {
+        const showEvidence = objectKind === 'entry';
+        this.inspector.evidence.hidden = !showEvidence;
+        this.inspector.evidenceList.replaceChildren();
+        if (this.inspector.evidenceCount) this.inspector.evidenceCount.textContent = showEvidence ? String(evidence.length) : '';
+        for (const item of evidence) {
+          const card = this.shell.ownerDocument.createElement('article');
+          card.className = 'knowledge-evidence-card';
+          const header = this.shell.ownerDocument.createElement('header');
+          const title = this.shell.ownerDocument.createElement('strong');
+          const quality = this.shell.ownerDocument.createElement('span');
+          title.textContent = String(item.source && (item.source.title || item.source.id) || displayLabel(item.type) || 'Evidence');
+          quality.textContent = [displayLabel(item.type), displayLabel(item.quality)].filter(Boolean).join(' · ');
+          header.append(title, quality);
+          card.appendChild(header);
+          const excerpt = String(item.source && item.source.excerpt || '').trim();
+          if (excerpt) {
+            const paragraph = this.shell.ownerDocument.createElement('p');
+            paragraph.textContent = plainTextLabel(excerpt, 300);
+            card.appendChild(paragraph);
+          }
+          const href = safeExternalURL(item.source && item.source.uri);
+          if (href) {
+            const link = this.shell.ownerDocument.createElement('a');
+            link.href = href;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = href;
+            card.appendChild(link);
+          }
+          this.inspector.evidenceList.appendChild(card);
+        }
+        if (showEvidence && !evidence.length) {
+          const empty = this.shell.ownerDocument.createElement('span');
+          empty.className = 'knowledge-support-status';
+          empty.textContent = errors && errors.length ? 'Evidence could not be loaded.' : 'No evidence is attached to this entry.';
+          this.inspector.evidenceList.appendChild(empty);
+        }
+      }
+      if (this.inspector.supportStatus) {
+        this.inspector.supportStatus.textContent = errors && errors.length ? 'Some supporting details are temporarily unavailable.' : truncated ? 'Showing the first bounded set of supporting records.' : '';
+      }
     }
 
     async expandGraph(direction, selection) {
@@ -1167,5 +1323,5 @@
     }
   }
 
-  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
+  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
 });
