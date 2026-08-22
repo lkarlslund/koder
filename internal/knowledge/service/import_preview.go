@@ -210,7 +210,7 @@ func (s *Service) previewChunkImpact(ctx context.Context, tx knowledgeStore.Read
 	if err := s.authorizeChunk(ctx, actor, ChunkPolicyRead, existing); err != nil {
 		return err
 	}
-	if packageChunkContentEqual(existing, incoming) {
+	if s.packageChunkContentEqual(existing, incoming) {
 		appendImportImpact(preview, existingImportImpact(knowledgeStore.RecordKindChunk, string(incoming.ID), ImportImpactUnchanged, "same_content_already_present", existing))
 	} else {
 		impact := existingImportImpact(knowledgeStore.RecordKindChunk, string(incoming.ID), ImportImpactConflict, "id_exists_with_different_content", existing)
@@ -449,7 +449,21 @@ func packageChunk(manifest kpackage.Manifest) knowledge.Chunk {
 	}
 }
 
-func packageChunkContentEqual(existing, incoming knowledge.Chunk) bool {
+func (s *Service) packageChunkContentEqual(existing, incoming knowledge.Chunk) bool {
+	// Portable packages require publisher, license, and minimum-version metadata.
+	// Local chunks may legitimately predate or omit those fields, so compare them
+	// against the exact defaults our exporter adds instead of turning an immediate
+	// export/reimport into a false content conflict.
+	if existing.Publisher.ID == "" && existing.Publisher.Name == "" &&
+		incoming.Publisher == (knowledge.Publisher{ID: defaultLocalPackagePublisherID, Name: "Koder local export"}) {
+		existing.Publisher = incoming.Publisher
+	}
+	if existing.License == "" && incoming.License == "NOASSERTION" {
+		existing.License = incoming.License
+	}
+	if existing.MinKoderVersion == "" && incoming.MinKoderVersion == s.importValidation.CurrentKoderVersion {
+		existing.MinKoderVersion = incoming.MinKoderVersion
+	}
 	return chunkContentEqual(existing, incoming) && existing.State == incoming.State
 }
 

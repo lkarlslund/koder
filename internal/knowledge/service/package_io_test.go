@@ -46,6 +46,41 @@ func TestExportAndValidatePackageArchiveRoundTrip(t *testing.T) {
 	}
 }
 
+func TestLocallyCreatedChunkExportPreviewsAsUnchanged(t *testing.T) {
+	t.Parallel()
+	backend := memory.New()
+	t.Cleanup(func() { _ = backend.Close() })
+	service, err := New(Config{
+		Store: backend, Actor: ContextActorSource(knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:test"}),
+		ImportValidation: kpackage.ValidationOptions{CurrentKoderVersion: "r9999-local"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.CreateChunk(context.Background(), CreateChunkRequest{Chunk: knowledge.Chunk{
+		Title: "Local package", Kind: knowledge.ChunkKindReference,
+		Scope: knowledge.Scope{Kind: knowledge.ScopeKindGlobal}, Visibility: knowledge.VisibilityPrivate,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var archive bytes.Buffer
+	if _, err := service.ExportPackage(context.Background(), &archive, ExportPackageRequest{ChunkID: created.Chunk.ID}); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := service.ValidateImportArchive(context.Background(), archive.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewImport(context.Background(), pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Summary.Conflicts != 0 || preview.Summary.Blockers != 0 || preview.Summary.Unchanged != 1 || !preview.ReadyToStage {
+		t.Fatalf("local export preview = %#v", preview)
+	}
+}
+
 func TestExportPackageHonorsReadPolicyAndArchiveValidationIsWriteFree(t *testing.T) {
 	t.Parallel()
 	backend := memory.New()
