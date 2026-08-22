@@ -117,10 +117,13 @@ func normalizeChunkListRequest(request ChunkListRequest) (ChunkListRequest, erro
 		return ChunkListRequest{}, err
 	}
 	request.Filter.Locale = locale
+	request.Filter.Kinds = slices.Clone(request.Filter.Kinds)
 	slices.Sort(request.Filter.Kinds)
 	request.Filter.Kinds = slices.Compact(request.Filter.Kinds)
+	request.Filter.States = slices.Clone(request.Filter.States)
 	slices.Sort(request.Filter.States)
 	request.Filter.States = slices.Compact(request.Filter.States)
+	request.Filter.ScopeKinds = slices.Clone(request.Filter.ScopeKinds)
 	slices.Sort(request.Filter.ScopeKinds)
 	request.Filter.ScopeKinds = slices.Compact(request.Filter.ScopeKinds)
 	for _, kind := range request.Filter.Kinds {
