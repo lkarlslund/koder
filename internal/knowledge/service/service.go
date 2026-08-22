@@ -162,6 +162,9 @@ func (s *Service) CreateChunk(ctx context.Context, request CreateChunkRequest) (
 	if err := candidate.Validate(); err != nil {
 		return CreateChunkResult{}, err
 	}
+	if err := s.authorizeChunk(ctx, actor, ChunkPolicyCreate, candidate); err != nil {
+		return CreateChunkResult{}, err
+	}
 	if err := s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
 		return tx.PutChunk(ctx, candidate, 0)
 	}); err != nil {

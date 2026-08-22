@@ -15,10 +15,19 @@ import (
 )
 
 const (
-	Version     = "knowledge.v1"
-	RoutePrefix = "/api/knowledge/v1"
-	ExplorerURL = "/knowledge"
+	Version             = "knowledge.v1"
+	RoutePrefix         = "/api/knowledge/v1"
+	ChunkCollectionPath = RoutePrefix + "/chunks"
+	ExplorerURL         = "/knowledge"
 )
+
+func ChunkPath(chunkID knowledge.ChunkID) string {
+	return ChunkCollectionPath + "/" + url.PathEscape(string(chunkID))
+}
+
+func ChunkLifecyclePath(chunkID knowledge.ChunkID, action string) string {
+	return ChunkPath(chunkID) + "/" + url.PathEscape(strings.TrimSpace(action))
+}
 
 type ResponseMetadata struct {
 	APIVersion string `json:"api_version"`

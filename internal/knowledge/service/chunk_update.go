@@ -92,11 +92,17 @@ func (s *Service) UpdateChunk(ctx context.Context, request UpdateChunkRequest) (
 		if err != nil {
 			return err
 		}
+		if err := s.authorizeChunk(ctx, actor, ChunkPolicyUpdate, current); err != nil {
+			return err
+		}
 		if current.Revision.Number != request.ExpectedRevision {
 			return fmt.Errorf("%w: chunk %s expected revision %d, current revision %d", knowledgeStore.ErrConflict, request.ChunkID, request.ExpectedRevision, current.Revision.Number)
 		}
 		next := applyChunkContent(current, candidate)
 		if err := validatePersonalMeMutation(current, next); err != nil {
+			return err
+		}
+		if err := s.authorizeChunk(ctx, actor, ChunkPolicyUpdate, next); err != nil {
 			return err
 		}
 		if chunkContentEqual(next, current) {

@@ -42,9 +42,23 @@ func (s *Service) changeChunkState(ctx context.Context, request ChunkLifecycleRe
 		return ChunkLifecycleResult{}, fmt.Errorf("%w: unsupported target state %q", ErrInvalidLifecycleTransition, target)
 	}
 	result := ChunkLifecycleResult{}
-	err := s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+	actor, err := s.actor(ctx)
+	if err != nil {
+		return ChunkLifecycleResult{}, fmt.Errorf("resolve knowledge actor: %w", err)
+	}
+	if err := actor.Validate(); err != nil {
+		return ChunkLifecycleResult{}, err
+	}
+	err = s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
 		current, err := tx.Chunk(ctx, request.ChunkID)
 		if err != nil {
+			return err
+		}
+		action := ChunkPolicyArchive
+		if target == knowledge.ChunkStateActive {
+			action = ChunkPolicyRestore
+		}
+		if err := s.authorizeChunk(ctx, actor, action, current); err != nil {
 			return err
 		}
 		if current.Revision.Number != request.ExpectedRevision {
@@ -62,13 +76,6 @@ func (s *Service) changeChunkState(ctx context.Context, request ChunkLifecycleRe
 		}
 		if target == knowledge.ChunkStateArchived && current.State != knowledge.ChunkStateActive && current.State != knowledge.ChunkStateDraft {
 			return fmt.Errorf("%w: chunk %s in state %q cannot be archived", ErrInvalidLifecycleTransition, request.ChunkID, current.State)
-		}
-		actor, err := s.actor(ctx)
-		if err != nil {
-			return fmt.Errorf("resolve knowledge actor: %w", err)
-		}
-		if err := actor.Validate(); err != nil {
-			return err
 		}
 		now := s.now().UTC().Round(0)
 		if !now.After(current.UpdatedAt) {

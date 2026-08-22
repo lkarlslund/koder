@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,8 +19,8 @@ import (
 )
 
 func (s *Server) registerKnowledgeAPI(mux *http.ServeMux) {
-	mux.HandleFunc(knowledgeapi.RoutePrefix+"/chunks", s.handleKnowledgeChunks)
-	mux.HandleFunc(knowledgeapi.RoutePrefix+"/chunks/", s.handleKnowledgeChunk)
+	mux.HandleFunc(knowledgeapi.ChunkCollectionPath, s.handleKnowledgeChunks)
+	mux.HandleFunc(knowledgeapi.ChunkCollectionPath+"/", s.handleKnowledgeChunk)
 }
 
 func (s *Server) handleKnowledgeChunks(w http.ResponseWriter, r *http.Request) {
@@ -27,16 +28,23 @@ func (s *Server) handleKnowledgeChunks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		s.writeKnowledgeError(w, requestID, http.StatusMethodNotAllowed, knowledgeService.ErrorCodeInvalid, "This Knowledge endpoint only supports GET.")
-		return
-	}
 	service := s.controller.KnowledgeService()
 	if service == nil {
 		s.writeKnowledgeError(w, requestID, http.StatusServiceUnavailable, knowledgeService.ErrorCodeUnavailable, "Knowledge is temporarily unavailable.")
 		return
 	}
+	switch r.Method {
+	case http.MethodGet:
+		s.listKnowledgeChunks(w, r, requestID, ctx, service)
+	case http.MethodPost:
+		s.createKnowledgeChunk(w, r, requestID, ctx, service)
+	default:
+		w.Header().Set("Allow", http.MethodGet+", "+http.MethodPost)
+		s.writeKnowledgeError(w, requestID, http.StatusMethodNotAllowed, knowledgeService.ErrorCodeInvalid, "This Knowledge endpoint does not support that method.")
+	}
+}
+
+func (s *Server) listKnowledgeChunks(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *knowledgeService.Service) {
 	request, err := parseChunkListQuery(r)
 	if err != nil {
 		s.writeKnowledgeError(w, requestID, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
@@ -60,26 +68,59 @@ func (s *Server) handleKnowledgeChunks(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) createKnowledgeChunk(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *knowledgeService.Service) {
+	var request knowledgeapi.ChunkCreateRequest
+	if err := decodeKnowledgeJSON(w, r, &request); err != nil {
+		s.writeKnowledgeError(w, requestID, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
+		return
+	}
+	result, err := service.CreateChunk(ctx, knowledgeService.CreateChunkRequest{
+		Chunk:          chunkCandidate(request.Chunk),
+		ReviewApproved: request.ReviewApproved,
+	})
+	if err != nil {
+		s.writeKnowledgeServiceError(w, requestID, err)
+		return
+	}
+	w.Header().Set("Location", knowledgeapi.ChunkPath(result.Chunk.ID))
+	s.writeKnowledgeChunk(w, requestID, http.StatusCreated, result.Chunk, &result.Classification)
+}
+
 func (s *Server) handleKnowledgeChunk(w http.ResponseWriter, r *http.Request) {
 	requestID, ctx, ok := s.authenticateKnowledgeRequest(w, r)
 	if !ok {
 		return
 	}
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		s.writeKnowledgeError(w, requestID, http.StatusMethodNotAllowed, knowledgeService.ErrorCodeInvalid, "This Knowledge endpoint only supports GET.")
-		return
-	}
-	chunkID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, knowledgeapi.RoutePrefix+"/chunks/"))
-	if chunkID == "" || strings.Contains(chunkID, "/") {
+	path := strings.Trim(strings.TrimPrefix(r.URL.Path, knowledgeapi.ChunkCollectionPath+"/"), "/")
+	parts := strings.Split(path, "/")
+	if path == "" || len(parts) > 2 || strings.TrimSpace(parts[0]) == "" {
 		s.writeKnowledgeError(w, requestID, http.StatusNotFound, knowledgeService.ErrorCodeNotFound, "The Knowledge object was not found.")
 		return
 	}
+	chunkID := strings.TrimSpace(parts[0])
 	service := s.controller.KnowledgeService()
 	if service == nil {
 		s.writeKnowledgeError(w, requestID, http.StatusServiceUnavailable, knowledgeService.ErrorCodeUnavailable, "Knowledge is temporarily unavailable.")
 		return
 	}
+	if len(parts) == 2 {
+		s.changeKnowledgeChunkLifecycle(w, r, requestID, ctx, service, knowledge.ChunkID(chunkID), parts[1])
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		s.getKnowledgeChunk(w, r, requestID, ctx, service, chunkID)
+	case http.MethodPut:
+		s.updateKnowledgeChunk(w, r, requestID, ctx, service, knowledge.ChunkID(chunkID))
+	case http.MethodDelete:
+		s.deleteKnowledgeChunk(w, r, requestID, ctx, service, knowledge.ChunkID(chunkID))
+	default:
+		w.Header().Set("Allow", http.MethodGet+", "+http.MethodPut+", "+http.MethodDelete)
+		s.writeKnowledgeError(w, requestID, http.StatusMethodNotAllowed, knowledgeService.ErrorCodeInvalid, "This Knowledge endpoint does not support that method.")
+	}
+}
+
+func (s *Server) getKnowledgeChunk(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *knowledgeService.Service, chunkID string) {
 	reference := knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: chunkID}
 	record, err := service.Get(ctx, reference)
 	if err != nil {
@@ -103,11 +144,88 @@ func (s *Server) handleKnowledgeChunk(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.writeKnowledgeJSON(w, http.StatusOK, knowledgeapi.ChunkResponse{
-		ResponseMetadata: knowledgeapi.Metadata(requestID),
-		ResourceMetadata: metadata,
-		Chunk:            *record.Chunk,
+	s.writeKnowledgeChunk(w, requestID, http.StatusOK, *record.Chunk, nil)
+}
+
+func (s *Server) updateKnowledgeChunk(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *knowledgeService.Service, chunkID knowledge.ChunkID) {
+	var request knowledgeapi.ChunkUpdateRequest
+	if err := decodeKnowledgeJSON(w, r, &request); err != nil {
+		s.writeKnowledgeError(w, requestID, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
+		return
+	}
+	result, err := service.UpdateChunk(ctx, knowledgeService.UpdateChunkRequest{
+		ChunkID: chunkID, ExpectedRevision: request.ExpectedRevision,
+		Content: chunkServiceContent(request.Chunk), Reason: request.Reason, ReviewApproved: request.ReviewApproved,
 	})
+	if err != nil {
+		s.writeKnowledgeServiceError(w, requestID, err)
+		return
+	}
+	s.writeKnowledgeChunk(w, requestID, http.StatusOK, result.Chunk, &result.Classification)
+}
+
+func (s *Server) changeKnowledgeChunkLifecycle(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *knowledgeService.Service, chunkID knowledge.ChunkID, action string) {
+	if action != "archive" && action != "restore" {
+		s.writeKnowledgeError(w, requestID, http.StatusNotFound, knowledgeService.ErrorCodeNotFound, "The Knowledge endpoint was not found.")
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		s.writeKnowledgeError(w, requestID, http.StatusMethodNotAllowed, knowledgeService.ErrorCodeInvalid, "This Knowledge endpoint does not support that method.")
+		return
+	}
+	var request knowledgeapi.LifecycleRequest
+	if err := decodeKnowledgeJSON(w, r, &request); err != nil {
+		s.writeKnowledgeError(w, requestID, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
+		return
+	}
+	serviceRequest := knowledgeService.ChunkLifecycleRequest{
+		ChunkID: chunkID, ExpectedRevision: request.ExpectedRevision, Reason: request.Reason,
+	}
+	var result knowledgeService.ChunkLifecycleResult
+	var err error
+	if action == "archive" {
+		result, err = service.ArchiveChunk(ctx, serviceRequest)
+	} else {
+		result, err = service.RestoreChunk(ctx, serviceRequest)
+	}
+	if err != nil {
+		s.writeKnowledgeServiceError(w, requestID, err)
+		return
+	}
+	s.writeKnowledgeChunk(w, requestID, http.StatusOK, result.Chunk, nil)
+}
+
+func (s *Server) deleteKnowledgeChunk(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *knowledgeService.Service, chunkID knowledge.ChunkID) {
+	var request knowledgeapi.DeleteRequest
+	if err := decodeKnowledgeJSON(w, r, &request); err != nil {
+		s.writeKnowledgeError(w, requestID, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
+		return
+	}
+	serviceRequest := knowledgeService.DeleteChunkRequest{
+		ChunkID: chunkID, ExpectedRevision: request.ExpectedRevision, Confirmed: request.Confirmed,
+	}
+	response := knowledgeapi.DeleteResponse{
+		ResponseMetadata: knowledgeapi.Metadata(requestID),
+		Object:           knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(chunkID)},
+		Deleted:          true,
+		Cascade:          request.Cascade,
+	}
+	if request.Cascade {
+		result, err := service.CascadeDeleteChunk(ctx, serviceRequest)
+		if err != nil {
+			s.writeKnowledgeServiceError(w, requestID, err)
+			return
+		}
+		response.DeletedEntryIDs = result.DeletedEntryIDs
+		response.DeletedLinkIDs = result.DeletedLinkIDs
+		response.DeletedEvidence = result.DeletedEvidenceIDs
+		response.UpdatedChunkIDs = result.UpdatedDependentChunkIDs
+	} else if err := service.DeleteChunk(ctx, serviceRequest); err != nil {
+		s.writeKnowledgeServiceError(w, requestID, err)
+		return
+	}
+	s.writeKnowledgeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) authenticateKnowledgeRequest(w http.ResponseWriter, r *http.Request) (string, context.Context, bool) {
@@ -240,6 +358,54 @@ func queryValues(values []string) []string {
 		}
 	}
 	return result
+}
+
+func chunkCandidate(content knowledgeapi.ChunkContent) knowledge.Chunk {
+	return knowledge.Chunk{
+		Title: content.Title, Description: content.Description, Aliases: content.Aliases, Tags: content.Tags,
+		Kind: content.Kind, Scope: content.Scope, Visibility: content.Visibility, SharedWith: content.SharedWith,
+		Language: content.Language, Locale: content.Locale, Domain: content.Domain, Risk: content.Risk,
+		Publisher: content.Publisher, License: content.License, SourcePolicy: content.SourcePolicy,
+		DependencyIDs: content.DependencyIDs, MinKoderVersion: content.MinKoderVersion, ReviewAfter: content.ReviewAfter,
+	}
+}
+
+func chunkServiceContent(content knowledgeapi.ChunkContent) knowledgeService.ChunkContent {
+	return knowledgeService.ChunkContent{
+		Title: content.Title, Description: content.Description, Aliases: content.Aliases, Tags: content.Tags,
+		Kind: content.Kind, Scope: content.Scope, Visibility: content.Visibility, SharedWith: content.SharedWith,
+		Language: content.Language, Locale: content.Locale, Domain: content.Domain, Risk: content.Risk,
+		Publisher: content.Publisher, License: content.License, SourcePolicy: content.SourcePolicy,
+		DependencyIDs: content.DependencyIDs, MinKoderVersion: content.MinKoderVersion, ReviewAfter: content.ReviewAfter,
+	}
+}
+
+func decodeKnowledgeJSON(w http.ResponseWriter, r *http.Request, target any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return fmt.Errorf("request body contains multiple JSON values")
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *Server) writeKnowledgeChunk(w http.ResponseWriter, requestID string, status int, chunk knowledge.Chunk, classification *knowledge.ClassificationResult) {
+	reference := knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(chunk.ID)}
+	metadata := knowledgeapi.Resource(reference, chunk.Revision)
+	if metadata.ETag != "" {
+		w.Header().Set("ETag", metadata.ETag)
+	}
+	s.writeKnowledgeJSON(w, status, knowledgeapi.ChunkResponse{
+		ResponseMetadata: knowledgeapi.Metadata(requestID), ResourceMetadata: metadata,
+		Chunk: chunk, Classification: classification,
+	})
 }
 
 func (s *Server) writeKnowledgeServiceError(w http.ResponseWriter, requestID string, err error) {

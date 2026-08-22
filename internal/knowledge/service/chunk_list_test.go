@@ -58,6 +58,13 @@ func TestListChunksFiltersDeniedChunksWithoutLeakingPagination(t *testing.T) {
 	store := memory.New()
 	t.Cleanup(func() { _ = store.Close() })
 	service := newTestService(t, store, nil)
+	for _, title := range []string{"Alpha hidden", "Bravo visible", "Charlie visible"} {
+		candidate := testChunkCandidate()
+		candidate.Title = title
+		if _, err := service.CreateChunk(ctx, CreateChunkRequest{Chunk: candidate}); err != nil {
+			t.Fatalf("CreateChunk(%q) error = %v", title, err)
+		}
+	}
 	service.chunkPolicy = ChunkPolicyFunc(func(_ context.Context, actor knowledge.Actor, action ChunkPolicyAction, chunk knowledge.Chunk) error {
 		if actor.ID != "user:test" || action != ChunkPolicyRead {
 			t.Fatalf("policy actor=%#v action=%q", actor, action)
@@ -67,13 +74,6 @@ func TestListChunksFiltersDeniedChunksWithoutLeakingPagination(t *testing.T) {
 		}
 		return nil
 	})
-	for _, title := range []string{"Alpha hidden", "Bravo visible", "Charlie visible"} {
-		candidate := testChunkCandidate()
-		candidate.Title = title
-		if _, err := service.CreateChunk(ctx, CreateChunkRequest{Chunk: candidate}); err != nil {
-			t.Fatalf("CreateChunk(%q) error = %v", title, err)
-		}
-	}
 
 	request := knowledgeStore.ChunkListRequest{Sort: knowledgeStore.ChunkSortTitle, Limit: 1}
 	first, err := service.ListChunks(ctx, request)

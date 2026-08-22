@@ -24,11 +24,51 @@ func (s *Service) CascadeDeleteChunk(ctx context.Context, request DeleteChunkReq
 	if err := validateDeleteChunkRequest(ctx, request); err != nil {
 		return CascadeDeleteChunkResult{}, err
 	}
+	actor, err := s.actor(ctx)
+	if err != nil {
+		return CascadeDeleteChunkResult{}, fmt.Errorf("resolve knowledge actor: %w", err)
+	}
+	if err := actor.Validate(); err != nil {
+		return CascadeDeleteChunkResult{}, err
+	}
 	result := CascadeDeleteChunkResult{}
-	err := s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
-		_, blockers, err := chunkDeletionTarget(ctx, tx, request)
+	err = s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+		_, blockers, err := s.chunkDeletionTarget(ctx, tx, request, actor, ChunkPolicyCascadeDelete)
 		if err != nil {
 			return err
+		}
+		touched := map[knowledge.ChunkID]knowledge.Chunk{}
+		for _, linkID := range blockers.LinkIDs {
+			link, err := tx.Link(ctx, linkID)
+			if err != nil {
+				return err
+			}
+			for _, endpoint := range []knowledge.ObjectRef{link.Source, link.Target} {
+				chunk, err := resolveLinkEndpoint(ctx, tx, endpoint)
+				if err != nil {
+					return err
+				}
+				if chunk.ID != request.ChunkID {
+					touched[chunk.ID] = chunk
+				}
+			}
+		}
+		for _, dependentID := range blockers.DependentChunkIDs {
+			dependent, err := tx.Chunk(ctx, dependentID)
+			if err != nil {
+				return err
+			}
+			touched[dependent.ID] = dependent
+		}
+		touchedIDs := make([]knowledge.ChunkID, 0, len(touched))
+		for chunkID := range touched {
+			touchedIDs = append(touchedIDs, chunkID)
+		}
+		slices.Sort(touchedIDs)
+		for _, chunkID := range touchedIDs {
+			if err := s.authorizeChunk(ctx, actor, ChunkPolicyCascadeDelete, touched[chunkID]); err != nil {
+				return err
+			}
 		}
 		for _, linkID := range blockers.LinkIDs {
 			link, err := tx.Link(ctx, linkID)
@@ -57,13 +97,6 @@ func (s *Service) CascadeDeleteChunk(ctx context.Context, request DeleteChunkReq
 			result.DeletedEvidenceIDs = append(result.DeletedEvidenceIDs, evidenceID)
 		}
 		if len(blockers.DependentChunkIDs) > 0 {
-			actor, err := s.actor(ctx)
-			if err != nil {
-				return fmt.Errorf("resolve knowledge actor: %w", err)
-			}
-			if err := actor.Validate(); err != nil {
-				return err
-			}
 			for _, dependentID := range blockers.DependentChunkIDs {
 				dependent, err := tx.Chunk(ctx, dependentID)
 				if err != nil {

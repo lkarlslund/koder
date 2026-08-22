@@ -12,12 +12,18 @@ import (
 type ChunkPolicyAction string
 
 const (
-	ChunkPolicyLinkCreate  ChunkPolicyAction = "link_create"
-	ChunkPolicyLinkUnlink  ChunkPolicyAction = "link_unlink"
-	ChunkPolicyLinkRestore ChunkPolicyAction = "link_restore"
-	ChunkPolicyRead        ChunkPolicyAction = "read"
-	ChunkPolicyTraverse    ChunkPolicyAction = "traverse"
-	ChunkPolicySearch      ChunkPolicyAction = "search"
+	ChunkPolicyCreate        ChunkPolicyAction = "create"
+	ChunkPolicyUpdate        ChunkPolicyAction = "update"
+	ChunkPolicyArchive       ChunkPolicyAction = "archive"
+	ChunkPolicyRestore       ChunkPolicyAction = "restore"
+	ChunkPolicyDelete        ChunkPolicyAction = "delete"
+	ChunkPolicyCascadeDelete ChunkPolicyAction = "cascade_delete"
+	ChunkPolicyLinkCreate    ChunkPolicyAction = "link_create"
+	ChunkPolicyLinkUnlink    ChunkPolicyAction = "link_unlink"
+	ChunkPolicyLinkRestore   ChunkPolicyAction = "link_restore"
+	ChunkPolicyRead          ChunkPolicyAction = "read"
+	ChunkPolicyTraverse      ChunkPolicyAction = "traverse"
+	ChunkPolicySearch        ChunkPolicyAction = "search"
 )
 
 var (
@@ -44,6 +50,13 @@ func (AllowAllChunkPolicy) AuthorizeChunk(context.Context, knowledge.Actor, Chun
 	return nil
 }
 
+func (s *Service) authorizeChunk(ctx context.Context, actor knowledge.Actor, action ChunkPolicyAction, chunk knowledge.Chunk) error {
+	if err := s.chunkPolicy.AuthorizeChunk(ctx, actor, action, chunk); err != nil {
+		return fmt.Errorf("%w: action %s on chunk %s: %w", ErrChunkPolicyDenied, action, chunk.ID, err)
+	}
+	return nil
+}
+
 func (s *Service) authorizeLinkChunks(ctx context.Context, actor knowledge.Actor, action ChunkPolicyAction, requireActive bool, chunks ...knowledge.Chunk) error {
 	unique := make(map[knowledge.ChunkID]knowledge.Chunk, len(chunks))
 	for _, chunk := range chunks {
@@ -60,8 +73,8 @@ func (s *Service) authorizeLinkChunks(ctx context.Context, actor knowledge.Actor
 		if requireActive && chunk.State != knowledge.ChunkStateActive {
 			failures = append(failures, fmt.Errorf("%w: chunk %s is %q", ErrLinkEndpointUnavailable, chunk.ID, chunk.State))
 		}
-		if err := s.chunkPolicy.AuthorizeChunk(ctx, actor, action, chunk); err != nil {
-			failures = append(failures, fmt.Errorf("%w: action %s on chunk %s: %w", ErrChunkPolicyDenied, action, chunk.ID, err))
+		if err := s.authorizeChunk(ctx, actor, action, chunk); err != nil {
+			failures = append(failures, err)
 		}
 	}
 	return errors.Join(failures...)

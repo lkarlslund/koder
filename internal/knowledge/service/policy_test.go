@@ -97,3 +97,167 @@ func TestUnlinkChecksBothPoliciesButAllowsArchivedEndpointCleanup(t *testing.T) 
 		t.Fatalf("same-chunk policy calls = %d, want 1", calls)
 	}
 }
+
+func TestChunkMutationsEnforceChunkPolicy(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		action ChunkPolicyAction
+		run    func(context.Context, *Service, knowledge.Chunk) error
+	}{
+		{
+			name: "create", action: ChunkPolicyCreate,
+			run: func(ctx context.Context, service *Service, _ knowledge.Chunk) error {
+				_, err := service.CreateChunk(ctx, CreateChunkRequest{Chunk: testChunkCandidate()})
+				return err
+			},
+		},
+		{
+			name: "update", action: ChunkPolicyUpdate,
+			run: func(ctx context.Context, service *Service, chunk knowledge.Chunk) error {
+				content := ChunkContentFrom(chunk)
+				content.Title = "Denied update"
+				_, err := service.UpdateChunk(ctx, UpdateChunkRequest{ChunkID: chunk.ID, ExpectedRevision: chunk.Revision.Number, Content: content})
+				return err
+			},
+		},
+		{
+			name: "archive", action: ChunkPolicyArchive,
+			run: func(ctx context.Context, service *Service, chunk knowledge.Chunk) error {
+				_, err := service.ArchiveChunk(ctx, ChunkLifecycleRequest{ChunkID: chunk.ID, ExpectedRevision: chunk.Revision.Number})
+				return err
+			},
+		},
+		{
+			name: "restore", action: ChunkPolicyRestore,
+			run: func(ctx context.Context, service *Service, chunk knowledge.Chunk) error {
+				service.chunkPolicy = AllowAllChunkPolicy{}
+				archived, err := service.ArchiveChunk(ctx, ChunkLifecycleRequest{ChunkID: chunk.ID, ExpectedRevision: chunk.Revision.Number})
+				if err != nil {
+					return err
+				}
+				service.chunkPolicy = denyChunkAction(ChunkPolicyRestore)
+				_, err = service.RestoreChunk(ctx, ChunkLifecycleRequest{ChunkID: chunk.ID, ExpectedRevision: archived.Chunk.Revision.Number})
+				return err
+			},
+		},
+		{
+			name: "delete", action: ChunkPolicyDelete,
+			run: func(ctx context.Context, service *Service, chunk knowledge.Chunk) error {
+				service.chunkPolicy = AllowAllChunkPolicy{}
+				archived, err := service.ArchiveChunk(ctx, ChunkLifecycleRequest{ChunkID: chunk.ID, ExpectedRevision: chunk.Revision.Number})
+				if err != nil {
+					return err
+				}
+				service.chunkPolicy = denyChunkAction(ChunkPolicyDelete)
+				return service.DeleteChunk(ctx, DeleteChunkRequest{ChunkID: chunk.ID, ExpectedRevision: archived.Chunk.Revision.Number, Confirmed: true})
+			},
+		},
+		{
+			name: "cascade delete", action: ChunkPolicyCascadeDelete,
+			run: func(ctx context.Context, service *Service, chunk knowledge.Chunk) error {
+				service.chunkPolicy = AllowAllChunkPolicy{}
+				archived, err := service.ArchiveChunk(ctx, ChunkLifecycleRequest{ChunkID: chunk.ID, ExpectedRevision: chunk.Revision.Number})
+				if err != nil {
+					return err
+				}
+				service.chunkPolicy = denyChunkAction(ChunkPolicyCascadeDelete)
+				_, err = service.CascadeDeleteChunk(ctx, DeleteChunkRequest{ChunkID: chunk.ID, ExpectedRevision: archived.Chunk.Revision.Number, Confirmed: true})
+				return err
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			store := memory.New()
+			t.Cleanup(func() { _ = store.Close() })
+			service := newTestService(t, store, nil)
+			var chunk knowledge.Chunk
+			if test.action != ChunkPolicyCreate {
+				created, err := service.CreateChunk(ctx, CreateChunkRequest{Chunk: testChunkCandidate()})
+				if err != nil {
+					t.Fatalf("seed chunk: %v", err)
+				}
+				chunk = created.Chunk
+			}
+			service.chunkPolicy = denyChunkAction(test.action)
+			if err := test.run(ctx, service, chunk); !errors.Is(err, ErrChunkPolicyDenied) {
+				t.Fatalf("mutation error = %v, want ErrChunkPolicyDenied", err)
+			}
+		})
+	}
+}
+
+func TestChunkUpdateAuthorizesDestinationScope(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service := newTestService(t, store, nil)
+	created, err := service.CreateChunk(ctx, CreateChunkRequest{Chunk: testChunkCandidate()})
+	if err != nil {
+		t.Fatalf("seed chunk: %v", err)
+	}
+	service.chunkPolicy = ChunkPolicyFunc(func(_ context.Context, _ knowledge.Actor, action ChunkPolicyAction, chunk knowledge.Chunk) error {
+		if action == ChunkPolicyUpdate && chunk.Scope.Kind == knowledge.ScopeKindProject {
+			return errors.New("project scope denied")
+		}
+		return nil
+	})
+	content := ChunkContentFrom(created.Chunk)
+	content.Scope = knowledge.Scope{Kind: knowledge.ScopeKindProject, Selector: "secret-project"}
+	_, err = service.UpdateChunk(ctx, UpdateChunkRequest{ChunkID: created.Chunk.ID, ExpectedRevision: 1, Content: content})
+	if !errors.Is(err, ErrChunkPolicyDenied) {
+		t.Fatalf("UpdateChunk() error = %v, want destination policy denial", err)
+	}
+	got, err := service.Chunk(ctx, created.Chunk.ID)
+	if err != nil || got.Scope != created.Chunk.Scope || got.Revision.Number != 1 {
+		t.Fatalf("chunk changed after denied scope move: chunk=%#v err=%v", got, err)
+	}
+}
+
+func TestCascadeDeleteAuthorizesEveryTouchedChunkBeforeMutation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	fixture := seedCascadeFixture(t, ctx, store)
+	service := cascadeTestService(t, store, "01a01688-fc5d-7f7d-8bb8-de244977f8af")
+	var checked []knowledge.ChunkID
+	service.chunkPolicy = ChunkPolicyFunc(func(_ context.Context, _ knowledge.Actor, action ChunkPolicyAction, chunk knowledge.Chunk) error {
+		if action != ChunkPolicyCascadeDelete {
+			t.Fatalf("policy action = %q", action)
+		}
+		checked = append(checked, chunk.ID)
+		if chunk.ID == fixture.dependent.ID {
+			return errors.New("dependent chunk denied")
+		}
+		return nil
+	})
+	_, err := service.CascadeDeleteChunk(ctx, DeleteChunkRequest{
+		ChunkID: fixture.root.ID, ExpectedRevision: 1, Confirmed: true,
+	})
+	if !errors.Is(err, ErrChunkPolicyDenied) {
+		t.Fatalf("CascadeDeleteChunk() error = %v, want ErrChunkPolicyDenied", err)
+	}
+	if len(checked) != 2 || checked[0] != fixture.root.ID || checked[1] != fixture.dependent.ID {
+		t.Fatalf("authorized chunks = %v", checked)
+	}
+	if _, err := service.Chunk(ctx, fixture.root.ID); err != nil {
+		t.Fatalf("root changed after denied cascade: %v", err)
+	}
+	if _, err := service.Chunk(ctx, fixture.dependent.ID); err != nil {
+		t.Fatalf("dependent changed after denied cascade: %v", err)
+	}
+}
+
+func denyChunkAction(denied ChunkPolicyAction) ChunkPolicy {
+	return ChunkPolicyFunc(func(_ context.Context, _ knowledge.Actor, action ChunkPolicyAction, _ knowledge.Chunk) error {
+		if action == denied {
+			return errors.New("denied by test policy")
+		}
+		return nil
+	})
+}

@@ -118,6 +118,16 @@ func TestResourceMetadataUsesStableRevisionAndExplorerLinks(t *testing.T) {
 	}
 }
 
+func TestChunkRoutesRemainVersionedAndEscaped(t *testing.T) {
+	chunkID := knowledge.ChunkID("chunk with/slash")
+	if got := ChunkPath(chunkID); got != "/api/knowledge/v1/chunks/chunk%20with%2Fslash" {
+		t.Fatalf("ChunkPath() = %q", got)
+	}
+	if got := ChunkLifecyclePath(chunkID, " archive "); got != "/api/knowledge/v1/chunks/chunk%20with%2Fslash/archive" {
+		t.Fatalf("ChunkLifecyclePath() = %q", got)
+	}
+}
+
 func requireJSONEOF(decoder *json.Decoder) error {
 	var trailing any
 	err := decoder.Decode(&trailing)

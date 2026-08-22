@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -136,6 +137,95 @@ func TestKnowledgeChunkAPIHidesPolicyDeniedRecords(t *testing.T) {
 	}
 }
 
+func TestKnowledgeChunkMutationLifecycleUsesOptimisticRevisions(t *testing.T) {
+	ctrl := newTestController(t)
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service, err := knowledgeService.New(knowledgeService.Config{
+		Store: store,
+		Actor: knowledgeService.ContextActorSource(knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:test"}),
+	})
+	if err != nil {
+		t.Fatalf("new Knowledge service: %v", err)
+	}
+	ctrl.SetKnowledgeService(service)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	token := bindKnowledgeTestDevice(t, srv)
+	baseURL := srv.URL() + knowledgeapi.RoutePrefix + "/chunks"
+	content := knowledgeapi.ChunkContent{
+		Title: "API lifecycle", Kind: knowledge.ChunkKindReference,
+		Scope: knowledge.Scope{Kind: knowledge.ScopeKindGlobal}, Visibility: knowledge.VisibilityPrivate,
+	}
+
+	response := knowledgeJSONRequest(t, http.MethodPost, baseURL, token, knowledgeapi.ChunkCreateRequest{Chunk: content})
+	var created knowledgeapi.ChunkResponse
+	decodeKnowledgeResponse(t, response, &created)
+	if response.StatusCode != http.StatusCreated || created.Chunk.ID == "" || created.Chunk.Revision.Number != 1 ||
+		created.Chunk.Revision.Actor.Kind != knowledge.ActorKindUser || response.Header.Get("Location") == "" {
+		t.Fatalf("create status=%d response=%#v", response.StatusCode, created)
+	}
+	chunkURL := baseURL + "/" + string(created.Chunk.ID)
+
+	content.Title = "API lifecycle updated"
+	update := knowledgeapi.ChunkUpdateRequest{Chunk: content, ExpectedRevision: 1, Reason: "test update"}
+	response = knowledgeJSONRequest(t, http.MethodPut, chunkURL, token, update)
+	var updated knowledgeapi.ChunkResponse
+	decodeKnowledgeResponse(t, response, &updated)
+	if response.StatusCode != http.StatusOK || updated.Chunk.Title != content.Title || updated.Chunk.Revision.Number != 2 {
+		t.Fatalf("update status=%d response=%#v", response.StatusCode, updated)
+	}
+
+	response = knowledgeJSONRequest(t, http.MethodPut, chunkURL, token, update)
+	var conflict knowledgeapi.ErrorResponse
+	decodeKnowledgeResponse(t, response, &conflict)
+	if response.StatusCode != http.StatusConflict || conflict.Error == nil || conflict.Error.Code != knowledgeService.ErrorCodeConflict {
+		t.Fatalf("stale update status=%d response=%#v", response.StatusCode, conflict)
+	}
+
+	response = knowledgeJSONRequest(t, http.MethodPost, chunkURL+"/archive", token, knowledgeapi.LifecycleRequest{ExpectedRevision: 2})
+	var archived knowledgeapi.ChunkResponse
+	decodeKnowledgeResponse(t, response, &archived)
+	if response.StatusCode != http.StatusOK || archived.Chunk.State != knowledge.ChunkStateArchived || archived.Chunk.Revision.Number != 3 {
+		t.Fatalf("archive status=%d response=%#v", response.StatusCode, archived)
+	}
+
+	response = knowledgeJSONRequest(t, http.MethodDelete, chunkURL, token, knowledgeapi.DeleteRequest{ExpectedRevision: 3})
+	var confirmation knowledgeapi.ErrorResponse
+	decodeKnowledgeResponse(t, response, &confirmation)
+	if response.StatusCode != http.StatusBadRequest || confirmation.Error == nil || confirmation.Error.Code != knowledgeService.ErrorCodeInvalid {
+		t.Fatalf("unconfirmed delete status=%d response=%#v", response.StatusCode, confirmation)
+	}
+
+	response = knowledgeJSONRequest(t, http.MethodPost, chunkURL+"/restore", token, knowledgeapi.LifecycleRequest{ExpectedRevision: 3})
+	var restored knowledgeapi.ChunkResponse
+	decodeKnowledgeResponse(t, response, &restored)
+	if response.StatusCode != http.StatusOK || restored.Chunk.State != knowledge.ChunkStateActive || restored.Chunk.Revision.Number != 4 {
+		t.Fatalf("restore status=%d response=%#v", response.StatusCode, restored)
+	}
+	response = knowledgeJSONRequest(t, http.MethodPost, chunkURL+"/archive", token, knowledgeapi.LifecycleRequest{ExpectedRevision: 4})
+	decodeKnowledgeResponse(t, response, &archived)
+	if response.StatusCode != http.StatusOK || archived.Chunk.Revision.Number != 5 {
+		t.Fatalf("second archive status=%d response=%#v", response.StatusCode, archived)
+	}
+
+	response = knowledgeJSONRequest(t, http.MethodDelete, chunkURL, token, knowledgeapi.DeleteRequest{ExpectedRevision: 5, Confirmed: true})
+	var deleted knowledgeapi.DeleteResponse
+	decodeKnowledgeResponse(t, response, &deleted)
+	if response.StatusCode != http.StatusOK || !deleted.Deleted || deleted.Object.ID != string(created.Chunk.ID) {
+		t.Fatalf("delete status=%d response=%#v", response.StatusCode, deleted)
+	}
+	response = knowledgeAPIRequest(t, http.MethodGet, chunkURL, token)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("get deleted status=%d", response.StatusCode)
+	}
+}
+
 func createAPIChunk(t *testing.T, service *knowledgeService.Service, title string, scope knowledge.Scope) knowledge.Chunk {
 	t.Helper()
 	created, err := service.CreateChunk(context.Background(), knowledgeService.CreateChunkRequest{Chunk: knowledge.Chunk{
@@ -169,6 +259,25 @@ func knowledgeAPIRequest(t *testing.T, method, url, token string) *http.Response
 	if token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("Knowledge API request: %v", err)
+	}
+	return response
+}
+
+func knowledgeJSONRequest(t *testing.T, method, url, token string, body any) *http.Response {
+	t.Helper()
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("encode Knowledge request: %v", err)
+	}
+	request, err := http.NewRequest(method, url, bytes.NewReader(encoded))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Content-Type", "application/json")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatalf("Knowledge API request: %v", err)

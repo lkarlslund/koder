@@ -43,8 +43,15 @@ func (s *Service) DeleteChunk(ctx context.Context, request DeleteChunkRequest) e
 	if err := validateDeleteChunkRequest(ctx, request); err != nil {
 		return err
 	}
-	err := s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
-		_, blockers, err := chunkDeletionTarget(ctx, tx, request)
+	actor, err := s.actor(ctx)
+	if err != nil {
+		return fmt.Errorf("resolve knowledge actor: %w", err)
+	}
+	if err := actor.Validate(); err != nil {
+		return err
+	}
+	err = s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+		_, blockers, err := s.chunkDeletionTarget(ctx, tx, request, actor, ChunkPolicyDelete)
 		if err != nil {
 			return err
 		}
@@ -72,9 +79,12 @@ func validateDeleteChunkRequest(ctx context.Context, request DeleteChunkRequest)
 	return nil
 }
 
-func chunkDeletionTarget(ctx context.Context, tx knowledgeStore.WriteTx, request DeleteChunkRequest) (knowledge.Chunk, knowledgeStore.ChunkDeletionBlockers, error) {
+func (s *Service) chunkDeletionTarget(ctx context.Context, tx knowledgeStore.WriteTx, request DeleteChunkRequest, actor knowledge.Actor, action ChunkPolicyAction) (knowledge.Chunk, knowledgeStore.ChunkDeletionBlockers, error) {
 	current, err := tx.Chunk(ctx, request.ChunkID)
 	if err != nil {
+		return knowledge.Chunk{}, knowledgeStore.ChunkDeletionBlockers{}, err
+	}
+	if err := s.authorizeChunk(ctx, actor, action, current); err != nil {
 		return knowledge.Chunk{}, knowledgeStore.ChunkDeletionBlockers{}, err
 	}
 	if current.Revision.Number != request.ExpectedRevision {
