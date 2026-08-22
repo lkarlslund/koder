@@ -12,52 +12,89 @@
   <link href="/assets/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
   <link href="/assets/vendor/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
   <link href="/assets/app.css" rel="stylesheet">
+  <link href="/assets/knowledge_browser.css" rel="stylesheet">
   <script>window.KODER_ASSET_HASH = "__KODER_ASSET_HASH__";</script>
   <script defer src="/assets/vendor/graphology/graphology.umd.min.js"></script>
   <script defer src="/assets/vendor/knowledge-layouts/knowledge-layouts.min.js"></script>
   <script defer src="/assets/vendor/sigma/sigma.min.js"></script>
+  <script defer src="/assets/knowledge_browser.js"></script>
 </head>
 <body class="bg-body text-body">
-  <div id="knowledge-browser" class="d-flex flex-column min-vh-100" data-state="shell">
-    <nav class="navbar bg-body-tertiary border-bottom px-3" aria-label="Knowledge explorer">
-      <div class="d-flex align-items-center gap-2 min-w-0">
+  <div id="knowledge-browser" class="knowledge-shell" data-state="shell" data-mobile-pane="graph">
+    <nav class="knowledge-topbar" aria-label="Knowledge explorer">
+      <div class="knowledge-brand">
         <img class="koder-logo" src="/assets/koder-logo.svg" alt="" aria-hidden="true">
-        <span class="fw-semibold">Koder Knowledge</span>
-        <span class="badge text-bg-secondary">Explorer</span>
+        <div class="knowledge-brand-copy">
+          <span class="knowledge-brand-title">Koder Knowledge</span>
+          <span class="knowledge-brand-subtitle"><span class="knowledge-status-dot" aria-hidden="true"></span>Local knowledge explorer</span>
+        </div>
       </div>
-      <a class="btn btn-sm btn-outline-secondary" href="/" title="Return to Koder chat">
+      <a class="knowledge-icon-button" href="/" title="Return to Koder chat">
         <i class="bi bi-chat-left-text" aria-hidden="true"></i>
         <span class="visually-hidden">Return to Koder chat</span>
       </a>
     </nav>
 
-    <main class="container-fluid flex-grow-1 py-3">
-      <div class="row g-3 h-100">
-        <aside class="col-12 col-lg-3" aria-labelledby="knowledge-sources-title">
-          <section class="card h-100">
-            <div class="card-header" id="knowledge-sources-title">Knowledge</div>
-            <div class="card-body text-secondary">Chunks, filters, and search results will appear here.</div>
-          </section>
-        </aside>
-        <section class="col-12 col-lg-6" aria-labelledby="knowledge-graph-title">
-          <div class="card h-100">
-            <div class="card-header d-flex align-items-center justify-content-between gap-2">
-              <span id="knowledge-graph-title">Graph</span>
-              <span class="small text-secondary">Preparing explorer</span>
-            </div>
-            <div class="card-body d-flex flex-column align-items-center justify-content-center gap-3 text-secondary" id="knowledge-graph" role="region" aria-live="polite">
-              <span class="spinner-border text-primary" aria-hidden="true"></span>
-              <span>The graph view is being connected.</span>
-            </div>
+    <div class="knowledge-mobile-tabs" role="tablist" aria-label="Explorer pane">
+      <button type="button" role="tab" data-knowledge-tab="sources" aria-controls="knowledge-sources-pane" aria-selected="false" tabindex="-1"><i class="bi bi-collection" aria-hidden="true"></i><span>Knowledge</span></button>
+      <button type="button" role="tab" data-knowledge-tab="graph" aria-controls="knowledge-graph-pane" aria-selected="true"><i class="bi bi-diagram-3" aria-hidden="true"></i><span>Graph</span></button>
+      <button type="button" role="tab" data-knowledge-tab="inspector" aria-controls="knowledge-inspector-pane" aria-selected="false" tabindex="-1"><i class="bi bi-card-text" aria-hidden="true"></i><span>Inspector</span></button>
+    </div>
+
+    <main class="knowledge-layout">
+      <aside class="knowledge-pane knowledge-sources-pane" id="knowledge-sources-pane" data-knowledge-pane="sources" role="tabpanel" aria-labelledby="knowledge-sources-title">
+        <header class="knowledge-pane-header">
+          <div>
+            <span class="knowledge-eyebrow">Browse</span>
+            <h1 id="knowledge-sources-title">Knowledge</h1>
           </div>
-        </section>
-        <aside class="col-12 col-lg-3" aria-labelledby="knowledge-inspector-title">
-          <section class="card h-100">
-            <div class="card-header" id="knowledge-inspector-title">Inspector</div>
-            <div class="card-body text-secondary">Select knowledge to inspect its content, evidence, and history.</div>
-          </section>
-        </aside>
-      </div>
+          <span class="knowledge-count-placeholder" aria-label="Loading chunk count">—</span>
+        </header>
+        <div class="knowledge-pane-body knowledge-shell-list" aria-hidden="true">
+          <div class="knowledge-skeleton knowledge-skeleton-search"></div>
+          <div class="knowledge-skeleton knowledge-skeleton-row"></div>
+          <div class="knowledge-skeleton knowledge-skeleton-row is-short"></div>
+          <div class="knowledge-skeleton knowledge-skeleton-row"></div>
+        </div>
+      </aside>
+
+      <section class="knowledge-pane knowledge-graph-pane" id="knowledge-graph-pane" data-knowledge-pane="graph" role="tabpanel" aria-labelledby="knowledge-graph-title">
+        <header class="knowledge-pane-header knowledge-graph-toolbar">
+          <div>
+            <span class="knowledge-eyebrow">Explore</span>
+            <h1 id="knowledge-graph-title">Graph</h1>
+          </div>
+          <span class="knowledge-stage-status"><span class="spinner-grow spinner-grow-sm" aria-hidden="true"></span>Preparing explorer</span>
+        </header>
+        <div class="knowledge-graph-stage" id="knowledge-graph" role="region" aria-live="polite">
+          <div class="knowledge-constellation" aria-hidden="true">
+            <span class="knowledge-orbit orbit-one"></span>
+            <span class="knowledge-orbit orbit-two"></span>
+            <span class="knowledge-star star-one"></span>
+            <span class="knowledge-star star-two"></span>
+            <span class="knowledge-star star-three"></span>
+            <img src="/assets/koder-logo.svg" alt="">
+          </div>
+          <div class="knowledge-graph-message">
+            <strong>Building your knowledge map</strong>
+            <span>The data connection and graph renderer are next.</span>
+          </div>
+        </div>
+      </section>
+
+      <aside class="knowledge-pane knowledge-inspector-pane" id="knowledge-inspector-pane" data-knowledge-pane="inspector" role="tabpanel" aria-labelledby="knowledge-inspector-title">
+        <header class="knowledge-pane-header">
+          <div>
+            <span class="knowledge-eyebrow">Details</span>
+            <h1 id="knowledge-inspector-title">Inspector</h1>
+          </div>
+        </header>
+        <div class="knowledge-pane-empty">
+          <span class="knowledge-empty-icon"><i class="bi bi-bezier2" aria-hidden="true"></i></span>
+          <strong>No selection</strong>
+          <span>Select a chunk, entry, or relationship to inspect its content, evidence, and history.</span>
+        </div>
+      </aside>
     </main>
 
     <noscript>

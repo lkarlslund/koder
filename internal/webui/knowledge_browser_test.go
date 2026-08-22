@@ -32,6 +32,8 @@ func TestServerServesStandaloneKnowledgeExplorerShell(t *testing.T) {
 	}
 	for _, required := range []string{
 		`id="knowledge-browser"`, `id="knowledge-graph"`, "Koder Knowledge",
+		`data-knowledge-pane="sources"`, `data-knowledge-pane="graph"`, `data-knowledge-pane="inspector"`,
+		`/assets/knowledge_browser.css`, `/assets/knowledge_browser.js`,
 		`/assets/vendor/graphology/graphology.umd.min.js`,
 		`/assets/vendor/knowledge-layouts/knowledge-layouts.min.js`,
 		`/assets/vendor/sigma/sigma.min.js`, currentAssetHash,
@@ -42,6 +44,18 @@ func TestServerServesStandaloneKnowledgeExplorerShell(t *testing.T) {
 	}
 	if strings.Contains(page, assetHashPlaceholder) || strings.Contains(page, "https://") || strings.Contains(page, "http://") {
 		t.Fatal("Knowledge explorer contains an unresolved hash or remote dependency")
+	}
+}
+
+func TestKnowledgeExplorerResponsiveShellAssetsAreEmbedded(t *testing.T) {
+	for _, path := range []string{"assets/knowledge_browser.css", "assets/knowledge_browser.js"} {
+		data, err := webAssets.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read embedded Knowledge shell asset %q: %v", path, err)
+		}
+		if len(data) < 100 {
+			t.Fatalf("Knowledge shell asset %q is unexpectedly small", path)
+		}
 	}
 }
 
