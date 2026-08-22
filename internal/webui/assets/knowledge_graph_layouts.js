@@ -5,6 +5,13 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (defaultLayouts) {
   'use strict';
 
+  function layoutNodeSize(attributes) {
+    attributes = attributes || {};
+    if (attributes.objectKind === 'chunk') return 1.9;
+    if (attributes.semanticKind === 'warning' || attributes.semanticKind === 'decision') return 1.3;
+    return 1;
+  }
+
   class ForceAtlasController {
     constructor(options) {
       options = options || {};
@@ -47,6 +54,8 @@
         gravity: 1.2, scalingRatio: this.graph.order > 150 ? 8 : 4, slowDown: 2,
         ...(options.settings || {}),
       };
+      const overlapIterations = Math.max(1, Math.min(500, Number(options.overlapIterations) || 80));
+      const overlapSettings = {gridSize: 20, margin: 0.35, expansion: 1.1, ratio: 1.12, speed: 3, ...(options.overlapSettings || {})};
       this.running = true;
       this.emit('start', {completed: 0, total, stage: 'coarse'});
       if (this.graph.order <= 1) {
@@ -69,8 +78,33 @@
           }, {attributes: ['x', 'y']});
           completed += iterations;
           if (completed >= total) {
-            this.running = false;
-            this.emit('ready', {completed, total, stage: 'settled'});
+            if (typeof this.layouts.noverlap !== 'function') {
+              this.running = false;
+              this.emit('ready', {completed, total, stage: 'settled'});
+              return;
+            }
+            this.emit('progress', {completed, total, stage: 'overlap'});
+            this.handle = this.schedule(() => {
+              this.handle = 0;
+              if (!this.running || token !== this.generation || this.destroyed) return;
+              try {
+                const positions = this.layouts.noverlap(this.graph, {
+                  maxIterations: overlapIterations, settings: overlapSettings,
+                  inputReducer: (key, attributes) => ({...attributes, size: layoutNodeSize(attributes)}),
+                });
+                if (!this.running || token !== this.generation || this.destroyed) return;
+                this.graph.updateEachNodeAttributes((key, attributes) => {
+                  const position = positions && positions[key];
+                  if (attributes.pinned || !position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) return attributes;
+                  return {...attributes, x: position.x, y: position.y};
+                }, {attributes: ['x', 'y']});
+                this.running = false;
+                this.emit('ready', {completed, total, stage: 'settled'});
+              } catch (error) {
+                this.running = false;
+                this.emit('error', {completed, total, stage: 'overlap', error});
+              }
+            });
             return;
           }
           this.emit('progress', {completed, total, stage: completed < coarse ? 'coarse' : 'settling'});
@@ -102,5 +136,5 @@
     }
   }
 
-  return Object.freeze({ForceAtlasController});
+  return Object.freeze({ForceAtlasController, layoutNodeSize});
 });
