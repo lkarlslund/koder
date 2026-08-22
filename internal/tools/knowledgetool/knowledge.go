@@ -282,16 +282,19 @@ func (tool) Call(ctx context.Context, options tools.Options) (tools.Result, erro
 	if len(offer.ScopeKinds) == 0 || !slices.Contains(offer.Actions, options.Request.Args["action"]) {
 		return tools.Result{}, knowledgeService.ClassifyError(fmt.Errorf("%w: action %s", knowledgeService.ErrToolOfferDenied, options.Request.Args["action"]))
 	}
+	if err := authorizeToolScopes(ctx, service, offer, options.Request.Args); err != nil {
+		return tools.Result{}, knowledgeService.ClassifyError(err)
+	}
 	var value any
 	switch options.Request.Args["action"] {
 	case "search":
-		value, err = callSearch(ctx, service, options.Request.Args)
+		value, err = callSearch(ctx, service, offer, options.Request.Args)
 	case "get":
 		value, err = callGet(ctx, service, options.Request.Args)
 	case "neighbors":
-		value, err = callNeighbors(ctx, service, options.Request.Args)
+		value, err = callNeighbors(ctx, service, offer, options.Request.Args)
 	case "chunk_list":
-		value, err = callChunkList(ctx, service, options.Request.Args)
+		value, err = callChunkList(ctx, service, offer, options.Request.Args)
 	case "chunk_get":
 		value, err = callChunkGet(ctx, service, options.Request.Args)
 	case "chunk_create":
@@ -319,7 +322,7 @@ func (tool) Call(ctx context.Context, options tools.Options) (tools.Result, erro
 	case "verify":
 		value, err = callVerify(ctx, service, options.Request.Args)
 	case "history":
-		value, err = callHistory(ctx, service, options.Request.Args)
+		value, err = callHistory(ctx, service, offer, options.Request.Args)
 	default:
 		err = fmt.Errorf("unsupported knowledge action %q", options.Request.Args["action"])
 	}
@@ -572,13 +575,14 @@ func encodeStringList(values []string) (string, error) {
 	return string(data), nil
 }
 
-func callSearch(ctx context.Context, service *knowledgeService.Service, args map[string]string) (knowledgeService.LexicalSearchResult, error) {
+func callSearch(ctx context.Context, service *knowledgeService.Service, offer knowledgeService.ToolOffer, args map[string]string) (knowledgeService.LexicalSearchResult, error) {
 	request := knowledgeService.LexicalSearchRequest{
 		Query:             args["query"],
 		Limit:             intArg(args, "limit", 5),
 		Cursor:            args["cursor"],
 		IncludeInvalid:    boolArg(args, "include_invalid"),
 		IncludeSuperseded: boolArg(args, "include_superseded"),
+		ScopeKinds:        slices.Clone(offer.ScopeKinds),
 	}
 	if raw := args["chunk_ids"]; raw != "" {
 		var ids []string
@@ -607,7 +611,7 @@ func callGet(ctx context.Context, service *knowledgeService.Service, args map[st
 	return adaptRecord(record), nil
 }
 
-func callNeighbors(ctx context.Context, service *knowledgeService.Service, args map[string]string) (neighborPageResult, error) {
+func callNeighbors(ctx context.Context, service *knowledgeService.Service, offer knowledgeService.ToolOffer, args map[string]string) (neighborPageResult, error) {
 	kind, err := knowledge.ObjectKindString(args["object_kind"])
 	if err != nil {
 		return neighborPageResult{}, err
@@ -637,6 +641,9 @@ func callNeighbors(ctx context.Context, service *knowledgeService.Service, args 
 	}
 	result := neighborPageResult{NextCursor: page.NextCursor, Neighbors: make([]neighborResult, 0, len(page.Neighbors))}
 	for _, neighbor := range page.Neighbors {
+		if err := requireRecordScope(ctx, service, offer, neighbor.Object); err != nil {
+			return neighborPageResult{}, err
+		}
 		result.Neighbors = append(result.Neighbors, neighborResult{
 			Direction: neighbor.Direction, Link: neighbor.Link, Object: summarizeRecord(neighbor.Object),
 		})

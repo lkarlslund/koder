@@ -82,6 +82,16 @@ func TestSearchLexicalFiltersAuthorizationScopeLifecycleAndValidityBeforeScoring
 	if err != nil || result.CorpusDocumentCount != 1 || len(result.Matches) != 1 {
 		t.Fatalf("global-scope result = %#v, %v", result, err)
 	}
+	result, err = service.SearchLexical(ctx, LexicalSearchRequest{Query: "needle", ScopeKinds: []knowledge.ScopeKind{knowledge.ScopeKindProject}})
+	if err != nil || result.CorpusDocumentCount != 1 || len(result.Matches) != 1 {
+		t.Fatalf("project-scope-kind result = %#v, %v", result, err)
+	}
+	result, err = service.SearchLexical(ctx, LexicalSearchRequest{
+		Query: "needle", ScopeKinds: []knowledge.ScopeKind{knowledge.ScopeKindProject}, Scopes: []knowledge.Scope{globalScope},
+	})
+	if err != nil || result.CorpusDocumentCount != 0 || len(result.Matches) != 0 {
+		t.Fatalf("disjoint scope filters result = %#v, %v", result, err)
+	}
 }
 
 func TestSearchLexicalRejectsInvalidFilters(t *testing.T) {
@@ -93,6 +103,7 @@ func TestSearchLexicalRejectsInvalidFilters(t *testing.T) {
 		{},
 		{Query: "valid", Limit: maxLexicalSearchLimit + 1},
 		{Query: "valid", Scopes: []knowledge.Scope{{Kind: knowledge.ScopeKindProject}}},
+		{Query: "valid", ScopeKinds: []knowledge.ScopeKind{knowledge.ScopeKindUnspecified}},
 		{Query: "valid", EntryStates: []knowledge.EntryState{knowledge.EntryStateUnspecified}},
 		{Query: "valid", ChunkStates: []knowledge.ChunkState{knowledge.ChunkStateUnspecified}},
 		{Query: "valid", GraphExpansion: &GraphExpansionOptions{Kinds: []knowledge.LinkKind{knowledge.LinkKindUnspecified}}},

@@ -180,7 +180,7 @@ func callUnlink(ctx context.Context, service *knowledgeService.Service, args map
 	return linkMutationResult{Link: result.Link, Updated: result.Updated}, nil
 }
 
-func callHistory(ctx context.Context, service *knowledgeService.Service, args map[string]string) (historyPageResult, error) {
+func callHistory(ctx context.Context, service *knowledgeService.Service, offer knowledgeService.ToolOffer, args map[string]string) (historyPageResult, error) {
 	kind, err := knowledge.ObjectKindString(args["object_kind"])
 	if err != nil {
 		return historyPageResult{}, err
@@ -197,6 +197,9 @@ func callHistory(ctx context.Context, service *knowledgeService.Service, args ma
 	}
 	result := historyPageResult{Revisions: make([]historyRevisionResult, 0, len(page.Revisions)), NextCursor: page.NextCursor}
 	for _, revision := range page.Revisions {
+		if err := requireRecordScope(ctx, service, offer, revision); err != nil {
+			return historyPageResult{}, err
+		}
 		result.Revisions = append(result.Revisions, adaptHistoryRevision(revision))
 	}
 	return result, nil

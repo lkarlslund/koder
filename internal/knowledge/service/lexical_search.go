@@ -23,6 +23,7 @@ type LexicalSearchRequest struct {
 	Query             string
 	ChunkIDs          []knowledge.ChunkID
 	Scopes            []knowledge.Scope
+	ScopeKinds        []knowledge.ScopeKind
 	EntryStates       []knowledge.EntryState
 	ChunkStates       []knowledge.ChunkState
 	ValidAt           time.Time
@@ -278,6 +279,14 @@ func (s *Service) normalizeLexicalSearchRequest(request LexicalSearchRequest) (L
 		return strings.Compare(left.Selector, right.Selector)
 	})
 	request.Scopes = slices.Compact(request.Scopes)
+	request.ScopeKinds = slices.Clone(request.ScopeKinds)
+	slices.Sort(request.ScopeKinds)
+	request.ScopeKinds = slices.Compact(request.ScopeKinds)
+	for _, scopeKind := range request.ScopeKinds {
+		if scopeKind == knowledge.ScopeKindUnspecified || !scopeKind.IsAScopeKind() {
+			return LexicalSearchRequest{}, nil, fmt.Errorf("invalid lexical search scope kind %q", scopeKind)
+		}
+	}
 	if request.IncludeInvalid {
 		request.ValidAt = time.Time{}
 	} else if request.ValidAt.IsZero() {
@@ -299,12 +308,23 @@ func (s *Service) listLexicalCorpusEntries(ctx context.Context, request LexicalS
 	if len(request.EntryStates) == 0 {
 		return nil, nil
 	}
-	scopeKinds := make([]knowledge.ScopeKind, 0, len(request.Scopes))
+	scopeKinds := slices.Clone(request.ScopeKinds)
+	exactScopeKinds := make([]knowledge.ScopeKind, 0, len(request.Scopes))
 	for _, scope := range request.Scopes {
-		scopeKinds = append(scopeKinds, scope.Kind)
+		exactScopeKinds = append(exactScopeKinds, scope.Kind)
 	}
-	slices.Sort(scopeKinds)
-	scopeKinds = slices.Compact(scopeKinds)
+	slices.Sort(exactScopeKinds)
+	exactScopeKinds = slices.Compact(exactScopeKinds)
+	if len(scopeKinds) == 0 {
+		scopeKinds = exactScopeKinds
+	} else if len(exactScopeKinds) != 0 {
+		scopeKinds = slices.DeleteFunc(scopeKinds, func(kind knowledge.ScopeKind) bool {
+			return !slices.Contains(exactScopeKinds, kind)
+		})
+		if len(scopeKinds) == 0 {
+			return nil, nil
+		}
+	}
 	filter := knowledgeStore.EntryFilter{
 		ChunkIDs: request.ChunkIDs, States: request.EntryStates, ScopeKinds: scopeKinds, ValidAt: request.ValidAt,
 	}

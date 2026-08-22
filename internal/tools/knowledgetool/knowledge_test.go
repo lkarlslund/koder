@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/chatinteraction"
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/knowledge"
 	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
@@ -150,6 +152,124 @@ func TestKnowledgeToolDefinitionHidesEmptyPolicyOffer(t *testing.T) {
 	}
 	if _, enabled := tools.DefinitionFor(tools.Knowledge, runtimeFor(service)); enabled {
 		t.Fatal("empty Knowledge policy offer must hide the tool")
+	}
+}
+
+func TestKnowledgeToolObeysChatProfileInteractionAndSessionToolState(t *testing.T) {
+	service := newService(t)
+	base := runtimeFor(service)
+
+	compaction := base
+	compaction.ChatRole = chatrole.Compaction
+	if _, enabled := tools.DefinitionFor(tools.Knowledge, compaction); enabled {
+		t.Fatal("compaction profile exposed Knowledge")
+	}
+	_, err := call(context.Background(), compaction, map[string]string{"action": "search", "query": "linux"})
+	if err == nil || !tools.IsDenied(err) {
+		t.Fatalf("compaction Knowledge call = %T %v, want role denial", err, err)
+	}
+
+	disabled := base
+	disabled.AllowedTools = map[tools.ID]bool{tools.Knowledge: false}
+	if _, enabled := tools.DefinitionFor(tools.Knowledge, disabled); enabled {
+		t.Fatal("session-disabled Knowledge was exposed")
+	}
+	_, err = call(context.Background(), disabled, map[string]string{"action": "search", "query": "linux"})
+	if err == nil || !tools.IsDenied(err) {
+		t.Fatalf("session-disabled Knowledge call = %T %v, want denial", err, err)
+	}
+
+	voice := base
+	voice.ChatRole = chatrole.Orchestrator
+	voice.InteractionMode = chatinteraction.Voice
+	if _, enabled := tools.DefinitionFor(tools.Knowledge, voice); !enabled {
+		t.Fatal("voice interaction unexpectedly withheld Knowledge")
+	}
+}
+
+func TestKnowledgeToolEnforcesPolicyScopesAcrossQueriesAndMutations(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service, err := knowledgeService.New(knowledgeService.Config{
+		Store: store,
+		Actor: knowledgeService.ContextActorSource(knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:test"}),
+		ToolPolicy: knowledgeService.ToolOfferPolicyFunc(func(_ context.Context, _ knowledge.Actor, offer knowledgeService.ToolOffer) (knowledgeService.ToolOffer, error) {
+			offer.ScopeKinds = []knowledge.ScopeKind{knowledge.ScopeKindProject}
+			return offer, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	global, err := service.CreateChunk(ctx, knowledgeService.CreateChunkRequest{Chunk: knowledge.Chunk{
+		Title: "Global tools", Kind: knowledge.ChunkKindReference, Scope: knowledge.Scope{Kind: knowledge.ScopeKindGlobal},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := service.CreateChunk(ctx, knowledgeService.CreateChunkRequest{Chunk: knowledge.Chunk{
+		Title: "Project tools", Kind: knowledge.ChunkKindProject,
+		Scope: knowledge.Scope{Kind: knowledge.ScopeKindProject, Selector: "project:test"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	globalEntry, _ := service.CreateEntry(ctx, knowledgeService.CreateEntryRequest{
+		ChunkID: global.Chunk.ID, Entry: knowledge.Entry{Title: "sfdisk global", Summary: "global result", Kind: knowledge.EntryKindFact},
+	})
+	projectEntry, _ := service.CreateEntry(ctx, knowledgeService.CreateEntryRequest{
+		ChunkID: project.Chunk.ID, Entry: knowledge.Entry{Title: "sfdisk project", Summary: "project result", Kind: knowledge.EntryKindFact},
+	})
+	runtime := runtimeFor(service)
+
+	listedCall, err := call(ctx, runtime, map[string]string{"action": "chunk_list", "states": `["active"]`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := listedCall.Stored.(chunkPageResult)
+	if len(listed.Chunks) != 1 || listed.Chunks[0].ID != project.Chunk.ID {
+		t.Fatalf("policy-scoped chunk_list = %#v", listed)
+	}
+	searchCall, err := call(ctx, runtime, map[string]string{"action": "search", "query": "sfdisk"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	search := searchCall.Stored.(knowledgeService.LexicalSearchResult)
+	if len(search.Matches) != 1 || search.Matches[0].EntryID != projectEntry.Entry.ID || strings.Contains(searchCall.Output, "global result") {
+		t.Fatalf("policy-scoped search = %#v, output=%s", search, searchCall.Output)
+	}
+
+	_, err = call(ctx, runtime, map[string]string{
+		"action": "get", "object_kind": "entry", "id": string(globalEntry.Entry.ID),
+	})
+	var forbidden *knowledgeService.ServiceError
+	if !errors.As(err, &forbidden) || forbidden.Code != knowledgeService.ErrorCodeForbidden {
+		t.Fatalf("global get error = %T %v, want forbidden", err, err)
+	}
+	if _, err := call(ctx, runtime, map[string]string{
+		"action": "get", "object_kind": "entry", "id": string(projectEntry.Entry.ID),
+	}); err != nil {
+		t.Fatalf("project get error = %v", err)
+	}
+
+	_, err = call(ctx, runtime, map[string]string{
+		"action": "chunk_create",
+		"chunk":  `{"title":"Forbidden global","kind":"reference","scope":{"kind":"global"}}`,
+	})
+	if !errors.As(err, &forbidden) || forbidden.Code != knowledgeService.ErrorCodeForbidden {
+		t.Fatalf("global chunk_create error = %T %v, want forbidden", err, err)
+	}
+	_, err = call(ctx, runtime, map[string]string{
+		"action": "chunk_update", "id": string(project.Chunk.ID), "expected_revision": "1",
+		"chunk": `{"scope":{"kind":"global"}}`,
+	})
+	if !errors.As(err, &forbidden) || forbidden.Code != knowledgeService.ErrorCodeForbidden {
+		t.Fatalf("scope-widening chunk_update error = %T %v, want forbidden", err, err)
+	}
+	unchanged, err := service.Chunk(ctx, project.Chunk.ID)
+	if err != nil || unchanged.Scope.Kind != knowledge.ScopeKindProject || unchanged.Revision.Number != 1 {
+		t.Fatalf("forbidden update changed project chunk: %#v, %v", unchanged, err)
 	}
 }
 

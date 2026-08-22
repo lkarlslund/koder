@@ -363,13 +363,22 @@ func validScopeKind(value string) bool {
 	return err == nil && scope != knowledge.ScopeKindUnspecified
 }
 
-func callChunkList(ctx context.Context, service *knowledgeService.Service, args map[string]string) (chunkPageResult, error) {
+func callChunkList(ctx context.Context, service *knowledgeService.Service, offer knowledgeService.ToolOffer, args map[string]string) (chunkPageResult, error) {
 	request := knowledgeStore.ChunkListRequest{
 		Sort: knowledgeStore.ChunkSort(args["sort"]), Descending: boolArg(args, "descending"),
 		Limit: intArg(args, "limit", 50), Cursor: args["cursor"],
 	}
 	if err := decodeChunkListFilters(args, &request.Filter); err != nil {
 		return chunkPageResult{}, err
+	}
+	if len(request.Filter.ScopeKinds) == 0 {
+		request.Filter.ScopeKinds = slices.Clone(offer.ScopeKinds)
+	} else {
+		for _, scopeKind := range request.Filter.ScopeKinds {
+			if !slices.Contains(offer.ScopeKinds, scopeKind) {
+				return chunkPageResult{}, fmt.Errorf("%w: scope %s", knowledgeService.ErrToolOfferDenied, scopeKind)
+			}
+		}
 	}
 	page, err := service.ListChunks(ctx, request)
 	if err != nil {
