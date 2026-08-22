@@ -1,0 +1,98 @@
+[
+  {
+    "name": "ordinary technical knowledge",
+    "fields": [
+      {
+        "name": "body",
+        "value": "Use sfdisk --dump before changing the partition table."
+      }
+    ],
+    "decision": "allow",
+    "finding_kinds": []
+  },
+  {
+    "name": "assigned credential",
+    "fields": [
+      {
+        "name": "body",
+        "value": "api_key = synthetic-secret-for-tests"
+      }
+    ],
+    "decision": "reject",
+    "finding_kinds": [
+      "credential"
+    ]
+  },
+  {
+    "name": "private key material",
+    "fields": [
+      {
+        "name": "body",
+        "value": "-----BEGIN PRIVATE KEY-----\nsynthetic test material"
+      }
+    ],
+    "decision": "reject",
+    "finding_kinds": [
+      "private_key"
+    ]
+  },
+  {
+    "name": "contact details",
+    "fields": [
+      {
+        "name": "body",
+        "value": "Contact test.person@example.invalid or +45 12 34 56 78."
+      }
+    ],
+    "decision": "review",
+    "finding_kinds": [
+      "contact",
+      "contact"
+    ]
+  },
+  {
+    "name": "precise location",
+    "fields": [
+      {
+        "name": "body",
+        "value": "GPS: 56.16294, 10.20392"
+      }
+    ],
+    "decision": "review",
+    "finding_kinds": [
+      "precise_location"
+    ]
+  },
+  {
+    "name": "medical risk metadata",
+    "fields": [
+      {
+        "name": "body",
+        "value": "Current Danish OTC guidance."
+      }
+    ],
+    "risk": [
+      "medical"
+    ],
+    "decision": "review",
+    "finding_kinds": [
+      "medical"
+    ]
+  },
+  {
+    "name": "prohibited secret metadata",
+    "fields": [
+      {
+        "name": "body",
+        "value": "The value was removed before classification."
+      }
+    ],
+    "risk": [
+      "prohibited_secret"
+    ],
+    "decision": "reject",
+    "finding_kinds": [
+      "credential"
+    ]
+  }
+]

@@ -1,6 +1,6 @@
 package knowledge
 
-//go:generate go tool enumer -type=ChunkKind,ScopeKind,Visibility,ChunkState,EntryKind,EntryState,LinkKind,LinkState,RiskClass,VerificationStatus,EvidenceType,EvidenceQuality,PersonalOrigin,ObjectKind,ActorKind -trimprefix=ChunkKind,ScopeKind,Visibility,ChunkState,EntryKind,EntryState,LinkKind,LinkState,RiskClass,VerificationStatus,EvidenceType,EvidenceQuality,PersonalOrigin,ObjectKind,ActorKind -transform=snake -json -text -values -output=enums_enumer.go
+//go:generate go tool enumer -type=ChunkKind,ScopeKind,Visibility,ChunkState,EntryKind,EntryState,LinkKind,LinkState,RiskClass,VerificationStatus,EvidenceType,EvidenceQuality,PersonalOrigin,ObjectKind,ActorKind,ClassificationDecision,FindingKind -trimprefix=ChunkKind,ScopeKind,Visibility,ChunkState,EntryKind,EntryState,LinkKind,LinkState,RiskClass,VerificationStatus,EvidenceType,EvidenceQuality,PersonalOrigin,ObjectKind,ActorKind,ClassificationDecision,FindingKind -transform=snake -json -text -values -output=enums_enumer.go
 
 // ChunkKind identifies the purpose and default policy of a knowledge chunk.
 type ChunkKind uint8
@@ -177,4 +177,33 @@ const (
 	ActorKindChat
 	ActorKindSystem
 	ActorKindImport
+)
+
+// ClassificationDecision is the ingestion policy implied by detected data classes.
+type ClassificationDecision uint8
+
+const (
+	ClassificationDecisionUnspecified ClassificationDecision = iota
+	ClassificationDecisionAllow
+	ClassificationDecisionReview
+	ClassificationDecisionReject
+)
+
+// FindingKind identifies a secret or sensitive-data classification without retaining the match.
+type FindingKind uint8
+
+const (
+	FindingKindUnspecified FindingKind = iota
+	FindingKindPrivateKey
+	FindingKindCredential
+	FindingKindAuthToken
+	FindingKindPersonalIdentifier
+	FindingKindContact
+	FindingKindPreciseLocation
+	FindingKindMedical
+	FindingKindLegal
+	FindingKindFinancial
+	FindingKindPhysicalSafety
+	FindingKindSecuritySensitive
+	FindingKindBiometric
 )
