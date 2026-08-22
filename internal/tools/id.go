@@ -64,6 +64,7 @@ const (
 	PhonePhotoView      ID = domain.ToolKindPhonePhotoView
 	PhonePhotoTransfer  ID = domain.ToolKindPhonePhotoTransfer
 	Present             ID = domain.ToolKindPresent
+	PresentContentOld   ID = domain.ToolKindPresentContentOld
 	Skill               ID = domain.ToolKindSkill
 	WebFetch            ID = domain.ToolKindWebFetch
 	WebSearch           ID = domain.ToolKindWebSearch

@@ -28,6 +28,7 @@ func init() {
 		Usage:       "Show a local image, audio, or video file in the browser UI to illustrate an explanation or result. This does not load media into model context. Playback always requires user interaction and never autoplays. Use view_image when you need to inspect an image yourself.",
 		Parameters:  mediaParameters,
 		ExposeToLLM: true,
+		Legacy:      true,
 	})
 	tools.Register(legacyImageTool{}, tools.ToolSpec{
 		Title:       "Show image (legacy)",

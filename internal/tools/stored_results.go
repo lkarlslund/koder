@@ -502,7 +502,14 @@ func compactStoredResultForPart(env storedResultEnvelope, diff string, limits Co
 	case OfferFile:
 		return decodeAndFormat[OfferFileStoredResult](env.Payload, formatOfferFileStoredResult)
 	case Present:
-		return decodeAndFormat[PresentationStoredResult](env.Payload, formatPresentationStoredResult)
+		switch env.Args["action"] {
+		case "media":
+			return decodeAndFormat[ShowMediaStoredResult](env.Payload, compactShowMediaStoredResult)
+		case "file":
+			return decodeAndFormat[OfferFileStoredResult](env.Payload, formatOfferFileStoredResult)
+		default:
+			return decodeAndFormat[PresentationStoredResult](env.Payload, formatPresentationStoredResult)
+		}
 	case BrowserStatus, BrowserTabs, BrowserNavigation, BrowserPage, BrowserInteract, BrowserCapture, BrowserNetwork,
 		BrowserTabList, BrowserTabNew, BrowserTabClaim, BrowserTabSelect, BrowserTabClose,
 		BrowserNavigate, BrowserBack, BrowserForward, BrowserReload, BrowserSnapshot, BrowserFind,
@@ -978,7 +985,14 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 	case OfferFile:
 		return decodeAndFormat[OfferFileStoredResult](env.Payload, formatOfferFileStoredResult)
 	case Present:
-		return decodeAndFormat[PresentationStoredResult](env.Payload, formatPresentationStoredResult)
+		switch env.Args["action"] {
+		case "media":
+			return decodeAndFormat[ShowMediaStoredResult](env.Payload, formatShowMediaStoredResult)
+		case "file":
+			return decodeAndFormat[OfferFileStoredResult](env.Payload, formatOfferFileStoredResult)
+		default:
+			return decodeAndFormat[PresentationStoredResult](env.Payload, formatPresentationStoredResult)
+		}
 	case BrowserStatus, BrowserTabs, BrowserNavigation, BrowserPage, BrowserInteract, BrowserCapture, BrowserNetwork,
 		BrowserTabList, BrowserTabNew, BrowserTabClaim, BrowserTabSelect, BrowserTabClose,
 		BrowserNavigate, BrowserBack, BrowserForward, BrowserReload, BrowserSnapshot, BrowserFind,

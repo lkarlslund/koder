@@ -24,6 +24,7 @@ func init() {
 		Usage:       "Create a download card for a local file that the user should receive. The link reads the original file when downloaded; it does not copy or snapshot the file, so later changes are reflected and moved or deleted files become unavailable.",
 		Parameters:  parameters,
 		ExposeToLLM: true,
+		Legacy:      true,
 	})
 }
 

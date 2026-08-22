@@ -54,17 +54,33 @@ func init() {
 		Usage:       "Use when the user asks to see something, or when visual detail is useful. Supported inputs are (1) card: a JSON object, never a quoted JSON string, with version 1 and blocks; or (2) content plus mime_type: text/plain, text/markdown, application/json, or application/vnd.koder.presentation+json. Markdown is rendered. Card blocks are text {text,style}, image {uri,title,alt}, key_value {items:[{key,value}]}, list {items:[{title,detail}]}, progress {label,value,max,detail}, action {label,uri}, and file {name,uri,mime_type,detail}. A text block uses text, not title. Then give a short plain conversational final response that refers to it; do not copy the presentation into that response.",
 		Parameters:  parameters,
 		ExposeToLLM: true,
+		Legacy:      true,
+	})
+	tools.Register(tools.ActionTool{
+		Kind: tools.Present,
+		Routes: []tools.ActionRoute{
+			{Action: "content", Tool: tools.PresentContentOld},
+			{Action: "media", Tool: tools.ShowMedia},
+			{Action: "file", Tool: tools.OfferFile},
+		},
+		DefaultAction: "content",
+	}, tools.ToolSpec{
+		Title:       "Present to user",
+		Description: "Deliberately present visual content, playable media, or a downloadable file to the user.",
+		Usage:       "Use content for a card, Markdown, JSON, or plain text; media for a local image, audio, or video; file for a local file the user should download. This is user-facing presentation, not model inspection: use view_image to inspect an image yourself. In voice conversations, keep the spoken response short and refer naturally to the presented material.",
+		Parameters:  `{"type":"object","properties":{"action":{"type":"string","enum":["content","media","file"]},"title":{"type":"string"},"path":{"type":"string","description":"For media or file, local workspace path"},"mime_type":{"type":"string","enum":["text/plain","text/markdown","application/json","application/vnd.koder.presentation+json"]},"content":{"type":"string"},"card":{"type":"object","properties":{"version":{"type":"integer","enum":[1]},"blocks":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"object","properties":{"kind":{"type":"string","enum":["text","image","key_value","list","progress","action","file"]},"text":{"type":"string"},"style":{"type":"string","enum":["body","heading","caption","code"]},"uri":{"type":"string"},"title":{"type":"string"},"alt":{"type":"string"},"label":{"type":"string"},"detail":{"type":"string"},"name":{"type":"string"},"mime_type":{"type":"string"},"value":{"type":"integer"},"max":{"type":"integer"},"items":{"type":"array","maxItems":100,"items":{"type":"object","properties":{"key":{"type":"string"},"value":{"type":"string"},"title":{"type":"string"},"detail":{"type":"string"}},"additionalProperties":false}}},"required":["kind"],"additionalProperties":false}}},"required":["version","blocks"],"additionalProperties":false}},"required":["action"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
 }
 
-func (tool) ID() tools.ID             { return tools.Present }
+func (tool) ID() tools.ID             { return tools.PresentContentOld }
 func (tool) BypassesPermission() bool { return true }
 func (tool) Preview(req tools.Request) string {
 	return strings.TrimSpace(req.Args["title"])
 }
 
 func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	return spec, runtime.VoiceInteraction()
+	return spec, true
 }
 
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {

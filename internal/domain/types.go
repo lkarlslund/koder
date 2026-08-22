@@ -100,6 +100,7 @@ const (
 	ToolKindPhonePhotoView      ToolKind = "phone_photo_view"
 	ToolKindPhonePhotoTransfer  ToolKind = "phone_photo_transfer"
 	ToolKindPresent             ToolKind = "present"
+	ToolKindPresentContentOld   ToolKind = "present_content_legacy"
 	ToolKindSkill               ToolKind = "skill"
 	ToolKindWebFetch            ToolKind = "web_fetch"
 	ToolKindWebSearch           ToolKind = "web_search"
@@ -209,6 +210,7 @@ var builtinToolKinds = []ToolKind{
 	ToolKindPhonePhotoView,
 	ToolKindPhonePhotoTransfer,
 	ToolKindPresent,
+	ToolKindPresentContentOld,
 	ToolKindSkill,
 	ToolKindWebFetch,
 	ToolKindWebSearch,

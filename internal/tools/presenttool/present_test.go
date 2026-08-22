@@ -8,15 +8,17 @@ import (
 
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/tools"
+	_ "github.com/lkarlslund/koder/internal/tools/offerfiletool"
+	_ "github.com/lkarlslund/koder/internal/tools/showimagetool"
 )
 
-func TestPresentIsVoiceOnlyAndStoresGenericVisual(t *testing.T) {
-	if _, enabled := tools.DefinitionFor(tools.Present, tools.Runtime{ChatRole: chatrole.General}); enabled {
-		t.Fatal("present tool offered outside voice chat")
-	}
-	definition, enabled := tools.DefinitionFor(tools.Present, tools.Runtime{ChatRole: chatrole.Voice})
-	if !enabled || !strings.Contains(string(definition.Function.Parameters), "text/markdown") {
+func TestPresentIsCrossModeResourceAndStoresGenericVisual(t *testing.T) {
+	definition, enabled := tools.DefinitionFor(tools.Present, tools.Runtime{ChatRole: chatrole.General})
+	if !enabled || !strings.Contains(string(definition.Function.Parameters), "text/markdown") || !strings.Contains(string(definition.Function.Parameters), `"media"`) || !strings.Contains(string(definition.Function.Parameters), `"file"`) {
 		t.Fatalf("definition=%#v enabled=%v", definition, enabled)
+	}
+	if _, enabled := tools.DefinitionFor(tools.PresentContentOld, tools.Runtime{ChatRole: chatrole.Voice}); enabled {
+		t.Fatal("legacy presentation content tool remained model-visible")
 	}
 	result, err := tools.Call(context.Background(), tools.Options{
 		Runtime: tools.Runtime{ChatRole: chatrole.Voice},
