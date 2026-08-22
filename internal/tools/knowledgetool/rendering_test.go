@@ -54,3 +54,19 @@ func TestKnowledgeResultSummaryCoversReadAndMutationFamilies(t *testing.T) {
 		})
 	}
 }
+
+func TestKnowledgeResultSummarySurvivesStoredJSONDecoding(t *testing.T) {
+	stored := map[string]any{
+		"matches": []any{
+			map[string]any{"entry_id": "entry-1", "document": map[string]any{"title": "Use sfdisk"}},
+			map[string]any{"entry_id": "entry-2", "document": map[string]any{"title": "Back up first"}},
+		},
+	}
+	summary, body := tool{}.SummarizeResult(
+		tools.Request{Args: map[string]string{"action": "search"}},
+		tools.Result{Output: `{"matches":[...]}`, Stored: stored},
+	)
+	if summary != "Found 2 knowledge results" || body != `{"matches":[...]}` {
+		t.Fatalf("decoded summary, body = %q, %q", summary, body)
+	}
+}

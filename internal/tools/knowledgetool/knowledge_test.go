@@ -182,8 +182,17 @@ func TestKnowledgeToolObeysChatProfileInteractionAndSessionToolState(t *testing.
 	voice := base
 	voice.ChatRole = chatrole.Orchestrator
 	voice.InteractionMode = chatinteraction.Voice
-	if _, enabled := tools.DefinitionFor(tools.Knowledge, voice); !enabled {
+	voiceDefinition, enabled := tools.DefinitionFor(tools.Knowledge, voice)
+	if !enabled {
 		t.Fatal("voice interaction unexpectedly withheld Knowledge")
+	}
+	if !strings.Contains(voiceDefinition.Function.Description, "Voice result: tell the user only the few relevant conclusions") ||
+		!strings.Contains(voiceDefinition.Function.Description, "complete structured result remains available in the transcript") {
+		t.Fatalf("voice Knowledge guidance = %q", voiceDefinition.Function.Description)
+	}
+	textDefinition, enabled := tools.DefinitionFor(tools.Knowledge, base)
+	if !enabled || strings.Contains(textDefinition.Function.Description, "Voice result:") {
+		t.Fatalf("text Knowledge guidance = enabled %v, %q", enabled, textDefinition.Function.Description)
 	}
 }
 

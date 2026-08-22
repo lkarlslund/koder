@@ -1225,13 +1225,30 @@ func voiceRenderParts(timeline []domain.TimelineItem, sequence int64) []voice.Pa
 			continue
 		}
 		for _, call := range assistant.Tools {
-			summary := truncateVoiceText(strings.TrimSpace(tools.Preview(tools.Request{Tool: call.Tool, ToolCallID: string(call.ToolCallID), Args: call.Args})), 180)
+			request := tools.Request{Tool: call.Tool, ToolCallID: string(call.ToolCallID), Args: call.Args}
+			summary := truncateVoiceText(strings.TrimSpace(tools.Preview(request)), 180)
+			data := map[string]any{
+				"tool": call.Tool, "title": tools.Info(call.Tool).Title, "status": call.Status, "summary": summary,
+			}
+			if call.Result != nil {
+				if (call.Result.Status == "" || call.Result.Status == domain.ToolResultStatusOK) && strings.TrimSpace(call.Result.Text) != "" {
+					resultSummary, _ := tools.SummarizeResult(request, tools.Result{Output: call.Result.Text, Stored: call.Result.Data})
+					summary = truncateVoiceText(strings.TrimSpace(resultSummary), 180)
+					if summary != "" {
+						data["summary"] = summary
+					}
+				}
+				// Knowledge results are bounded structured data. Keep that data in
+				// the transcript-only part so richer clients can inspect it without
+				// making TTS recite it.
+				if call.Tool == tools.Knowledge && call.Result.Data != nil {
+					data["result"] = call.Result.Data
+				}
+			}
 			parts = append(parts, voice.Part{
 				ID:       string(call.ToolCallID),
 				MIMEType: "application/vnd.koder.tool-activity+json",
-				Data: map[string]any{
-					"tool": call.Tool, "title": tools.Info(call.Tool).Title, "status": call.Status, "summary": summary,
-				},
+				Data:     data,
 				Metadata: map[string]string{"surface": "transcript", "render_key": "tool:" + string(call.ToolCallID)},
 			})
 		}

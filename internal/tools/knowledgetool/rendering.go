@@ -1,6 +1,7 @@
 package knowledgetool
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -72,10 +73,18 @@ func knowledgeActionTitle(action string) string {
 
 func knowledgeResultSummary(req tools.Request, stored any) string {
 	action := strings.TrimSpace(req.Args["action"])
-	switch value := stored.(type) {
-	case knowledgeService.LexicalSearchResult:
+	switch action {
+	case "search":
+		value, ok := decodeKnowledgeResult[knowledgeService.LexicalSearchResult](stored)
+		if !ok {
+			break
+		}
 		return countSummary("Found", len(value.Matches), "knowledge result")
-	case recordResult:
+	case "get", "chunk_get":
+		value, ok := decodeKnowledgeResult[recordResult](stored)
+		if !ok {
+			break
+		}
 		title := ""
 		if value.Chunk != nil {
 			title = value.Chunk.Title
@@ -84,25 +93,53 @@ func knowledgeResultSummary(req tools.Request, stored any) string {
 			title = value.Entry.Title
 		}
 		return titledSummary("Read knowledge "+string(value.Kind), title)
-	case neighborPageResult:
+	case "neighbors":
+		value, ok := decodeKnowledgeResult[neighborPageResult](stored)
+		if !ok {
+			break
+		}
 		return countSummary("Found", len(value.Neighbors), "linked object")
-	case chunkPageResult:
+	case "chunk_list":
+		value, ok := decodeKnowledgeResult[chunkPageResult](stored)
+		if !ok {
+			break
+		}
 		return countSummary("Listed", len(value.Chunks), "knowledge chunk")
-	case chunkMutationResult:
+	case "chunk_create", "chunk_update", "chunk_archive", "chunk_restore":
+		value, ok := decodeKnowledgeResult[chunkMutationResult](stored)
+		if !ok {
+			break
+		}
 		return titledSummary(pastAction(action, "knowledge chunk"), value.Chunk.Title)
-	case chunkDeleteResult:
+	case "chunk_delete":
 		return "Deleted knowledge chunk"
-	case entryMutationResult:
+	case "entry_create", "entry_update", "entry_supersede", "entry_archive", "entry_restore", "verify":
+		value, ok := decodeKnowledgeResult[entryMutationResult](stored)
+		if !ok {
+			break
+		}
 		return titledSummary(pastAction(action, "knowledge entry"), value.Entry.Title)
-	case entryDeleteResult:
+	case "entry_delete":
 		return "Deleted knowledge entry"
-	case linkMutationResult:
+	case "link", "unlink":
 		return pastAction(action, "knowledge link")
-	case historyPageResult:
+	case "history":
+		value, ok := decodeKnowledgeResult[historyPageResult](stored)
+		if !ok {
+			break
+		}
 		return countSummary("Loaded", len(value.Revisions), "knowledge revision")
-	default:
-		return knowledgeActionTitle(action)
 	}
+	return knowledgeActionTitle(action)
+}
+
+func decodeKnowledgeResult[T any](stored any) (T, bool) {
+	var value T
+	data, err := json.Marshal(stored)
+	if err != nil || json.Unmarshal(data, &value) != nil {
+		return value, false
+	}
+	return value, true
 }
 
 func pastAction(action, object string) string {

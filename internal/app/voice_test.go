@@ -248,6 +248,32 @@ func TestVoiceRenderPartsAddsTranscriptOnlyToolActivity(t *testing.T) {
 	}
 }
 
+func TestVoiceKnowledgeActivitySummarizesAndPreservesStructuredResult(t *testing.T) {
+	stored := map[string]any{
+		"matches": []any{
+			map[string]any{"entry_id": "entry-1", "document": map[string]any{"title": "Use sfdisk", "summary": "Scriptable partitioning"}},
+			map[string]any{"entry_id": "entry-2", "document": map[string]any{"title": "Back up first", "summary": "Preserve the partition table"}},
+		},
+	}
+	timeline := []domain.TimelineItem{{Seq: 1, Content: domain.AssistantMessage{Tools: []domain.ToolCall{{
+		ToolCallID: "knowledge-1", Tool: tools.Knowledge, Status: domain.ToolStatusDone,
+		Args:   map[string]string{"action": "search", "query": "Linux partition tools"},
+		Result: &domain.ToolResult{Text: `{"matches":[...]}`, Data: stored, Status: domain.ToolResultStatusOK},
+	}}}}}
+	parts := voiceRenderParts(timeline, 0)
+	if len(parts) != 1 || parts[0].Metadata["surface"] != "transcript" {
+		t.Fatalf("knowledge activity parts = %#v", parts)
+	}
+	data, ok := parts[0].Data.(map[string]any)
+	if !ok || data["summary"] != "Found 2 knowledge results" || data["result"] == nil {
+		t.Fatalf("knowledge activity data = %#v", parts[0].Data)
+	}
+	encoded, err := json.Marshal(data["result"])
+	if err != nil || !strings.Contains(string(encoded), "Scriptable partitioning") || !strings.Contains(string(encoded), "Preserve the partition table") {
+		t.Fatalf("knowledge activity omitted full structured result: %s (%v)", encoded, err)
+	}
+}
+
 func TestVoiceTurnStartedIgnoresStaleErroredState(t *testing.T) {
 	if voiceTurnStarted(chat.StatusErrored, false) {
 		t.Fatal("stale errored status must not terminate a newly enqueued voice turn")

@@ -180,6 +180,9 @@ func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSp
 	policyDescription := " Runtime policy permits actions: " + actions + "; permitted scopes: " + scopes + "."
 	spec.Description += policyDescription
 	spec.Usage += " " + toolGuidance(offer) + policyDescription
+	if runtime.VoiceInteraction() {
+		spec.Usage += " Voice result: tell the user only the few relevant conclusions in natural spoken sentences. Do not recite IDs, scores, JSON, metadata, or result counts unless asked. Preserve contradictions, uncertainty, and any action the user must take; the complete structured result remains available in the transcript, and deliberately visual detail belongs in a presentation."
+	}
 	return spec, true
 }
 
