@@ -9,6 +9,105 @@ This document defines the vocabulary used by domain records, tools, APIs, packag
 user interfaces. Wire values use lowercase `snake_case` and must not be given different
 meanings in individual transports.
 
+## Identity, revisions, time, and cursors
+
+### Stable identities
+
+Canonical knowledge objects use Koder's existing UUIDv7 identifiers. JSON and tool
+transports encode them as lowercase hyphenated strings, for example:
+
+```text
+01a01688-fc5d-7f7d-8bb8-de244977f8a1
+```
+
+Chunk, entry, link, evidence, revision, package-import, saved-view, and asynchronous-job
+identities occupy distinct typed fields even though they share the same wire format.
+Callers must not infer an object's type from an ID or use a display title as identity.
+
+IDs are assigned once at creation and never change during rename, archive, restore,
+supersession, package export/import, or index rebuild. An imported object retains its ID
+only when the import policy establishes that it is the same object; “keep both” allocates
+a new ID and records the source identity as provenance.
+
+UUIDv7's timestamp component is useful for locality and deterministic tie-breaking, but
+it is not a substitute for an object's explicit timestamps or authorization checks.
+
+### Revisions and optimistic writes
+
+Every mutable canonical object has:
+
+- `revision`, an unsigned integer starting at `1` and increasing by exactly one for each
+  committed mutation;
+- `revision_id`, a stable UUIDv7 identifying the immutable revision record;
+- `updated_at` and the actor/reason associated with that revision.
+
+A transaction that mutates several objects advances each changed object's own revision.
+No-op requests do not create revisions. Derived index updates, last-used counters, and
+layout/view state do not silently revise canonical knowledge content.
+
+API and tool writes provide the revision they observed. A mismatched revision returns a
+structured `conflict` containing the object's current revision and safe identity metadata;
+it never overwrites newer content. HTTP resources expose a strong ETag derived from object
+ID and revision and accept `If-Match` as the transport equivalent.
+
+Permanent deletion does not leave an addressable object at its former revision. If an
+installation retains a minimal audit tombstone, it is inaccessible through ordinary
+knowledge reads and contains no deleted content.
+
+### Timestamps and validity
+
+Go domain objects use `time.Time`. Durable and wire representations use RFC 3339 with
+nanosecond precision, normalized to UTC with a trailing `Z`:
+
+```text
+2026-08-22T14:37:05.123456789Z
+```
+
+Inputs containing an explicit numeric offset are accepted and normalized to UTC. Inputs
+without an offset are rejected rather than interpreted in the server's local timezone.
+Persisted values do not contain Go's monotonic-clock component.
+
+`created_at` is immutable. `updated_at` is the commit time of the current canonical
+revision. Domain events produced by the same transaction carry that commit time and the
+resulting revision.
+
+Optional temporal fields have distinct meanings:
+
+- `observed_at`: when evidence or an observation occurred;
+- `valid_from` and `valid_until`: the interval in which the claim applies;
+- `last_verified_at`: when the stated verification was performed;
+- `review_after`: when retrieval must additionally mark the claim stale;
+- `last_used_at`: a derived retrieval/use statistic that does not verify or revise content.
+
+Intervals are start-inclusive and end-exclusive: `valid_from <= t < valid_until`. A
+missing bound is open. `valid_until` must be later than `valid_from` when both exist.
+
+### Stable pagination cursors
+
+List and search cursors are opaque, URL-safe, versioned values. Clients store or return a
+cursor but never parse, construct, compare, or persist it as an object identity.
+
+A cursor binds:
+
+- cursor format version and owning index;
+- index generation;
+- normalized filter/query fingerprint;
+- sort field and direction;
+- the last composite sort value and stable object ID.
+
+Pagination is exclusive: the next page begins strictly after the cursor item in the
+requested order. Every order ends with object ID as a deterministic tie-breaker, so equal
+titles or timestamps neither duplicate nor skip records.
+
+Changing filters, sort order, or direction while reusing a cursor returns `invalid_cursor`.
+Using a cursor after its derived index generation has been retired returns `stale_cursor`
+and instructs the caller to restart pagination. Authorization and lifecycle filters are
+reapplied on every page; cursor contents never grant access.
+
+Cursors may encode a private backend position internally, but the domain/API contract
+must not expose raw Pebble keys. Cursor encoding can change by adding a new format version
+while existing versions remain supported for their documented lifetime.
+
 ## Scope
 
 Scope answers **where does this knowledge apply?** It does not grant access. An entry can
