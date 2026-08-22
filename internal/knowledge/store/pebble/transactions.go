@@ -165,6 +165,29 @@ func (tx *transaction) Entry(ctx context.Context, id knowledge.EntryID) (knowled
 	return readRecord[knowledge.Entry](tx.reader, entryKey(string(id)), "entry", string(id))
 }
 
+func (tx *transaction) EntryDeletionBlockers(ctx context.Context, id knowledge.EntryID) (knowledgeStore.EntryDeletionBlockers, error) {
+	if err := tx.check(ctx, false); err != nil {
+		return knowledgeStore.EntryDeletionBlockers{}, err
+	}
+	if _, err := tx.Entry(ctx, id); err != nil {
+		return knowledgeStore.EntryDeletionBlockers{}, err
+	}
+	var entries []knowledge.Entry
+	var links []knowledge.Link
+	if _, err := scanCanonical(ctx, tx.reader, func(record knowledgeStore.CanonicalRecord) error {
+		switch record.Kind {
+		case knowledgeStore.RecordKindEntry:
+			entries = append(entries, *record.Entry)
+		case knowledgeStore.RecordKindLink:
+			links = append(links, *record.Link)
+		}
+		return nil
+	}); err != nil {
+		return knowledgeStore.EntryDeletionBlockers{}, err
+	}
+	return knowledgeStore.DeriveEntryDeletionBlockers(id, entries, links), nil
+}
+
 func (tx *transaction) Link(ctx context.Context, id knowledge.LinkID) (knowledge.Link, error) {
 	if err := tx.check(ctx, false); err != nil {
 		return knowledge.Link{}, err

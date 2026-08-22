@@ -287,6 +287,43 @@ func TestChunkDeletionBlockersSeeCanonicalRecordsAndPendingWrites(t *testing.T) 
 	}
 }
 
+func TestEntryDeletionBlockersSeePendingLinksAndSupersession(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	target := txEntry()
+	source := txEntry()
+	source.ID = txOtherEntry
+	source.State = knowledge.EntryStateSuperseded
+	source.SupersededByID = target.ID
+	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+		if err := tx.PutEntry(ctx, target, 0); err != nil {
+			return err
+		}
+		if err := tx.PutEntry(ctx, source, 0); err != nil {
+			return err
+		}
+		if err := tx.PutLink(ctx, txLink(), 0); err != nil {
+			return err
+		}
+		blockers, err := tx.EntryDeletionBlockers(ctx, target.ID)
+		if err != nil {
+			return err
+		}
+		if len(blockers.LinkIDs) != 1 || blockers.LinkIDs[0] != txLinkID ||
+			len(blockers.SupersededEntryIDs) != 1 || blockers.SupersededEntryIDs[0] != source.ID {
+			return fmt.Errorf("pending entry deletion blockers = %#v", blockers)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+}
+
 func TestDerivedChunkCountsAndLastUsedProjectionStayOutOfContentRevision(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

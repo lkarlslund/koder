@@ -249,6 +249,24 @@ func (tx *transaction) Entry(ctx context.Context, id knowledge.EntryID) (knowled
 	return cloneEntry(value), nil
 }
 
+func (tx *transaction) EntryDeletionBlockers(ctx context.Context, id knowledge.EntryID) (knowledgeStore.EntryDeletionBlockers, error) {
+	if err := tx.check(ctx, false); err != nil {
+		return knowledgeStore.EntryDeletionBlockers{}, err
+	}
+	if _, exists := tx.data.entries[id]; !exists {
+		return knowledgeStore.EntryDeletionBlockers{}, fmt.Errorf("%w: entry %s", knowledgeStore.ErrNotFound, id)
+	}
+	entries := make([]knowledge.Entry, 0, len(tx.data.entries))
+	for _, entry := range tx.data.entries {
+		entries = append(entries, entry)
+	}
+	links := make([]knowledge.Link, 0, len(tx.data.links))
+	for _, link := range tx.data.links {
+		links = append(links, link)
+	}
+	return knowledgeStore.DeriveEntryDeletionBlockers(id, entries, links), nil
+}
+
 func (tx *transaction) Link(ctx context.Context, id knowledge.LinkID) (knowledge.Link, error) {
 	if err := tx.check(ctx, false); err != nil {
 		return knowledge.Link{}, err

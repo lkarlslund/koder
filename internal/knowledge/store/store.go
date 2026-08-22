@@ -47,6 +47,7 @@ type ReadTx interface {
 	Chunk(context.Context, knowledge.ChunkID) (knowledge.Chunk, error)
 	ChunkDeletionBlockers(context.Context, knowledge.ChunkID) (ChunkDeletionBlockers, error)
 	Entry(context.Context, knowledge.EntryID) (knowledge.Entry, error)
+	EntryDeletionBlockers(context.Context, knowledge.EntryID) (EntryDeletionBlockers, error)
 	Link(context.Context, knowledge.LinkID) (knowledge.Link, error)
 	Evidence(context.Context, knowledge.EvidenceID) (knowledge.Evidence, error)
 }
