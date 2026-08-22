@@ -23,3 +23,16 @@ The SHA-256 values above are hashes of the npm `.tgz` payloads named
 `<package>-<version>.tgz`, downloaded from the registry on 2026-08-22. The npm
 integrity values are the registry's package metadata and provide an independent
 content check.
+
+## Vendored browser assets
+
+| Asset | Source package path | SHA-256 |
+| --- | --- | --- |
+| `graphology/graphology.umd.min.js` | `graphology/dist/graphology.umd.min.js` | `dc337efa23903f61e064c8e7e7f93a429e6855dccfc2458802b4ed30c621c087` |
+| `graphology/LICENSE.txt` | `graphology/LICENSE.txt` | `9d396b4882c329077f32861c0d6822dcee48f2d0ff6196d8459af70844196275` |
+| `sigma/sigma.min.js` | `sigma/dist/sigma.min.js` | `58e30383ab428f832068d9d16a5215c65ba12430d438ed091c5703f398de9e16` |
+| `sigma/LICENSE.txt` | `sigma/LICENSE.txt` | `2d6beb4435a5186414986ef25facdea68619d0f3e1043b9a795f5c6233914013` |
+
+The owning Go test checks these hashes from the embedded filesystem, serves the
+assets through Koder's local asset handler, and rejects network-loading
+primitives in the JavaScript payloads.
