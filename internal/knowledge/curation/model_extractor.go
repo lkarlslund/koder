@@ -33,6 +33,13 @@ const (
 	CandidateActionContradictEntry CandidateAction = "contradict_entry"
 )
 
+type CandidateRoute string
+
+const (
+	CandidateRouteAutomatic     CandidateRoute = "automatic"
+	CandidateRoutePendingReview CandidateRoute = "pending_review"
+)
+
 // TurnItem is bounded material loaded from an authorized completed turn.
 type TurnItem struct {
 	ID   string `json:"id"`
@@ -89,6 +96,8 @@ type CandidateDraft struct {
 	Reason         string                         `json:"reason"`
 	SourceItemIDs  []string                       `json:"source_item_ids"`
 	Classification knowledge.ClassificationResult `json:"-"`
+	Route          CandidateRoute                 `json:"-"`
+	ReviewReasons  []string                       `json:"-"`
 }
 
 type modelDraftResponse struct {

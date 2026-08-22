@@ -62,6 +62,9 @@ func (a LowRiskApplier) Apply(ctx context.Context, record knowledge.CurationReco
 	if record.State != knowledge.CurationStateCandidatesReady {
 		return knowledgeService.ApplyCuratedEntryResult{}, fmt.Errorf("%w: curation record is not ready", knowledge.ErrInvalidRecord)
 	}
+	if draft.Route != curation.CandidateRouteAutomatic {
+		return knowledgeService.ApplyCuratedEntryResult{}, fmt.Errorf("%w: candidate is pending review", knowledgeService.ErrReviewRequired)
+	}
 	action := knowledgeService.CuratedEntryAction("")
 	switch draft.Action {
 	case curation.CandidateActionCreateEntry:

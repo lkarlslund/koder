@@ -46,7 +46,7 @@ func TestLowRiskApplierBridgesValidatedCandidateToAtomicService(t *testing.T) {
 		State: knowledge.CurationStateCandidatesReady,
 	}
 	draft := curation.CandidateDraft{
-		Action: curation.CandidateActionCreateEntry, ChunkID: chunk.Chunk.ID,
+		Action: curation.CandidateActionCreateEntry, Route: curation.CandidateRouteAutomatic, ChunkID: chunk.Chunk.ID,
 		Entry: curation.EntryDraft{
 			Kind: knowledge.EntryKindFact, Title: "Use sfdisk", Summary: "fdisk is unavailable here.",
 			Scope: knowledge.Scope{Kind: knowledge.ScopeKindGlobal}, Confidence: 0.9,

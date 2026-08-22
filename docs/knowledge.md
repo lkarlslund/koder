@@ -454,6 +454,13 @@ curation record ID in the revision reason. Any validation, policy, conflict, or 
 failure rolls both writes back. Supersession, contradiction, review-classified content,
 and risk-labelled content remain outside this automatic path.
 
+Candidate routing is a server-owned decision applied after model validation. A candidate
+is stored as `pending_review` when classification requests review, any risk label is
+present, personal knowledge is inferred, or the action is supersession/contradiction.
+Each safe reason is retained for the curator UI. Only low-risk create/update drafts are
+marked `automatic`; model output cannot set or override the route, and the low-risk adapter
+rejects anything not explicitly routed there.
+
 ## Combined examples
 
 ### Environment-specific procedure

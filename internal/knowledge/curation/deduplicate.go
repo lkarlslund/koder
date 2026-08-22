@@ -118,6 +118,7 @@ func cloneCandidateDraft(draft CandidateDraft) CandidateDraft {
 	draft.Entry.Applicability = cloneDraftApplicability(draft.Entry.Applicability)
 	draft.SourceItemIDs = slices.Clone(draft.SourceItemIDs)
 	draft.Classification.Findings = slices.Clone(draft.Classification.Findings)
+	draft.ReviewReasons = slices.Clone(draft.ReviewReasons)
 	return draft
 }
 
