@@ -24,6 +24,11 @@
     return value;
   }
 
+  function pointerModifiers(value) {
+    const source = value && value.event && (value.event.original || value.event) || value && value.original || value || {};
+    return {additive: !!(source.ctrlKey || source.metaKey), shift: !!source.shiftKey};
+  }
+
   class Renderer {
     constructor(options) {
       options = options || {};
@@ -36,6 +41,7 @@
       this.container = options.container;
       this.stage = options.stage || options.container.parentElement || options.container;
       this.legend = options.legend || null;
+      this.selectionBox = options.selectionBox || null;
       this.rendering = options.rendering;
       this.SigmaAPI = options.SigmaAPI || defaultSigmaAPI;
       this.requestFrame = options.requestAnimationFrame || globalThis.requestAnimationFrame.bind(globalThis);
@@ -49,6 +55,7 @@
       this.frame = 0;
       this.destroyed = false;
       this.selection = null;
+      this.selectionKeys = new Set();
       this.hover = null;
 
       provisionalPositions(this.store.graph);
@@ -61,11 +68,11 @@
         labelDensity: 0.12, labelGridCellSize: 90, labelRenderedSizeThreshold: 7,
         minCameraRatio: 0.04, maxCameraRatio: 25,
         nodeReducer: (key, attributes) => this.rendering.styledNodeAttributes(attributes, {
-          selected: !!this.selection && this.selection.kind === 'node' && this.selection.key === key,
+          selected: this.selectionKeys.has(`node:${key}`),
           hovered: !!this.hover && this.hover.kind === 'node' && this.hover.key === key,
         }),
         edgeReducer: (key, attributes) => this.rendering.styledEdgeAttributes(attributes, {
-          selected: !!this.selection && this.selection.kind === 'edge' && this.selection.key === key,
+          selected: this.selectionKeys.has(`edge:${key}`),
           hovered: !!this.hover && this.hover.kind === 'edge' && this.hover.key === key,
         }),
       };
@@ -75,9 +82,12 @@
       }
       this.sigma = new Sigma(this.store.graph, this.container, settings);
       this.interactionHandlers = {
-        clickNode: event => this.emit('node', {key: String(event && event.node || '')}),
-        clickEdge: event => this.emit('edge', {key: String(event && event.edge || '')}),
-        clickStage: () => this.emit('background', null),
+        clickNode: event => this.emit('node', {key: String(event && event.node || ''), ...pointerModifiers(event)}),
+        clickEdge: event => this.emit('edge', {key: String(event && event.edge || ''), ...pointerModifiers(event)}),
+        clickStage: event => {
+          if (this.suppressStageClick) { this.suppressStageClick = false; return; }
+          this.emit('background', pointerModifiers(event));
+        },
         enterNode: event => this.setHover('node', event && event.node),
         leaveNode: event => this.clearHover('node', event && event.node),
         enterEdge: event => this.setHover('edge', event && event.edge),
@@ -85,6 +95,15 @@
       };
       if (typeof this.sigma.on === 'function') {
         for (const [name, handler] of Object.entries(this.interactionHandlers)) this.sigma.on(name, handler);
+      }
+      this.pointerHandlers = {
+        pointerdown: event => this.beginBoxSelection(event),
+        pointermove: event => this.moveBoxSelection(event),
+        pointerup: event => this.endBoxSelection(event),
+        pointercancel: event => this.cancelBoxSelection(event),
+      };
+      if (this.selectionBox && typeof this.container.addEventListener === 'function') {
+        for (const [name, handler] of Object.entries(this.pointerHandlers)) this.container.addEventListener(name, handler, true);
       }
       this.unsubscribe = this.store.subscribe(event => this.onStoreEvent(event));
       if (typeof this.ResizeObserver === 'function') {
@@ -150,8 +169,77 @@
     }
 
     setSelection(kind, key) {
-      this.selection = kind && key ? {kind: String(kind), key: String(key)} : null;
+      this.setSelections(kind && key ? [{kind: String(kind), key: String(key)}] : []);
+    }
+
+    setSelections(items) {
+      this.selectionKeys = new Set((items || []).map(item => `${String(item.kind)}:${String(item.key)}`));
+      this.selection = (items || []).at(-1) || null;
       this.scheduleRefresh(false);
+    }
+
+    beginBoxSelection(event) {
+      if (!event || !event.shiftKey || event.button !== 0) return;
+      const bounds = this.container.getBoundingClientRect();
+      this.boxDrag = {
+        pointerID: event.pointerId, startX: event.clientX - bounds.left, startY: event.clientY - bounds.top,
+        x: event.clientX - bounds.left, y: event.clientY - bounds.top,
+        additive: !!(event.ctrlKey || event.metaKey),
+      };
+      if (this.container.setPointerCapture) this.container.setPointerCapture(event.pointerId);
+      this.updateSelectionBox();
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    moveBoxSelection(event) {
+      if (!this.boxDrag || event.pointerId !== this.boxDrag.pointerID) return;
+      const bounds = this.container.getBoundingClientRect();
+      this.boxDrag.x = event.clientX - bounds.left;
+      this.boxDrag.y = event.clientY - bounds.top;
+      this.updateSelectionBox();
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    updateSelectionBox() {
+      if (!this.boxDrag || !this.selectionBox) return;
+      const left = Math.min(this.boxDrag.startX, this.boxDrag.x);
+      const top = Math.min(this.boxDrag.startY, this.boxDrag.y);
+      this.selectionBox.style.left = `${left}px`;
+      this.selectionBox.style.top = `${top}px`;
+      this.selectionBox.style.width = `${Math.abs(this.boxDrag.x - this.boxDrag.startX)}px`;
+      this.selectionBox.style.height = `${Math.abs(this.boxDrag.y - this.boxDrag.startY)}px`;
+      this.selectionBox.hidden = false;
+    }
+
+    endBoxSelection(event) {
+      if (!this.boxDrag || event.pointerId !== this.boxDrag.pointerID) return;
+      const drag = this.boxDrag;
+      this.boxDrag = null;
+      if (this.container.releasePointerCapture) this.container.releasePointerCapture(event.pointerId);
+      if (this.selectionBox) this.selectionBox.hidden = true;
+      const left = Math.min(drag.startX, drag.x);
+      const right = Math.max(drag.startX, drag.x);
+      const top = Math.min(drag.startY, drag.y);
+      const bottom = Math.max(drag.startY, drag.y);
+      if (right - left >= 4 && bottom - top >= 4) {
+        const keys = this.store.graph.filterNodes(key => {
+          const data = this.sigma.getNodeDisplayData && this.sigma.getNodeDisplayData(key);
+          const point = data && this.sigma.graphToViewport ? this.sigma.graphToViewport(data) : null;
+          return !!point && point.x >= left && point.x <= right && point.y >= top && point.y <= bottom;
+        });
+        this.suppressStageClick = true;
+        this.emit('boxselect', {keys, additive: drag.additive});
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    cancelBoxSelection(event) {
+      if (!this.boxDrag || event && event.pointerId !== this.boxDrag.pointerID) return;
+      this.boxDrag = null;
+      if (this.selectionBox) this.selectionBox.hidden = true;
     }
 
     setHover(kind, key) {
@@ -186,7 +274,12 @@
       if (this.sigma && typeof this.sigma.off === 'function') {
         for (const [name, handler] of Object.entries(this.interactionHandlers)) this.sigma.off(name, handler);
       }
+      if (this.selectionBox && typeof this.container.removeEventListener === 'function') {
+        for (const [name, handler] of Object.entries(this.pointerHandlers)) this.container.removeEventListener(name, handler, true);
+      }
+      this.cancelBoxSelection();
       this.listeners.clear();
+      this.selectionKeys.clear();
       this.hover = null;
       if (this.resizeObserver) this.resizeObserver.disconnect();
       if (this.sigma && typeof this.sigma.kill === 'function') this.sigma.kill();
@@ -197,5 +290,5 @@
     }
   }
 
-  return Object.freeze({Renderer, provisionalPositions, sigmaClass});
+  return Object.freeze({Renderer, provisionalPositions, sigmaClass, pointerModifiers});
 });

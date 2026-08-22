@@ -207,6 +207,7 @@
       this.loadMoreButton = shell.querySelector('[data-knowledge-load-more]');
       this.graphFitButton = shell.querySelector('[data-knowledge-graph-fit]');
       this.graphCenterButton = shell.querySelector('[data-knowledge-graph-center]');
+      this.graphSelectionCount = shell.querySelector('[data-knowledge-selection-count]');
       this.filters = Object.fromEntries(Array.from(shell.querySelectorAll('[data-knowledge-filter]')).map(input => [input.dataset.knowledgeFilter, input]));
       this.inspector = {
         empty: shell.querySelector('[data-knowledge-inspector-empty]'),
@@ -259,11 +260,13 @@
       this.shell.addEventListener('koder:knowledge-pane', this.onGraphPane);
       if (this.graphAdapter) {
         this.graphUnsubscribe = this.graphAdapter.subscribe(event => {
-          if (event.type !== 'refetch' || this.graphRefetchTimer) return;
-          this.graphRefetchTimer = setTimeout(() => {
-            this.graphRefetchTimer = 0;
-            this.loadGraphSelection();
-          }, 0);
+          if (event.type === 'selection') this.syncGraphSelection(event.detail);
+          if (event.type === 'refetch' && !this.graphRefetchTimer) {
+            this.graphRefetchTimer = setTimeout(() => {
+              this.graphRefetchTimer = 0;
+              this.loadGraphSelection();
+            }, 0);
+          }
         });
       }
       if (this.graphLayout) {
@@ -283,9 +286,10 @@
       }
       if (this.graphRenderer) {
         this.graphInteractionUnsubscribe = this.graphRenderer.subscribe(event => {
-          if (event.type === 'node' && event.detail && event.detail.key) this.selectGraphObject('node', event.detail.key);
-          if (event.type === 'edge' && event.detail && event.detail.key) this.selectGraphObject('edge', event.detail.key);
-          if (event.type === 'background') this.clearGraphSelection();
+          if (event.type === 'node' && event.detail && event.detail.key) this.selectGraphObject('node', event.detail.key, event.detail);
+          if (event.type === 'edge' && event.detail && event.detail.key) this.selectGraphObject('edge', event.detail.key, event.detail);
+          if (event.type === 'boxselect' && event.detail) this.selectGraphObjects(event.detail.keys, event.detail.additive);
+          if (event.type === 'background' && !(event.detail && event.detail.additive)) this.clearGraphSelection();
         });
       }
       this.syncControls();
@@ -516,33 +520,66 @@
       this.loadGraphSelection();
     }
 
-    selectGraphObject(graphKind, key) {
+    selectGraphObject(graphKind, key, options) {
+      options = options || {};
       key = String(key || '');
+      if (!['node', 'edge'].includes(graphKind) || !key) return false;
+      if (this.graphAdapter && !this.graphAdapter.select(graphKind, key, {additive: options.additive, toggle: options.additive})) return false;
+      const primary = this.graphAdapter ? this.graphAdapter.selectionSnapshot().primary : {kind: graphKind, key};
+      return this.applyPrimaryGraphSelection(primary);
+    }
+
+    selectGraphObjects(keys, additive) {
+      if (!this.graphAdapter) return false;
+      const selected = this.graphAdapter.selectMany('node', keys, {additive: !!additive});
+      const primary = this.graphAdapter.selectionSnapshot().primary;
+      if (!primary) {
+        this.clearGraphSelection();
+        return selected > 0;
+      }
+      this.applyPrimaryGraphSelection(primary);
+      return selected > 0;
+    }
+
+    applyPrimaryGraphSelection(primary) {
+      if (!primary) {
+        this.writeURLState({...this.urlState, objectKind: '', id: ''}, false);
+        this.client.cancel('inspector');
+        this.setInspectorMode('empty');
+        return true;
+      }
       let objectKind;
       let id;
-      if (graphKind === 'node') {
-        const separator = key.indexOf(':');
-        objectKind = separator > 0 ? key.slice(0, separator) : '';
-        id = separator > 0 ? key.slice(separator + 1) : '';
+      if (primary.kind === 'node') {
+        const separator = primary.key.indexOf(':');
+        objectKind = separator > 0 ? primary.key.slice(0, separator) : '';
+        id = separator > 0 ? primary.key.slice(separator + 1) : '';
         if (!['chunk', 'entry', 'evidence'].includes(objectKind)) return false;
-      } else if (graphKind === 'edge') {
+      } else if (primary.kind === 'edge') {
         objectKind = 'link';
-        id = key;
+        id = primary.key;
       } else return false;
-      if (!id) return false;
       this.writeURLState({...this.urlState, objectKind, id}, false);
       this.renderSelection();
-      if (this.graphAdapter) this.graphAdapter.select(graphKind, key);
-      if (this.graphRenderer) this.graphRenderer.setSelection(graphKind, key);
       this.shell.dispatchEvent(new CustomEvent('koder:knowledge-selection', {detail: {objectKind, id, label: plainTextLabel(id)}}));
       this.loadSelection();
       return true;
     }
 
+    syncGraphSelection(snapshot) {
+      snapshot = snapshot || {primary: null, items: []};
+      const items = Array.isArray(snapshot.items) ? snapshot.items : [];
+      if (this.graphRenderer) this.graphRenderer.setSelections(items);
+      if (this.graphSelectionCount) {
+        this.graphSelectionCount.hidden = items.length < 2;
+        this.graphSelectionCount.textContent = items.length < 2 ? '' : `${items.length} selected`;
+      }
+    }
+
     clearGraphSelection() {
       this.writeURLState({...this.urlState, objectKind: '', id: ''}, false);
       if (this.graphAdapter) this.graphAdapter.clearSelection();
-      if (this.graphRenderer) this.graphRenderer.setSelection(null, null);
+      else if (this.graphRenderer) this.graphRenderer.setSelection(null, null);
       this.client.cancel('inspector');
       this.setInspectorMode('empty');
     }
@@ -634,7 +671,6 @@
         this.graphAdapter.replaceSnapshot(response);
         const rootKey = `${request.root.kind}:${request.root.id}`;
         this.graphAdapter.select('node', rootKey);
-        this.graphRenderer.setSelection('node', rootKey);
         const counts = this.graphAdapter.counts();
         const truncated = !!(response && response.page && response.page.truncated);
         const detail = `${counts.nodes} ${counts.nodes === 1 ? 'node' : 'nodes'} and ${counts.edges} ${counts.edges === 1 ? 'relationship' : 'relationships'}.`;
@@ -829,7 +865,7 @@
         runtime.graphRenderer = new globalThis.KoderKnowledgeGraphRenderer.Renderer({
           store: graphStore, container: canvas, stage: shell.querySelector('#knowledge-graph'),
           legend: shell.querySelector('[data-knowledge-legend]'), rendering: globalThis.KoderKnowledgeGraphRendering,
-          SigmaAPI: globalThis.Sigma, debug: graphDebug,
+          selectionBox: shell.querySelector('[data-knowledge-selection-box]'), SigmaAPI: globalThis.Sigma, debug: graphDebug,
         });
         runtime.graphViewport = new globalThis.KoderKnowledgeGraphViewport.Viewport({
           renderer: runtime.graphRenderer.sigma, container: canvas,

@@ -97,12 +97,14 @@
           </div>
           <div class="knowledge-graph-toolbar-actions">
             <span class="knowledge-stage-status"><span class="spinner-grow spinner-grow-sm" data-knowledge-spinner aria-hidden="true"></span><span data-knowledge-status-label>Preparing explorer</span></span>
+            <span class="knowledge-selection-count" data-knowledge-selection-count hidden></span>
             <button type="button" class="knowledge-icon-button" data-knowledge-graph-center title="Center selected node"><i class="bi bi-crosshair" aria-hidden="true"></i><span class="visually-hidden">Center selected node</span></button>
             <button type="button" class="knowledge-icon-button" data-knowledge-graph-fit title="Fit graph to view"><i class="bi bi-arrows-fullscreen" aria-hidden="true"></i><span class="visually-hidden">Fit graph to view</span></button>
           </div>
         </header>
         <div class="knowledge-graph-stage" id="knowledge-graph" role="region" aria-live="polite">
           <div class="knowledge-graph-canvas" data-knowledge-graph-canvas aria-hidden="true"></div>
+          <div class="knowledge-selection-box" data-knowledge-selection-box hidden aria-hidden="true"></div>
           <div class="knowledge-graph-fallback" data-knowledge-graph-fallback role="status" hidden>
             <span class="knowledge-empty-icon"><i class="bi bi-list-nested" aria-hidden="true"></i></span>
             <strong>Graph canvas disabled</strong>

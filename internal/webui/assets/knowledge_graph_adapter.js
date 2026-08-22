@@ -115,6 +115,7 @@
       }
       this.target = target;
       this.listeners = new Set();
+      this.selections = new Map();
       this.selection = null;
       this.destroyed = false;
     }
@@ -141,6 +142,7 @@
         this.emit(result.action, result);
         return patch;
       }
+      this.selections.clear();
       this.selection = null;
       this.emit('change', {mode: 'replace', patch, counts: this.counts()});
       return patch;
@@ -155,7 +157,17 @@
         this.emit(result.action, result);
         return patch;
       }
-      if (this.selection && !this.has(this.selection.kind, this.selection.key)) this.selection = null;
+      let selectionChanged = false;
+      for (const [token, item] of this.selections) {
+        if (this.has(item.kind, item.key)) continue;
+        this.selections.delete(token);
+        selectionChanged = true;
+      }
+      if (this.selection && !this.has(this.selection.kind, this.selection.key)) {
+        this.selection = [...this.selections.values()].at(-1) || null;
+        selectionChanged = true;
+      }
+      if (selectionChanged) this.emit('selection', this.selectionSnapshot());
       this.emit('change', {mode: 'apply', patch, counts: this.counts()});
       return patch;
     }
@@ -177,21 +189,53 @@
       return {nodes: Number(counts.nodes) || 0, edges: Number(counts.edges) || 0};
     }
 
-    select(kind, key) {
+    select(kind, key, options) {
       this.assertActive();
+      options = options || {};
       kind = String(kind || '');
       key = String(key || '');
       if (!this.has(kind, key)) return false;
-      this.selection = Object.freeze({kind, key});
-      this.emit('selection', this.selection);
+      const token = `${kind}:${key}`;
+      if (!options.additive && !options.toggle) this.selections.clear();
+      if (options.toggle && this.selections.has(token)) {
+        this.selections.delete(token);
+        this.selection = [...this.selections.values()].at(-1) || null;
+      } else {
+        const item = Object.freeze({kind, key});
+        this.selections.set(token, item);
+        this.selection = item;
+      }
+      this.emit('selection', this.selectionSnapshot());
       return true;
+    }
+
+    selectMany(kind, keys, options) {
+      this.assertActive();
+      options = options || {};
+      kind = String(kind || '');
+      const valid = [...new Set((keys || []).map(String))].filter(key => this.has(kind, key));
+      if (!options.additive) this.selections.clear();
+      for (const key of valid) {
+        const item = Object.freeze({kind, key});
+        this.selections.set(`${kind}:${key}`, item);
+        this.selection = item;
+      }
+      if (!valid.length && !options.additive) this.selection = null;
+      else if (!this.selection || !this.selections.has(`${this.selection.kind}:${this.selection.key}`)) this.selection = [...this.selections.values()].at(-1) || null;
+      this.emit('selection', this.selectionSnapshot());
+      return valid.length;
+    }
+
+    selectionSnapshot() {
+      return Object.freeze({primary: this.selection, items: Object.freeze([...this.selections.values()])});
     }
 
     clearSelection() {
       this.assertActive();
-      if (!this.selection) return false;
+      if (!this.selection && !this.selections.size) return false;
+      this.selections.clear();
       this.selection = null;
-      this.emit('selection', null);
+      this.emit('selection', this.selectionSnapshot());
       return true;
     }
 
@@ -202,6 +246,7 @@
     destroy() {
       if (this.destroyed) return;
       this.destroyed = true;
+      this.selections.clear();
       this.selection = null;
       this.emit('destroy', null);
       this.listeners.clear();
