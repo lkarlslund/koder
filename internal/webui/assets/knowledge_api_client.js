@@ -58,6 +58,20 @@
     return encoded ? '?' + encoded : '';
   }
 
+  function attachmentFilename(value, fallback) {
+    value = String(value || '');
+    fallback = String(fallback || 'knowledge.kknowledge');
+    const encoded = value.match(/filename\*=UTF-8''([^;]+)/i);
+    const plain = value.match(/filename="([^"]+)"|filename=([^;\s]+)/i);
+    let name = plain ? (plain[1] || plain[2]) : fallback;
+    if (encoded) {
+      try { name = decodeURIComponent(encoded[1]); } catch (_) { name = fallback; }
+    }
+    name = String(name || fallback).replace(/[\\/\u0000-\u001f\u007f]/g, '-').trim().replace(/^\.+/, '');
+    if (!name.toLowerCase().endsWith('.kknowledge')) name += '.kknowledge';
+    return name || fallback;
+  }
+
   async function responseJSON(response) {
     const text = await response.text();
     if (!text.trim()) return null;
@@ -128,10 +142,13 @@
 
       try {
         const headers = new Headers(options.headers || {});
-        headers.set('Accept', 'application/json');
+        headers.set('Accept', options.responseType === 'package' ? 'application/vnd.koder.knowledge+zip' : 'application/json');
         if (this.token) headers.set('Authorization', 'Bearer ' + this.token);
         let body;
-        if (options.body !== undefined) {
+        if (options.rawBody !== undefined) {
+          headers.set('Content-Type', String(options.contentType || 'application/octet-stream'));
+          body = options.rawBody;
+        } else if (options.body !== undefined) {
           headers.set('Content-Type', 'application/json');
           body = JSON.stringify(options.body);
         }
@@ -140,7 +157,8 @@
           signal: controller.signal, cache: 'no-store', credentials: 'same-origin'
         });
         if (this.generation(channel) !== generation) throw new KnowledgeAPIStaleResponseError(channel, generation);
-        const data = await responseJSON(response);
+        let data;
+        if (!response.ok || options.responseType !== 'package') data = await responseJSON(response);
         if (this.generation(channel) !== generation) throw new KnowledgeAPIStaleResponseError(channel, generation);
         if (!response.ok) {
           const detail = data && data.error || {};
@@ -148,6 +166,16 @@
             code: detail.code || 'http_error', status: response.status, retryable: detail.retryable,
             details: detail.details, requestID: data && data.request_id || response.headers.get('X-Koder-Request-ID')
           });
+        }
+        if (options.responseType === 'package') {
+          const blob = await response.blob();
+          if (this.generation(channel) !== generation) throw new KnowledgeAPIStaleResponseError(channel, generation);
+          return {
+            blob,
+            filename: attachmentFilename(response.headers.get('Content-Disposition'), options.filename),
+            contentType: response.headers.get('Content-Type') || '',
+            etag: response.headers.get('ETag') || '',
+          };
         }
         if (data && data.api_version && data.api_version !== API_VERSION) {
           throw new KnowledgeAPIError('Knowledge API version is not compatible.', {
@@ -217,6 +245,17 @@
     createGraphView(body, options) { return this.request('/views', {...options, method: 'POST', body}); }
     updateGraphView(id, body, options) { return this.request('/views/' + encodeID(id), {...options, method: 'PUT', body}); }
     deleteGraphView(id, body, options) { return this.request('/views/' + encodeID(id), {...options, method: 'DELETE', body}); }
+    previewPackage(file, options) {
+      if (!file) throw new TypeError('Knowledge package file is required');
+      return this.request('/packages/preview', {...options, method: 'POST', rawBody: file, contentType: 'application/vnd.koder.knowledge+zip', timeoutMS: 90000});
+    }
+    stagePackage(file, values, options) {
+      if (!file) throw new TypeError('Knowledge package file is required');
+      return this.request('/packages/stages', {...options, method: 'POST', rawBody: file, contentType: 'application/vnd.koder.knowledge+zip', query: values, timeoutMS: 90000});
+    }
+    activatePackage(stageID, options) { return this.request('/packages/stages/' + encodeID(stageID) + '/activate', {...options, method: 'POST', timeoutMS: 90000}); }
+    discardPackage(stageID, options) { return this.request('/packages/stages/' + encodeID(stageID), {...options, method: 'DELETE'}); }
+    exportPackage(chunkID, options) { return this.request('/packages/export/' + encodeID(chunkID), {...options, responseType: 'package', timeoutMS: 90000, filename: 'knowledge.kknowledge'}); }
 
     async *pages(path, options) {
       options = options || {};
@@ -243,5 +282,5 @@
     return new Client({...options, base: config.api_base, token: config.token});
   }
 
-  return Object.freeze({API_VERSION, Client, KnowledgeAPIError, KnowledgeAPIStaleResponseError, queryString, fromPageConfig});
+  return Object.freeze({API_VERSION, Client, KnowledgeAPIError, KnowledgeAPIStaleResponseError, queryString, attachmentFilename, fromPageConfig});
 });

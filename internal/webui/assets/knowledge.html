@@ -28,6 +28,7 @@
   <script defer src="/assets/knowledge_graph_layouts.js"></script>
   <script defer src="/assets/knowledge_graph_interactions.js"></script>
   <script defer src="/assets/knowledge_graph_table.js"></script>
+  <script defer src="/assets/knowledge_packages.js"></script>
   <script defer src="/assets/knowledge_browser.js"></script>
 </head>
 <body class="bg-body text-body">
@@ -61,6 +62,7 @@
           </div>
           <div class="knowledge-pane-header-actions">
             <span class="knowledge-count-placeholder" data-knowledge-count aria-label="Loading chunk count">—</span>
+            <button type="button" class="knowledge-icon-button" data-knowledge-package-open title="Import knowledge package"><i class="bi bi-box-arrow-in-down" aria-hidden="true"></i><span class="visually-hidden">Import knowledge package</span></button>
             <button type="button" class="knowledge-icon-button" data-knowledge-chunk-create title="Create knowledge chunk"><i class="bi bi-plus-lg" aria-hidden="true"></i><span class="visually-hidden">Create knowledge chunk</span></button>
           </div>
         </header>
@@ -214,6 +216,7 @@
             <div class="knowledge-chunk-actions" data-knowledge-chunk-actions hidden>
               <button type="button" class="btn btn-sm btn-info" data-knowledge-entry-create><i class="bi bi-plus-lg" aria-hidden="true"></i> New entry</button>
               <button type="button" class="btn btn-sm btn-outline-info" data-knowledge-chunk-edit><i class="bi bi-pencil" aria-hidden="true"></i> Edit</button>
+              <button type="button" class="btn btn-sm btn-outline-info" data-knowledge-package-export><i class="bi bi-download" aria-hidden="true"></i> Export</button>
               <button type="button" class="btn btn-sm btn-outline-warning" data-knowledge-chunk-archive><i class="bi bi-archive" aria-hidden="true"></i> Archive</button>
               <button type="button" class="btn btn-sm btn-outline-success" data-knowledge-chunk-restore hidden><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Restore</button>
               <button type="button" class="btn btn-sm btn-outline-danger" data-knowledge-chunk-delete hidden><i class="bi bi-trash" aria-hidden="true"></i> Delete</button>
@@ -256,6 +259,31 @@
         </div>
         <div class="knowledge-editor-error" data-knowledge-saved-view-error role="alert" hidden></div>
         <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-knowledge-saved-view-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-info" data-knowledge-saved-view-submit>Save view</button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="knowledge-editor-dialog knowledge-package-dialog" data-knowledge-package-dialog aria-labelledby="knowledge-package-dialog-title">
+      <form method="dialog">
+        <header>
+          <div><span class="knowledge-eyebrow">Portable knowledge</span><h2 id="knowledge-package-dialog-title">Import package</h2></div>
+          <button type="button" class="knowledge-icon-button" data-knowledge-package-cancel title="Close"><i class="bi bi-x-lg" aria-hidden="true"></i><span class="visually-hidden">Close package import</span></button>
+        </header>
+        <div class="knowledge-package-body">
+          <p class="knowledge-dialog-explanation">Koder validates hashes, compatibility, signatures, secrets, dependencies, and conflicts before anything is written. A staged package remains private until you activate it.</p>
+          <label class="knowledge-package-drop"><i class="bi bi-file-earmark-zip" aria-hidden="true"></i><span><strong>Select .kknowledge package</strong><small data-knowledge-package-file-name>Choose a .kknowledge package from this device.</small></span><input type="file" accept=".kknowledge,application/vnd.koder.knowledge+zip,application/zip" data-knowledge-package-file></label>
+          <section class="knowledge-package-preview" data-knowledge-package-preview hidden>
+            <header><div><span class="knowledge-eyebrow">Validated preview</span><h3 data-knowledge-package-preview-title></h3></div><span class="knowledge-package-safe"><i class="bi bi-shield-check" aria-hidden="true"></i> No writes yet</span></header>
+            <p data-knowledge-package-preview-meta></p>
+            <div class="knowledge-package-summary" data-knowledge-package-summary></div>
+            <section class="knowledge-package-findings"><strong>Classifier and integrity findings</strong><div data-knowledge-package-findings>No prohibited findings reported.</div></section>
+            <details open><summary>Object impact preview</summary><p data-knowledge-package-impact-note></p><ol data-knowledge-package-impacts></ol></details>
+            <label data-knowledge-package-conflict-field hidden><span>Conflict policy</span><select data-knowledge-package-conflict-policy><option value="">Choose deliberately…</option><option value="merge">Merge — preserve local conflicting records</option><option value="replace">Replace — use package records</option><option value="keep_both">Keep both — import remapped copies</option></select></label>
+            <label class="knowledge-review-checkbox" data-knowledge-package-review-field hidden><input type="checkbox" data-knowledge-package-review><span>I reviewed the sensitive-content findings and approve staging.</span></label>
+          </section>
+          <div class="knowledge-editor-error" data-knowledge-package-error role="alert" hidden></div>
+          <div class="knowledge-package-status" data-knowledge-package-status role="status">Nothing is imported until you review and activate a staged package.</div>
+        </div>
+        <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-knowledge-package-cancel>Cancel</button><button type="button" class="btn btn-sm btn-outline-info" data-knowledge-package-preview-button disabled>Preview</button><button type="button" class="btn btn-sm btn-warning" data-knowledge-package-stage-button hidden disabled>Stage package</button><button type="button" class="btn btn-sm btn-success" data-knowledge-package-activate-button hidden disabled>Activate import</button></footer>
       </form>
     </dialog>
 

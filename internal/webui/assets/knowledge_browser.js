@@ -3077,6 +3077,16 @@
         }
       }
       const app = new BrowserApp(shell, client, runtime);
+	  if (globalThis.KoderKnowledgePackages) {
+		app.packageController = new globalThis.KoderKnowledgePackages.Controller({
+		  shell, client,
+		  onImported: async result => {
+			await app.refresh();
+			const chunkID = String(result && result.chunk_id || '');
+			if (chunkID) app.selectObject('chunk', chunkID, {id: chunkID, title: 'Imported knowledge'});
+		  },
+		});
+	  }
       shell.__koderKnowledgeApp = app;
       app.refresh();
       app.loadSavedGraphViews();

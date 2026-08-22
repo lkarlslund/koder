@@ -61,6 +61,8 @@ type ImportImpactSummary struct {
 // ImportPreview is a deterministic read-only analysis of one validated package.
 type ImportPreview struct {
 	Package        kpackage.Identity              `json:"package"`
+	Publisher      kpackage.Publisher             `json:"publisher"`
+	License        kpackage.License               `json:"license"`
 	ChunkID        knowledge.ChunkID              `json:"chunk_id"`
 	ChunkTitle     string                         `json:"chunk_title"`
 	SignatureState kpackage.SignatureState        `json:"signature_state"`
@@ -79,7 +81,8 @@ func (s *Service) PreviewImport(ctx context.Context, pkg kpackage.ValidatedPacka
 	}
 	report, err := kpackage.Scan(ctx, pkg, s.classifier)
 	preview := ImportPreview{
-		Package: pkg.Manifest.Package, ChunkID: knowledge.ChunkID(pkg.Manifest.Chunk.ID),
+		Package: pkg.Manifest.Package, Publisher: pkg.Manifest.Publisher, License: pkg.Manifest.License,
+		ChunkID:    knowledge.ChunkID(pkg.Manifest.Chunk.ID),
 		ChunkTitle: pkg.Manifest.Chunk.Title, SignatureState: pkg.SignatureState,
 		Classification: knowledge.ClassificationResult{Decision: report.Decision, Findings: slices.Clone(report.Findings)},
 		ReviewRequired: report.Decision == knowledge.ClassificationDecisionReview,

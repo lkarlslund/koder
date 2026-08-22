@@ -12,6 +12,15 @@ function response(status, body, requestID = 'request-1') {
   };
 }
 
+function packageResponse(bytes, headers) {
+  return {
+    ok: true, status: 200,
+    headers: new Headers(headers || {}),
+    text: async () => { throw new Error('package response must not be decoded as JSON'); },
+    blob: async () => new Blob([bytes], {type: 'application/vnd.koder.knowledge+zip'}),
+  };
+}
+
 async function testRequestAndCursorEncoding() {
   const requests = [];
   const client = new knowledge.Client({token: 'secret', fetchImpl: async (url, options) => {
@@ -114,6 +123,38 @@ async function testStructuredErrors() {
   });
 }
 
+async function testPackageRequestsAndBinaryExport() {
+  const requests = [];
+  const client = new knowledge.Client({token: 'secret', fetchImpl: async (url, options) => {
+    requests.push({url, options});
+    if (url.includes('/export/')) return packageResponse('archive', {
+      'Content-Type': 'application/vnd.koder.knowledge+zip',
+      'Content-Disposition': 'attachment; filename="disk-tools.kknowledge"',
+      'ETag': '"sha256-test"',
+    });
+    if (url.endsWith('/activate')) return response(200, {api_version: 'knowledge.v1', result: {chunk_id: 'chunk-1'}});
+    if (options.method === 'DELETE') return response(200, {api_version: 'knowledge.v1', discarded: true});
+    return response(url.endsWith('/preview') ? 200 : 201, {api_version: 'knowledge.v1', preview: {chunk_id: 'chunk-1'}, stage: {id: 'stage-1'}});
+  }});
+  const file = new Blob(['zip'], {type: 'application/zip'});
+  await client.previewPackage(file, {channel: 'package'});
+  assert.strictEqual(requests[0].url, '/api/knowledge/v1/packages/preview');
+  assert.strictEqual(requests[0].options.body, file);
+  assert.strictEqual(requests[0].options.headers.get('Content-Type'), 'application/vnd.koder.knowledge+zip');
+  await client.stagePackage(file, {conflict_policy: 'keep_both', review_approved: true}, {channel: 'package'});
+  assert.strictEqual(requests[1].url, '/api/knowledge/v1/packages/stages?conflict_policy=keep_both&review_approved=true');
+  await client.activatePackage('stage-1', {channel: 'package'});
+  assert.strictEqual(requests[2].url, '/api/knowledge/v1/packages/stages/stage-1/activate');
+  await client.discardPackage('stage-1', {channel: 'package'});
+  assert.strictEqual(requests[3].options.method, 'DELETE');
+  const exported = await client.exportPackage('chunk-1', {channel: 'package'});
+  assert.strictEqual(exported.filename, 'disk-tools.kknowledge');
+  assert.strictEqual(exported.etag, '"sha256-test"');
+  assert.strictEqual(await exported.blob.text(), 'archive');
+  assert.strictEqual(requests[4].options.headers.get('Accept'), 'application/vnd.koder.knowledge+zip');
+  assert.strictEqual(knowledge.attachmentFilename('attachment; filename="../unsafe"', 'fallback.kknowledge'), '-unsafe.kknowledge');
+}
+
 async function testPaginationUsesOpaqueCursors() {
   const urls = [];
   const pages = [
@@ -158,6 +199,7 @@ Promise.resolve()
   .then(testRequestAndCursorEncoding)
   .then(testNewGenerationCancelsStaleRequest)
   .then(testStructuredErrors)
+  .then(testPackageRequestsAndBinaryExport)
   .then(testPaginationUsesOpaqueCursors)
   .then(testCancelAndValidation)
   .then(testRepeatedCursorIsRejected)
