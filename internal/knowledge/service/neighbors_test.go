@@ -132,3 +132,42 @@ func TestNeighborsSkipsDeniedLinksBeforeVisiblePageResults(t *testing.T) {
 		t.Fatalf("Neighbors(policy-filtered) = %#v, %v", page, err)
 	}
 }
+
+func TestNeighborsAppliesScopeFilterBeforePagination(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service := newTestService(t, store, nil)
+	rootCandidate := testChunkCandidate()
+	rootCandidate.Kind = knowledge.ChunkKindProject
+	rootCandidate.Scope = knowledge.Scope{Kind: knowledge.ScopeKindProject, Selector: "project:test"}
+	root, _ := service.CreateChunk(ctx, CreateChunkRequest{Chunk: rootCandidate})
+	hiddenCandidate := testChunkCandidate()
+	hiddenCandidate.Title = "Hidden global"
+	hidden, _ := service.CreateChunk(ctx, CreateChunkRequest{Chunk: hiddenCandidate})
+	visibleCandidate := rootCandidate
+	visibleCandidate.Title = "Visible project"
+	visible, _ := service.CreateChunk(ctx, CreateChunkRequest{Chunk: visibleCandidate})
+	rootRef := knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(root.Chunk.ID)}
+	_, _ = service.CreateLink(ctx, CreateLinkRequest{Link: knowledge.Link{
+		Source: rootRef, Target: knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(hidden.Chunk.ID)},
+		Kind: knowledge.LinkKindRelatedTo,
+	}})
+	visibleLink, _ := service.CreateLink(ctx, CreateLinkRequest{Link: knowledge.Link{
+		Source: rootRef, Target: knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(visible.Chunk.ID)},
+		Kind: knowledge.LinkKindRelatedTo,
+	}})
+
+	page, err := service.Neighbors(ctx, NeighborRequest{
+		Endpoint: rootRef, ScopeKinds: []knowledge.ScopeKind{knowledge.ScopeKindProject}, Limit: 1,
+	})
+	if err != nil || len(page.Neighbors) != 1 || page.Neighbors[0].Link.ID != visibleLink.Link.ID || page.NextCursor != "" {
+		t.Fatalf("Neighbors(scope-filtered) = %#v, %v", page, err)
+	}
+	if _, err := service.Neighbors(ctx, NeighborRequest{
+		Endpoint: rootRef, ScopeKinds: []knowledge.ScopeKind{knowledge.ScopeKindUnspecified},
+	}); !errors.Is(err, knowledge.ErrInvalidRecord) {
+		t.Fatalf("Neighbors(invalid scope) error = %v, want ErrInvalidRecord", err)
+	}
+}

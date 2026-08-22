@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
@@ -12,8 +13,11 @@ type NeighborRequest struct {
 	Endpoint  knowledge.ObjectRef
 	Direction knowledgeStore.LinkDirection
 	Kinds     []knowledge.LinkKind
-	Limit     int
-	Cursor    string
+	// ScopeKinds bounds the visible graph before pagination. An empty slice
+	// permits every scope authorized by ChunkPolicy.
+	ScopeKinds []knowledge.ScopeKind
+	Limit      int
+	Cursor     string
 }
 
 type Neighbor struct {
@@ -30,6 +34,14 @@ type NeighborPage struct {
 func (s *Service) Neighbors(ctx context.Context, request NeighborRequest) (NeighborPage, error) {
 	if err := ctx.Err(); err != nil {
 		return NeighborPage{}, err
+	}
+	request.ScopeKinds = slices.Clone(request.ScopeKinds)
+	slices.Sort(request.ScopeKinds)
+	request.ScopeKinds = slices.Compact(request.ScopeKinds)
+	for _, scopeKind := range request.ScopeKinds {
+		if scopeKind == knowledge.ScopeKindUnspecified || !scopeKind.IsAScopeKind() {
+			return NeighborPage{}, fmt.Errorf("%w: invalid neighbor scope kind %q", knowledge.ErrInvalidRecord, scopeKind)
+		}
 	}
 	listRequest, err := knowledgeStore.NormalizeAdjacentLinkListRequest(knowledgeStore.AdjacentLinkListRequest{
 		Filter: knowledgeStore.AdjacentLinkFilter{
@@ -74,7 +86,7 @@ func (s *Service) Neighbors(ctx context.Context, request NeighborRequest) (Neigh
 		}
 		link := links.Links[0]
 		cursor = links.NextCursor
-		neighbor, allowed, err := s.authorizedNeighbor(ctx, actor, listRequest.Filter.Endpoint, link)
+		neighbor, allowed, err := s.authorizedNeighbor(ctx, actor, listRequest.Filter.Endpoint, request.ScopeKinds, link)
 		if err != nil {
 			return NeighborPage{}, err
 		}
@@ -90,7 +102,7 @@ func (s *Service) Neighbors(ctx context.Context, request NeighborRequest) (Neigh
 		}
 	}
 	if len(result.Neighbors) == listRequest.Limit && cursor != "" {
-		hasMore, err := s.hasAuthorizedNeighborAfter(ctx, actor, listRequest.Filter.Endpoint, scan, cursor)
+		hasMore, err := s.hasAuthorizedNeighborAfter(ctx, actor, listRequest.Filter.Endpoint, request.ScopeKinds, scan, cursor)
 		if err != nil {
 			return NeighborPage{}, err
 		}
@@ -103,7 +115,7 @@ func (s *Service) Neighbors(ctx context.Context, request NeighborRequest) (Neigh
 	return result, nil
 }
 
-func (s *Service) hasAuthorizedNeighborAfter(ctx context.Context, actor knowledge.Actor, endpoint knowledge.ObjectRef, scan knowledgeStore.AdjacentLinkListRequest, cursor string) (bool, error) {
+func (s *Service) hasAuthorizedNeighborAfter(ctx context.Context, actor knowledge.Actor, endpoint knowledge.ObjectRef, scopeKinds []knowledge.ScopeKind, scan knowledgeStore.AdjacentLinkListRequest, cursor string) (bool, error) {
 	for cursor != "" {
 		scan.Cursor = cursor
 		page, err := s.store.ListAdjacentLinks(ctx, scan)
@@ -113,7 +125,7 @@ func (s *Service) hasAuthorizedNeighborAfter(ctx context.Context, actor knowledg
 		if len(page.Links) == 0 {
 			return false, nil
 		}
-		_, allowed, err := s.authorizedNeighbor(ctx, actor, endpoint, page.Links[0])
+		_, allowed, err := s.authorizedNeighbor(ctx, actor, endpoint, scopeKinds, page.Links[0])
 		if err != nil {
 			return false, err
 		}
@@ -125,7 +137,7 @@ func (s *Service) hasAuthorizedNeighborAfter(ctx context.Context, actor knowledg
 	return false, nil
 }
 
-func (s *Service) authorizedNeighbor(ctx context.Context, actor knowledge.Actor, endpoint knowledge.ObjectRef, link knowledge.Link) (Neighbor, bool, error) {
+func (s *Service) authorizedNeighbor(ctx context.Context, actor knowledge.Actor, endpoint knowledge.ObjectRef, scopeKinds []knowledge.ScopeKind, link knowledge.Link) (Neighbor, bool, error) {
 	other, direction, err := oppositeEndpoint(link, endpoint)
 	if err != nil {
 		return Neighbor{}, false, err
@@ -138,6 +150,9 @@ func (s *Service) authorizedNeighbor(ctx context.Context, actor knowledge.Actor,
 		return err
 	}); err != nil {
 		return Neighbor{}, false, fmt.Errorf("resolve knowledge neighbor: %w", err)
+	}
+	if len(scopeKinds) != 0 && !slices.Contains(scopeKinds, chunk.Scope.Kind) {
+		return Neighbor{}, false, nil
 	}
 	if err := s.authorizeLinkChunks(ctx, actor, ChunkPolicyTraverse, true, chunk); err != nil {
 		if contextErr := ctx.Err(); contextErr != nil {

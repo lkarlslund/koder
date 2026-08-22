@@ -654,10 +654,11 @@ func callNeighbors(ctx context.Context, service *knowledgeService.Service, offer
 		return neighborPageResult{}, err
 	}
 	request := knowledgeService.NeighborRequest{
-		Endpoint:  knowledge.ObjectRef{Kind: kind, ID: args["id"]},
-		Direction: knowledgeStore.LinkDirection(args["direction"]),
-		Limit:     intArg(args, "limit", 25),
-		Cursor:    args["cursor"],
+		Endpoint:   knowledge.ObjectRef{Kind: kind, ID: args["id"]},
+		Direction:  knowledgeStore.LinkDirection(args["direction"]),
+		ScopeKinds: slices.Clone(offer.ScopeKinds),
+		Limit:      intArg(args, "limit", 25),
+		Cursor:     args["cursor"],
 	}
 	if raw := args["link_kinds"]; raw != "" {
 		var names []string
