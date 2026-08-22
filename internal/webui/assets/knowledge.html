@@ -102,6 +102,7 @@
           <div class="knowledge-graph-toolbar-actions">
             <span class="knowledge-stage-status"><span class="spinner-grow spinner-grow-sm" data-knowledge-spinner aria-hidden="true"></span><span data-knowledge-status-label>Preparing explorer</span></span>
             <span class="knowledge-selection-count" data-knowledge-selection-count hidden></span>
+            <button type="button" class="knowledge-icon-button" data-knowledge-link-create title="Create a relationship between exactly two selected nodes" disabled><i class="bi bi-bezier2" aria-hidden="true"></i><span class="visually-hidden">Create relationship</span></button>
             <button type="button" class="knowledge-icon-button" data-knowledge-view-hide title="Hide selected locally" disabled><i class="bi bi-eye-slash" aria-hidden="true"></i><span class="visually-hidden">Hide selected locally</span></button>
             <button type="button" class="knowledge-icon-button" data-knowledge-view-isolate title="Isolate selected locally" disabled><i class="bi bi-bullseye" aria-hidden="true"></i><span class="visually-hidden">Isolate selected locally</span></button>
             <button type="button" class="knowledge-icon-button" data-knowledge-view-reveal title="Reveal hidden graph items" disabled><i class="bi bi-eye" aria-hidden="true"></i><span class="visually-hidden">Reveal hidden graph items</span></button>
@@ -120,6 +121,7 @@
             <button type="button" role="menuitem" data-knowledge-context-action="outgoing"><i class="bi bi-box-arrow-right" aria-hidden="true"></i><span>Expand outgoing</span><kbd>]</kbd></button>
             <button type="button" role="menuitem" data-knowledge-context-action="center"><i class="bi bi-crosshair" aria-hidden="true"></i><span>Center node</span><kbd>C</kbd></button>
             <button type="button" role="menuitem" data-knowledge-context-action="pin"><i class="bi bi-pin-angle" aria-hidden="true"></i><span data-knowledge-context-pin-label>Pin locally</span><kbd>P</kbd></button>
+            <button type="button" role="menuitem" data-knowledge-context-action="relate"><i class="bi bi-bezier2" aria-hidden="true"></i><span>Create relationship</span></button>
             <button type="button" role="menuitem" data-knowledge-context-action="hide"><i class="bi bi-eye-slash" aria-hidden="true"></i><span>Hide selection</span><kbd>H</kbd></button>
             <button type="button" role="menuitem" data-knowledge-context-action="isolate"><i class="bi bi-bullseye" aria-hidden="true"></i><span>Isolate selection</span><kbd>I</kbd></button>
           </div>
@@ -198,6 +200,11 @@
               <button type="button" class="btn btn-sm btn-outline-success" data-knowledge-entry-restore hidden><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Restore</button>
               <button type="button" class="btn btn-sm btn-outline-danger" data-knowledge-entry-delete hidden><i class="bi bi-trash" aria-hidden="true"></i> Delete</button>
               <span data-knowledge-entry-mutation-status role="status"></span>
+            </div>
+            <div class="knowledge-link-actions" data-knowledge-link-actions hidden>
+              <button type="button" class="btn btn-sm btn-outline-warning" data-knowledge-link-unlink><i class="bi bi-link-45deg" aria-hidden="true"></i> Unlink</button>
+              <button type="button" class="btn btn-sm btn-outline-success" data-knowledge-link-restore hidden><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Restore</button>
+              <span data-knowledge-link-mutation-status role="status"></span>
             </div>
             <div class="knowledge-expand-actions" data-knowledge-expand-actions hidden>
               <button type="button" class="btn btn-sm btn-outline-info" data-knowledge-expand-incoming><i class="bi bi-box-arrow-in-down" aria-hidden="true"></i> Incoming</button>
@@ -301,6 +308,31 @@
         </div>
         <div class="knowledge-editor-error" data-knowledge-supersede-error role="alert" hidden></div>
         <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-knowledge-supersede-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-primary" data-knowledge-supersede-submit>Supersede</button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="knowledge-editor-dialog" data-knowledge-link-dialog aria-labelledby="knowledge-link-dialog-title">
+      <form method="dialog" data-knowledge-link-form>
+        <header>
+          <div><span class="knowledge-eyebrow">Knowledge graph</span><h2 id="knowledge-link-dialog-title">Create relationship</h2></div>
+          <button type="button" class="knowledge-icon-button" data-knowledge-link-cancel title="Close editor"><i class="bi bi-x-lg" aria-hidden="true"></i><span class="visually-hidden">Close editor</span></button>
+        </header>
+        <div class="knowledge-editor-fields">
+          <input name="source_kind" type="hidden"><input name="source_id" type="hidden">
+          <input name="target_kind" type="hidden"><input name="target_id" type="hidden">
+          <section class="knowledge-relation-endpoint" aria-label="Relationship source"><span>Source</span><strong data-knowledge-link-source-label></strong><code data-knowledge-link-source-ref></code></section>
+          <section class="knowledge-relation-direction" aria-hidden="true"><i class="bi bi-arrow-right"></i></section>
+          <section class="knowledge-relation-endpoint" aria-label="Relationship target"><span>Target</span><strong data-knowledge-link-target-label></strong><code data-knowledge-link-target-ref></code></section>
+          <button type="button" class="btn btn-sm btn-outline-secondary knowledge-relation-swap is-wide" data-knowledge-link-swap><i class="bi bi-arrow-left-right" aria-hidden="true"></i> Swap direction</button>
+          <label><span>Relationship</span><select name="kind" required><option value="related_to">Related to</option><option value="part_of">Part of</option><option value="requires">Requires</option><option value="alternative_to">Alternative to</option><option value="applies_to">Applies to</option><option value="supersedes">Supersedes</option><option value="contradicts">Contradicts</option><option value="caused_by">Caused by</option><option value="supported_by">Supported by</option><option value="derived_from">Derived from</option></select></label>
+          <label><span>Label</span><input name="label" maxlength="240" placeholder="Optional human-friendly label"></label>
+          <label class="is-wide"><span>Notes (Markdown)</span><textarea name="notes" maxlength="8000" rows="4"></textarea></label>
+          <label class="is-wide"><span>Evidence IDs</span><input name="evidence_ids" maxlength="4000" placeholder="Comma-separated IDs"></label>
+          <section class="knowledge-relation-preview is-wide" data-knowledge-link-preview aria-live="polite"><span>Preview</span><strong data-knowledge-link-preview-path></strong><p data-knowledge-link-preview-detail></p></section>
+          <label class="knowledge-review-checkbox is-wide"><input name="review_approved" type="checkbox"><span>I reviewed any sensitive relationship label or notes before saving.</span></label>
+        </div>
+        <div class="knowledge-editor-error" data-knowledge-link-form-error role="alert" hidden></div>
+        <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-knowledge-link-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-info" data-knowledge-link-submit>Create relationship</button></footer>
       </form>
     </dialog>
 

@@ -90,6 +90,20 @@ assert.deepStrictEqual(browser.entryContentFromValues({
 assert.throws(() => browser.entryContentFromValues({title: 'Bad', kind: 'fact', scope_kind: 'global', confidence: '2'}), /confidence/);
 assert.throws(() => browser.entryContentFromValues({title: 'Bad', kind: 'fact', scope_kind: 'global', valid_from: '2026-02-01T00:00', valid_until: '2026-01-01T00:00'}), /later/);
 assert.strictEqual(browser.entryEditorValues({chunk_id: 'chunk-1', applicability: {software: [{name: 'Go', version_range: '>=1.24'}]}}).software, 'Go|>=1.24');
+assert.strictEqual(browser.relationshipShapeError('contradicts', {kind: 'entry', id: 'one'}, {kind: 'entry', id: 'two'}), '');
+assert.match(browser.relationshipShapeError('contradicts', {kind: 'chunk', id: 'one'}, {kind: 'entry', id: 'two'}), /two entries/);
+assert.match(browser.relationshipShapeError('part_of', {kind: 'entry', id: 'one'}, {kind: 'entry', id: 'two'}), /point to a chunk/);
+assert.deepStrictEqual(browser.linkContentFromValues({
+  source_kind: 'entry', source_id: 'entry-1', target_kind: 'chunk', target_id: 'chunk-2', kind: 'supported_by',
+  label: 'Manual', notes: 'See source', evidence_ids: 'evidence-1, evidence-2',
+}), {
+  source: {kind: 'entry', id: 'entry-1'}, target: {kind: 'chunk', id: 'chunk-2'}, kind: 'supported_by',
+  label: 'Manual', notes: 'See source', evidence_ids: ['evidence-1', 'evidence-2'],
+});
+assert.deepStrictEqual(browser.relationPreview({source_kind: 'chunk', source_id: 'one', target_kind: 'entry', target_id: 'two', kind: 'part_of'}, {source: 'One', target: 'Two'}), {
+  valid: false, path: 'One → Part of → Two', detail: 'Part of must point to a chunk.',
+});
+assert.strictEqual(browser.relationPreview({source_kind: 'entry', source_id: 'one', target_kind: 'entry', target_id: 'two', kind: 'contradicts'}, {source: 'One', target: 'Two'}).path, 'One ↔ Contradicts ↔ Two');
 assert.strictEqual(browser.graphDebugEnabled('?graph_debug=1'), true);
 assert.strictEqual(browser.graphDebugEnabled('?graph_debug=true'), false);
 const webglDocument = {createElement: () => ({getContext: name => name === 'webgl2' ? {} : null})};

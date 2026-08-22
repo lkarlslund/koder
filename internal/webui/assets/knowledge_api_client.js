@@ -195,6 +195,12 @@
     deleteEntry(id, body, options) { return this.request('/entries/' + encodeID(id), {...options, method: 'DELETE', body}); }
     entryEvidence(id, query, options) { return this.request('/entries/' + encodeID(id) + '/evidence', {...options, query}); }
     getLink(id, options) { return this.request('/links/' + encodeID(id), options); }
+    createLink(body, options) { return this.request('/links', {...options, method: 'POST', body}); }
+    linkLifecycle(id, action, body, options) {
+      action = String(action || '');
+      if (!['unlink', 'restore'].includes(action)) throw new TypeError('Knowledge relationship lifecycle action is invalid');
+      return this.request('/links/' + encodeID(id) + '/' + action, {...options, method: 'POST', body});
+    }
     search(body, options) { return this.request('/search', {...options, method: 'POST', body}); }
     graphSnapshot(body, options) { return this.request('/graph/snapshot', {...options, method: 'POST', body}); }
     neighbors(body, options) { return this.request('/neighbors', {...options, method: 'POST', body}); }

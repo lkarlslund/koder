@@ -908,6 +908,9 @@ body {
 .knowledge-entry-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.42rem; }
 .knowledge-entry-actions[hidden] { display: none; }
 .knowledge-entry-actions > span { grid-column: 1 / -1; }
+.knowledge-link-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.42rem; }
+.knowledge-link-actions[hidden] { display: none; }
+.knowledge-link-actions > span { grid-column: 1 / -1; }
 
 .knowledge-editor-dialog {
   width: min(46rem, calc(100vw - 1.5rem));
@@ -943,6 +946,17 @@ body {
 .knowledge-editor-error[hidden] { display: none; }
 .knowledge-compact-dialog { width: min(34rem, calc(100vw - 1.5rem)); }
 .knowledge-dialog-explanation { margin: 0; color: var(--bs-secondary-color); font-size: 0.74rem; line-height: 1.5; }
+.knowledge-relation-endpoint { display: grid; min-width: 0; padding: 0.72rem; border: 1px solid var(--knowledge-pane-border); border-radius: 0.65rem; background: var(--bs-secondary-bg); }
+.knowledge-relation-endpoint > span,
+.knowledge-relation-preview > span { color: var(--knowledge-cyan); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.knowledge-relation-endpoint strong { overflow: hidden; margin-top: 0.28rem; font-size: 0.82rem; text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-relation-endpoint code { overflow: hidden; margin-top: 0.22rem; color: var(--bs-secondary-color); font-size: 0.62rem; text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-relation-direction { display: none; }
+.knowledge-relation-preview { display: grid; gap: 0.3rem; padding: 0.72rem; border: 1px solid color-mix(in srgb, var(--knowledge-cyan) 35%, var(--knowledge-pane-border)); border-radius: 0.65rem; background: color-mix(in srgb, var(--bs-info-bg-subtle) 35%, transparent); }
+.knowledge-relation-preview strong { font-size: 0.78rem; line-height: 1.45; }
+.knowledge-relation-preview p { margin: 0; color: var(--bs-secondary-color); font-size: 0.69rem; line-height: 1.45; }
+.knowledge-relation-preview.is-invalid { border-color: var(--bs-danger-border-subtle); background: var(--bs-danger-bg-subtle); }
+.knowledge-relation-preview.is-invalid > span { color: var(--bs-danger-text-emphasis); }
 
 .knowledge-inspector-actions span {
   color: var(--bs-secondary-color);

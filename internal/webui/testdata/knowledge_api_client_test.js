@@ -54,11 +54,19 @@ async function testRequestAndCursorEncoding() {
   assert.strictEqual(requests[11].options.method, 'DELETE');
   assert.throws(() => client.entryLifecycle('entry-1', 'erase', {}), /invalid/);
 
+  await client.createLink({link: {source: {kind: 'entry', id: 'entry-1'}, target: {kind: 'entry', id: 'entry-2'}, kind: 'related_to'}}, {channel: 'link-create'});
+  assert.strictEqual(requests[12].url, '/api/knowledge/v1/links');
+  assert.strictEqual(requests[12].options.method, 'POST');
+  await client.linkLifecycle('link-1', 'unlink', {expected_revision: 1}, {channel: 'link-lifecycle'});
+  assert.strictEqual(requests[13].url, '/api/knowledge/v1/links/link-1/unlink');
+  assert.strictEqual(requests[13].options.method, 'POST');
+  assert.throws(() => client.linkLifecycle('link-1', 'delete', {}), /invalid/);
+
   const selection = {session_id: 'session-1', chat_id: 'chat-2', object: {kind: 'entry', id: 'entry-3'}};
   await client.sendToChat(selection, {channel: 'send'});
-  assert.strictEqual(requests[12].url, '/api/knowledge/v1/chat-context');
-  assert.strictEqual(requests[12].options.method, 'POST');
-  assert.deepStrictEqual(JSON.parse(requests[12].options.body), selection);
+  assert.strictEqual(requests[14].url, '/api/knowledge/v1/chat-context');
+  assert.strictEqual(requests[14].options.method, 'POST');
+  assert.deepStrictEqual(JSON.parse(requests[14].options.body), selection);
 }
 
 async function testNewGenerationCancelsStaleRequest() {

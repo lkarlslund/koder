@@ -356,6 +356,57 @@
     };
   }
 
+  const relationshipKinds = new Set(['related_to', 'part_of', 'requires', 'alternative_to', 'applies_to', 'supersedes', 'contradicts', 'caused_by', 'supported_by', 'derived_from']);
+  const symmetricRelationshipKinds = new Set(['related_to', 'alternative_to', 'contradicts']);
+
+  function relationshipShapeError(kind, source, target) {
+    kind = String(kind || '').trim();
+    source = source || {};
+    target = target || {};
+    if (!relationshipKinds.has(kind)) return 'Choose a known relationship type.';
+    if (!['chunk', 'entry'].includes(source.kind) || !String(source.id || '').trim()) return 'Choose a chunk or entry as the source.';
+    if (!['chunk', 'entry'].includes(target.kind) || !String(target.id || '').trim()) return 'Choose a chunk or entry as the target.';
+    if (source.kind === target.kind && source.id === target.id) return 'A knowledge object cannot relate to itself.';
+    if (kind === 'alternative_to' && source.kind !== target.kind) return 'Alternatives must connect two objects of the same type.';
+    if (kind === 'part_of' && target.kind !== 'chunk') return 'Part of must point to a chunk.';
+    if (['applies_to', 'supported_by'].includes(kind) && source.kind !== 'entry') return `${displayLabel(kind)} must start at an entry.`;
+    if (['supersedes', 'contradicts', 'caused_by'].includes(kind) && (source.kind !== 'entry' || target.kind !== 'entry')) return `${displayLabel(kind)} requires two entries.`;
+    return '';
+  }
+
+  function linkContentFromValues(values) {
+    values = values || {};
+    const source = {kind: String(values.source_kind || '').trim(), id: String(values.source_id || '').trim()};
+    const target = {kind: String(values.target_kind || '').trim(), id: String(values.target_id || '').trim()};
+    const kind = String(values.kind || '').trim();
+    const error = relationshipShapeError(kind, source, target);
+    if (error) throw new TypeError(error);
+    const content = {source, target, kind};
+    for (const name of ['label', 'notes']) {
+      const value = String(values[name] || '').trim();
+      if (value) content[name] = value;
+    }
+    const evidence = commaValues(values.evidence_ids);
+    if (evidence.length) content.evidence_ids = evidence;
+    return content;
+  }
+
+  function relationPreview(values, labels) {
+    values = values || {};
+    labels = labels || {};
+    const source = {kind: String(values.source_kind || ''), id: String(values.source_id || '')};
+    const target = {kind: String(values.target_kind || ''), id: String(values.target_id || '')};
+    const kind = String(values.kind || '');
+    const error = relationshipShapeError(kind, source, target);
+    const sourceLabel = String(labels.source || source.id || 'Source');
+    const targetLabel = String(labels.target || target.id || 'Target');
+    const arrow = symmetricRelationshipKinds.has(kind) ? '↔' : '→';
+    const detail = symmetricRelationshipKinds.has(kind)
+      ? 'This symmetric relationship can be traversed in either direction.'
+      : 'This directed relationship will become part of normal knowledge traversal.';
+    return {valid: !error, path: `${sourceLabel} ${arrow} ${displayLabel(kind) || 'Relationship'} ${arrow} ${targetLabel}`, detail: error || detail};
+  }
+
   function graphDebugEnabled(search) {
     try { return new URLSearchParams(String(search || '')).get('graph_debug') === '1'; } catch (_) { return false; }
   }
@@ -463,6 +514,22 @@
       this.supersedeForm = shell.querySelector('[data-knowledge-supersede-form]');
       this.supersedeError = shell.querySelector('[data-knowledge-supersede-error]');
       this.supersedeSubmitButton = shell.querySelector('[data-knowledge-supersede-submit]');
+      this.linkCreateButton = shell.querySelector('[data-knowledge-link-create]');
+      this.linkDialog = shell.querySelector('[data-knowledge-link-dialog]');
+      this.linkForm = shell.querySelector('[data-knowledge-link-form]');
+      this.linkFormError = shell.querySelector('[data-knowledge-link-form-error]');
+      this.linkSubmitButton = shell.querySelector('[data-knowledge-link-submit]');
+      this.linkSourceLabel = shell.querySelector('[data-knowledge-link-source-label]');
+      this.linkSourceRef = shell.querySelector('[data-knowledge-link-source-ref]');
+      this.linkTargetLabel = shell.querySelector('[data-knowledge-link-target-label]');
+      this.linkTargetRef = shell.querySelector('[data-knowledge-link-target-ref]');
+      this.linkPreview = shell.querySelector('[data-knowledge-link-preview]');
+      this.linkPreviewPath = shell.querySelector('[data-knowledge-link-preview-path]');
+      this.linkPreviewDetail = shell.querySelector('[data-knowledge-link-preview-detail]');
+      this.linkActions = shell.querySelector('[data-knowledge-link-actions]');
+      this.linkUnlinkButton = shell.querySelector('[data-knowledge-link-unlink]');
+      this.linkRestoreButton = shell.querySelector('[data-knowledge-link-restore]');
+      this.linkMutationStatus = shell.querySelector('[data-knowledge-link-mutation-status]');
       this.filters = Object.fromEntries(Array.from(shell.querySelectorAll('[data-knowledge-filter]')).map(input => [input.dataset.knowledgeFilter, input]));
       this.inspector = {
         empty: shell.querySelector('[data-knowledge-inspector-empty]'),
@@ -552,6 +619,16 @@
       if (entryScopeInput) entryScopeInput.addEventListener('change', () => this.syncEntryScopeField());
       for (const button of shell.querySelectorAll('[data-knowledge-supersede-cancel]')) button.addEventListener('click', () => this.closeSupersedeEditor());
       if (this.supersedeForm) this.supersedeForm.addEventListener('submit', event => { event.preventDefault(); this.saveSupersedeEditor(); });
+      if (this.linkCreateButton) this.linkCreateButton.addEventListener('click', () => this.openLinkEditor());
+      for (const button of shell.querySelectorAll('[data-knowledge-link-cancel]')) button.addEventListener('click', () => this.closeLinkEditor());
+      const linkSwap = shell.querySelector('[data-knowledge-link-swap]');
+      if (linkSwap) linkSwap.addEventListener('click', () => this.swapLinkEndpoints());
+      if (this.linkForm) {
+        this.linkForm.addEventListener('submit', event => { event.preventDefault(); this.saveLinkEditor(); });
+        this.linkForm.elements.namedItem('kind').addEventListener('change', () => this.syncLinkPreview());
+      }
+      if (this.linkUnlinkButton) this.linkUnlinkButton.addEventListener('click', () => this.changeLinkLifecycle('unlink'));
+      if (this.linkRestoreButton) this.linkRestoreButton.addEventListener('click', () => this.changeLinkLifecycle('restore'));
       if (this.inspector.sendButton) this.inspector.sendButton.addEventListener('click', () => this.sendSelectionToChat());
       this.onPopState = () => {
         this.urlState = browserStateFromSearch(globalThis.location && globalThis.location.search);
@@ -901,10 +978,15 @@
     syncGraphSelection(snapshot) {
       snapshot = snapshot || {primary: null, items: []};
       const items = Array.isArray(snapshot.items) ? snapshot.items : [];
+      const relationReady = items.length === 2 && items.every(item => item.kind === 'node' && graphObjectForSelection(item));
       if (this.graphRenderer) this.graphRenderer.setSelections(items);
       if (this.graphSelectionCount) {
         this.graphSelectionCount.hidden = items.length < 2;
         this.graphSelectionCount.textContent = items.length < 2 ? '' : `${items.length} selected`;
+      }
+      if (this.linkCreateButton) {
+        this.linkCreateButton.disabled = !relationReady;
+        this.linkCreateButton.title = relationReady ? 'Preview a relationship between the selected nodes' : 'Select exactly two graph nodes to create a relationship';
       }
       this.updateGraphViewControls();
     }
@@ -951,9 +1033,10 @@
         this.graphContextHeading.textContent = count > 1 ? `${count} selected` : `${target.kind} · ${target.key}`;
       }
       if (this.graphContextPinLabel) this.graphContextPinLabel.textContent = pinned ? 'Release local pin' : 'Pin locally';
+      const relationReady = selection.length === 2 && selection.every(item => item.kind === 'node' && graphObjectForSelection(item));
       for (const button of this.graphContextButtons) {
         const action = button.dataset.knowledgeContextAction;
-        button.hidden = ['incoming', 'outgoing'].includes(action) ? !object : ['center', 'pin'].includes(action) ? !isNode : false;
+        button.hidden = action === 'relate' ? !relationReady : ['incoming', 'outgoing'].includes(action) ? !object : ['center', 'pin'].includes(action) ? !isNode : false;
       }
       this.graphContextMenu.hidden = false;
       const stage = this.graphContextMenu.parentElement;
@@ -984,6 +1067,10 @@
     runGraphContextAction(action) {
       const target = this.graphContextTarget || (this.graphAdapter && this.graphAdapter.selectionSnapshot().primary);
       if (!target) return false;
+      if (action === 'relate') {
+        this.closeGraphContextMenu();
+        return this.openLinkEditor();
+      }
       let changed = false;
       if (action === 'inspect') changed = this.applyPrimaryGraphSelection(target);
       if (action === 'incoming' || action === 'outgoing') changed = this.expandGraph(action, target);
@@ -1064,6 +1151,7 @@
         if (this.graphExpandActions) this.graphExpandActions.hidden = true;
         if (this.chunkActions) this.chunkActions.hidden = true;
         if (this.entryActions) this.entryActions.hidden = true;
+        if (this.linkActions) this.linkActions.hidden = true;
       }
     }
 
@@ -1249,6 +1337,12 @@
       if (this.entryRestoreButton) this.entryRestoreButton.hidden = !archivedEntry;
       if (this.entryDeleteButton) this.entryDeleteButton.hidden = !archivedEntry;
       if (this.entryMutationStatus) this.entryMutationStatus.textContent = '';
+      const linkSelected = objectKind === 'link';
+      const archivedLink = linkSelected && record.state === 'archived';
+      if (this.linkActions) this.linkActions.hidden = !linkSelected;
+      if (this.linkUnlinkButton) this.linkUnlinkButton.hidden = !linkSelected || archivedLink;
+      if (this.linkRestoreButton) this.linkRestoreButton.hidden = !archivedLink;
+      if (this.linkMutationStatus) this.linkMutationStatus.textContent = '';
       this.setInspectorMode('content');
       this.loadInspectorSupport(objectKind, record);
       this.shell.dispatchEvent(new CustomEvent('koder:knowledge-inspected', {
@@ -1645,6 +1739,153 @@
       }
     }
 
+    linkEndpointFromSelection(selection) {
+      const reference = graphObjectForSelection(selection);
+      if (!reference) return null;
+      const node = this.graphAdapter && this.graphAdapter.get('node', selection.key);
+      const attributes = node && node.attributes || {};
+      return {kind: reference.kind, id: reference.id, label: String(attributes.title || `${displayLabel(reference.kind)} ${reference.id}`)};
+    }
+
+    openLinkEditor() {
+      if (!this.linkDialog || !this.linkForm || !this.graphAdapter) return false;
+      const selected = this.graphAdapter.selectionSnapshot().items;
+      if (selected.length !== 2 || selected.some(item => item.kind !== 'node')) return false;
+      const endpoints = selected.map(item => this.linkEndpointFromSelection(item));
+      if (endpoints.some(endpoint => !endpoint)) return false;
+      this.linkEditorEndpoints = endpoints;
+      this.linkForm.reset();
+      if (this.linkFormError) { this.linkFormError.hidden = true; this.linkFormError.textContent = ''; }
+      this.syncLinkEndpointFields();
+      if (typeof this.linkDialog.showModal === 'function') this.linkDialog.showModal();
+      else this.linkDialog.setAttribute('open', '');
+      this.syncLinkPreview();
+      return true;
+    }
+
+    closeLinkEditor() {
+      if (!this.linkDialog) return;
+      if (typeof this.linkDialog.close === 'function') this.linkDialog.close();
+      else this.linkDialog.removeAttribute('open');
+      this.linkEditorEndpoints = null;
+    }
+
+    syncLinkEndpointFields() {
+      if (!this.linkForm || !Array.isArray(this.linkEditorEndpoints) || this.linkEditorEndpoints.length !== 2) return false;
+      const [source, target] = this.linkEditorEndpoints;
+      this.linkForm.elements.namedItem('source_kind').value = source.kind;
+      this.linkForm.elements.namedItem('source_id').value = source.id;
+      this.linkForm.elements.namedItem('target_kind').value = target.kind;
+      this.linkForm.elements.namedItem('target_id').value = target.id;
+      if (this.linkSourceLabel) this.linkSourceLabel.textContent = source.label;
+      if (this.linkSourceRef) this.linkSourceRef.textContent = `${source.kind}:${source.id}`;
+      if (this.linkTargetLabel) this.linkTargetLabel.textContent = target.label;
+      if (this.linkTargetRef) this.linkTargetRef.textContent = `${target.kind}:${target.id}`;
+      return true;
+    }
+
+    swapLinkEndpoints() {
+      if (!Array.isArray(this.linkEditorEndpoints) || this.linkEditorEndpoints.length !== 2) return false;
+      this.linkEditorEndpoints.reverse();
+      this.syncLinkEndpointFields();
+      this.syncLinkPreview();
+      return true;
+    }
+
+    syncLinkPreview() {
+      if (!this.linkForm) return false;
+      const values = Object.fromEntries(new FormData(this.linkForm).entries());
+      const endpoints = this.linkEditorEndpoints || [];
+      const preview = relationPreview(values, {source: endpoints[0] && endpoints[0].label, target: endpoints[1] && endpoints[1].label});
+      if (this.linkPreview) this.linkPreview.classList.toggle('is-invalid', !preview.valid);
+      if (this.linkPreviewPath) this.linkPreviewPath.textContent = preview.path;
+      if (this.linkPreviewDetail) this.linkPreviewDetail.textContent = preview.detail;
+      if (this.linkSubmitButton) this.linkSubmitButton.disabled = !preview.valid;
+      return preview.valid;
+    }
+
+    async saveLinkEditor() {
+      if (!this.linkForm || !this.client) return false;
+      if (this.linkFormError) { this.linkFormError.hidden = true; this.linkFormError.textContent = ''; }
+      const values = Object.fromEntries(new FormData(this.linkForm).entries());
+      values.review_approved = !!this.linkForm.elements.namedItem('review_approved').checked;
+      let content;
+      try { content = linkContentFromValues(values); }
+      catch (error) {
+        if (this.linkFormError) { this.linkFormError.hidden = false; this.linkFormError.textContent = String(error && error.message || error); }
+        return false;
+      }
+      if (this.linkSubmitButton) this.linkSubmitButton.disabled = true;
+      try {
+        const response = await this.client.createLink({link: content, review_approved: values.review_approved}, {channel: 'link-mutation'});
+        const link = response && response.link;
+        this.closeLinkEditor();
+        if (link) {
+          this.writeURLState({...this.urlState, objectKind: 'link', id: link.id}, false);
+          await this.refreshGraphAround(link.source, link.id);
+          await this.loadSelection();
+        }
+        return true;
+      } catch (error) {
+        const requestID = String(error && error.requestID || '');
+        const message = String(error && error.message || 'Knowledge could not create this relationship.');
+        if (this.linkFormError) { this.linkFormError.hidden = false; this.linkFormError.textContent = requestID ? `${message} Audit ID: ${requestID}` : message; }
+        return false;
+      } finally {
+        if (this.linkSubmitButton) this.linkSubmitButton.disabled = false;
+      }
+    }
+
+    async changeLinkLifecycle(action) {
+      const link = this.inspectedRecord;
+      if (!link || !this.inspectedObject || this.inspectedObject.kind !== 'link' || !['unlink', 'restore'].includes(action)) return false;
+      const verb = action === 'unlink' ? 'Unlink' : 'Restore';
+      if (typeof globalThis.confirm === 'function' && !globalThis.confirm(`${verb} “${link.label || displayLabel(link.kind)}”?`)) return false;
+      const buttons = [this.linkUnlinkButton, this.linkRestoreButton];
+      for (const button of buttons) if (button) button.disabled = true;
+      if (this.linkMutationStatus) this.linkMutationStatus.textContent = `${verb} in progress…`;
+      try {
+        const response = await this.client.linkLifecycle(link.id, action, {
+          expected_revision: link.revision.number, reason: action === 'unlink' ? 'Unlinked in Knowledge explorer' : 'Restored in Knowledge explorer',
+        }, {channel: 'link-mutation'});
+        const updated = response && response.link;
+        if (updated) {
+          await this.refreshGraphAround(updated.source, action === 'restore' ? updated.id : '');
+          this.renderInspector('link', updated);
+        }
+        return true;
+      } catch (error) {
+        const requestID = String(error && error.requestID || '');
+        const message = String(error && error.message || `Knowledge could not ${action} this relationship.`);
+        if (this.linkMutationStatus) this.linkMutationStatus.textContent = requestID ? `${message} Audit ID: ${requestID}` : message;
+        return false;
+      } finally {
+        for (const button of buttons) if (button) button.disabled = false;
+      }
+    }
+
+    async refreshGraphAround(reference, selectedLinkID) {
+      const request = reference && graphSnapshotRequest(reference.kind, reference.id);
+      if (!request || !this.graphAdapter) return false;
+      try {
+        const response = await this.client.graphSnapshot({...request, max_depth: 1, max_nodes: 100, max_edges: 200, time_limit_ms: 2000}, {channel: 'graph', timeoutMS: 10000});
+        this.graphAdapter.replaceSnapshot(response);
+        if (this.graphView) this.graphView.reset();
+        if (selectedLinkID && this.graphAdapter.has('edge', selectedLinkID)) this.graphAdapter.select('edge', selectedLinkID);
+        const counts = this.graphAdapter.counts();
+        this.setGraphState(response && response.page && response.page.truncated ? 'truncated' : 'ready', `${counts.nodes} ${counts.nodes === 1 ? 'node' : 'nodes'} and ${counts.edges} ${counts.edges === 1 ? 'relationship' : 'relationships'}.`);
+        if (this.graphLayout) this.graphLayout.request();
+        else if (this.graphViewport) this.graphViewport.fit({animate: false});
+        return true;
+      } catch (error) {
+        if (error && ['canceled', 'stale_response'].includes(error.code)) return false;
+        const requestID = String(error && error.requestID || '');
+        const message = String(error && error.message || 'The relationship changed, but the graph could not refresh.');
+        this.setGraphState('stale', requestID ? `${message} Audit ID: ${requestID}` : message);
+        return false;
+      }
+    }
+
     async expandGraph(direction, selection) {
       const selected = graphObjectForSelection(selection) || this.inspectedObject;
       const request = selected && graphExpansionRequest(selected.kind, selected.id, direction);
@@ -1828,5 +2069,5 @@
     }
   }
 
-  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, localDateTimeValue, entryContentFromValues, entryEditorValues, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
+  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, localDateTimeValue, entryContentFromValues, entryEditorValues, relationshipShapeError, linkContentFromValues, relationPreview, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
 });
