@@ -186,6 +186,22 @@ type Deps struct {
 	Life    ToolLifecycleService
 	Pending PendingToolService
 	Compact CompactService
+	Turns   CompletedTurnObserver
+}
+
+// CompletedTurn is the final sealed user/assistant boundary for one driver turn.
+// Observer implementations must return immediately and move expensive work to
+// their own bounded background queue.
+type CompletedTurn struct {
+	Session   domain.Session
+	Chat      domain.Chat
+	User      domain.TimelineItem
+	Assistant domain.TimelineItem
+	Items     []domain.TimelineItem
+}
+
+type CompletedTurnObserver interface {
+	ObserveCompletedTurn(CompletedTurn)
 }
 
 // TurnDriver owns backend-specific execution of one queued chat turn. The
@@ -3273,7 +3289,9 @@ func (r *Chat) handleStreamClosedForTurn(turn uint64) {
 	}
 	discardPartialAssistant := r.cancelState == CancelStateCancelling
 	shouldDispatch := r.status != StatusWaitingApproval && r.status != StatusWaitingInput
-	if r.status != StatusErrored && r.status != StatusWaitingApproval && r.status != StatusWaitingInput {
+	turnFinished := r.status != StatusErrored && r.status != StatusWaitingApproval && r.status != StatusWaitingInput
+	completed := turnFinished && !discardPartialAssistant
+	if turnFinished {
 		r.active = false
 		r.status = StatusIdle
 		r.statusText = "Idle"
@@ -3286,6 +3304,10 @@ func (r *Chat) handleStreamClosedForTurn(turn uint64) {
 			r.state.ClearPendingAssistant()
 		}
 	}
+	var completedTurn CompletedTurn
+	if completed && r.deps.Turns != nil && r.state != nil {
+		completedTurn, _ = latestCompletedTurn(r.session, r.chat, r.state.SnapshotTimeline())
+	}
 	r.cancelState = CancelStateNone
 	r.running = nil
 	r.activeUserSource = ""
@@ -3293,9 +3315,37 @@ func (r *Chat) handleStreamClosedForTurn(turn uint64) {
 	r.draining = false
 	r.mu.Unlock()
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, true, false))
+	if completedTurn.Assistant.ID != "" {
+		r.deps.Turns.ObserveCompletedTurn(completedTurn)
+	}
 	if shouldDispatch && !draining {
 		r.maybeDispatchNext()
 	}
+}
+
+func latestCompletedTurn(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) (CompletedTurn, bool) {
+	assistantIndex := -1
+	for index := len(timeline) - 1; index >= 0; index-- {
+		item := timeline[index]
+		message, ok := item.Content.(domain.AssistantMessage)
+		if ok && item.Sealed() && (strings.TrimSpace(message.Text) != "" || len(message.Tools) != 0) {
+			assistantIndex = index
+			break
+		}
+	}
+	if assistantIndex < 0 {
+		return CompletedTurn{}, false
+	}
+	for index := assistantIndex - 1; index >= 0; index-- {
+		item := timeline[index]
+		if _, ok := item.Content.(domain.UserMessage); ok && item.Sealed() {
+			return CompletedTurn{
+				Session: session, Chat: chat, User: item, Assistant: timeline[assistantIndex],
+				Items: slices.Clone(timeline[index : assistantIndex+1]),
+			}, true
+		}
+	}
+	return CompletedTurn{}, false
 }
 
 func (r *Chat) abortActiveTurnLocked() {

@@ -152,6 +152,13 @@ func runKoder(ctx context.Context, mode app.StartupMode, serveOpts serveConfig) 
 
 	engine := agent.New(cfg, st, recorder, mcpManager)
 	engine.SetKnowledgeService(knowledge.Service)
+	if knowledge.Service != nil {
+		if err := engine.StartKnowledgeCuration(ctx, knowledge.Service); err != nil {
+			slog.Warn("knowledge curation unavailable; continuing without background learning", "error", err)
+		} else {
+			defer engine.StopKnowledgeCuration()
+		}
+	}
 	return runWeb(ctx, cfg, engine, mode, recorder, serveOpts)
 }
 

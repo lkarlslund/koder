@@ -522,6 +522,7 @@ func New(cfg config.Config, engine *agent.Engine) *Controller {
 		engine.SetVoiceSessionControl(controller)
 		engine.SetPhoneDeviceControl(phone)
 		controller.attachKnowledgeEvents(engine.KnowledgeService())
+		controller.knowledgeCuration = engine.KnowledgeCuration()
 	}
 	return controller
 }

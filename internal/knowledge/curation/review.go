@@ -31,7 +31,20 @@ type ReviewManager struct {
 	candidates CandidateRepository
 	records    CurationRecordSource
 	applier    CandidateApplier
+	automatic  CandidateApplier
 	undoer     CandidateUndoer
+}
+
+func NewReviewManagerWithAutomatic(candidates CandidateRepository, records CurationRecordSource, reviewed CandidateApplier, automatic CandidateApplier, undoer CandidateUndoer) (*ReviewManager, error) {
+	manager, err := NewReviewManager(candidates, records, reviewed, undoer)
+	if err != nil {
+		return nil, err
+	}
+	if automatic == nil {
+		return nil, fmt.Errorf("%w: automatic candidate applier is required", ErrUnavailable)
+	}
+	manager.automatic = automatic
+	return manager, nil
 }
 
 func NewReviewManager(candidates CandidateRepository, records CurationRecordSource, applier CandidateApplier, undoer CandidateUndoer) (*ReviewManager, error) {
@@ -88,4 +101,30 @@ func (m *ReviewManager) Undo(ctx context.Context, candidateID CandidateID, expec
 		return StoredCandidate{}, fmt.Errorf("mark candidate undone after canonical rollback: %w", err)
 	}
 	return updated, nil
+}
+
+// ApplyAutomatic commits every currently pending automatic candidate in queue order.
+// It is called only by the background coordinator, never by the human review API.
+func (m *ReviewManager) ApplyAutomatic(ctx context.Context) error {
+	if m == nil || m.automatic == nil {
+		return ErrUnavailable
+	}
+	candidates, err := m.candidates.ListCandidates(ctx, []CandidateStatus{CandidateStatusPendingAutomatic}, 200)
+	if err != nil {
+		return err
+	}
+	for _, candidate := range candidates {
+		record, err := m.records.Get(ctx, candidate.RecordID)
+		if err != nil {
+			return fmt.Errorf("load automatic curation record: %w", err)
+		}
+		receipt, err := m.automatic.ApplyCandidate(ctx, record, candidate.Draft)
+		if err != nil {
+			return fmt.Errorf("apply automatic curation candidate: %w", err)
+		}
+		if _, err := m.candidates.MarkApplied(ctx, candidate.ID, candidate.Version, receipt); err != nil {
+			return fmt.Errorf("mark automatic curation candidate applied: %w", err)
+		}
+	}
+	return nil
 }

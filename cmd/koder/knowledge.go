@@ -79,6 +79,9 @@ func openConfiguredKnowledgeStore(stateDir string, cfg config.Knowledge, open kn
 		if err == nil {
 			_, err = service.EnsurePersonalChunk(context.Background())
 		}
+		if err == nil {
+			_, err = service.EnsureCuratedLearningChunk(context.Background())
+		}
 		if err != nil {
 			_ = subsystem.Store.Close()
 			subsystem.Store = nil

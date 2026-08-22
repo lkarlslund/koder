@@ -92,3 +92,47 @@ func TestReviewManagerAcceptRejectAndUndoLifecycle(t *testing.T) {
 		t.Fatalf("Reject() = %#v, %v", rejected, err)
 	}
 }
+
+func TestReviewManagerAppliesOnlyAutomaticCandidates(t *testing.T) {
+	t.Parallel()
+	now := queueTestTime
+	ids := []string{"00000000-0000-7000-8000-000000000131", "00000000-0000-7000-8000-000000000132"}
+	store := NewMemoryCandidateStoreWithSources(func() string {
+		value := ids[0]
+		ids = ids[1:]
+		return value
+	}, func() time.Time { return now })
+	recordID := knowledge.CurationRecordID("00000000-0000-7000-8000-000000000130")
+	automaticDraft := dedupTestDraft()
+	automaticDraft.Route = CandidateRouteAutomatic
+	reviewDraft := dedupTestDraft()
+	reviewDraft.Entry.Title = "Review this"
+	reviewDraft.Route = CandidateRoutePendingReview
+	if _, err := store.StoreCandidates(context.Background(), recordID, []CandidateDraft{automaticDraft, reviewDraft}); err != nil {
+		t.Fatal(err)
+	}
+	record := processingRecord()
+	record.ID, record.State, record.CandidateCount = recordID, knowledge.CurationStateCandidatesReady, 2
+	record.CompletedAt = record.UpdatedAt
+	automaticCalls := 0
+	automatic := candidateApplierFunc(func(context.Context, knowledge.CurationRecord, CandidateDraft) (ApplyReceipt, error) {
+		automaticCalls++
+		return ApplyReceipt{EntryID: "00000000-0000-7000-8000-000000000139", AfterRevision: 1, Created: true}, nil
+	})
+	manager, err := NewReviewManagerWithAutomatic(store, recordSourceFunc(func(context.Context, knowledge.CurationRecordID) (knowledge.CurationRecord, error) {
+		return record, nil
+	}), automatic, automatic, candidateUndoerFunc(func(context.Context, StoredCandidate) error { return nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ApplyAutomatic(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if automaticCalls != 1 {
+		t.Fatalf("automatic calls = %d", automaticCalls)
+	}
+	pending, err := manager.List(context.Background(), []CandidateStatus{CandidateStatusPendingReview}, 10)
+	if err != nil || len(pending) != 1 || pending[0].Draft.Entry.Title != "Review this" {
+		t.Fatalf("pending review = %#v, %v", pending, err)
+	}
+}

@@ -48,7 +48,17 @@ type TurnItem struct {
 }
 
 type TurnMaterial struct {
-	Items []TurnItem `json:"items"`
+	Items        []TurnItem    `json:"items"`
+	Destinations []Destination `json:"destinations,omitempty"`
+}
+
+// Destination is an authorized chunk the drafting model may target. Supplying
+// IDs explicitly prevents models from inventing or guessing canonical graph IDs.
+type Destination struct {
+	ID    knowledge.ChunkID   `json:"id"`
+	Title string              `json:"title"`
+	Kind  knowledge.ChunkKind `json:"kind"`
+	Scope knowledge.Scope     `json:"scope"`
 }
 
 // TurnLoader hydrates only the timeline items requested by the extractor.
@@ -59,7 +69,7 @@ type TurnLoader interface {
 // DraftModel is the only model-specific seam. Schema is supplied on every call so
 // adapters can use native structured output when available.
 type DraftModel interface {
-	Draft(context.Context, TurnMaterial, json.RawMessage) ([]byte, error)
+	Draft(context.Context, knowledge.CurationRecord, TurnMaterial, json.RawMessage) ([]byte, error)
 }
 
 // CandidateSink atomically stores a completely validated set of drafts.
@@ -142,7 +152,7 @@ func (e *ModelExtractor) Extract(ctx context.Context, record knowledge.CurationR
 	for _, item := range material.Items {
 		materialIDs[item.ID] = struct{}{}
 	}
-	raw, err := e.model.Draft(ctx, cloneTurnMaterial(material), append(json.RawMessage(nil), candidateDraftSchema...))
+	raw, err := e.model.Draft(ctx, record, cloneTurnMaterial(material), append(json.RawMessage(nil), candidateDraftSchema...))
 	if err != nil {
 		return ExtractionResult{}, fmt.Errorf("draft knowledge candidates: %w", err)
 	}
@@ -168,6 +178,7 @@ func (e *ModelExtractor) Extract(ctx context.Context, record knowledge.CurationR
 
 func cloneTurnMaterial(material TurnMaterial) TurnMaterial {
 	material.Items = append([]TurnItem(nil), material.Items...)
+	material.Destinations = append([]Destination(nil), material.Destinations...)
 	return material
 }
 
