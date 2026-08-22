@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/knowledge"
 	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 	"github.com/lkarlslund/koder/internal/knowledge/store/memory"
@@ -77,20 +78,15 @@ func TestConfiguredRequiredKnowledgeOpensAndCloses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openConfiguredKnowledgeStore() error = %v", err)
 	}
-	if !subsystem.Enabled || !subsystem.Required || subsystem.Store != memoryStore {
+	if !subsystem.Enabled || !subsystem.Required || subsystem.Store != memoryStore || subsystem.Service == nil {
 		t.Fatalf("openConfiguredKnowledgeStore() = %#v", subsystem)
 	}
-	if err := memoryStore.View(context.Background(), func(tx knowledgeStore.ReadTx) error {
-		personal, err := tx.Chunk(context.Background(), knowledgeService.PersonalMeChunkID)
-		if err != nil {
-			return err
-		}
-		if personal.Counts.Entries != 0 {
-			return fmt.Errorf("personal seed created %d entries", personal.Counts.Entries)
-		}
-		return nil
-	}); err != nil {
+	personal, err := subsystem.Service.Chunk(context.Background(), knowledgeService.PersonalMeChunkID)
+	if err != nil {
 		t.Fatalf("personal seed: %v", err)
+	}
+	if personal.Counts.Entries != 0 {
+		t.Fatalf("personal seed created %d entries", personal.Counts.Entries)
 	}
 	if err := subsystem.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -118,7 +114,14 @@ func TestKnowledgeOperationalHealthReportsStoreMetadataWithoutPath(t *testing.T)
 	t.Parallel()
 	memoryStore := memory.New()
 	t.Cleanup(func() { _ = memoryStore.Close() })
-	subsystem := optionalKnowledgeStore{Store: memoryStore, Enabled: true, Backend: "configured"}
+	service, err := knowledgeService.New(knowledgeService.Config{
+		Store: memoryStore,
+		Actor: knowledgeService.ContextActorSource(knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:koder"}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subsystem := optionalKnowledgeStore{Store: memoryStore, Service: service, Enabled: true, Backend: "configured"}
 	health := subsystem.OperationalHealth(context.Background())
 	if health.Status != "ready" || !health.Available || health.Backend != "memory" || health.SchemaVersion != 1 {
 		t.Fatalf("OperationalHealth() = %#v", health)

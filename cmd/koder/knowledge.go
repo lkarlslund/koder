@@ -19,6 +19,7 @@ type knowledgeStoreOpener func(string) (knowledgeStore.Store, error)
 // does not prevent the rest of Koder from starting.
 type optionalKnowledgeStore struct {
 	Store     knowledgeStore.Store
+	Service   *knowledgeService.Service
 	OpenError error
 	Enabled   bool
 	Required  bool
@@ -55,9 +56,9 @@ func openConfiguredKnowledgeStore(stateDir string, cfg config.Knowledge, open kn
 	if subsystem.OpenError == nil && subsystem.Store != nil {
 		service, err := knowledgeService.New(knowledgeService.Config{
 			Store: subsystem.Store,
-			Actor: func(context.Context) (knowledge.Actor, error) {
-				return knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:koder"}, nil
-			},
+			Actor: knowledgeService.ContextActorSource(knowledge.Actor{
+				Kind: knowledge.ActorKindSystem, ID: "system:koder",
+			}),
 		})
 		if err == nil {
 			_, err = service.EnsurePersonalChunk(context.Background())
@@ -66,6 +67,8 @@ func openConfiguredKnowledgeStore(stateDir string, cfg config.Knowledge, open kn
 			_ = subsystem.Store.Close()
 			subsystem.Store = nil
 			subsystem.OpenError = fmt.Errorf("seed built-in knowledge: %w", err)
+		} else {
+			subsystem.Service = service
 		}
 	}
 	if subsystem.OpenError != nil && cfg.Required {
@@ -93,7 +96,7 @@ func (s optionalKnowledgeStore) OperationalHealth(ctx context.Context) debugsrv.
 	if !s.Enabled {
 		return health
 	}
-	if s.OpenError != nil || s.Store == nil {
+	if s.OpenError != nil || s.Store == nil || s.Service == nil {
 		health.Status = "unavailable"
 		health.LastError = "knowledge store failed to open"
 		return health
