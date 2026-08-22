@@ -158,7 +158,8 @@ func TestSearchLexicalGraphExpansionIsBoundedAndCannotReintroduceFilteredEntries
 	}
 	for _, match := range result.Matches[1:] {
 		if match.LexicalScore != 0 || len(match.Terms) != 0 || len(match.GraphConnections) != 1 ||
-			match.GraphConnections[0].FromEntryID != root.ID {
+			match.GraphConnections[0].FromEntryID != root.ID || len(match.Reasons) != 1 ||
+			match.Reasons[0].Kind != SearchMatchReasonGraph {
 			t.Fatalf("expanded match = %#v", match)
 		}
 	}

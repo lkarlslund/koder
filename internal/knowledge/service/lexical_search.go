@@ -31,27 +31,34 @@ type LexicalSearchRequest struct {
 	Limit             int
 	Weights           LexicalFieldWeights
 	GraphExpansion    *GraphExpansionOptions
+	Cursor            string
 }
 
 type LexicalSearchResult struct {
 	Terms                []string             `json:"terms"`
 	Matches              []LexicalSearchMatch `json:"matches"`
 	GraphExpansion       *GraphExpansionStats `json:"graph_expansion,omitempty"`
+	Warnings             []SearchWarning      `json:"warnings,omitempty"`
+	Contradictions       []Contradiction      `json:"contradictions,omitempty"`
+	AsOf                 time.Time            `json:"as_of"`
+	NextCursor           string               `json:"next_cursor,omitempty"`
 	CorpusDocumentCount  uint64               `json:"corpus_document_count"`
 	MatchedDocumentCount uint64               `json:"matched_document_count"`
 }
 
 type LexicalSearchMatch struct {
-	EntryID          knowledge.EntryID  `json:"entry_id"`
-	LexicalScore     float64            `json:"lexical_score"`
-	Terms            []LexicalTermScore `json:"terms,omitempty"`
-	GraphConnections []GraphConnection  `json:"graph_connections,omitempty"`
-	Rank             SearchRank         `json:"rank"`
+	EntryID          knowledge.EntryID   `json:"entry_id"`
+	LexicalScore     float64             `json:"lexical_score"`
+	Terms            []LexicalTermScore  `json:"terms,omitempty"`
+	GraphConnections []GraphConnection   `json:"graph_connections,omitempty"`
+	Rank             SearchRank          `json:"rank"`
+	Reasons          []SearchMatchReason `json:"reasons"`
 }
 
 // SearchLexical applies authorization, exact scope, lifecycle, and temporal validity
 // filters to the corpus before deriving document frequencies and scoring matches.
 func (s *Service) SearchLexical(ctx context.Context, request LexicalSearchRequest) (LexicalSearchResult, error) {
+	explicitValidAt := !request.IncludeInvalid && !request.ValidAt.IsZero()
 	request, terms, err := s.normalizeLexicalSearchRequest(request)
 	if err != nil {
 		return LexicalSearchResult{}, err
@@ -62,6 +69,34 @@ func (s *Service) SearchLexical(ctx context.Context, request LexicalSearchReques
 	}
 	if err := actor.Validate(); err != nil {
 		return LexicalSearchResult{}, err
+	}
+	health, err := s.store.Health(ctx)
+	if err != nil {
+		return LexicalSearchResult{}, fmt.Errorf("read knowledge search index generation: %w", err)
+	}
+	binding, err := lexicalSearchCursorBinding(request, terms, actor, health.IndexGeneration, explicitValidAt)
+	if err != nil {
+		return LexicalSearchResult{}, err
+	}
+	searchAsOf := request.ValidAt
+	if searchAsOf.IsZero() {
+		searchAsOf = s.now().UTC().Round(0)
+	}
+	var cursorPosition *rankedSearchCursorPosition
+	if request.Cursor != "" {
+		position, err := knowledgeStore.DecodeCursor(request.Cursor, binding)
+		if err != nil {
+			return LexicalSearchResult{}, err
+		}
+		decoded, err := decodeRankedSearchCursorPosition(position)
+		if err != nil {
+			return LexicalSearchResult{}, err
+		}
+		cursorPosition = &decoded
+		searchAsOf = decoded.AsOf
+		if !request.IncludeInvalid && !explicitValidAt {
+			request.ValidAt = decoded.AsOf
+		}
 	}
 
 	entries, err := s.listLexicalCorpusEntries(ctx, request)
@@ -109,15 +144,38 @@ func (s *Service) SearchLexical(ctx context.Context, request LexicalSearchReques
 			return LexicalSearchResult{}, err
 		}
 	}
-	matches, err = s.rankSearchMatches(ctx, matches, allowed, request.Scopes, s.now().UTC().Round(0))
+	matches, err = s.rankSearchMatches(ctx, matches, allowed, request.Scopes, searchAsOf)
 	if err != nil {
 		return LexicalSearchResult{}, err
 	}
-	if len(matches) > request.Limit {
-		matches = matches[:request.Limit]
+	if cursorPosition != nil {
+		matches = rankedSearchMatchesAfter(matches, *cursorPosition)
+	}
+	pageMatches := matches
+	nextCursor := ""
+	if len(pageMatches) > request.Limit {
+		pageMatches = pageMatches[:request.Limit]
+		position, err := encodeRankedSearchCursorPosition(searchAsOf, pageMatches[len(pageMatches)-1])
+		if err != nil {
+			return LexicalSearchResult{}, err
+		}
+		nextCursor, err = knowledgeStore.EncodeCursor(binding, position)
+		if err != nil {
+			return LexicalSearchResult{}, err
+		}
+	}
+	pageMatches = addSearchMatchReasons(pageMatches)
+	warnings := searchWarnings(pageMatches, allowed, searchAsOf, expansion)
+	contradictions, contradictionTruncated, err := s.searchContradictions(ctx, pageMatches, allowed)
+	if err != nil {
+		return LexicalSearchResult{}, err
+	}
+	if contradictionTruncated {
+		warnings = append(warnings, SearchWarning{Code: SearchWarningContradictionsTruncated})
 	}
 	return LexicalSearchResult{
-		Terms: slices.Clone(terms), Matches: matches, GraphExpansion: expansion,
+		Terms: slices.Clone(terms), Matches: pageMatches, GraphExpansion: expansion,
+		Warnings: warnings, Contradictions: contradictions, AsOf: searchAsOf, NextCursor: nextCursor,
 		CorpusDocumentCount: uint64(len(entries)), MatchedDocumentCount: uint64(len(matched)),
 	}, nil
 }
@@ -130,6 +188,7 @@ func (s *Service) normalizeLexicalSearchRequest(request LexicalSearchRequest) (L
 	if err := validateLexicalFieldWeights(weights); err != nil {
 		return LexicalSearchRequest{}, nil, err
 	}
+	request.Weights = weights
 	postingRequest, err := knowledgeStore.NormalizeLexicalPostingRequest(knowledgeStore.LexicalPostingRequest{Terms: []string{request.Query}})
 	if err != nil {
 		return LexicalSearchRequest{}, nil, err

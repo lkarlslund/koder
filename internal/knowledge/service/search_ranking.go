@@ -89,28 +89,30 @@ func (s *Service) rankSearchMatches(ctx context.Context, matches []LexicalSearch
 		match.Rank = roundSearchRank(rank)
 		result[index] = match
 	}
-	slices.SortFunc(result, func(left, right LexicalSearchMatch) int {
-		if left.Rank.Total > right.Rank.Total {
-			return -1
-		}
-		if left.Rank.Total < right.Rank.Total {
-			return 1
-		}
-		if left.Rank.Verification > right.Rank.Verification {
-			return -1
-		}
-		if left.Rank.Verification < right.Rank.Verification {
-			return 1
-		}
-		if left.LexicalScore > right.LexicalScore {
-			return -1
-		}
-		if left.LexicalScore < right.LexicalScore {
-			return 1
-		}
-		return strings.Compare(string(left.EntryID), string(right.EntryID))
-	})
+	slices.SortFunc(result, compareRankedSearchMatches)
 	return result, nil
+}
+
+func compareRankedSearchMatches(left, right LexicalSearchMatch) int {
+	if left.Rank.Total > right.Rank.Total {
+		return -1
+	}
+	if left.Rank.Total < right.Rank.Total {
+		return 1
+	}
+	if left.Rank.Verification > right.Rank.Verification {
+		return -1
+	}
+	if left.Rank.Verification < right.Rank.Verification {
+		return 1
+	}
+	if left.LexicalScore > right.LexicalScore {
+		return -1
+	}
+	if left.LexicalScore < right.LexicalScore {
+		return 1
+	}
+	return strings.Compare(string(left.EntryID), string(right.EntryID))
 }
 
 func (s *Service) loadSearchEvidence(ctx context.Context, ids []knowledge.EntryID, entries map[knowledge.EntryID]knowledge.Entry) (map[knowledge.EntryID][]knowledge.EvidenceQuality, error) {
