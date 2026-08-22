@@ -61,3 +61,47 @@ ranking, graph expansion, or output limits change materially. Treat a clearly su
 curve, a 100,000-entry regression beyond roughly one second on comparable hardware, or a
 material increase above the recorded allocation as a release investigation rather than an
 automatic flaky-test threshold.
+
+## Explorer rendering at the graph limits
+
+The browser boundary test uses the real explorer application, Graphology store, Sigma
+renderer, virtualized accessible table, and Chromium canvas. It injects an API-shaped
+snapshot at the enforced maximum of 1,000 nodes and 2,000 directed relationships through
+the application's normal graph-selection path. It then selects 35 dispersed nodes,
+discards five warm-up selections, and records 30 interaction paints. Run it with:
+
+```sh
+go test ./internal/webui \
+  -run '^TestKnowledgeBrowserPerformanceAtSnapshotLimits$' -count=3 -v
+```
+
+These results were recorded on the same 2026-08-23 Linux/amd64 machine in a 1440 by 1000
+headless Chromium viewport. Chromium used its SwiftShader WebGL implementation, which is a
+repeatable software-rendering baseline rather than a claim about a particular phone or
+desktop GPU. The table reports the median of three independent browser runs; each
+interaction percentile is calculated within one run and then the median is reported:
+
+| Measurement at 1,000 nodes / 2,000 edges | Observed time |
+| --- | ---: |
+| API snapshot handoff to completed first paint | 56.7 ms |
+| Initial Sigma refresh work | 13.7 ms |
+| Selection interaction, p50 | 93.4 ms |
+| Selection interaction, p95 | 103.0 ms |
+| Selection interaction, maximum | 108.3 ms |
+| Sigma refresh work during selection, p50 | 5.3 ms |
+| Sigma refresh work during selection, p95 | 7.6 ms |
+| Sigma refresh work during selection, maximum | 8.0 ms |
+
+Snapshot-to-paint deliberately excludes network transfer and server traversal; those are
+bounded separately and the backend search/traversal cost is measured above. The interaction
+measurement includes waiting across browser animation frames, while the Sigma refresh
+measurement isolates the synchronous renderer work inside those frames. This distinction
+keeps frame scheduling in the user-visible number without misdiagnosing idle frame wait as
+graph processing.
+
+The automated test asserts the exact maximum object counts, the bounded/truncated UI state,
+and that every interaction causes a successful paint. Its timing ceilings are intentionally
+wide (15 seconds to first paint and one second at interaction p95) so ordinary CI hardware
+variation does not make performance verification flaky. Use the recorded values, browser
+traces, and renderer metrics to investigate meaningful regressions instead of tightening
+those safety ceilings to one workstation's current speed.
