@@ -40,7 +40,8 @@ same sanitization used for locally authored Knowledge.
 - `files` contains every payload file except `manifest.json`, sorted bytewise by `path`.
 - `sha256` is the lowercase hexadecimal SHA-256 of the exact uncompressed file bytes.
 - ZIP entries are ordered `manifest.json`, then payload paths in bytewise order. Exporters
-  use the package `created_at` instant for ZIP timestamps and do not add platform extras.
+  encode the package `created_at` instant in the ZIP's UTC DOS timestamp, rounded down to
+  its two-second resolution, and do not add platform extras.
 
 These rules make the logical package deterministic. KG-1102 defines and tests the exact
 ZIP encoding used by Koder's exporter.

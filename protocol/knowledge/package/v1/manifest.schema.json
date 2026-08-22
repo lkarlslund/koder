@@ -114,6 +114,14 @@
         "scope": {
           "$ref": "#/$defs/scope"
         },
+        "shared_with": {
+          "items": {
+            "$ref": "#/$defs/principal"
+          },
+          "maxItems": 256,
+          "type": "array",
+          "uniqueItems": true
+        },
         "source_policy": {
           "maxLength": 16384,
           "type": "string"
@@ -328,6 +336,22 @@
       "required": [
         "id",
         "name"
+      ],
+      "type": "object"
+    },
+    "principal": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/token"
+        },
+        "kind": {
+          "$ref": "#/$defs/token"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
       ],
       "type": "object"
     },
