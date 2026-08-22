@@ -94,6 +94,18 @@ API, tool, import, and browser tests share the canonical JSON fixtures under
 `protocol/knowledge/v1/testdata`. Transport adapters may add envelopes, but canonical
 objects and enum meanings remain owned by `internal/knowledge`.
 
+Browser graph JavaScript is verified through Node scripts owned by `internal/webui` and
+invoked from Go tests so the normal Go component suite cannot omit them:
+
+- `knowledge_graph_adapter_test.js` covers API snapshot-to-patch generation, validation,
+  selection, and incremental adapter application;
+- `knowledge_graph_store_test.js` covers patch checkpoints, stale generations, revision
+  gaps, refetch decisions, and preservation of local graph state;
+- `knowledge_graph_viewport_test.js` and `knowledge_graph_interactions_test.js` cover
+  camera fit/centering plus hide, isolate, reveal, undo, and restored visibility;
+- `knowledge_graph_layouts_test.js` and `knowledge_layout_worker_test.js` cover bounded
+  layout progress, cancellation, and rejection of stale worker generations.
+
 ## Identity, revisions, time, and cursors
 
 ### Stable identities
