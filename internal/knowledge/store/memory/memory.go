@@ -176,6 +176,22 @@ func (s *Store) ListEntries(ctx context.Context, request knowledgeStore.EntryLis
 	return knowledgeStore.PaginateEntries(entries, request, s.indexGeneration)
 }
 
+func (s *Store) ListAdjacentLinks(ctx context.Context, request knowledgeStore.AdjacentLinkListRequest) (knowledgeStore.LinkPage, error) {
+	if err := ctx.Err(); err != nil {
+		return knowledgeStore.LinkPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return knowledgeStore.LinkPage{}, knowledgeStore.ErrClosed
+	}
+	links := make([]knowledge.Link, 0, len(s.data.links))
+	for _, link := range s.data.links {
+		links = append(links, cloneLink(link))
+	}
+	return knowledgeStore.PaginateAdjacentLinks(links, request, s.indexGeneration)
+}
+
 func (s *Store) ListRevisions(ctx context.Context, request knowledgeStore.RevisionListRequest) (knowledgeStore.RevisionPage, error) {
 	if err := ctx.Err(); err != nil {
 		return knowledgeStore.RevisionPage{}, err
