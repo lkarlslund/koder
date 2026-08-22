@@ -19,6 +19,7 @@ const (
 	RoutePrefix         = "/api/knowledge/v1"
 	ChunkCollectionPath = RoutePrefix + "/chunks"
 	EntryCollectionPath = RoutePrefix + "/entries"
+	LinkCollectionPath  = RoutePrefix + "/links"
 	ExplorerURL         = "/knowledge"
 )
 
@@ -48,6 +49,18 @@ func EntryHistoryPath(entryID knowledge.EntryID) string {
 
 func EntryLifecyclePath(entryID knowledge.EntryID, action string) string {
 	return EntryPath(entryID) + "/" + url.PathEscape(strings.TrimSpace(action))
+}
+
+func LinkPath(linkID knowledge.LinkID) string {
+	return LinkCollectionPath + "/" + url.PathEscape(string(linkID))
+}
+
+func LinkLifecyclePath(linkID knowledge.LinkID, action string) string {
+	return LinkPath(linkID) + "/" + url.PathEscape(strings.TrimSpace(action))
+}
+
+func LinkHistoryPath(linkID knowledge.LinkID) string {
+	return LinkPath(linkID) + "/history"
 }
 
 type ResponseMetadata struct {

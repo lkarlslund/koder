@@ -53,6 +53,13 @@ func (s *Service) CreateLink(ctx context.Context, request CreateLinkRequest) (Cr
 	if err := knowledge.ValidateRelationshipShape(candidate.Kind, candidate.Source, candidate.Target); err != nil {
 		return CreateLinkResult{}, err
 	}
+	actor, err := s.actor(ctx)
+	if err != nil {
+		return CreateLinkResult{}, fmt.Errorf("resolve knowledge actor: %w", err)
+	}
+	if err := actor.Validate(); err != nil {
+		return CreateLinkResult{}, err
+	}
 	result := CreateLinkResult{Classification: classification}
 	err = s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
 		sourceChunk, err := resolveLinkEndpoint(ctx, tx, candidate.Source)
@@ -63,22 +70,15 @@ func (s *Service) CreateLink(ctx context.Context, request CreateLinkRequest) (Cr
 		if err != nil {
 			return fmt.Errorf("resolve link target: %w", err)
 		}
+		if err := s.authorizeLinkChunks(ctx, actor, ChunkPolicyLinkCreate, true, sourceChunk, targetChunk); err != nil {
+			return err
+		}
 		if err := validateEvidenceReferences(ctx, tx, candidate.EvidenceIDs); err != nil {
 			return err
 		}
 		if existing, err := tx.EquivalentLink(ctx, candidate); err == nil {
 			return &DuplicateLinkError{Existing: existing}
 		} else if !errors.Is(err, knowledgeStore.ErrNotFound) {
-			return err
-		}
-		actor, err := s.actor(ctx)
-		if err != nil {
-			return fmt.Errorf("resolve knowledge actor: %w", err)
-		}
-		if err := actor.Validate(); err != nil {
-			return err
-		}
-		if err := s.authorizeLinkChunks(ctx, actor, ChunkPolicyLinkCreate, true, sourceChunk, targetChunk); err != nil {
 			return err
 		}
 		now := s.now().UTC().Round(0)

@@ -41,29 +41,16 @@ func (s *Service) changeLinkState(ctx context.Context, request LinkLifecycleRequ
 		return LinkLifecycleResult{}, fmt.Errorf("%w: unsupported link target state %q", ErrInvalidLifecycleTransition, target)
 	}
 	result := LinkLifecycleResult{}
-	err := s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+	actor, err := s.actor(ctx)
+	if err != nil {
+		return LinkLifecycleResult{}, fmt.Errorf("resolve knowledge actor: %w", err)
+	}
+	if err := actor.Validate(); err != nil {
+		return LinkLifecycleResult{}, err
+	}
+	err = s.store.Update(ctx, func(tx knowledgeStore.WriteTx) error {
 		current, err := tx.Link(ctx, request.LinkID)
 		if err != nil {
-			return err
-		}
-		if current.Revision.Number != request.ExpectedRevision {
-			return fmt.Errorf("%w: link %s expected revision %d, current revision %d", knowledgeStore.ErrConflict, request.LinkID, request.ExpectedRevision, current.Revision.Number)
-		}
-		if current.State == target {
-			result.Link = current
-			return nil
-		}
-		if target == knowledge.LinkStateArchived && current.State != knowledge.LinkStateActive {
-			return fmt.Errorf("%w: link %s in state %q cannot be unlinked", ErrInvalidLifecycleTransition, request.LinkID, current.State)
-		}
-		if target == knowledge.LinkStateActive && current.State != knowledge.LinkStateArchived {
-			return fmt.Errorf("%w: link %s in state %q cannot be restored", ErrInvalidLifecycleTransition, request.LinkID, current.State)
-		}
-		actor, err := s.actor(ctx)
-		if err != nil {
-			return fmt.Errorf("resolve knowledge actor: %w", err)
-		}
-		if err := actor.Validate(); err != nil {
 			return err
 		}
 		sourceChunk, err := resolveLinkEndpoint(ctx, tx, current.Source)
@@ -82,6 +69,19 @@ func (s *Service) changeLinkState(ctx context.Context, request LinkLifecycleRequ
 		}
 		if err := s.authorizeLinkChunks(ctx, actor, action, requireActive, sourceChunk, targetChunk); err != nil {
 			return err
+		}
+		if current.Revision.Number != request.ExpectedRevision {
+			return fmt.Errorf("%w: link %s expected revision %d, current revision %d", knowledgeStore.ErrConflict, request.LinkID, request.ExpectedRevision, current.Revision.Number)
+		}
+		if current.State == target {
+			result.Link = current
+			return nil
+		}
+		if target == knowledge.LinkStateArchived && current.State != knowledge.LinkStateActive {
+			return fmt.Errorf("%w: link %s in state %q cannot be unlinked", ErrInvalidLifecycleTransition, request.LinkID, current.State)
+		}
+		if target == knowledge.LinkStateActive && current.State != knowledge.LinkStateArchived {
+			return fmt.Errorf("%w: link %s in state %q cannot be restored", ErrInvalidLifecycleTransition, request.LinkID, current.State)
 		}
 		now := s.now().UTC().Round(0)
 		if !now.After(current.UpdatedAt) {

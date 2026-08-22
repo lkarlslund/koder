@@ -98,6 +98,31 @@ func TestUnlinkChecksBothPoliciesButAllowsArchivedEndpointCleanup(t *testing.T) 
 	}
 }
 
+func TestLinkPolicyRunsBeforeDuplicateAndNoOpDetails(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service := newTestService(t, store, nil)
+	created := createServiceLinkFixture(t, ctx, service)
+
+	service.chunkPolicy = denyChunkAction(ChunkPolicyLinkCreate)
+	_, err := service.CreateLink(ctx, CreateLinkRequest{Link: knowledge.Link{
+		Source: created.Source, Target: created.Target, Kind: created.Kind,
+	}})
+	var duplicate *DuplicateLinkError
+	if !errors.Is(err, ErrChunkPolicyDenied) || errors.As(err, &duplicate) {
+		t.Fatalf("denied duplicate create error = %v, duplicate=%#v", err, duplicate)
+	}
+
+	service.chunkPolicy = denyChunkAction(ChunkPolicyLinkRestore)
+	if _, err := service.RestoreLink(ctx, LinkLifecycleRequest{
+		LinkID: created.ID, ExpectedRevision: created.Revision.Number,
+	}); !errors.Is(err, ErrChunkPolicyDenied) {
+		t.Fatalf("denied no-op restore error = %v, want ErrChunkPolicyDenied", err)
+	}
+}
+
 func TestChunkMutationsEnforceChunkPolicy(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
