@@ -20,6 +20,7 @@ var codexAdditionalTools = map[tools.ID]struct{}{
 	tools.Chats: {}, tools.ChatStatus: {},
 	tools.Sessions:    {},
 	tools.Present:     {},
+	tools.Knowledge:   {},
 	tools.PhoneDevice: {}, tools.PhoneLocation: {}, tools.PhoneContacts: {}, tools.PhoneCalendar: {}, tools.PhoneMessages: {}, tools.PhoneCalls: {}, tools.PhoneNotifications: {},
 	tools.PhoneClock: {}, tools.PhoneClipboard: {}, tools.PhoneApps: {}, tools.PhoneMedia: {}, tools.PhoneShare: {}, tools.PhoneOpen: {}, tools.PhonePhotos: {},
 }
@@ -50,18 +51,29 @@ func (e *Engine) codexToolDefinitions(ctx context.Context, rt *chatpkg.Chat) ([]
 		if _, allowed := codexAdditionalTools[id]; !allowed {
 			continue
 		}
-		definition, ok := tools.DefinitionFor(id, runtime)
+		definition, ok := codexAdditionalToolDefinition(id, runtime)
 		if !ok {
 			continue
 		}
-		definitions = append(definitions, codexdriver.DynamicTool{
-			Type:        "function",
-			Name:        definition.Function.Name,
-			Description: definition.Function.Description,
-			InputSchema: append(json.RawMessage(nil), definition.Function.Parameters...),
-		})
+		definitions = append(definitions, definition)
 	}
 	return definitions, nil
+}
+
+func codexAdditionalToolDefinition(id tools.ID, runtime tools.Runtime) (codexdriver.DynamicTool, bool) {
+	if _, allowed := codexAdditionalTools[id]; !allowed {
+		return codexdriver.DynamicTool{}, false
+	}
+	definition, ok := tools.DefinitionFor(id, runtime)
+	if !ok {
+		return codexdriver.DynamicTool{}, false
+	}
+	return codexdriver.DynamicTool{
+		Type:        "function",
+		Name:        definition.Function.Name,
+		Description: definition.Function.Description,
+		InputSchema: append(json.RawMessage(nil), definition.Function.Parameters...),
+	}, true
 }
 
 func (e *Engine) codexToolCall(ctx context.Context, rt *chatpkg.Chat, name, callID string, arguments json.RawMessage) (domain.ToolResult, error) {
