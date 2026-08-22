@@ -63,7 +63,7 @@ type Verification struct {
 	Method      string             `json:"method,omitempty"`
 	EvidenceIDs []EvidenceID       `json:"evidence_ids,omitempty"`
 	Actor       Actor              `json:"actor"`
-	VerifiedAt  time.Time          `json:"verified_at,omitempty"`
+	VerifiedAt  time.Time          `json:"verified_at,omitzero"`
 }
 
 // Revision identifies the current immutable revision of a mutable canonical object.
@@ -100,16 +100,16 @@ type Chunk struct {
 	State           ChunkState     `json:"state"`
 	SchemaVersion   uint32         `json:"schema_version"`
 	Revision        Revision       `json:"revision"`
-	Publisher       Publisher      `json:"publisher,omitempty"`
+	Publisher       Publisher      `json:"publisher,omitzero"`
 	License         string         `json:"license,omitempty"`
 	SourcePolicy    string         `json:"source_policy,omitempty"`
 	DependencyIDs   []ChunkID      `json:"dependency_ids,omitempty"`
 	MinKoderVersion string         `json:"min_koder_version,omitempty"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
-	LastUsedAt      time.Time      `json:"last_used_at,omitempty"`
-	LastVerifiedAt  time.Time      `json:"last_verified_at,omitempty"`
-	ReviewAfter     time.Time      `json:"review_after,omitempty"`
+	LastUsedAt      time.Time      `json:"last_used_at,omitzero"`
+	LastVerifiedAt  time.Time      `json:"last_verified_at,omitzero"`
+	ReviewAfter     time.Time      `json:"review_after,omitzero"`
 	Counts          ChunkCounts    `json:"counts"`
 }
 
@@ -124,14 +124,14 @@ type Entry struct {
 	Aliases        []string       `json:"aliases,omitempty"`
 	Tags           []string       `json:"tags,omitempty"`
 	Scope          Scope          `json:"scope"`
-	Applicability  Applicability  `json:"applicability,omitempty"`
+	Applicability  Applicability  `json:"applicability,omitzero"`
 	Risk           []RiskClass    `json:"risk,omitempty"`
 	Confidence     float32        `json:"confidence,omitempty"`
 	Verification   Verification   `json:"verification"`
-	ValidFrom      time.Time      `json:"valid_from,omitempty"`
-	ValidUntil     time.Time      `json:"valid_until,omitempty"`
-	ObservedAt     time.Time      `json:"observed_at,omitempty"`
-	ReviewAfter    time.Time      `json:"review_after,omitempty"`
+	ValidFrom      time.Time      `json:"valid_from,omitzero"`
+	ValidUntil     time.Time      `json:"valid_until,omitzero"`
+	ObservedAt     time.Time      `json:"observed_at,omitzero"`
+	ReviewAfter    time.Time      `json:"review_after,omitzero"`
 	State          EntryState     `json:"state"`
 	SupersededByID EntryID        `json:"superseded_by_id,omitempty"`
 	EvidenceIDs    []EvidenceID   `json:"evidence_ids,omitempty"`
@@ -139,7 +139,7 @@ type Entry struct {
 	Revision       Revision       `json:"revision"`
 	CreatedAt      time.Time      `json:"created_at"`
 	UpdatedAt      time.Time      `json:"updated_at"`
-	LastUsedAt     time.Time      `json:"last_used_at,omitempty"`
+	LastUsedAt     time.Time      `json:"last_used_at,omitzero"`
 }
 
 // ObjectRef identifies a knowledge graph endpoint or revision owner.
@@ -170,7 +170,7 @@ type Source struct {
 	Title       string    `json:"title,omitempty"`
 	ContentHash string    `json:"content_hash,omitempty"`
 	Excerpt     string    `json:"excerpt,omitempty"`
-	AccessedAt  time.Time `json:"accessed_at,omitempty"`
+	AccessedAt  time.Time `json:"accessed_at,omitzero"`
 }
 
 // Evidence is immutable support for a knowledge entry revision or link.
@@ -179,7 +179,7 @@ type Evidence struct {
 	Type       EvidenceType    `json:"type"`
 	Quality    EvidenceQuality `json:"quality"`
 	Source     Source          `json:"source"`
-	ObservedAt time.Time       `json:"observed_at,omitempty"`
+	ObservedAt time.Time       `json:"observed_at,omitzero"`
 	Actor      Actor           `json:"actor"`
 	CreatedAt  time.Time       `json:"created_at"`
 }

@@ -1,0 +1,56 @@
+{
+  "id": "019f132e-4f3a-739a-9ab2-5198dcd19e67",
+  "title": "Linux partition tools",
+  "description": "Verified tools and procedures for partitioning Linux disks.",
+  "aliases": [
+    "disk partitioning"
+  ],
+  "tags": [
+    "linux",
+    "storage"
+  ],
+  "kind": "environment",
+  "scope": {
+    "kind": "environment",
+    "selector": "host:workstation"
+  },
+  "visibility": "private",
+  "language": "en",
+  "locale": "en-DK",
+  "domain": "system_administration",
+  "risk": [
+    "physical_safety"
+  ],
+  "state": "active",
+  "schema_version": 1,
+  "revision": {
+    "number": 2,
+    "id": "01a01688-fc5d-7f7d-8bb8-de244977f8a1",
+    "actor": {
+      "kind": "system",
+      "id": "koder"
+    },
+    "reason": "Verified the available partitioning tool",
+    "created_at": "2026-08-22T12:00:00Z"
+  },
+  "publisher": {
+    "id": "local:koder",
+    "name": "Local Koder"
+  },
+  "license": "private",
+  "source_policy": "Require direct observation and the installed tool manual.",
+  "dependency_ids": [
+    "019f132e-4f3a-739a-9ab2-5198dcd19e68"
+  ],
+  "min_koder_version": "r1000",
+  "created_at": "2026-08-22T10:00:00Z",
+  "updated_at": "2026-08-22T12:00:00Z",
+  "last_used_at": "2026-08-22T12:30:00Z",
+  "last_verified_at": "2026-08-22T11:55:00Z",
+  "review_after": "2026-11-22T00:00:00Z",
+  "counts": {
+    "entries": 2,
+    "links": 1,
+    "evidence": 1
+  }
+}
