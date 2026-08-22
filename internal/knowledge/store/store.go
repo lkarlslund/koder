@@ -49,6 +49,7 @@ type ReadTx interface {
 	Entry(context.Context, knowledge.EntryID) (knowledge.Entry, error)
 	EntryDeletionBlockers(context.Context, knowledge.EntryID) (EntryDeletionBlockers, error)
 	Link(context.Context, knowledge.LinkID) (knowledge.Link, error)
+	EquivalentLink(context.Context, knowledge.Link) (knowledge.Link, error)
 	Evidence(context.Context, knowledge.EvidenceID) (knowledge.Evidence, error)
 	EvidenceBySource(context.Context, string, string) (knowledge.Evidence, error)
 }

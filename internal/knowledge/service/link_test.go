@@ -126,3 +126,65 @@ func TestCreateLinkClassifiesTextBeforePersistence(t *testing.T) {
 		t.Fatalf("rejected secret link stats = %#v, %v", stats, err)
 	}
 }
+
+func TestCreateLinkRejectsSymmetricDuplicatesInEitherOrder(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service := newTestService(t, store, nil)
+	first, _ := service.CreateChunk(ctx, CreateChunkRequest{Chunk: testChunkCandidate()})
+	secondCandidate := testChunkCandidate()
+	secondCandidate.Title = "Second"
+	second, _ := service.CreateChunk(ctx, CreateChunkRequest{Chunk: secondCandidate})
+	left := knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(first.Chunk.ID)}
+	right := knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(second.Chunk.ID)}
+	created, err := service.CreateLink(ctx, CreateLinkRequest{Link: knowledge.Link{
+		Source: right, Target: left, Kind: knowledge.LinkKindRelatedTo,
+	}})
+	if err != nil || created.Link.Source != left || created.Link.Target != right {
+		t.Fatalf("canonical CreateLink() = %#v, %v", created, err)
+	}
+	for _, endpoints := range [][2]knowledge.ObjectRef{{left, right}, {right, left}} {
+		_, err := service.CreateLink(ctx, CreateLinkRequest{Link: knowledge.Link{
+			Source: endpoints[0], Target: endpoints[1], Kind: knowledge.LinkKindRelatedTo,
+		}})
+		var duplicate *DuplicateLinkError
+		if !errors.As(err, &duplicate) || duplicate.Existing.ID != created.Link.ID {
+			t.Fatalf("duplicate error = %v, detail=%#v", err, duplicate)
+		}
+	}
+	if _, err := service.Unlink(ctx, LinkLifecycleRequest{LinkID: created.Link.ID, ExpectedRevision: 1}); err != nil {
+		t.Fatalf("Unlink(): %v", err)
+	}
+	if _, err := service.CreateLink(ctx, CreateLinkRequest{Link: knowledge.Link{
+		Source: left, Target: right, Kind: knowledge.LinkKindRelatedTo,
+	}}); !errors.Is(err, ErrDuplicateLink) {
+		t.Fatalf("duplicate of archived relationship error = %v", err)
+	}
+}
+
+func TestCreateLinkKeepsReverseDirectedRelationshipsDistinct(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service := newTestService(t, store, nil)
+	first, _ := service.CreateChunk(ctx, CreateChunkRequest{Chunk: testChunkCandidate()})
+	secondCandidate := testChunkCandidate()
+	secondCandidate.Title = "Second"
+	second, _ := service.CreateChunk(ctx, CreateChunkRequest{Chunk: secondCandidate})
+	left := knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(first.Chunk.ID)}
+	right := knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(second.Chunk.ID)}
+	for _, endpoints := range [][2]knowledge.ObjectRef{{left, right}, {right, left}} {
+		if _, err := service.CreateLink(ctx, CreateLinkRequest{Link: knowledge.Link{
+			Source: endpoints[0], Target: endpoints[1], Kind: knowledge.LinkKindRequires,
+		}}); err != nil {
+			t.Fatalf("CreateLink(%v): %v", endpoints, err)
+		}
+	}
+	stats, err := store.ScanCanonical(ctx, func(knowledgeStore.CanonicalRecord) error { return nil })
+	if err != nil || stats.Links != 2 {
+		t.Fatalf("directed link stats = %#v, %v", stats, err)
+	}
+}

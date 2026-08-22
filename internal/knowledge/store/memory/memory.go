@@ -337,6 +337,23 @@ func (tx *transaction) Link(ctx context.Context, id knowledge.LinkID) (knowledge
 	return cloneLink(value), nil
 }
 
+func (tx *transaction) EquivalentLink(ctx context.Context, candidate knowledge.Link) (knowledge.Link, error) {
+	if err := tx.check(ctx, false); err != nil {
+		return knowledge.Link{}, err
+	}
+	if err := knowledge.ValidateRelationshipShape(candidate.Kind, candidate.Source, candidate.Target); err != nil {
+		return knowledge.Link{}, err
+	}
+	candidate = knowledge.NormalizeLink(candidate)
+	for _, link := range tx.data.links {
+		normalized := knowledge.NormalizeLink(link)
+		if normalized.Kind == candidate.Kind && normalized.Source == candidate.Source && normalized.Target == candidate.Target {
+			return cloneLink(link), nil
+		}
+	}
+	return knowledge.Link{}, fmt.Errorf("%w: equivalent link", knowledgeStore.ErrNotFound)
+}
+
 func (tx *transaction) Evidence(ctx context.Context, id knowledge.EvidenceID) (knowledge.Evidence, error) {
 	if err := tx.check(ctx, false); err != nil {
 		return knowledge.Evidence{}, err
@@ -502,6 +519,11 @@ func (tx *transaction) PutLink(ctx context.Context, value knowledge.Link, expect
 	}
 	current, exists := tx.data.links[value.ID]
 	if err := revisioncheck.CheckPut("link", string(value.ID), expectedRevision, value.Revision.Number, current.Revision.Number, exists); err != nil {
+		return err
+	}
+	if equivalent, err := tx.EquivalentLink(ctx, value); err == nil && equivalent.ID != value.ID {
+		return fmt.Errorf("%w: link %s duplicates %s", knowledgeStore.ErrConflict, value.ID, equivalent.ID)
+	} else if err != nil && !errors.Is(err, knowledgeStore.ErrNotFound) {
 		return err
 	}
 	tx.data.links[value.ID] = cloneLink(value)

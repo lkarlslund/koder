@@ -407,6 +407,34 @@ func assertIndexPresence(t *testing.T, s *Store, name string, suffix []byte, wan
 	}
 }
 
+func TestTransactionRejectsEquivalentSymmetricLinksAndRollsBack(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open(): %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	first := txLink()
+	reversed := first
+	reversed.ID = "01a020a6-84d5-7b03-a995-bb2cfb4528b1"
+	reversed.Source, reversed.Target = first.Target, first.Source
+	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+		if err := tx.PutLink(ctx, first, 0); err != nil {
+			return err
+		}
+		return tx.PutLink(ctx, reversed, 0)
+	}); !errors.Is(err, knowledgeStore.ErrConflict) {
+		t.Fatalf("duplicate transaction error = %v, want ErrConflict", err)
+	}
+	if err := s.View(ctx, func(tx knowledgeStore.ReadTx) error {
+		_, err := tx.Link(ctx, first.ID)
+		return err
+	}); !errors.Is(err, knowledgeStore.ErrNotFound) {
+		t.Fatalf("first link after rollback error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestTransactionExpiresAfterCallbackAndStoreClose(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

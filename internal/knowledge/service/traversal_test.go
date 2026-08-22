@@ -32,7 +32,7 @@ func TestTraverseBreadthFirstDetectsCycles(t *testing.T) {
 	}
 	for index := range refs {
 		if _, err := service.CreateLink(ctx, CreateLinkRequest{Link: knowledge.Link{
-			Source: refs[index], Target: refs[(index+1)%len(refs)], Kind: knowledge.LinkKindRelatedTo,
+			Source: refs[index], Target: refs[(index+1)%len(refs)], Kind: knowledge.LinkKindRequires,
 		}}); err != nil {
 			t.Fatalf("CreateLink(%d): %v", index, err)
 		}

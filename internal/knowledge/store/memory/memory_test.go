@@ -273,6 +273,30 @@ func TestStoreTracksEntryAndLinkRevisionHistory(t *testing.T) {
 	}
 }
 
+func TestStoreRejectsEquivalentSymmetricLinksAtomically(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+	first := link()
+	reversed := first
+	reversed.ID = "01a020a6-84d5-7b03-a995-bb2cfb4528b1"
+	reversed.Source, reversed.Target = first.Target, first.Source
+	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+		if err := tx.PutLink(ctx, first, 0); err != nil {
+			return err
+		}
+		return tx.PutLink(ctx, reversed, 0)
+	}); !errors.Is(err, knowledgeStore.ErrConflict) {
+		t.Fatalf("duplicate transaction error = %v, want ErrConflict", err)
+	}
+	if _, err := s.ListRevisions(ctx, knowledgeStore.RevisionListRequest{
+		Object: knowledge.ObjectRef{Kind: knowledge.ObjectKindLink, ID: string(first.ID)},
+	}); !errors.Is(err, knowledgeStore.ErrNotFound) {
+		t.Fatalf("rolled-back first link history error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestStoreClonesMutableRecordData(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

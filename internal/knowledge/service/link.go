@@ -2,11 +2,26 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 )
+
+var ErrDuplicateLink = errors.New("duplicate knowledge link")
+
+type DuplicateLinkError struct {
+	Existing knowledge.Link
+}
+
+func (e *DuplicateLinkError) Error() string {
+	return fmt.Sprintf("%s: existing link %s", ErrDuplicateLink, e.Existing.ID)
+}
+
+func (e *DuplicateLinkError) Unwrap() []error {
+	return []error{ErrDuplicateLink, knowledgeStore.ErrConflict}
+}
 
 type CreateLinkRequest struct {
 	Link           knowledge.Link
@@ -49,6 +64,11 @@ func (s *Service) CreateLink(ctx context.Context, request CreateLinkRequest) (Cr
 			return fmt.Errorf("resolve link target: %w", err)
 		}
 		if err := validateEvidenceReferences(ctx, tx, candidate.EvidenceIDs); err != nil {
+			return err
+		}
+		if existing, err := tx.EquivalentLink(ctx, candidate); err == nil {
+			return &DuplicateLinkError{Existing: existing}
+		} else if !errors.Is(err, knowledgeStore.ErrNotFound) {
 			return err
 		}
 		actor, err := s.actor(ctx)

@@ -195,6 +195,40 @@ func (tx *transaction) Link(ctx context.Context, id knowledge.LinkID) (knowledge
 	return readRecord[knowledge.Link](tx.reader, linkKey(string(id)), "link", string(id))
 }
 
+func (tx *transaction) EquivalentLink(ctx context.Context, candidate knowledge.Link) (knowledge.Link, error) {
+	if err := tx.check(ctx, false); err != nil {
+		return knowledge.Link{}, err
+	}
+	if err := knowledge.ValidateRelationshipShape(candidate.Kind, candidate.Source, candidate.Target); err != nil {
+		return knowledge.Link{}, err
+	}
+	candidate = knowledge.NormalizeLink(candidate)
+	lower, upper := prefixBounds(linkPrefix())
+	iter, err := tx.reader.NewIter(&cockroachpebble.IterOptions{LowerBound: lower, UpperBound: upper})
+	if err != nil {
+		return knowledge.Link{}, fmt.Errorf("find equivalent knowledge link: %w", err)
+	}
+	defer func() { _ = iter.Close() }()
+	for iter.First(); iter.Valid(); iter.Next() {
+		if err := ctx.Err(); err != nil {
+			return knowledge.Link{}, err
+		}
+		id := knowledge.LinkID(string(iter.Key()[len(linkPrefix()):]))
+		link, err := decodeRecord[knowledge.Link](iter.Value(), "link", string(id))
+		if err != nil {
+			return knowledge.Link{}, err
+		}
+		normalized := knowledge.NormalizeLink(link)
+		if normalized.Kind == candidate.Kind && normalized.Source == candidate.Source && normalized.Target == candidate.Target {
+			return link, nil
+		}
+	}
+	if err := iter.Error(); err != nil {
+		return knowledge.Link{}, fmt.Errorf("find equivalent knowledge link: %w", err)
+	}
+	return knowledge.Link{}, fmt.Errorf("%w: equivalent link", knowledgeStore.ErrNotFound)
+}
+
 func (tx *transaction) Evidence(ctx context.Context, id knowledge.EvidenceID) (knowledge.Evidence, error) {
 	if err := tx.check(ctx, false); err != nil {
 		return knowledge.Evidence{}, err
@@ -498,6 +532,11 @@ func (tx *transaction) PutLink(ctx context.Context, value knowledge.Link, expect
 		return err
 	}
 	if err := revision.CheckPut("link", string(value.ID), expectedRevision, value.Revision.Number, current.Revision.Number, exists); err != nil {
+		return err
+	}
+	if equivalent, err := tx.EquivalentLink(ctx, value); err == nil && equivalent.ID != value.ID {
+		return fmt.Errorf("%w: link %s duplicates %s", knowledgeStore.ErrConflict, value.ID, equivalent.ID)
+	} else if err != nil && !errors.Is(err, knowledgeStore.ErrNotFound) {
 		return err
 	}
 	if err := tx.updateLinkIndexes(ctx, optionalLink(current, exists), &value); err != nil {

@@ -1,5 +1,14 @@
 package knowledge
 
+func IsSymmetricLinkKind(kind LinkKind) bool {
+	switch kind {
+	case LinkKindRelatedTo, LinkKindAlternativeTo, LinkKindContradicts:
+		return true
+	default:
+		return false
+	}
+}
+
 // ValidateRelationshipShape enforces the endpoint arity and direction defined by the
 // initial relationship vocabulary. Existence and cross-chunk authorization belong to the
 // service because they require canonical reads and actor policy.

@@ -131,3 +131,17 @@ func TestNormalizeEntry(t *testing.T) {
 		t.Fatalf("NormalizeEntry() locales = %#v", got.Applicability.Locales)
 	}
 }
+
+func TestNormalizeLinkCanonicalizesOnlySymmetricEndpoints(t *testing.T) {
+	t.Parallel()
+	low := ObjectRef{Kind: ObjectKindChunk, ID: string(testChunkID)}
+	high := ObjectRef{Kind: ObjectKindEntry, ID: string(testEntryID)}
+	symmetric := NormalizeLink(Link{Source: high, Target: low, Kind: LinkKindRelatedTo, Label: "  Same   topic "})
+	if symmetric.Source != low || symmetric.Target != high || symmetric.Label != "Same topic" {
+		t.Fatalf("normalized symmetric link = %#v", symmetric)
+	}
+	directed := NormalizeLink(Link{Source: high, Target: low, Kind: LinkKindRequires})
+	if directed.Source != high || directed.Target != low {
+		t.Fatalf("directed endpoints were reordered: %#v", directed)
+	}
+}

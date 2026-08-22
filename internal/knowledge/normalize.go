@@ -183,5 +183,18 @@ func NormalizeEntry(value Entry) (Entry, error) {
 func NormalizeLink(value Link) Link {
 	value.Label = NormalizeTitle(value.Label)
 	value.Notes = strings.TrimSpace(value.Notes)
+	if IsSymmetricLinkKind(value.Kind) && compareObjectRefs(value.Source, value.Target) > 0 {
+		value.Source, value.Target = value.Target, value.Source
+	}
 	return value
+}
+
+func compareObjectRefs(left, right ObjectRef) int {
+	if left.Kind < right.Kind {
+		return -1
+	}
+	if left.Kind > right.Kind {
+		return 1
+	}
+	return strings.Compare(left.ID, right.ID)
 }
