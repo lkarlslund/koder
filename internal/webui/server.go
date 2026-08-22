@@ -165,6 +165,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 		s.debug.SetDebugAPI(s.URL())
 		debugServer := debugsrv.NewServer(controller, s.debug)
 		debugServer.Register(mux)
+		mux.HandleFunc("/debug/knowledge", s.handleKnowledgeDebug)
 	}
 	s.server = &http.Server{
 		Handler: mux, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second,

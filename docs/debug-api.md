@@ -33,6 +33,7 @@ Use the host and port from that URL:
 BASE=http://127.0.0.1:7979
 curl -sS "$BASE/debug/health" | jq .
 curl -sS "$BASE/debug/runtime" | jq .
+curl -sS "$BASE/debug/knowledge" | jq .
 curl -sS "$BASE/debug/sessions" | jq .
 ```
 
@@ -144,6 +145,25 @@ The response is the same shape as `GET /debug/runtime`.
 
 Deep debug is intended for short-lived investigation. It can increase retained
 diagnostic detail and should not be left on casually.
+
+### `GET /debug/knowledge`
+
+Returns the authorized, content-free Knowledge operational snapshot used by the
+authenticated Knowledge status API. The service applies its operational policy before
+the response is produced; policy denial returns `403`, and an unavailable Knowledge
+service returns `503`.
+
+```sh
+curl -sS "$BASE/debug/knowledge" \
+  | jq '.status | {store, lexical_index, semantic_index, mutation_checkpoint, operations}'
+```
+
+The response contains backend/schema/index/storage state, sanitized Pebble storage and
+compaction details, rebuild and semantic-index state, the mutation checkpoint, and the
+bounded search/import/curation operation snapshot. It does not contain the store path,
+canonical record text or labels, search queries, package contents, model output, or raw
+errors. Operation records contain only server-generated operation/audit IDs, registered
+operation classes, outcomes, timing, and numeric counts.
 
 ## Client Endpoints
 
