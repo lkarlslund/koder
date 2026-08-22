@@ -290,8 +290,23 @@ func (e Entry) Validate() error {
 	if e.PersonalOrigin != PersonalOriginUnspecified && !e.PersonalOrigin.IsAPersonalOrigin() {
 		return invalid("personal_origin", "is not a known personal origin")
 	}
-	if e.Scope.Kind == ScopeKindPersonal && e.PersonalOrigin == PersonalOriginUnspecified {
-		return invalid("personal_origin", "is required for personal scope")
+	if e.Scope.Kind == ScopeKindPersonal {
+		if e.PersonalOrigin == PersonalOriginUnspecified {
+			return invalid("personal_origin", "is required for personal scope")
+		}
+	} else if e.PersonalOrigin != PersonalOriginUnspecified {
+		return invalid("personal_origin", "is only valid for personal scope")
+	}
+	if e.PersonalOrigin == PersonalOriginObserved {
+		if e.ObservedAt.IsZero() {
+			return invalid("observed_at", "is required for observed personal knowledge")
+		}
+		if len(e.EvidenceIDs) == 0 {
+			return invalid("evidence_ids", "observed personal knowledge requires evidence")
+		}
+	}
+	if e.PersonalOrigin == PersonalOriginInferred && (e.Confidence <= 0 || e.Confidence >= 1) {
+		return invalid("confidence", "inferred personal knowledge requires explicit uncertainty between 0 and 1")
 	}
 	if err := e.Revision.Validate(); err != nil {
 		return err

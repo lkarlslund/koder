@@ -398,6 +398,13 @@ func TestEveryEnumValueIsValidated(t *testing.T) {
 		entry := validEntry()
 		entry.Scope = Scope{Kind: ScopeKindPersonal, Selector: "user:local"}
 		entry.PersonalOrigin = value
+		if value == PersonalOriginObserved {
+			entry.ObservedAt = testTime
+			entry.EvidenceIDs = []EvidenceID{testEvidenceID}
+		}
+		if value == PersonalOriginInferred {
+			entry.Confidence = 0.6
+		}
 		if err := entry.Validate(); err != nil {
 			t.Errorf("PersonalOrigin %v rejected: %v", value, err)
 		}
@@ -411,6 +418,46 @@ func TestEveryEnumValueIsValidated(t *testing.T) {
 		if err := (Actor{Kind: value, ID: "actor"}).Validate(); err != nil {
 			t.Errorf("ActorKind %v rejected: %v", value, err)
 		}
+	}
+}
+
+func TestPersonalOriginStructuralPolicy(t *testing.T) {
+	t.Parallel()
+	tests := map[string]func() error{
+		"origin on non-personal entry": func() error {
+			entry := validEntry()
+			entry.PersonalOrigin = PersonalOriginExplicit
+			return entry.Validate()
+		},
+		"missing personal origin": func() error {
+			entry := validEntry()
+			entry.Scope = Scope{Kind: ScopeKindPersonal, Selector: "me"}
+			return entry.Validate()
+		},
+		"observed without timestamp": func() error {
+			entry := validEntry()
+			entry.Scope = Scope{Kind: ScopeKindPersonal, Selector: "me"}
+			entry.PersonalOrigin = PersonalOriginObserved
+			entry.EvidenceIDs = []EvidenceID{testEvidenceID}
+			return entry.Validate()
+		},
+		"observed without evidence": func() error {
+			entry := validEntry()
+			entry.Scope = Scope{Kind: ScopeKindPersonal, Selector: "me"}
+			entry.PersonalOrigin = PersonalOriginObserved
+			entry.ObservedAt = testTime
+			return entry.Validate()
+		},
+		"inferred without uncertainty": func() error {
+			entry := validEntry()
+			entry.Scope = Scope{Kind: ScopeKindPersonal, Selector: "me"}
+			entry.PersonalOrigin = PersonalOriginInferred
+			entry.Confidence = 1
+			return entry.Validate()
+		},
+	}
+	for name, validate := range tests {
+		t.Run(name, func(t *testing.T) { expectInvalid(t, validate()) })
 	}
 }
 

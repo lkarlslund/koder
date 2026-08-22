@@ -102,11 +102,17 @@ func (s *Service) UpdateEntry(ctx context.Context, request UpdateEntryRequest) (
 			return fmt.Errorf("%w: restore chunk %s before editing entries", ErrParentChunkArchived, chunk.ID)
 		}
 		next := applyEntryContent(current, candidate)
+		if err := applyPersonalEntryUpdatePolicy(&next, current, classification); err != nil {
+			return err
+		}
 		if entryContentEqual(next, current) {
 			result.Entry = current
 			return nil
 		}
 		if err := validateEvidenceReferences(ctx, tx, next.EvidenceIDs, next.Verification.EvidenceIDs); err != nil {
+			return err
+		}
+		if err := validatePersonalEntryEvidence(ctx, tx, next); err != nil {
 			return err
 		}
 		now := s.now().UTC().Round(0)
@@ -170,7 +176,7 @@ func entryContentEqual(left, right knowledge.Entry) bool {
 		applicabilityEqual(left.Applicability, right.Applicability) && slices.Equal(left.Risk, right.Risk) &&
 		left.Confidence == right.Confidence && left.ValidFrom.Equal(right.ValidFrom) && left.ValidUntil.Equal(right.ValidUntil) &&
 		left.ObservedAt.Equal(right.ObservedAt) && left.ReviewAfter.Equal(right.ReviewAfter) &&
-		slices.Equal(left.EvidenceIDs, right.EvidenceIDs) && left.PersonalOrigin == right.PersonalOrigin
+		slices.Equal(left.EvidenceIDs, right.EvidenceIDs) && left.PersonalOrigin == right.PersonalOrigin && left.State == right.State
 }
 
 func cloneApplicability(value knowledge.Applicability) knowledge.Applicability {
