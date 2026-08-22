@@ -22,6 +22,17 @@ const (
 
 var ErrOperationalPolicyDenied = errors.New("knowledge operational policy denied operation")
 
+type OperationalHealthState string
+
+const (
+	OperationalHealthCurrent     OperationalHealthState = "current"
+	OperationalHealthReady       OperationalHealthState = "ready"
+	OperationalHealthRebuilding  OperationalHealthState = "rebuilding"
+	OperationalHealthStale       OperationalHealthState = "stale"
+	OperationalHealthError       OperationalHealthState = "error"
+	OperationalHealthUnavailable OperationalHealthState = "unavailable"
+)
+
 type OperationalPolicy interface {
 	AuthorizeKnowledgeOperation(context.Context, knowledge.Actor, OperationalAction) error
 }
@@ -39,12 +50,16 @@ func (AllowAllOperationalPolicy) AuthorizeKnowledgeOperation(context.Context, kn
 }
 
 type OperationalStoreStatus struct {
-	Backend         string `json:"backend"`
-	Open            bool   `json:"open"`
-	ReadOnly        bool   `json:"read_only"`
-	SchemaVersion   uint32 `json:"schema_version"`
-	IndexGeneration uint64 `json:"index_generation"`
-	LastError       string `json:"last_error,omitempty"`
+	Backend         string                             `json:"backend"`
+	Open            bool                               `json:"open"`
+	ReadOnly        bool                               `json:"read_only"`
+	SchemaVersion   uint32                             `json:"schema_version"`
+	SchemaState     OperationalHealthState             `json:"schema_state"`
+	IndexGeneration uint64                             `json:"index_generation"`
+	IndexState      OperationalHealthState             `json:"index_state"`
+	StorageState    OperationalHealthState             `json:"storage_state"`
+	LastError       string                             `json:"last_error,omitempty"`
+	Details         *knowledgeStore.OperationalDetails `json:"details,omitempty"`
 }
 
 type OperationalStatus struct {
@@ -80,9 +95,22 @@ func (s *Service) OperationalStatus(ctx context.Context) (OperationalStatus, err
 		Store: OperationalStoreStatus{
 			Backend: health.Backend, Open: health.Open, ReadOnly: health.ReadOnly,
 			SchemaVersion: health.SchemaVersion, IndexGeneration: health.IndexGeneration,
-			LastError: health.LastError,
+			SchemaState: operationalSchemaState(health), IndexState: OperationalHealthUnavailable,
+			StorageState: OperationalHealthUnavailable, LastError: health.LastError,
 		},
 		MutationCheckpoint: s.MutationCheckpoint(),
+	}
+	if detailsStore, ok := s.store.(knowledgeStore.OperationalDetailsStore); ok {
+		details, err := detailsStore.OperationalDetails(ctx)
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return OperationalStatus{}, ctxErr
+			}
+			result.Store.StorageState = OperationalHealthError
+		} else {
+			result.Store.Details = &details
+			result.Store.StorageState = OperationalHealthCurrent
+		}
 	}
 	if maintenance, ok := s.store.(knowledgeStore.MaintenanceStore); ok {
 		status, err := maintenance.IndexRebuildStatus(ctx)
@@ -101,6 +129,7 @@ func (s *Service) OperationalStatus(ctx context.Context) (OperationalStatus, err
 		s.operationalMu.Unlock()
 		result.MaintenanceAvailable = true
 		result.LexicalIndex = &status
+		result.Store.IndexState = operationalIndexState(health, status)
 	}
 	if s.semantic != nil {
 		status, err := s.semantic.Status(ctx)
@@ -114,6 +143,32 @@ func (s *Service) OperationalStatus(ctx context.Context) (OperationalStatus, err
 		result.SemanticIndex = &status
 	}
 	return result, nil
+}
+
+func operationalSchemaState(health knowledgeStore.Health) OperationalHealthState {
+	switch {
+	case !health.Open:
+		return OperationalHealthUnavailable
+	case health.LastError != "":
+		return OperationalHealthError
+	default:
+		return OperationalHealthCurrent
+	}
+}
+
+func operationalIndexState(health knowledgeStore.Health, status knowledgeStore.IndexRebuildStatus) OperationalHealthState {
+	switch {
+	case !health.Open:
+		return OperationalHealthUnavailable
+	case status.Running:
+		return OperationalHealthRebuilding
+	case status.LastError != "":
+		return OperationalHealthError
+	case status.ActiveGeneration != health.IndexGeneration:
+		return OperationalHealthStale
+	default:
+		return OperationalHealthReady
+	}
 }
 
 func (s *Service) StartIndexRebuild(ctx context.Context) (StartIndexRebuildResult, error) {

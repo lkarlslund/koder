@@ -128,6 +128,7 @@ func TestOperationalStatusAndAsynchronousIndexRebuild(t *testing.T) {
 
 	initial, err := service.OperationalStatus(context.Background())
 	if err != nil || initial.Store.Backend != "memory" || initial.Store.IndexGeneration != 1 ||
+		initial.Store.SchemaState != "current" || initial.Store.IndexState != "ready" ||
 		!initial.MaintenanceAvailable || initial.LexicalIndex == nil || initial.LexicalIndex.Running ||
 		initial.MutationCheckpoint.StreamID == "" {
 		t.Fatalf("OperationalStatus() = %#v, %v", initial, err)
@@ -145,7 +146,7 @@ func TestOperationalStatusAndAsynchronousIndexRebuild(t *testing.T) {
 		t.Fatalf("second StartIndexRebuild() error = %v, want conflict", err)
 	}
 	running, err := service.OperationalStatus(context.Background())
-	if err != nil || running.LexicalIndex == nil || !running.LexicalIndex.Running || running.LexicalIndex.TargetGeneration != 2 {
+	if err != nil || running.Store.IndexState != "rebuilding" || running.LexicalIndex == nil || !running.LexicalIndex.Running || running.LexicalIndex.TargetGeneration != 2 {
 		t.Fatalf("OperationalStatus(running) = %#v, %v", running, err)
 	}
 	close(store.release)
@@ -164,6 +165,47 @@ func TestOperationalStatusAndAsynchronousIndexRebuild(t *testing.T) {
 			t.Fatalf("OperationalStatus(complete) = %#v, %v", complete, err)
 		}
 		runtime.Gosched()
+	}
+}
+
+type operationalDetailsTestStore struct {
+	*memory.Store
+	details knowledgeStore.OperationalDetails
+	err     error
+}
+
+func (s *operationalDetailsTestStore) OperationalDetails(context.Context) (knowledgeStore.OperationalDetails, error) {
+	return s.details, s.err
+}
+
+func TestOperationalStatusIncludesOptionalSanitizedStoreDetails(t *testing.T) {
+	t.Parallel()
+	store := &operationalDetailsTestStore{
+		Store: memory.New(),
+		details: knowledgeStore.OperationalDetails{
+			Storage:    knowledgeStore.StorageDetails{PhysicalBytes: 1024, LiveBytes: 900, ReclaimableBytes: 12, WALBytes: 100, TableFiles: 2},
+			Compaction: knowledgeStore.CompactionDetails{State: "compacting", PendingBytes: 44, ReadAmplification: 2, WriteAmplification: 1.5},
+		},
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service, err := New(Config{
+		Store: store, Actor: ContextActorSource(knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:test"}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := service.OperationalStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Store.Details == nil || status.Store.Details.Storage.PhysicalBytes != 1024 || status.Store.Details.Compaction.State != "compacting" {
+		t.Fatalf("OperationalStatus() details = %#v", status.Store.Details)
+	}
+
+	store.err = errors.New("metrics unavailable")
+	status, err = service.OperationalStatus(context.Background())
+	if err != nil || status.Store.StorageState != OperationalHealthError || status.Store.Details != nil {
+		t.Fatalf("OperationalStatus(details error) = %#v, %v", status.Store, err)
 	}
 }
 

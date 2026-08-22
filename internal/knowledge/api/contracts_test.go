@@ -61,6 +61,8 @@ func TestV1FixturesStrictlyMatchContracts(t *testing.T) {
 			check: func(t *testing.T, value any) {
 				response := value.(*OperationalStatusResponse)
 				if response.APIVersion != Version || response.Status.Store.Backend != "pebble" || response.Status.Store.IndexGeneration != 4 ||
+					response.Status.Store.SchemaState != "current" || response.Status.Store.IndexState != "ready" || response.Status.Store.StorageState != "current" || response.Status.Store.Details == nil ||
+					response.Status.Store.Details.Storage.PhysicalBytes != 1048576 || response.Status.Store.Details.Compaction.ReadAmplification != 2 ||
 					response.Status.LexicalIndex == nil || response.Status.LexicalIndex.Scanned.Total != 28 || response.Status.MutationCheckpoint.Sequence != 42 {
 					t.Fatalf("operational status fixture = %#v", response)
 				}

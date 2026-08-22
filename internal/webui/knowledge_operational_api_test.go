@@ -12,6 +12,7 @@ import (
 	"github.com/lkarlslund/koder/internal/knowledge"
 	knowledgeapi "github.com/lkarlslund/koder/internal/knowledge/api"
 	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
+	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 	"github.com/lkarlslund/koder/internal/knowledge/store/memory"
 )
 
@@ -19,6 +20,15 @@ type apiBlockingMaintenanceStore struct {
 	*memory.Store
 	started chan struct{}
 	done    chan struct{}
+}
+
+type apiOperationalDetailsStore struct{ *memory.Store }
+
+func (s *apiOperationalDetailsStore) OperationalDetails(context.Context) (knowledgeStore.OperationalDetails, error) {
+	return knowledgeStore.OperationalDetails{
+		Storage:    knowledgeStore.StorageDetails{PhysicalBytes: 2048, LiveBytes: 1024},
+		Compaction: knowledgeStore.CompactionDetails{State: "idle", ReadAmplification: 1},
+	}, nil
 }
 
 func (s *apiBlockingMaintenanceStore) RebuildIndexes(ctx context.Context) error {
@@ -30,7 +40,7 @@ func (s *apiBlockingMaintenanceStore) RebuildIndexes(ctx context.Context) error 
 
 func TestKnowledgeOperationalStatusAndIndexRebuildAPI(t *testing.T) {
 	ctrl := newTestController(t)
-	store := memory.New()
+	store := &apiOperationalDetailsStore{Store: memory.New()}
 	t.Cleanup(func() { _ = store.Close() })
 	service, err := knowledgeService.New(knowledgeService.Config{
 		Store: store,
@@ -66,6 +76,8 @@ func TestKnowledgeOperationalStatusAndIndexRebuildAPI(t *testing.T) {
 		t.Fatalf("decode status: %v", err)
 	}
 	if response.StatusCode != http.StatusOK || status.Status.Store.Backend != "memory" || status.Status.Store.IndexGeneration != 1 ||
+		status.Status.Store.SchemaState != "current" || status.Status.Store.IndexState != "ready" || status.Status.Store.StorageState != "current" || status.Status.Store.Details == nil ||
+		status.Status.Store.Details.Storage.PhysicalBytes != 2048 || status.Status.Store.Details.Compaction.State != "idle" ||
 		!status.Status.MaintenanceAvailable || status.Status.LexicalIndex == nil || status.Status.MutationCheckpoint.StreamID == "" {
 		t.Fatalf("status=%d response=%#v", response.StatusCode, status)
 	}

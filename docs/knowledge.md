@@ -464,6 +464,22 @@ Each safe reason is retained for the curator UI. Only low-risk create/update dra
 marked `automatic`; model output cannot set or override the route, and the low-risk adapter
 rejects anything not explicitly routed there.
 
+## Operational health
+
+The authenticated `GET /api/knowledge/v1/status` response reports the backend lifecycle,
+schema version and state, canonical index generation and state, rebuild progress, semantic
+index status when configured, and the mutation checkpoint used by live explorer clients.
+An open validated schema reports `current`; canonical indexes report `ready`, `rebuilding`,
+`stale`, `error`, or `unavailable` from runtime state rather than from UI inference.
+
+Backends may also implement the sanitized operational-details contract. Pebble reports
+physical/live/reclaimable storage bytes, memory and WAL bytes, table count, compaction
+state/count/debt, read amplification, write amplification, and maximum level score. These
+are runtime observations, so consumers should display them as a current snapshot rather
+than durable Knowledge. The response never includes the database path, keys, record text,
+queries, or raw backend errors. If metric collection fails, `storage_state` becomes `error`
+while the rest of the operational status remains available.
+
 ## Combined examples
 
 ### Environment-specific procedure
