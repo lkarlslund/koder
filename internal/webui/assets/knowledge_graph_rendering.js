@@ -90,10 +90,12 @@
     const hovered = !!context.hovered;
     const searchHit = !!context.searchHit;
     const stale = !!context.stale;
+    const pinned = !!attributes.pinned;
     const badges = [
       {kind: 'scope', glyph: scope.glyph, label: scope.label, color: scope.color},
       verification && {kind: 'verification', glyph: verification.glyph, label: verification.label, color: verification.color},
       state.pattern !== 'solid' && {kind: 'state', glyph: state.pattern === 'dashed' ? '◌' : '×', label: state.label, color: '#aab4bf'},
+      pinned && {kind: 'layout', glyph: '⌖', label: 'Pinned locally', color: '#73d7f2'},
     ].filter(Boolean);
     const borderColor = stale ? '#f16f6f' : selected ? '#f5fbff' : verification ? verification.color : scope.color;
     const borderPattern = stale ? 'warning' : selected ? 'selected' : verification ? verification.pattern : state.pattern;
@@ -103,10 +105,11 @@
     const ariaParts = [label, kind.key.replace(':', ' '), scope.label, state.label];
     if (verification) ariaParts.push(verification.label);
     if (stale) ariaParts.push('Stale');
+    if (pinned) ariaParts.push('Pinned locally');
     return {
       kind: kind.key, shape: kind.shape, glyph: kind.glyph, color: kind.color, size, opacity,
       label, scopeColor: scope.color, borderColor, borderWidth: selected ? 3.5 : verification ? verification.width : 1.7,
-      borderPattern, statePattern: state.pattern, badges, selected, hovered, searchHit, stale,
+      borderPattern, statePattern: state.pattern, badges, selected, hovered, searchHit, stale, pinned,
       ariaLabel: ariaParts.join(', '),
       sigma: {
         label, color: kind.color, size, borderColor, borderSize: selected ? 0.22 : 0.14,

@@ -82,6 +82,8 @@
       }
       this.sigma = new Sigma(this.store.graph, this.container, settings);
       this.interactionHandlers = {
+        downNode: event => this.beginNodeDrag(event),
+        doubleClickNode: event => this.toggleNodePin(event && event.node, event),
         clickNode: event => this.emit('node', {key: String(event && event.node || ''), ...pointerModifiers(event)}),
         clickEdge: event => this.emit('edge', {key: String(event && event.edge || ''), ...pointerModifiers(event)}),
         clickStage: event => {
@@ -95,6 +97,14 @@
       };
       if (typeof this.sigma.on === 'function') {
         for (const [name, handler] of Object.entries(this.interactionHandlers)) this.sigma.on(name, handler);
+      }
+      this.mouseCaptor = typeof this.sigma.getMouseCaptor === 'function' ? this.sigma.getMouseCaptor() : null;
+      this.mouseHandlers = {
+        mousemovebody: event => this.moveNodeDrag(event),
+        mouseup: event => this.endNodeDrag(event),
+      };
+      if (this.mouseCaptor && typeof this.mouseCaptor.on === 'function') {
+        for (const [name, handler] of Object.entries(this.mouseHandlers)) this.mouseCaptor.on(name, handler);
       }
       this.pointerHandlers = {
         pointerdown: event => this.beginBoxSelection(event),
@@ -250,6 +260,53 @@
       this.scheduleRefresh(false);
     }
 
+    beginNodeDrag(event) {
+      const key = String(event && event.node || '');
+      if (!key || !this.store.graph.hasNode(key)) return;
+      const pointer = event && event.event || {};
+      this.nodeDrag = {key, startX: Number(pointer.x) || 0, startY: Number(pointer.y) || 0, moved: false};
+      const camera = this.sigma.getCamera && this.sigma.getCamera();
+      if (camera && typeof camera.disable === 'function') camera.disable();
+      this.emit('dragstart', {key});
+    }
+
+    moveNodeDrag(event) {
+      if (!this.nodeDrag || !event || !this.sigma.viewportToGraph) return;
+      const point = this.sigma.viewportToGraph(event);
+      if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+      const distance = Math.hypot((Number(event.x) || 0) - this.nodeDrag.startX, (Number(event.y) || 0) - this.nodeDrag.startY);
+      if (distance >= 2) this.nodeDrag.moved = true;
+      if (!this.nodeDrag.moved) return;
+      this.store.graph.mergeNodeAttributes(this.nodeDrag.key, {x: point.x, y: point.y, pinned: true});
+      if (typeof event.preventSigmaDefault === 'function') event.preventSigmaDefault();
+      if (event.original && typeof event.original.preventDefault === 'function') event.original.preventDefault();
+      this.scheduleRefresh(false);
+      this.emit('drag', {key: this.nodeDrag.key, x: point.x, y: point.y});
+    }
+
+    endNodeDrag() {
+      if (!this.nodeDrag) return;
+      const drag = this.nodeDrag;
+      this.nodeDrag = null;
+      const camera = this.sigma.getCamera && this.sigma.getCamera();
+      if (camera && typeof camera.enable === 'function') camera.enable();
+      if (!drag.moved) return;
+      const attributes = this.store.graph.getNodeAttributes(drag.key);
+      this.emit('pin', {key: drag.key, pinned: true, x: attributes.x, y: attributes.y});
+    }
+
+    toggleNodePin(key, event) {
+      key = String(key || '');
+      if (!key || !this.store.graph.hasNode(key)) return false;
+      const pinned = !this.store.graph.getNodeAttribute(key, 'pinned');
+      this.store.graph.setNodeAttribute(key, 'pinned', pinned);
+      if (event && event.event && typeof event.event.preventSigmaDefault === 'function') event.event.preventSigmaDefault();
+      this.scheduleRefresh(false);
+      const attributes = this.store.graph.getNodeAttributes(key);
+      this.emit('pin', {key, pinned, x: attributes.x, y: attributes.y});
+      return pinned;
+    }
+
     clearHover(kind, key) {
       if (!this.hover || this.hover.kind !== kind || this.hover.key !== String(key || '')) return;
       this.hover = null;
@@ -274,6 +331,10 @@
       if (this.sigma && typeof this.sigma.off === 'function') {
         for (const [name, handler] of Object.entries(this.interactionHandlers)) this.sigma.off(name, handler);
       }
+      if (this.mouseCaptor && typeof this.mouseCaptor.off === 'function') {
+        for (const [name, handler] of Object.entries(this.mouseHandlers)) this.mouseCaptor.off(name, handler);
+      }
+      this.endNodeDrag();
       if (this.selectionBox && typeof this.container.removeEventListener === 'function') {
         for (const [name, handler] of Object.entries(this.pointerHandlers)) this.container.removeEventListener(name, handler, true);
       }

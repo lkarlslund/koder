@@ -10,7 +10,11 @@ const fixture = require('./knowledge_graph_fixtures.js');
 assert.deepStrictEqual(rendererAPI.pointerModifiers({event: {original: {metaKey: true, shiftKey: true}}}), {additive: true, shift: true});
 
 class FakeSigma {
-  constructor(graph, container, settings) { this.graph = graph; this.container = container; this.settings = settings; FakeSigma.instance = this; }
+  constructor(graph, container, settings) {
+    this.graph = graph; this.container = container; this.settings = settings;
+    this.camera = {disable() { this.disabled = true; }, enable() { this.disabled = false; }};
+    this.mouse = new FakeMouseCaptor(); FakeSigma.instance = this;
+  }
   on(name, handler) { (this.handlers ||= {})[name] = handler; }
   off(name, handler) { if (this.handlers && this.handlers[name] === handler) delete this.handlers[name]; }
   emit(name, value) { this.handlers[name](value); }
@@ -20,9 +24,18 @@ class FakeSigma {
     return {x: 180, y: 180};
   }
   graphToViewport(value) { return value; }
+  viewportToGraph(value) { return {x: value.x, y: value.y}; }
+  getMouseCaptor() { return this.mouse; }
+  getCamera() { return this.camera; }
   resize() { this.resizeCount = (this.resizeCount || 0) + 1; }
   refresh() { this.refreshCount = (this.refreshCount || 0) + 1; }
   kill() { this.killed = true; }
+}
+class FakeMouseCaptor {
+  constructor() { this.handlers = {}; }
+  on(name, handler) { this.handlers[name] = handler; }
+  off(name, handler) { if (this.handlers[name] === handler) delete this.handlers[name]; }
+  emit(name, value) { this.handlers[name](value); }
 }
 class FakeResizeObserver {
   constructor(callback) { this.callback = callback; FakeResizeObserver.instance = this; }
@@ -92,6 +105,24 @@ assert.strictEqual(selectionBox.hidden, true);
 assert.deepStrictEqual(boxSelections, [{
   keys: [`entry:${fixture.ids.partition}`, `entry:${fixture.ids.format}`], additive: true,
 }]);
+const pinEvents = [];
+renderer.subscribe(event => { if (event.type === 'pin') pinEvents.push(event.detail); });
+FakeSigma.instance.emit('downNode', {node: `entry:${fixture.ids.partition}`, event: {x: 10, y: 10}});
+assert.strictEqual(FakeSigma.instance.camera.disabled, true);
+FakeSigma.instance.mouse.emit('mousemovebody', {
+  x: 30, y: 40, preventSigmaDefault() {}, original: {preventDefault() {}},
+});
+FakeSigma.instance.mouse.emit('mouseup', {});
+assert.strictEqual(FakeSigma.instance.camera.disabled, false);
+assert.strictEqual(store.graph.getNodeAttribute(`entry:${fixture.ids.partition}`, 'pinned'), true);
+assert.strictEqual(store.graph.getNodeAttribute(`entry:${fixture.ids.partition}`, 'x'), 30);
+assert.strictEqual(pinEvents[0].pinned, true);
+assert.strictEqual(rendering.nodeStyle(store.graph.getNodeAttributes(`entry:${fixture.ids.partition}`)).pinned, true);
+FakeSigma.instance.emit('doubleClickNode', {
+  node: `entry:${fixture.ids.partition}`, event: {preventSigmaDefault() {}},
+});
+assert.strictEqual(store.graph.getNodeAttribute(`entry:${fixture.ids.partition}`, 'pinned'), false);
+assert.strictEqual(pinEvents[1].pinned, false);
 scheduled();
 assert.strictEqual(FakeSigma.instance.resizeCount, 1);
 assert.strictEqual(FakeSigma.instance.refreshCount, 1);
@@ -120,4 +151,5 @@ assert.strictEqual(FakeSigma.instance.killed, true);
 assert.strictEqual(FakeResizeObserver.instance.disconnected, true);
 assert.deepStrictEqual(FakeSigma.instance.handlers, {});
 assert.deepStrictEqual(container.handlers, {});
+assert.deepStrictEqual(FakeSigma.instance.mouse.handlers, {});
 renderer.destroy();

@@ -290,6 +290,12 @@
           if (event.type === 'edge' && event.detail && event.detail.key) this.selectGraphObject('edge', event.detail.key, event.detail);
           if (event.type === 'boxselect' && event.detail) this.selectGraphObjects(event.detail.keys, event.detail.additive);
           if (event.type === 'background' && !(event.detail && event.detail.additive)) this.clearGraphSelection();
+          if (event.type === 'dragstart' && this.graphLayout) this.graphLayout.stop('node_drag');
+          if (event.type === 'pin') {
+            const status = this.shell.querySelector('[data-knowledge-status-label]');
+            if (status) status.textContent = event.detail && event.detail.pinned ? 'Node pinned locally' : 'Node released';
+            if (event.detail && !event.detail.pinned && this.graphLayout) this.graphLayout.request();
+          }
         });
       }
       this.syncControls();
