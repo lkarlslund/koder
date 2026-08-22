@@ -52,24 +52,14 @@ type SemanticIndexIdentity struct {
 }
 
 func (i SemanticIndexIdentity) Validate() error {
-	for _, item := range []struct{ field, value string }{
-		{field: "provider_id", value: i.ProviderID},
-		{field: "model_id", value: i.ModelID},
-		{field: "document_schema", value: i.DocumentSchema},
-	} {
-		field, value := item.field, item.value
-		if strings.TrimSpace(value) == "" {
-			return fmt.Errorf("semantic index %s is required", field)
-		}
-		if len(value) > 256 {
-			return fmt.Errorf("semantic index %s exceeds 256 bytes", field)
-		}
+	if err := validateEmbeddingIdentity(i.ProviderID, i.ModelID, i.Dimensions, i.Metric); err != nil {
+		return err
 	}
-	if i.Dimensions <= 0 || i.Dimensions > maxSemanticDimensions {
-		return fmt.Errorf("semantic index dimensions must be between 1 and %d", maxSemanticDimensions)
+	if strings.TrimSpace(i.DocumentSchema) == "" {
+		return fmt.Errorf("semantic index document_schema is required")
 	}
-	if !i.Metric.valid() {
-		return fmt.Errorf("semantic index metric %q is not supported", i.Metric)
+	if len(i.DocumentSchema) > 256 {
+		return fmt.Errorf("semantic index document_schema exceeds 256 bytes")
 	}
 	return nil
 }
@@ -102,10 +92,58 @@ func (d SemanticDocument) Validate() error {
 	return nil
 }
 
-// SemanticDocumentSource streams a canonical snapshot into a provider rebuild. The
-// provider must not retain Content after deriving its index representation.
+// SemanticDocumentSource streams a canonical snapshot into a provider rebuild. It calls
+// visit sequentially, and the provider must not retain Content after deriving its index
+// representation.
 type SemanticDocumentSource interface {
 	ScanSemanticDocuments(context.Context, func(SemanticDocument) error) error
+}
+
+type SemanticDocumentSourceFunc func(context.Context, func(SemanticDocument) error) error
+
+func (fn SemanticDocumentSourceFunc) ScanSemanticDocuments(ctx context.Context, visit func(SemanticDocument) error) error {
+	return fn(ctx, visit)
+}
+
+// EmbeddingIdentity describes a backend without contacting it. Dimensions are validated
+// again on every response so a changed or misconfigured remote model cannot corrupt an
+// index generation.
+type EmbeddingIdentity struct {
+	ProviderID string
+	ModelID    string
+	Dimensions int
+	Metric     SemanticMetric
+}
+
+func (i EmbeddingIdentity) Validate() error {
+	return validateEmbeddingIdentity(i.ProviderID, i.ModelID, i.Dimensions, i.Metric)
+}
+
+func validateEmbeddingIdentity(providerID, modelID string, dimensions int, metric SemanticMetric) error {
+	for _, item := range []struct{ field, value string }{
+		{field: "provider_id", value: providerID}, {field: "model_id", value: modelID},
+	} {
+		if strings.TrimSpace(item.value) == "" {
+			return fmt.Errorf("semantic index %s is required", item.field)
+		}
+		if len(item.value) > 256 {
+			return fmt.Errorf("semantic index %s exceeds 256 bytes", item.field)
+		}
+	}
+	if dimensions <= 0 || dimensions > maxSemanticDimensions {
+		return fmt.Errorf("semantic index dimensions must be between 1 and %d", maxSemanticDimensions)
+	}
+	if !metric.valid() {
+		return fmt.Errorf("semantic index metric %q is not supported", metric)
+	}
+	return nil
+}
+
+// EmbeddingBackend returns one vector per input in the same order. It must honor context
+// cancellation and must not make network or model calls from Identity.
+type EmbeddingBackend interface {
+	Identity() EmbeddingIdentity
+	Embed(context.Context, []string) ([][]float32, error)
 }
 
 type SemanticCorpusEntry struct {
