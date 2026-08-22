@@ -8,6 +8,8 @@ Backup, restore, and maintenance procedures live in
 [Knowledge operations](knowledge-operations.md).
 For day-to-day search, editing, provenance, lifecycle, packages, privacy, and recovery,
 start with [Using Koder Knowledge](knowledge-user-guide.md).
+The completed first-production gate is recorded in
+[Knowledge first-production verification](knowledge-release-verification.md).
 
 This document defines the vocabulary used by domain records, tools, APIs, packages, and
 user interfaces. Wire values use lowercase `snake_case` and must not be given different
