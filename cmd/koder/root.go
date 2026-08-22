@@ -122,6 +122,17 @@ func runKoder(ctx context.Context, mode app.StartupMode, serveOpts serveConfig) 
 		return err
 	}
 	defer func() { _ = st.Close() }()
+	knowledge := openDefaultKnowledgeStore(cfg.StateDir())
+	if knowledge.OpenError != nil {
+		slog.Warn("knowledge store unavailable; continuing without Knowledge", "error", knowledge.OpenError)
+	} else {
+		slog.Info("knowledge store opened")
+	}
+	defer func() {
+		if err := knowledge.Close(); err != nil {
+			slog.Error("close knowledge store", "error", err)
+		}
+	}()
 	recorder := debugsrv.NewRecorder()
 
 	mcpManager, err := mcp.NewManager(cfg.MCPServers)
