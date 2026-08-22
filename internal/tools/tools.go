@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -209,6 +210,9 @@ type ToolSpec struct {
 	Usage       string
 	Parameters  string
 	ExposeToLLM bool
+	// Legacy keeps a tool executable for stored transcripts and compatibility
+	// while excluding its definition from new model requests.
+	Legacy bool
 }
 
 type definitionProvider interface {
@@ -445,6 +449,9 @@ func DefinitionFor(kind ID, runtime Runtime) (provider.ToolDefinition, bool) {
 	if !ok {
 		return provider.ToolDefinition{}, false
 	}
+	if spec.Legacy {
+		return provider.ToolDefinition{}, false
+	}
 	if !chatrole.AllowsTool(runtime.ChatRole, kind) {
 		return provider.ToolDefinition{}, false
 	}
@@ -464,6 +471,191 @@ func DefinitionFor(kind ID, runtime Runtime) (provider.ToolDefinition, bool) {
 		return provider.ToolDefinition{}, false
 	}
 	return providerDefinition(kind, spec), true
+}
+
+// ActionRoute maps one model-facing resource action to an existing operation.
+// Keeping the operation as a normal registered tool preserves its validation,
+// policy, result, and stored-history behavior during migrations.
+type ActionRoute struct {
+	Action    string
+	Tool      ID
+	FixedArgs map[string]string
+}
+
+// ActionTool exposes a coherent resource API while delegating each action to
+// an existing operation handler. Its Parameters schema must contain an action
+// string enum; unavailable actions are removed from that enum at definition
+// time according to role, interaction mode, session settings, and runtime
+// availability.
+type ActionTool struct {
+	Kind              ID
+	Routes            []ActionRoute
+	BypassPermissions bool
+}
+
+func (t ActionTool) ID() ID { return t.Kind }
+
+func (t ActionTool) BypassesPermission() bool { return t.BypassPermissions }
+
+func (t ActionTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	action := strings.TrimSpace(args["action"])
+	legacy, ok := t.legacyTool(action)
+	if !ok {
+		return nil, fmt.Errorf("unsupported %s action %q", t.Kind, action)
+	}
+	delegate, _, ok := lookupWithSpec(legacy)
+	if !ok {
+		return nil, fmt.Errorf("%s action %q is unavailable", t.Kind, action)
+	}
+	delegatedArgs := maps.Clone(args)
+	delete(delegatedArgs, "action")
+	for key, value := range t.routeFixedArgs(action) {
+		delegatedArgs[key] = value
+	}
+	normalized, err := delegate.NormalizeArgs(delegatedArgs)
+	if err != nil {
+		return nil, err
+	}
+	normalized["action"] = action
+	return normalized, nil
+}
+
+func (t ActionTool) Preview(req Request) string {
+	legacyReq, delegate, err := t.delegatedRequest(req)
+	if err != nil {
+		return strings.ReplaceAll(req.Args["action"], "_", " ")
+	}
+	return delegate.Preview(legacyReq)
+}
+
+func (t ActionTool) Presentation(req Request) Presentation {
+	legacyReq, delegate, err := t.delegatedRequest(req)
+	if err != nil {
+		return SharedPresentation(t.Kind, t.Preview(req))
+	}
+	if presenter, ok := delegate.(Presenter); ok {
+		return presenter.Presentation(legacyReq)
+	}
+	return SharedPresentation(legacyReq.Tool, delegate.Preview(legacyReq))
+}
+
+func (t ActionTool) SummarizeResult(req Request, result Result) (string, string) {
+	legacyReq, delegate, err := t.delegatedRequest(req)
+	if err != nil {
+		return defaultSummary(t.Kind, result)
+	}
+	if summarizer, ok := delegate.(resultSummarizer); ok {
+		return summarizer.SummarizeResult(legacyReq, result)
+	}
+	return defaultSummary(legacyReq.Tool, result)
+}
+
+func (t ActionTool) Call(ctx context.Context, opts Options) (Result, error) {
+	legacyReq, _, err := t.delegatedRequest(opts.Request)
+	if err != nil {
+		return Result{}, err
+	}
+	return Call(ctx, Options{Runtime: opts.Runtime, Request: legacyReq})
+}
+
+func (t ActionTool) FinalizeResult(ctx context.Context, runtime Runtime, req Request, result Result) (Result, error) {
+	legacyReq, delegate, err := t.delegatedRequest(req)
+	if err != nil {
+		return Result{}, err
+	}
+	if finalizer, ok := delegate.(resultFinalizer); ok {
+		return finalizer.FinalizeResult(ctx, runtime, legacyReq, result)
+	}
+	return result, nil
+}
+
+func (t ActionTool) Definition(runtime Runtime, spec ToolSpec) (ToolSpec, bool) {
+	actions := make([]string, 0, len(t.Routes))
+	for _, route := range t.Routes {
+		if legacyOperationAvailable(route.Tool, runtime) {
+			actions = append(actions, route.Action)
+		}
+	}
+	if len(actions) == 0 {
+		return ToolSpec{}, false
+	}
+	parameters, err := schemaWithActionEnum(spec.Parameters, actions)
+	if err != nil {
+		return ToolSpec{}, false
+	}
+	spec.Parameters = parameters
+	return spec, true
+}
+
+func (t ActionTool) legacyTool(action string) (ID, bool) {
+	for _, route := range t.Routes {
+		if route.Action == action {
+			return route.Tool, true
+		}
+	}
+	return "", false
+}
+
+func (t ActionTool) routeFixedArgs(action string) map[string]string {
+	for _, route := range t.Routes {
+		if route.Action == action {
+			return route.FixedArgs
+		}
+	}
+	return nil
+}
+
+func (t ActionTool) delegatedRequest(req Request) (Request, Tool, error) {
+	legacy, ok := t.legacyTool(strings.TrimSpace(req.Args["action"]))
+	if !ok {
+		return Request{}, nil, fmt.Errorf("unsupported %s action %q", t.Kind, req.Args["action"])
+	}
+	delegate, _, ok := lookupWithSpec(legacy)
+	if !ok {
+		return Request{}, nil, fmt.Errorf("%s action %q is unavailable", t.Kind, req.Args["action"])
+	}
+	args := maps.Clone(req.Args)
+	delete(args, "action")
+	for key, value := range t.routeFixedArgs(req.Args["action"]) {
+		args[key] = value
+	}
+	return Request{Tool: legacy, ToolCallID: req.ToolCallID, Args: args}, delegate, nil
+}
+
+func legacyOperationAvailable(kind ID, runtime Runtime) bool {
+	tool, spec, ok := lookupWithSpec(kind)
+	if !ok || !chatrole.AllowsTool(runtime.ChatRole, kind) || !chatinteraction.AllowsTool(runtime.InteractionMode, kind) {
+		return false
+	}
+	if enabled, ok := runtime.AllowedTools[kind]; ok && !enabled {
+		return false
+	}
+	if dynamic, ok := tool.(definitionProvider); ok {
+		_, enabled := dynamic.Definition(runtime, spec)
+		return enabled
+	}
+	return true
+}
+
+func schemaWithActionEnum(raw string, actions []string) (string, error) {
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(raw), &schema); err != nil {
+		return "", fmt.Errorf("decode action tool schema: %w", err)
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return "", errors.New("action tool schema has no properties")
+	}
+	action, ok := properties["action"].(map[string]any)
+	if !ok {
+		return "", errors.New("action tool schema has no action property")
+	}
+	action["enum"] = actions
+	data, err := json.Marshal(schema)
+	if err != nil {
+		return "", fmt.Errorf("encode action tool schema: %w", err)
+	}
+	return string(data), nil
 }
 
 func ArgumentByteLimits() map[string]int {

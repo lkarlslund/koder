@@ -1748,6 +1748,9 @@ func toolDefaultPreferencesFromConfig(src map[tools.ID]bool) []ToolDefaultPrefer
 }
 
 func hideToolDefault(kind tools.ID) bool {
+	if tools.Info(kind).Legacy {
+		return true
+	}
 	switch kind {
 	case tools.MilestonePlan, tools.MilestoneWrite, tools.TaskAddItems, tools.TaskUpdateItem:
 		return true

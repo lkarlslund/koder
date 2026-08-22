@@ -15,51 +15,71 @@ import (
 )
 
 func init() {
+	tools.Register(tools.ActionTool{
+		Kind: tools.Milestones,
+		Routes: []tools.ActionRoute{
+			{Action: "list", Tool: tools.MilestoneList},
+			{Action: "create", Tool: tools.MilestoneAdd},
+			{Action: "update", Tool: tools.MilestoneUpdate},
+			{Action: "set_dependency", Tool: tools.MilestoneDepend},
+			{Action: "archive", Tool: tools.MilestoneArchive, FixedArgs: map[string]string{"archived": "true"}},
+			{Action: "restore", Tool: tools.MilestoneArchive, FixedArgs: map[string]string{"archived": "false"}},
+			{Action: "delete", Tool: tools.MilestoneDelete},
+		},
+		BypassPermissions: true,
+	}, tools.ToolSpec{
+		Title:       "Milestones",
+		Description: "Read and maintain the current session's milestones.",
+		Usage:       "Manage durable session milestones. Use list before changing unfamiliar milestones and copy milestone_key values exactly. create adds one pending milestone; update changes its status or details; set_dependency changes its parent; archive hides inactive work; restore makes archived work visible; delete permanently erases only an archived empty milestone.",
+		Parameters:  `{"type":"object","properties":{"action":{"type":"string","enum":["list","create","update","set_dependency","archive","restore","delete"]},"milestone_key":{"type":"string","description":"Milestone key returned by this tool"},"title":{"type":"string"},"notes":{"type":"string"},"status":{"type":"string","enum":["pending","decomposing","ready","executing","completed","blocked","cancelled"]},"depends_on_key":{"type":"string","description":"Parent milestone key; empty makes it a root milestone"},"completed":{"type":"boolean","description":"For list, include completed milestones"},"archived":{"type":"boolean","description":"For list, include archived milestones"}},"required":["action"],"additionalProperties":false}`,
+		ExposeToLLM: true,
+	})
 	tools.Register(listTool{}, tools.ToolSpec{
 		Title:       "List milestones",
 		Description: "Read the current session milestone plan.",
 		Usage:       "Read the current session milestone plan. Completed and archived milestones are hidden by default. Pass completed=true to include finished work and archived=true to include archived milestones. Archived milestones remain durable but cannot receive work until restored.",
 		Parameters:  `{"type":"object","properties":{"completed":{"type":"boolean","description":"Include completed milestones. Defaults to false."},"archived":{"type":"boolean","description":"Include archived milestones. Defaults to false."}},"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(addItemsTool{}, tools.ToolSpec{
 		Title:       "Add milestone",
 		Description: "Create one blank pending milestone.",
 		Usage:       "Create one blank pending milestone with no tasks. Koder generates the milestone_key; copy that key exactly in later tool calls. Use depends_on_key to make it a child of another milestone. Use tasks_add afterwards to add concrete tasks, then milestone_update status=ready when the milestone is ready for execution. Fails if depends_on_key is unknown or if the dependency would create a cycle.",
 		Parameters:  `{"type":"object","properties":{"title":{"type":"string","description":"Milestone title"},"notes":{"type":"string","description":"Optional milestone notes"},"depends_on_key":{"type":"string","description":"Optional parent milestone key for tree/dependency structure"}},"required":["title"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(updateItemTool{}, tools.ToolSpec{
 		Title:       "Update milestone",
 		Description: "Update one milestone's status or details.",
 		Usage:       "Update one milestone's status, title, or notes. Use milestone_depend, not milestone_update, when you only need to change depends_on_key. Use ready when decomposition is done and execution can start. Set completed, blocked, or cancelled when work is finished, blocked, created by accident, or no longer wanted.",
 		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Milestone key returned by milestone_list or milestone_add"},"status":{"type":"string","enum":["pending","decomposing","ready","executing","completed","blocked","cancelled"]},"title":{"type":"string","description":"Optional replacement title"},"notes":{"type":"string","description":"Optional replacement notes"},"depends_on_key":{"type":"string","description":"Optional parent milestone key. Pass an empty string to make this a root milestone."}},"required":["milestone_key"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(dependTool{}, tools.ToolSpec{
 		Title:       "Set milestone dependency",
 		Description: "Move one milestone under another milestone or back to the root.",
 		Usage:       "Set exactly one milestone dependency parent. Use this instead of milestone_update for dependency-only changes. Pass milestone_key for the milestone to move and depends_on_key for its parent. Pass depends_on_key as an empty string to make the milestone a root milestone. Fails if either milestone key is unknown or if the dependency would create a cycle.",
 		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Milestone key to move, returned by milestone_list or milestone_add"},"depends_on_key":{"type":"string","description":"Parent milestone key. Use an empty string to make this milestone a root milestone."}},"required":["milestone_key","depends_on_key"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(archiveTool{}, tools.ToolSpec{
 		Title:       "Archive milestone",
 		Description: "Archive or restore a milestone.",
 		Usage:       "Set archived=true to hide an inactive milestone without deleting it, or archived=false to restore it. Decomposing or executing milestones, milestones with in-progress tasks, and parents of visible child milestones cannot be archived. Use milestone_list archived=true to find archived milestones.",
 		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Milestone key returned by milestone_list"},"archived":{"type":"boolean","description":"true archives the milestone; false restores it"}},"required":["milestone_key","archived"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(deleteTool{}, tools.ToolSpec{
 		Title:       "Delete milestone",
 		Description: "Permanently delete an archived empty milestone.",
 		Usage:       "Permanently erase a milestone. This cannot be undone. The milestone must already be archived, contain no tasks, and have no milestones depending on it. Archive and delete its tasks first, and reparent or delete child milestones before retrying.",
 		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Archived milestone key returned by milestone_list archived=true"}},"required":["milestone_key"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(writeTool{}, tools.ToolSpec{
 		Title:       "Updated milestones",
 		Description: "Replace the current milestone plan.",
+		Legacy:      true,
 	})
 }
 

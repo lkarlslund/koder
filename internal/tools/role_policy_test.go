@@ -22,9 +22,18 @@ func TestDefinitionsHideRoleForbiddenTools(t *testing.T) {
 			t.Fatalf("execution definitions exposed forbidden tool %q", name)
 		}
 	}
-	for _, name := range []string{domain.ToolKindFileRead.String(), domain.ToolKindFileGrep.String(), domain.ToolKindFileEdit.String(), domain.ToolKindMilestoneUpdate.String()} {
+	for _, name := range []string{domain.ToolKindFileRead.String(), domain.ToolKindFileGrep.String(), domain.ToolKindFileEdit.String(), domain.ToolKindMilestones.String()} {
 		if !names[name] {
 			t.Fatalf("execution definitions did not expose allowed tool %q", name)
+		}
+	}
+	for _, def := range defs {
+		if def.Function.Name != domain.ToolKindMilestones.String() {
+			continue
+		}
+		params := string(def.Function.Parameters)
+		if strings.Contains(params, `"create"`) || !strings.Contains(params, `"update"`) {
+			t.Fatalf("execution milestone actions were not role filtered: %s", params)
 		}
 	}
 }

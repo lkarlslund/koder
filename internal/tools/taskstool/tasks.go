@@ -13,47 +13,66 @@ import (
 )
 
 func init() {
+	tools.Register(tools.ActionTool{
+		Kind: tools.Tasks,
+		Routes: []tools.ActionRoute{
+			{Action: "list", Tool: tools.TaskList},
+			{Action: "create", Tool: tools.TasksAdd},
+			{Action: "update", Tool: tools.TasksUpdate},
+			{Action: "next", Tool: tools.TaskFetchNext},
+			{Action: "archive", Tool: tools.TaskArchive, FixedArgs: map[string]string{"archived": "true"}},
+			{Action: "restore", Tool: tools.TaskArchive, FixedArgs: map[string]string{"archived": "false"}},
+			{Action: "delete", Tool: tools.TaskDelete},
+		},
+		BypassPermissions: true,
+	}, tools.ToolSpec{
+		Title:       "Tasks",
+		Description: "Read and maintain milestone task lists.",
+		Usage:       "Manage concrete tasks within a milestone. Use list before changing unfamiliar tasks and copy task_key values exactly. create appends pending items; update changes one task's status, note, or content; next returns the current or next actionable task without claiming it; archive hides inactive work; restore makes archived work visible; delete permanently erases only an archived task.",
+		Parameters:  `{"type":"object","properties":{"action":{"type":"string","enum":["list","create","update","next","archive","restore","delete"]},"milestone_key":{"type":"string","description":"Milestone owning the tasks; defaults to the assigned milestone where supported"},"task_key":{"type":"string","description":"Task key returned by this tool"},"items":{"type":"array","items":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"],"additionalProperties":false}},"status":{"type":"string","enum":["pending","in_progress","completed","cancelled"]},"note":{"type":"string"},"content":{"type":"string"},"archived":{"type":"boolean","description":"For list, include archived tasks"}},"required":["action"],"additionalProperties":false}`,
+		ExposeToLLM: true,
+	})
 	tools.Register(listTool{}, tools.ToolSpec{
 		Title:       "List tasks",
 		Description: "Read the task list for a milestone.",
 		Usage:       "Read the task list for a milestone. Archived tasks are hidden by default; pass archived=true when you need to inspect or restore them. If milestone_key is omitted, this reads the current assigned milestone's tasks.",
 		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Optional milestone key; defaults to the assigned milestone"},"archived":{"type":"boolean","description":"Include archived tasks. Defaults to false."}},"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(addItemsTool{}, tools.ToolSpec{
 		Title:       "Add tasks",
 		Description: "Append new pending tasks to a milestone.",
 		Usage:       "Append new pending tasks to a milestone's task list. Use this to break down the current milestone into concrete execution steps. This rejects duplicate task content already present in the milestone; update existing tasks instead of adding duplicates.",
 		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Milestone key that owns these tasks"},"items":{"type":"array","description":"New tasks to append as pending","items":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}}},"required":["milestone_key","items"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(updateItemTool{}, tools.ToolSpec{
 		Title:       "Update task",
 		Description: "Update one task's status, note, or content.",
 		Usage:       "Update one task's status and add a short note explaining what changed or why. Use the exact task_key returned by task_list, task_fetch_next, or tasks_add. Do not invent keys. Keep at most one task in_progress in a milestone. When marking completed, note what was completed in one concise sentence.",
 		Parameters:  `{"type":"object","properties":{"task_key":{"type":"string","description":"Task key returned by task_list, task_fetch_next, or tasks_add"},"status":{"type":"string","enum":["pending","in_progress","completed","cancelled"]},"note":{"type":"string","description":"Required short summary of what was done or why the status changed"},"content":{"type":"string","description":"Optional replacement content"}},"required":["task_key","status","note"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(fetchNextTool{}, tools.ToolSpec{
 		Title:       "Fetch next task",
 		Description: "Find the next task to work on.",
 		Usage:       "Find the next task to work on for a milestone. If there is already an in_progress task, it is returned. Otherwise the first pending task is returned. If all tasks are done, this returns the finished list and a message telling you to move to the next milestone or break it down into tasks.",
 		Parameters:  `{"type":"object","properties":{"milestone_key":{"type":"string","description":"Optional milestone key; defaults to the assigned milestone"}},"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(archiveTool{}, tools.ToolSpec{
 		Title:       "Archive task",
 		Description: "Archive or restore a task.",
 		Usage:       "Set archived=true to hide an inactive task without deleting it, or archived=false to restore it. An in-progress task cannot be archived. Use task_list archived=true to find archived tasks.",
 		Parameters:  `{"type":"object","properties":{"task_key":{"type":"string","description":"Task key returned by task_list"},"archived":{"type":"boolean","description":"true archives the task; false restores it"}},"required":["task_key","archived"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(deleteTool{}, tools.ToolSpec{
 		Title:       "Delete task",
 		Description: "Permanently delete an archived task.",
 		Usage:       "Permanently erase an archived task. This cannot be undone. Archive the task first; in-progress or visible tasks cannot be deleted.",
 		Parameters:  `{"type":"object","properties":{"task_key":{"type":"string","description":"Archived task key returned by task_list archived=true"}},"required":["task_key"],"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 }
 

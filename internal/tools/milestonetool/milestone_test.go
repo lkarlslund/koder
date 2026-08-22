@@ -108,19 +108,48 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if dependency["milestone_key"] != "alpha" || dependency["depends_on_key"] != "beta" {
 		t.Fatalf("unexpected dependency args: %#v", dependency)
 	}
-	def, enabled := tools.DefinitionFor(domain.ToolKindMilestoneUpdate, tools.Runtime{ChatRole: chatrole.Orchestrator})
+	def, enabled := tools.DefinitionFor(domain.ToolKindMilestones, tools.Runtime{ChatRole: chatrole.Orchestrator})
 	if !enabled {
-		t.Fatal("expected update milestone definition to be enabled")
+		t.Fatal("expected milestones definition to be enabled")
 	}
-	if !strings.Contains(string(def.Function.Parameters), `"cancelled"`) || strings.Contains(string(def.Function.Parameters), `"required":["milestone_key","status"]`) || !strings.Contains(def.Function.Description, "milestone_depend") {
-		t.Fatalf("expected cancelled status and guidance in LLM definition: %#v", def)
+	if !strings.Contains(string(def.Function.Parameters), `"cancelled"`) || !strings.Contains(string(def.Function.Parameters), `"set_dependency"`) || !strings.Contains(def.Function.Description, "set_dependency") {
+		t.Fatalf("expected lifecycle actions and guidance in LLM definition: %#v", def)
 	}
-	def, enabled = tools.DefinitionFor(domain.ToolKindMilestoneDepend, tools.Runtime{ChatRole: chatrole.Orchestrator})
-	if !enabled {
-		t.Fatal("expected depend milestone definition to be enabled")
+	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestoneUpdate, tools.Runtime{ChatRole: chatrole.Orchestrator}); enabled {
+		t.Fatal("legacy milestone_update definition remained model-visible")
 	}
-	if !strings.Contains(string(def.Function.Parameters), `"required":["milestone_key","depends_on_key"]`) {
-		t.Fatalf("expected dependency tool to require both keys: %#v", def)
+}
+
+func TestMilestonesResourceDispatchesToLegacyOperations(t *testing.T) {
+	runtime, _, _ := newMilestoneRuntime(t)
+	created, err := tools.Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
+		Tool: tools.Milestones,
+		Args: map[string]string{"action": "create", "title": "Resource API"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(created.Output, "Resource API") {
+		t.Fatalf("create output = %q", created.Output)
+	}
+	if _, _, err := tools.FinalizeResult(context.Background(), runtime, tools.Request{
+		Tool: tools.Milestones,
+		Args: map[string]string{"action": "create", "title": "Resource API"},
+	}, created); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := tools.Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
+		Tool: tools.Milestones,
+		Args: map[string]string{"action": "list"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(listed.Output, "Resource API") {
+		t.Fatalf("list output = %q", listed.Output)
+	}
+	if _, err := tools.Normalize(tools.Request{Tool: tools.Milestones, Args: map[string]string{"action": "unknown"}}); err == nil {
+		t.Fatal("unknown milestone action was accepted")
 	}
 }
 

@@ -32,25 +32,25 @@ func TestTaskUpdateItemParsesTaskKey(t *testing.T) {
 func TestTaskUpdateItemDefinitionUsesTaskKey(t *testing.T) {
 	defs := tools.Definitions(tools.Runtime{})
 	for _, def := range defs {
-		if def.Function.Name != domain.ToolKindTasksUpdate.String() {
+		if def.Function.Name != domain.ToolKindTasks.String() {
 			continue
 		}
 		params := string(def.Function.Parameters)
-		if !strings.Contains(params, `"task_key":{"type":"string"`) || strings.Contains(params, `"id"`) {
+		if !strings.Contains(params, `"task_key":{`) || !strings.Contains(params, `"Task key returned by this tool"`) || strings.Contains(params, `"id"`) {
 			t.Fatalf("expected tasks_update task_key string, got %s", params)
 		}
 		if !strings.Contains(params, `"enum":["pending","in_progress","completed","cancelled"]`) || strings.Contains(params, "InProgress") {
 			t.Fatalf("expected tasks_update status enum to match task status strings, got %s", params)
 		}
-		if !strings.Contains(params, `"required":["task_key","status","note"]`) {
-			t.Fatalf("expected tasks_update to require note, got %s", params)
+		if !strings.Contains(params, `"action"`) || !strings.Contains(params, `"update"`) {
+			t.Fatalf("expected tasks action schema, got %s", params)
 		}
-		if !strings.Contains(def.Function.Description, "exact task_key") {
-			t.Fatalf("expected tasks_update description to tell model to use task keys, got %q", def.Function.Description)
+		if !strings.Contains(def.Function.Description, "task_key") {
+			t.Fatalf("expected tasks description to tell model to use task keys, got %q", def.Function.Description)
 		}
 		return
 	}
-	t.Fatal("tasks_update definition not found")
+	t.Fatal("tasks definition not found")
 }
 
 func TestTaskStatusUsesSnakeCase(t *testing.T) {
@@ -601,20 +601,19 @@ func TestTaskScopedChatSeesAndUpdatesOnlyAssignedTask(t *testing.T) {
 	}
 }
 
-func TestMilestoneAddUpdateExposedInDefinitions(t *testing.T) {
+func TestMilestonesResourceExposedInDefinitions(t *testing.T) {
 	defs := tools.Definitions(tools.Runtime{})
-	foundAdd := false
-	foundUpdate := false
+	found := false
 	for _, def := range defs {
-		switch def.Function.Name {
-		case domain.ToolKindMilestoneAdd.String():
-			foundAdd = true
-		case domain.ToolKindMilestoneUpdate.String():
-			foundUpdate = true
+		if def.Function.Name == domain.ToolKindMilestones.String() {
+			found = strings.Contains(string(def.Function.Parameters), `"create"`) && strings.Contains(string(def.Function.Parameters), `"update"`)
+		}
+		if def.Function.Name == domain.ToolKindMilestoneAdd.String() || def.Function.Name == domain.ToolKindMilestoneUpdate.String() {
+			t.Fatalf("legacy milestone tool remained exposed: %s", def.Function.Name)
 		}
 	}
-	if !foundAdd || !foundUpdate {
-		t.Fatalf("expected milestone add/update tools, got add=%v update=%v", foundAdd, foundUpdate)
+	if !found {
+		t.Fatal("milestones resource definition missing create/update actions")
 	}
 }
 
