@@ -341,6 +341,14 @@ Evidence is immutable. Correcting its metadata creates a replacement evidence re
 a new owner revision. Evidence content is referenced by identity and bounded metadata;
 Koder does not copy an entire web page or transcript into every knowledge entry.
 
+## Portable packages
+
+The normative `.kknowledge` v1 manifest schema, byte-level format rules, security
+boundary, and canonical unpacked example live under
+[`protocol/knowledge/package/v1`](../protocol/knowledge/package/v1/README.md). Package
+metadata and signatures describe provenance; they never grant runtime authority or widen
+the importer's visibility and scope policy.
+
 ## Origin of personal knowledge
 
 Personal entries additionally record how they arose:

@@ -1,0 +1,474 @@
+{
+  "$id": "https://github.com/lkarlslund/koder/protocol/knowledge/package/v1/manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "chunk": {
+      "$ref": "#/$defs/chunk"
+    },
+    "content": {
+      "$ref": "#/$defs/content"
+    },
+    "created_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "dependencies": {
+      "items": {
+        "$ref": "#/$defs/dependency"
+      },
+      "maxItems": 256,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "features": {
+      "$ref": "#/$defs/features"
+    },
+    "files": {
+      "items": {
+        "$ref": "#/$defs/file"
+      },
+      "maxItems": 10000,
+      "minItems": 2,
+      "type": "array"
+    },
+    "format": {
+      "const": "koder.knowledge.package"
+    },
+    "license": {
+      "$ref": "#/$defs/license"
+    },
+    "min_koder_version": {
+      "pattern": "^r[0-9]+$",
+      "type": "string"
+    },
+    "package": {
+      "$ref": "#/$defs/package"
+    },
+    "publisher": {
+      "$ref": "#/$defs/publisher"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "signature": {
+      "$ref": "#/$defs/signature"
+    }
+  },
+  "required": [
+    "format",
+    "schema_version",
+    "package",
+    "publisher",
+    "license",
+    "created_at",
+    "min_koder_version",
+    "chunk",
+    "content",
+    "files"
+  ],
+  "title": "Koder Knowledge package manifest v1",
+  "type": "object",
+  "$defs": {
+    "chunk": {
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "$ref": "#/$defs/stringSet"
+        },
+        "description": {
+          "maxLength": 16384,
+          "type": "string"
+        },
+        "domain": {
+          "$ref": "#/$defs/token"
+        },
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "kind": {
+          "enum": [
+            "reference",
+            "personal",
+            "project",
+            "environment"
+          ]
+        },
+        "language": {
+          "maxLength": 35,
+          "minLength": 2,
+          "pattern": "^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$",
+          "type": "string"
+        },
+        "locale": {
+          "maxLength": 35,
+          "minLength": 2,
+          "pattern": "^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$",
+          "type": "string"
+        },
+        "review_after": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "risk": {
+          "$ref": "#/$defs/riskSet"
+        },
+        "scope": {
+          "$ref": "#/$defs/scope"
+        },
+        "source_policy": {
+          "maxLength": 16384,
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "draft",
+            "active",
+            "archived"
+          ]
+        },
+        "tags": {
+          "$ref": "#/$defs/stringSet"
+        },
+        "title": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string"
+        },
+        "visibility": {
+          "enum": [
+            "private",
+            "installation",
+            "shared",
+            "public"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "kind",
+        "scope",
+        "visibility",
+        "state"
+      ],
+      "type": "object"
+    },
+    "content": {
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "$ref": "#/$defs/recordCollection"
+        },
+        "edges": {
+          "$ref": "#/$defs/recordFile"
+        },
+        "entries": {
+          "$ref": "#/$defs/entryCollection"
+        },
+        "sources": {
+          "$ref": "#/$defs/recordFile"
+        }
+      },
+      "required": [
+        "entries",
+        "edges",
+        "sources",
+        "assets"
+      ],
+      "type": "object"
+    },
+    "dependency": {
+      "additionalProperties": false,
+      "properties": {
+        "chunk_id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "package_id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "title": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        }
+      },
+      "required": [
+        "package_id",
+        "chunk_id",
+        "version",
+        "title",
+        "required"
+      ],
+      "type": "object"
+    },
+    "entryCollection": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "maximum": 100000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "directory": {
+          "const": "entries/"
+        }
+      },
+      "required": [
+        "directory",
+        "count"
+      ],
+      "type": "object"
+    },
+    "features": {
+      "additionalProperties": false,
+      "properties": {
+        "optional": {
+          "$ref": "#/$defs/tokenSet"
+        },
+        "required": {
+          "$ref": "#/$defs/tokenSet"
+        }
+      },
+      "required": [
+        "required",
+        "optional"
+      ],
+      "type": "object"
+    },
+    "file": {
+      "additionalProperties": false,
+      "properties": {
+        "media_type": {
+          "maxLength": 255,
+          "minLength": 3,
+          "pattern": "^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+(?:;[ -~]+)?$",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "pattern": "^(?:entries/[0-9a-f-]{36}\\.md|edges\\.jsonl|sources\\.jsonl|assets/[A-Za-z0-9_][A-Za-z0-9._-]*(?:/[A-Za-z0-9_][A-Za-z0-9._-]*)*)$",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "size": {
+          "maximum": 1073741824,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "media_type",
+        "size",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "license": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "url": {
+          "format": "uri",
+          "maxLength": 2048,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "package": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "type": "object"
+    },
+    "publisher": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/token"
+        },
+        "name": {
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "url": {
+          "format": "uri",
+          "maxLength": 2048,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "recordCollection": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "maximum": 10000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "directory": {
+          "const": "assets/"
+        }
+      },
+      "required": [
+        "directory",
+        "count"
+      ],
+      "type": "object"
+    },
+    "recordFile": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "maximum": 1000000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "enum": [
+            "edges.jsonl",
+            "sources.jsonl"
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "count"
+      ],
+      "type": "object"
+    },
+    "riskSet": {
+      "items": {
+        "enum": [
+          "personal_sensitive",
+          "medical",
+          "legal",
+          "financial",
+          "physical_safety",
+          "security_sensitive"
+        ]
+      },
+      "maxItems": 6,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "scope": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "global",
+            "personal",
+            "project",
+            "session",
+            "environment"
+          ]
+        },
+        "selector": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "signature": {
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {
+          "const": "ed25519"
+        },
+        "key_id": {
+          "$ref": "#/$defs/token"
+        },
+        "value": {
+          "contentEncoding": "base64",
+          "maxLength": 88,
+          "minLength": 88,
+          "type": "string"
+        }
+      },
+      "required": [
+        "algorithm",
+        "key_id",
+        "value"
+      ],
+      "type": "object"
+    },
+    "stringSet": {
+      "items": {
+        "maxLength": 1024,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 256,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "timestamp": {
+      "format": "date-time",
+      "pattern": "Z$",
+      "type": "string"
+    },
+    "token": {
+      "maxLength": 255,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+~-]*$",
+      "type": "string"
+    },
+    "tokenSet": {
+      "items": {
+        "$ref": "#/$defs/token"
+      },
+      "maxItems": 256,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "uuidv7": {
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "version": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+      "type": "string"
+    }
+  }
+}

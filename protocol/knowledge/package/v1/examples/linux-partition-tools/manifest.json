@@ -1,0 +1,95 @@
+{
+  "chunk": {
+    "aliases": [
+      "disk partitioning"
+    ],
+    "description": "Verified, safety-conscious procedures for Linux partition tables.",
+    "domain": "system_administration",
+    "id": "01a02b00-0000-7000-8000-000000000001",
+    "kind": "reference",
+    "language": "en",
+    "locale": "en-DK",
+    "review_after": "2026-11-22T00:00:00Z",
+    "risk": [
+      "physical_safety"
+    ],
+    "scope": {
+      "kind": "global"
+    },
+    "source_policy": "Require an authoritative util-linux source and an explicit target-device check.",
+    "state": "active",
+    "tags": [
+      "linux",
+      "partitioning",
+      "sfdisk"
+    ],
+    "title": "Linux partition tools",
+    "visibility": "public"
+  },
+  "content": {
+    "assets": {
+      "count": 0,
+      "directory": "assets/"
+    },
+    "edges": {
+      "count": 1,
+      "path": "edges.jsonl"
+    },
+    "entries": {
+      "count": 2,
+      "directory": "entries/"
+    },
+    "sources": {
+      "count": 1,
+      "path": "sources.jsonl"
+    }
+  },
+  "created_at": "2026-08-22T12:05:00Z",
+  "dependencies": [],
+  "features": {
+    "optional": [],
+    "required": []
+  },
+  "files": [
+    {
+      "media_type": "application/x-ndjson",
+      "path": "edges.jsonl",
+      "sha256": "d60d25b229119a9e4ed4a7db4f186f2f745f033e37aad89e95411075e24f5adf",
+      "size": 586
+    },
+    {
+      "media_type": "text/markdown; charset=utf-8",
+      "path": "entries/01a02b00-0000-7000-8000-000000000002.md",
+      "sha256": "acd5be1af6e8bfac556bc493024a99990e932b61aae89c49916fb44bdbfa2b94",
+      "size": 1196
+    },
+    {
+      "media_type": "text/markdown; charset=utf-8",
+      "path": "entries/01a02b00-0000-7000-8000-000000000003.md",
+      "sha256": "e9c4800411124c571a2eb6cbd9359590f91a3d0936de070afeb151fad2736362",
+      "size": 1311
+    },
+    {
+      "media_type": "application/x-ndjson",
+      "path": "sources.jsonl",
+      "sha256": "d88c8af3c8bf3044ca9ecb9938d36e7fb87b10b843b6766f195336408cf05482",
+      "size": 428
+    }
+  ],
+  "format": "koder.knowledge.package",
+  "license": {
+    "name": "CC-BY-4.0",
+    "url": "https://creativecommons.org/licenses/by/4.0/"
+  },
+  "min_koder_version": "r1847",
+  "package": {
+    "id": "01a02b00-0000-7000-8000-000000000000",
+    "version": "1.0.0"
+  },
+  "publisher": {
+    "id": "publisher:example",
+    "name": "Koder canonical examples",
+    "url": "https://github.com/lkarlslund/koder"
+  },
+  "schema_version": 1
+}
