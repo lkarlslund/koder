@@ -8,6 +8,7 @@ const rendererAPI = require('../assets/knowledge_graph_renderer.js');
 const fixture = require('./knowledge_graph_fixtures.js');
 
 assert.deepStrictEqual(rendererAPI.pointerModifiers({event: {original: {metaKey: true, shiftKey: true}}}), {additive: true, shift: true});
+assert.deepStrictEqual(rendererAPI.pointerLocation({event: {x: 17, y: 23}}), {x: 17, y: 23});
 
 class FakeSigma {
   constructor(graph, container, settings) {
@@ -84,13 +85,20 @@ FakeSigma.instance.emit('clickStage', {});
 assert.deepStrictEqual(interactions, [
   ['node', `entry:${fixture.ids.partition}`], ['edge', fixture.ids.requires], ['background', undefined],
 ]);
+let contextPrevented = false;
+FakeSigma.instance.emit('rightClickNode', {node: `entry:${fixture.ids.partition}`, event: {x: 12, y: 14, preventSigmaDefault() { contextPrevented = true; }}});
+FakeSigma.instance.emit('rightClickEdge', {edge: fixture.ids.requires, event: {x: 18, y: 20}});
+assert.strictEqual(contextPrevented, true);
+assert.deepStrictEqual(interactions.slice(3), [
+  ['context', `entry:${fixture.ids.partition}`], ['context', fixture.ids.requires],
+]);
 FakeSigma.instance.emit('enterNode', {node: `entry:${fixture.ids.partition}`});
 assert.strictEqual(FakeSigma.instance.settings.nodeReducer(`entry:${fixture.ids.partition}`, store.graph.getNodeAttributes(`entry:${fixture.ids.partition}`)).knowledgeStyle.hovered, true);
 FakeSigma.instance.emit('leaveNode', {node: `entry:${fixture.ids.partition}`});
 FakeSigma.instance.emit('enterEdge', {edge: fixture.ids.requires});
 assert.strictEqual(FakeSigma.instance.settings.edgeReducer(fixture.ids.requires, store.graph.getEdgeAttributes(fixture.ids.requires)).knowledgeStyle.hovered, true);
 FakeSigma.instance.emit('leaveEdge', {edge: fixture.ids.requires});
-assert.deepStrictEqual(interactions.slice(3), [
+assert.deepStrictEqual(interactions.slice(5), [
   ['hover', `entry:${fixture.ids.partition}`], ['hover', null], ['hover', fixture.ids.requires], ['hover', null],
 ]);
 const boxSelections = [];

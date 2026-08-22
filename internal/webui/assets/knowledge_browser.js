@@ -152,6 +152,27 @@
     return {root: {kind: objectKind, id}, direction, max_depth: 1, max_nodes: 100, max_edges: 200, time_limit_ms: 2000};
   }
 
+  function graphObjectForSelection(selection) {
+    selection = selection || {};
+    if (['chunk', 'entry'].includes(selection.kind) && /^[A-Za-z0-9_-]+$/.test(String(selection.id || ''))) {
+      return {kind: selection.kind, id: String(selection.id)};
+    }
+    if (selection.kind !== 'node') return null;
+    const key = String(selection.key || '');
+    const separator = key.indexOf(':');
+    const kind = separator > 0 ? key.slice(0, separator) : '';
+    const id = separator > 0 ? key.slice(separator + 1) : '';
+    return ['chunk', 'entry'].includes(kind) && /^[A-Za-z0-9_-]+$/.test(id) ? {kind, id} : null;
+  }
+
+  function graphKeyboardAction(event) {
+    event = event || {};
+    const key = String(event.key || '').toLowerCase();
+    if ((event.ctrlKey || event.metaKey) && key === 'z') return 'undo';
+    if (event.ctrlKey || event.metaKey || event.altKey) return '';
+    return ({enter: 'inspect', delete: 'hide', backspace: 'hide', h: 'hide', i: 'isolate', r: 'reveal', c: 'center', p: 'pin', '[': 'incoming', ']': 'outgoing'})[key] || '';
+  }
+
   function graphDebugEnabled(search) {
     try { return new URLSearchParams(String(search || '')).get('graph_debug') === '1'; } catch (_) { return false; }
   }
@@ -225,6 +246,11 @@
       this.graphIsolateButton = shell.querySelector('[data-knowledge-view-isolate]');
       this.graphRevealButton = shell.querySelector('[data-knowledge-view-reveal]');
       this.graphUndoButton = shell.querySelector('[data-knowledge-view-undo]');
+      this.graphCanvas = shell.querySelector('[data-knowledge-graph-canvas]');
+      this.graphContextMenu = shell.querySelector('[data-knowledge-context-menu]');
+      this.graphContextHeading = shell.querySelector('[data-knowledge-context-heading]');
+      this.graphContextPinLabel = shell.querySelector('[data-knowledge-context-pin-label]');
+      this.graphContextButtons = this.graphContextMenu ? Array.from(this.graphContextMenu.querySelectorAll('[data-knowledge-context-action]')) : [];
       this.filters = Object.fromEntries(Array.from(shell.querySelectorAll('[data-knowledge-filter]')).map(input => [input.dataset.knowledgeFilter, input]));
       this.inspector = {
         empty: shell.querySelector('[data-knowledge-inspector-empty]'),
@@ -268,6 +294,24 @@
       if (this.graphIsolateButton) this.graphIsolateButton.addEventListener('click', () => this.applyGraphViewAction('isolate'));
       if (this.graphRevealButton) this.graphRevealButton.addEventListener('click', () => this.applyGraphViewAction('reveal'));
       if (this.graphUndoButton) this.graphUndoButton.addEventListener('click', () => this.applyGraphViewAction('undo'));
+      this.graphContextClickHandlers = new Map();
+      for (const button of this.graphContextButtons) {
+        const handler = () => this.runGraphContextAction(button.dataset.knowledgeContextAction);
+        this.graphContextClickHandlers.set(button, handler);
+        button.addEventListener('click', handler);
+      }
+      this.onGraphKeyDown = event => this.handleGraphKeyDown(event);
+      this.onGraphNativeContext = event => event.preventDefault();
+      this.onContextMenuKeyDown = event => this.handleContextMenuKeyDown(event);
+      this.onDocumentPointerDown = event => {
+        if (this.graphContextMenu && !this.graphContextMenu.hidden && !this.graphContextMenu.contains(event.target)) this.closeGraphContextMenu();
+      };
+      if (this.graphCanvas) {
+        this.graphCanvas.addEventListener('keydown', this.onGraphKeyDown);
+        this.graphCanvas.addEventListener('contextmenu', this.onGraphNativeContext);
+      }
+      if (this.graphContextMenu) this.graphContextMenu.addEventListener('keydown', this.onContextMenuKeyDown);
+      this.shell.ownerDocument.addEventListener('pointerdown', this.onDocumentPointerDown, true);
       if (this.inspector.sendButton) this.inspector.sendButton.addEventListener('click', () => this.sendSelectionToChat());
       this.onPopState = () => {
         this.urlState = browserStateFromSearch(globalThis.location && globalThis.location.search);
@@ -315,10 +359,22 @@
       }
       if (this.graphRenderer) {
         this.graphInteractionUnsubscribe = this.graphRenderer.subscribe(event => {
-          if (event.type === 'node' && event.detail && event.detail.key) this.selectGraphObject('node', event.detail.key, event.detail);
-          if (event.type === 'edge' && event.detail && event.detail.key) this.selectGraphObject('edge', event.detail.key, event.detail);
+          if (event.type === 'node' && event.detail && event.detail.key) {
+            this.closeGraphContextMenu();
+            this.selectGraphObject('node', event.detail.key, event.detail);
+            if (this.graphCanvas) this.graphCanvas.focus({preventScroll: true});
+          }
+          if (event.type === 'edge' && event.detail && event.detail.key) {
+            this.closeGraphContextMenu();
+            this.selectGraphObject('edge', event.detail.key, event.detail);
+            if (this.graphCanvas) this.graphCanvas.focus({preventScroll: true});
+          }
           if (event.type === 'boxselect' && event.detail) this.selectGraphObjects(event.detail.keys, event.detail.additive);
-          if (event.type === 'background' && !(event.detail && event.detail.additive)) this.clearGraphSelection();
+          if (event.type === 'background' && !(event.detail && event.detail.additive)) {
+            this.closeGraphContextMenu();
+            this.clearGraphSelection();
+          }
+          if (event.type === 'context' && event.detail) this.showGraphContextMenu(event.detail);
           if (event.type === 'dragstart' && this.graphLayout) this.graphLayout.stop('node_drag');
           if (event.type === 'pin') {
             const status = this.shell.querySelector('[data-knowledge-status-label]');
@@ -640,6 +696,103 @@
       return true;
     }
 
+    showGraphContextMenu(target, options) {
+      options = options || {};
+      if (!this.graphContextMenu || !target || !['node', 'edge'].includes(target.kind) || !target.key) return false;
+      const selection = this.graphAdapter ? this.graphAdapter.selectionSnapshot().items : [];
+      if (!selection.some(item => item.kind === target.kind && item.key === target.key)) this.selectGraphObject(target.kind, target.key);
+      this.graphContextTarget = {kind: target.kind, key: String(target.key)};
+      const object = graphObjectForSelection(this.graphContextTarget);
+      const isNode = target.kind === 'node';
+      const graph = this.graphAdapter && this.graphAdapter.target && this.graphAdapter.target.graph;
+      const pinned = !!(isNode && graph && graph.hasNode(target.key) && graph.getNodeAttribute(target.key, 'pinned'));
+      if (this.graphContextHeading) {
+        const count = this.graphAdapter ? this.graphAdapter.selectionSnapshot().items.length : 1;
+        this.graphContextHeading.textContent = count > 1 ? `${count} selected` : `${target.kind} · ${target.key}`;
+      }
+      if (this.graphContextPinLabel) this.graphContextPinLabel.textContent = pinned ? 'Release local pin' : 'Pin locally';
+      for (const button of this.graphContextButtons) {
+        const action = button.dataset.knowledgeContextAction;
+        button.hidden = ['incoming', 'outgoing'].includes(action) ? !object : ['center', 'pin'].includes(action) ? !isNode : false;
+      }
+      this.graphContextMenu.hidden = false;
+      const stage = this.graphContextMenu.parentElement;
+      const stageWidth = stage && stage.clientWidth || 0;
+      const stageHeight = stage && stage.clientHeight || 0;
+      const x = Number.isFinite(Number(target.x)) ? Number(target.x) : stageWidth / 2;
+      const y = Number.isFinite(Number(target.y)) ? Number(target.y) : stageHeight / 2;
+      const width = this.graphContextMenu.offsetWidth || 248;
+      const height = this.graphContextMenu.offsetHeight || 280;
+      this.graphContextMenu.style.left = `${Math.max(8, Math.min(x, Math.max(8, stageWidth - width - 8)))}px`;
+      this.graphContextMenu.style.top = `${Math.max(8, Math.min(y, Math.max(8, stageHeight - height - 8)))}px`;
+      if (options.focus) {
+        const first = this.graphContextButtons.find(button => !button.hidden && !button.disabled);
+        if (first) first.focus();
+      }
+      return true;
+    }
+
+    closeGraphContextMenu(options) {
+      if (!this.graphContextMenu) return false;
+      const wasOpen = !this.graphContextMenu.hidden;
+      if (wasOpen) this.graphContextMenu.hidden = true;
+      this.graphContextTarget = null;
+      if (wasOpen && options && options.focusGraph && this.graphCanvas) this.graphCanvas.focus({preventScroll: true});
+      return wasOpen;
+    }
+
+    runGraphContextAction(action) {
+      const target = this.graphContextTarget || (this.graphAdapter && this.graphAdapter.selectionSnapshot().primary);
+      if (!target) return false;
+      let changed = false;
+      if (action === 'inspect') changed = this.applyPrimaryGraphSelection(target);
+      if (action === 'incoming' || action === 'outgoing') changed = this.expandGraph(action, target);
+      if (action === 'center' && target.kind === 'node' && this.graphViewport) changed = this.graphViewport.centerNode(target.key);
+      if (action === 'pin' && target.kind === 'node' && this.graphRenderer) changed = this.graphRenderer.toggleNodePin(target.key);
+      if (action === 'hide' || action === 'isolate') changed = this.applyGraphViewAction(action);
+      this.closeGraphContextMenu({focusGraph: true});
+      return changed;
+    }
+
+    handleGraphKeyDown(event) {
+      const primary = this.graphAdapter && this.graphAdapter.selectionSnapshot().primary;
+      if ((event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) && primary) {
+        event.preventDefault();
+        return this.showGraphContextMenu(primary, {focus: true});
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (!this.closeGraphContextMenu({focusGraph: true})) this.clearGraphSelection();
+        return true;
+      }
+      const action = graphKeyboardAction(event);
+      if (!action) return false;
+      event.preventDefault();
+      if (['undo', 'reveal'].includes(action)) return this.applyGraphViewAction(action);
+      if (!primary) return false;
+      this.graphContextTarget = primary;
+      return this.runGraphContextAction(action);
+    }
+
+    handleContextMenuKeyDown(event) {
+      const available = this.graphContextButtons.filter(button => !button.hidden && !button.disabled);
+      const index = available.indexOf(this.shell.ownerDocument.activeElement);
+      let next = -1;
+      if (event.key === 'ArrowDown') next = (index + 1 + available.length) % available.length;
+      if (event.key === 'ArrowUp') next = (index - 1 + available.length) % available.length;
+      if (event.key === 'Home') next = 0;
+      if (event.key === 'End') next = available.length - 1;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        this.closeGraphContextMenu({focusGraph: true});
+        return true;
+      }
+      if (next < 0 || !available[next]) return false;
+      event.preventDefault();
+      available[next].focus();
+      return true;
+    }
+
     clearGraphSelection() {
       this.writeURLState({...this.urlState, objectKind: '', id: ''}, false);
       if (this.graphAdapter) this.graphAdapter.clearSelection();
@@ -831,8 +984,8 @@
       }));
     }
 
-    async expandGraph(direction) {
-      const selected = this.inspectedObject;
+    async expandGraph(direction, selection) {
+      const selected = graphObjectForSelection(selection) || this.inspectedObject;
       const request = selected && graphExpansionRequest(selected.kind, selected.id, direction);
       if (!request || !this.graphAdapter) return false;
       if (this.graphExpandIncoming) this.graphExpandIncoming.disabled = true;
@@ -891,6 +1044,13 @@
       clearTimeout(this.graphRefetchTimer);
       globalThis.removeEventListener('popstate', this.onPopState);
       this.shell.removeEventListener('koder:knowledge-pane', this.onGraphPane);
+      if (this.graphCanvas) {
+        this.graphCanvas.removeEventListener('keydown', this.onGraphKeyDown);
+        this.graphCanvas.removeEventListener('contextmenu', this.onGraphNativeContext);
+      }
+      if (this.graphContextMenu) this.graphContextMenu.removeEventListener('keydown', this.onContextMenuKeyDown);
+      for (const [button, handler] of this.graphContextClickHandlers) button.removeEventListener('click', handler);
+      this.shell.ownerDocument.removeEventListener('pointerdown', this.onDocumentPointerDown, true);
       if (this.graphUnsubscribe) this.graphUnsubscribe();
       if (this.graphInteractionUnsubscribe) this.graphInteractionUnsubscribe();
       if (this.graphLayoutUnsubscribe) this.graphLayoutUnsubscribe();
@@ -1007,5 +1167,5 @@
     }
   }
 
-  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
+  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
 });

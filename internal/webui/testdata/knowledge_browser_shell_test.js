@@ -53,6 +53,13 @@ assert.deepStrictEqual(browser.graphExpansionRequest('entry', 'entry-7', 'incomi
   root: {kind: 'entry', id: 'entry-7'}, direction: 'incoming', max_depth: 1, max_nodes: 100, max_edges: 200, time_limit_ms: 2000,
 });
 assert.strictEqual(browser.graphExpansionRequest('entry', 'entry-7', 'both'), null);
+assert.deepStrictEqual(browser.graphObjectForSelection({kind: 'node', key: 'entry:entry-7'}), {kind: 'entry', id: 'entry-7'});
+assert.deepStrictEqual(browser.graphObjectForSelection({kind: 'chunk', id: 'chunk-7'}), {kind: 'chunk', id: 'chunk-7'});
+assert.strictEqual(browser.graphObjectForSelection({kind: 'edge', key: 'link-7'}), null);
+assert.strictEqual(browser.graphKeyboardAction({key: 'h'}), 'hide');
+assert.strictEqual(browser.graphKeyboardAction({key: 'Delete'}), 'hide');
+assert.strictEqual(browser.graphKeyboardAction({key: 'z', ctrlKey: true}), 'undo');
+assert.strictEqual(browser.graphKeyboardAction({key: 'h', ctrlKey: true}), '');
 assert.strictEqual(browser.graphDebugEnabled('?graph_debug=1'), true);
 assert.strictEqual(browser.graphDebugEnabled('?graph_debug=true'), false);
 const webglDocument = {createElement: () => ({getContext: name => name === 'webgl2' ? {} : null})};

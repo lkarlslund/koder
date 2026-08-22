@@ -29,6 +29,20 @@
     return {additive: !!(source.ctrlKey || source.metaKey), shift: !!source.shiftKey};
   }
 
+  function pointerLocation(value) {
+    const event = value && value.event || value || {};
+    const original = event.original || event;
+    const read = (primary, fallback) => Number.isFinite(Number(primary)) ? Number(primary) : Number(fallback) || 0;
+    return {x: read(event.x, original.offsetX), y: read(event.y, original.offsetY)};
+  }
+
+  function preventPointerDefault(value) {
+    const event = value && value.event || value || {};
+    if (typeof event.preventSigmaDefault === 'function') event.preventSigmaDefault();
+    const original = event.original || event;
+    if (typeof original.preventDefault === 'function') original.preventDefault();
+  }
+
   class Renderer {
     constructor(options) {
       options = options || {};
@@ -91,6 +105,14 @@
         clickStage: event => {
           if (this.suppressStageClick) { this.suppressStageClick = false; return; }
           this.emit('background', pointerModifiers(event));
+        },
+        rightClickNode: event => {
+          preventPointerDefault(event);
+          this.emit('context', {kind: 'node', key: String(event && event.node || ''), ...pointerLocation(event)});
+        },
+        rightClickEdge: event => {
+          preventPointerDefault(event);
+          this.emit('context', {kind: 'edge', key: String(event && event.edge || ''), ...pointerLocation(event)});
         },
         enterNode: event => this.setHover('node', event && event.node),
         leaveNode: event => this.clearHover('node', event && event.node),
@@ -353,5 +375,5 @@
     }
   }
 
-  return Object.freeze({Renderer, provisionalPositions, sigmaClass, pointerModifiers});
+  return Object.freeze({Renderer, provisionalPositions, sigmaClass, pointerModifiers, pointerLocation});
 });

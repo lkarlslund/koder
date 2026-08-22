@@ -108,8 +108,18 @@
           </div>
         </header>
         <div class="knowledge-graph-stage" id="knowledge-graph" role="region" aria-live="polite">
-          <div class="knowledge-graph-canvas" data-knowledge-graph-canvas aria-hidden="true"></div>
+          <div class="knowledge-graph-canvas" data-knowledge-graph-canvas tabindex="0" role="application" aria-label="Knowledge graph. Press Shift+F10 for actions on the selected item."></div>
           <div class="knowledge-selection-box" data-knowledge-selection-box hidden aria-hidden="true"></div>
+          <div class="knowledge-graph-context-menu" data-knowledge-context-menu role="menu" aria-label="Graph item actions" hidden>
+            <div class="knowledge-context-heading" data-knowledge-context-heading></div>
+            <button type="button" role="menuitem" data-knowledge-context-action="inspect"><i class="bi bi-info-circle" aria-hidden="true"></i><span>Inspect</span><kbd>Enter</kbd></button>
+            <button type="button" role="menuitem" data-knowledge-context-action="incoming"><i class="bi bi-box-arrow-in-left" aria-hidden="true"></i><span>Expand incoming</span><kbd>[</kbd></button>
+            <button type="button" role="menuitem" data-knowledge-context-action="outgoing"><i class="bi bi-box-arrow-right" aria-hidden="true"></i><span>Expand outgoing</span><kbd>]</kbd></button>
+            <button type="button" role="menuitem" data-knowledge-context-action="center"><i class="bi bi-crosshair" aria-hidden="true"></i><span>Center node</span><kbd>C</kbd></button>
+            <button type="button" role="menuitem" data-knowledge-context-action="pin"><i class="bi bi-pin-angle" aria-hidden="true"></i><span data-knowledge-context-pin-label>Pin locally</span><kbd>P</kbd></button>
+            <button type="button" role="menuitem" data-knowledge-context-action="hide"><i class="bi bi-eye-slash" aria-hidden="true"></i><span>Hide selection</span><kbd>H</kbd></button>
+            <button type="button" role="menuitem" data-knowledge-context-action="isolate"><i class="bi bi-bullseye" aria-hidden="true"></i><span>Isolate selection</span><kbd>I</kbd></button>
+          </div>
           <div class="knowledge-graph-fallback" data-knowledge-graph-fallback role="status" hidden>
             <span class="knowledge-empty-icon"><i class="bi bi-list-nested" aria-hidden="true"></i></span>
             <strong>Graph canvas disabled</strong>
