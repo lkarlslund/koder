@@ -32,7 +32,7 @@ func TestServerServesStandaloneKnowledgeExplorerShell(t *testing.T) {
 	}
 	for _, required := range []string{
 		`id="knowledge-browser"`, `id="knowledge-graph"`, "Koder Knowledge",
-		`data-knowledge-pane="sources"`, `data-knowledge-pane="graph"`, `data-knowledge-pane="inspector"`,
+		`data-knowledge-pane="sources"`, `data-knowledge-pane="graph"`, `data-knowledge-pane="inspector"`, `data-knowledge-return`,
 		`/assets/knowledge_browser.css`, `/assets/knowledge_browser.js`,
 		`/assets/vendor/graphology/graphology.umd.min.js`,
 		`/assets/vendor/knowledge-layouts/knowledge-layouts.min.js`,
@@ -44,6 +44,22 @@ func TestServerServesStandaloneKnowledgeExplorerShell(t *testing.T) {
 	}
 	if strings.Contains(page, assetHashPlaceholder) || strings.Contains(page, "https://") || strings.Contains(page, "http://") {
 		t.Fatal("Knowledge explorer contains an unresolved hash or remote dependency")
+	}
+}
+
+func TestMainWebUIExposesKnowledgeExplorerEntry(t *testing.T) {
+	page := renderIndexHTML()
+	script := mustReadAsset("assets/app.js")
+	for value, source := range map[string]string{
+		`title="Open Knowledge"`:                  page,
+		`@click="openKnowledgeExplorer()"`:        page,
+		`knowledgeExplorerURL()`:                  script,
+		`return knowledgeExplorerHref()`:          script,
+		`params.set('return', location.pathname)`: script,
+	} {
+		if !strings.Contains(source, value) {
+			t.Fatalf("main Web UI Knowledge entry does not contain %q", value)
+		}
 	}
 }
 

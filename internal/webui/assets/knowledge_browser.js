@@ -19,11 +19,26 @@
     return panes[(index + offset + panes.length) % panes.length];
   }
 
+  function safeReturnPath(value) {
+    value = String(value || '').trim();
+    return /^\/s\/[A-Za-z0-9_-]+(?:\/c\/[A-Za-z0-9_-]+)?$/.test(value) ? value : '/';
+  }
+
+  function returnPathFromSearch(search) {
+    try {
+      return safeReturnPath(new URLSearchParams(String(search || '')).get('return'));
+    } catch (_) {
+      return '/';
+    }
+  }
+
   function mount(document) {
     const shell = document.getElementById('knowledge-browser');
     if (!shell || shell.dataset.shellMounted === 'true') return;
     shell.dataset.shellMounted = 'true';
     const tabs = Array.from(shell.querySelectorAll('[data-knowledge-tab]'));
+    const returnLink = shell.querySelector('[data-knowledge-return]');
+    if (returnLink) returnLink.setAttribute('href', returnPathFromSearch(globalThis.location && globalThis.location.search));
 
     function selectPane(value, options) {
       const pane = normalizePane(value);
@@ -52,5 +67,5 @@
     selectPane(shell.dataset.mobilePane);
   }
 
-  return Object.freeze({panes, normalizePane, adjacentPane, mount});
+  return Object.freeze({panes, normalizePane, adjacentPane, safeReturnPath, returnPathFromSearch, mount});
 });

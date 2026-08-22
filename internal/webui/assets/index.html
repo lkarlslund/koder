@@ -48,6 +48,7 @@
         <button class="btn btn-sm btn-outline-secondary mobile-sidebar-toggle" title="Open sidebar" @click="openMobileSidebar()"><i class="bi bi-layout-sidebar-inset-reverse"></i></button>
 		<button class="btn btn-sm btn-outline-secondary" type="button" title="Open board" x-show="currentSessionID() && workspaceSessionMode()" @click="openSessionBoard()" style="display: none;"><i class="bi bi-kanban"></i><span class="visually-hidden">Open board</span></button>
 		<button class="btn btn-sm btn-outline-secondary" type="button" title="Browse files" x-show="currentSessionID() && workspaceSessionMode()" @click="openSessionFiles()" style="display: none;"><i class="bi bi-folder2-open"></i><span class="visually-hidden">Browse files</span></button>
+        <button class="btn btn-sm btn-outline-info" type="button" title="Open Knowledge" @click="openKnowledgeExplorer()"><i class="bi bi-bezier2"></i><span class="visually-hidden">Open Knowledge</span></button>
         <button class="btn btn-sm btn-outline-secondary" title="Observability" @click="openObservabilityPanel()"><i class="bi bi-activity"></i></button>
         <button class="btn btn-sm btn-outline-secondary" title="Sessions &amp; Chats" @click="openSessionDialog()"><i class="bi bi-collection"></i></button>
 		<button class="btn btn-sm btn-outline-primary" title="Connect Android phone" @click="openPhoneBinding()"><i class="bi bi-phone"></i><span class="visually-hidden">Connect Android phone</span></button>

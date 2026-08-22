@@ -885,7 +885,7 @@
       if (kind) params.set('object_kind', String(kind));
       if (id) params.set('id', String(id));
       if (query) params.set('query', String(query));
-      if (/^\/s\/[^/]+\/c\/[^/]+/.test(location.pathname)) params.set('return', location.pathname);
+      if (/^\/s\/[^/]+\/c\/[^/]+$/.test(location.pathname)) params.set('return', location.pathname);
       const suffix = params.toString();
       return '/knowledge' + (suffix ? '?' + suffix : '');
     }
@@ -2433,6 +2433,12 @@
         },
         openSessionFiles() {
           this.openURLInNewTab(this.sessionFilesURL());
+        },
+        knowledgeExplorerURL() {
+          return knowledgeExplorerHref();
+        },
+        openKnowledgeExplorer() {
+          this.openURLInNewTab(this.knowledgeExplorerURL());
         },
         chatURL(chatID, sessionID) {
           const session = String(sessionID || this.currentSessionID() || '').trim();
