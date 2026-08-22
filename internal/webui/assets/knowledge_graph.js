@@ -46,15 +46,32 @@
     return result;
   }
 
-  function initialPoint(key) {
+  function keyHash(key) {
     let hash = 2166136261;
     for (const character of String(key)) {
       hash ^= character.codePointAt(0);
       hash = Math.imul(hash, 16777619) >>> 0;
     }
+    return hash;
+  }
+
+  function initialPoint(key) {
+    const hash = keyHash(key);
     const angle = (hash / 0x100000000) * Math.PI * 2;
     const radius = 0.8 + ((hash >>> 24) / 255) * 2.4;
     return {x: Math.cos(angle) * radius, y: Math.sin(angle) * radius};
+  }
+
+  function expandedPoint(key, anchors) {
+    anchors = (anchors || []).filter(point => Number.isFinite(point && point.x) && Number.isFinite(point && point.y));
+    if (!anchors.length) return initialPoint(key);
+    const center = anchors.reduce((result, point) => ({x: result.x + point.x, y: result.y + point.y}), {x: 0, y: 0});
+    center.x /= anchors.length;
+    center.y /= anchors.length;
+    const hash = keyHash(key);
+    const angle = (hash / 0x100000000) * Math.PI * 2;
+    const radius = 0.65 + ((hash >>> 25) / 127) * 0.55;
+    return {x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius};
   }
 
   class Store {
@@ -99,6 +116,7 @@
       this.preflight(patch, replace);
       const decision = this.assessOrder(patch, replace);
       if (decision) return decision;
+      const startingPositions = this.startingPositions(patch, replace);
 
       const before = this.counts();
       if (replace) this.graph.clear();
@@ -108,7 +126,7 @@
       for (const key of patch.removeNodeKeys) {
         if (this.graph.hasNode(key)) this.graph.dropNode(key);
       }
-      for (const node of patch.upsertNodes) this.upsertNode(node);
+      for (const node of patch.upsertNodes) this.upsertNode(node, startingPositions.get(String(node.key)));
       for (const edge of patch.upsertEdges) this.upsertEdge(edge);
 
       this.generation = Number(patch.generation);
@@ -121,6 +139,29 @@
       });
       this.emit('change', detail);
       return detail;
+    }
+
+    startingPositions(patch, replace) {
+      const result = new Map();
+      const removed = new Set(patch.removeNodeKeys.map(String));
+      const newKeys = new Set(patch.upsertNodes.filter(node => replace || !this.graph.hasNode(String(node.key))).map(node => String(node.key)));
+      for (const node of patch.upsertNodes) {
+        const key = String(node.key);
+        if (!newKeys.has(key) || Number.isFinite(node.attributes && node.attributes.x) && Number.isFinite(node.attributes && node.attributes.y)) continue;
+        const anchors = [];
+        if (!replace) {
+          for (const edge of patch.upsertEdges) {
+            const source = String(edge.source);
+            const target = String(edge.target);
+            const other = source === key ? target : target === key ? source : '';
+            if (!other || newKeys.has(other) || removed.has(other) || !this.graph.hasNode(other)) continue;
+            const attributes = this.graph.getNodeAttributes(other);
+            anchors.push({x: attributes.x, y: attributes.y});
+          }
+        }
+        result.set(key, expandedPoint(key, anchors));
+      }
+      return result;
     }
 
     assessOrder(patch, replace) {
@@ -191,11 +232,11 @@
       }
     }
 
-    upsertNode(node) {
+    upsertNode(node, startingPosition) {
       const key = String(node.key);
       const attributes = cloneAttributes(node.attributes);
       if (!this.graph.hasNode(key)) {
-        if (!Number.isFinite(attributes.x) || !Number.isFinite(attributes.y)) Object.assign(attributes, initialPoint(key));
+        if (!Number.isFinite(attributes.x) || !Number.isFinite(attributes.y)) Object.assign(attributes, startingPosition || initialPoint(key));
         this.graph.addNode(key, attributes);
         return;
       }
@@ -261,5 +302,5 @@
     }
   }
 
-  return Object.freeze({PATCH_VERSION, Store, initialPoint});
+  return Object.freeze({PATCH_VERSION, Store, initialPoint, expandedPoint});
 });

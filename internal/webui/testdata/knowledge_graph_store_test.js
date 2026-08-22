@@ -11,6 +11,7 @@ const batches = [];
 store.subscribe(event => batches.push([event.type, event.detail]));
 
 adapter.replaceSnapshot(fixture.apiSnapshot);
+assert.deepStrictEqual(graphAPI.initialPoint('stable-key'), graphAPI.initialPoint('stable-key'));
 assert.deepStrictEqual(store.counts(), {nodes: 3, edges: 1});
 assert.strictEqual(store.graph.type, 'directed');
 assert.strictEqual(store.graph.multi, true);
@@ -27,6 +28,8 @@ const formatKey = `entry:${fixture.ids.format}`;
 store.graph.setNodeAttribute(formatKey, 'x', 17);
 store.graph.setNodeAttribute(formatKey, 'y', -4);
 adapter.applyPatch(fixture.incrementalPatches[0]);
+const verifyPosition = store.node(`entry:${fixture.ids.verify}`).attributes;
+assert(Math.hypot(verifyPosition.x - 17, verifyPosition.y + 4) < 1.3);
 adapter.applyPatch(fixture.incrementalPatches[1]);
 assert.deepStrictEqual(store.counts(), {nodes: 4, edges: 2});
 assert.strictEqual(store.node(formatKey).attributes.state, 'active');
