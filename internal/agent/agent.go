@@ -52,28 +52,30 @@ import (
 )
 
 type Engine struct {
-	cfg            config.Config
-	store          *store.Store
-	debug          *debugsrv.Recorder
-	files          *attachment.Manager
-	offeredFiles   *offeredfile.Manager
-	caps           *provider.CapabilityStore
-	health         *provider.HealthTracker
-	agents         *agents.Manager
-	mcp            *mcp.Manager
-	settings       *settings.Store
-	modelOverlays  modeloverlay.Catalog
-	modelRuntime   *modelruntime.Runtime
-	toolsRuntime   *toolruntime.Runtime
-	browser        *browser.Manager
-	codex          *codexdriver.Manager
-	envMu          sync.Mutex
-	envPrompts     map[id.ID]string
-	registry       *sessionpkg.Registry
-	retryPause     func(context.Context, time.Duration, func(time.Duration)) error
-	curationMu     sync.RWMutex
-	curation       *curation.Coordinator
-	curationReview *curation.ReviewManager
+	cfg               config.Config
+	store             *store.Store
+	debug             *debugsrv.Recorder
+	files             *attachment.Manager
+	offeredFiles      *offeredfile.Manager
+	caps              *provider.CapabilityStore
+	health            *provider.HealthTracker
+	agents            *agents.Manager
+	mcp               *mcp.Manager
+	settings          *settings.Store
+	modelOverlays     modeloverlay.Catalog
+	modelRuntime      *modelruntime.Runtime
+	toolsRuntime      *toolruntime.Runtime
+	browser           *browser.Manager
+	codex             *codexdriver.Manager
+	envMu             sync.Mutex
+	envPrompts        map[id.ID]string
+	registry          *sessionpkg.Registry
+	retryPause        func(context.Context, time.Duration, func(time.Duration)) error
+	curationMu        sync.RWMutex
+	curation          *curation.Coordinator
+	curationReview    *curation.ReviewManager
+	curationPatternMu sync.Mutex
+	curationPatterns  map[string]curationPatternObservation
 }
 
 // SetVoiceSessionControl connects the native voice profile to process-wide

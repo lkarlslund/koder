@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -53,5 +54,60 @@ func TestBoundedCurationSourceIDsPreservesStartAndEnd(t *testing.T) {
 	bounded := boundedCurationSourceIDs(ids)
 	if len(bounded) != 64 || bounded[0] != "item-00" || bounded[31] != "item-31" || bounded[32] != "item-48" || bounded[63] != "item-79" {
 		t.Fatalf("bounded IDs = %#v", bounded)
+	}
+}
+
+func TestCurationFlowsDetectCorrectionContradictionAndPersonalPreference(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	tests := []struct {
+		name string
+		text string
+		want knowledge.CurationSignalKind
+	}{
+		{name: "correction", text: "Actually, that is wrong; use sfdisk.", want: knowledge.CurationSignalKindUserCorrection},
+		{name: "contradiction", text: "This contradicts what the manual says.", want: knowledge.CurationSignalKindContradictingEvidence},
+		{name: "personal preference", text: "I prefer concise answers.", want: knowledge.CurationSignalKindExplicitPersonalPreference},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			user := domain.TimelineItem{ID: "00000000-0000-7000-8000-000000000081", SealedAt: now, Content: domain.UserMessage{Text: test.text}}
+			assistant := domain.TimelineItem{ID: "00000000-0000-7000-8000-000000000082", SealedAt: now, Content: domain.AssistantMessage{Text: "Understood."}}
+			signals := completedTurnSignals(chatpkg.CompletedTurn{User: user, Assistant: assistant, Items: []domain.TimelineItem{user, assistant}})
+			if !slices.ContainsFunc(signals, func(signal knowledge.CurationSignal) bool { return signal.Kind == test.want }) {
+				t.Fatalf("signals = %#v, want %s", signals, test.want)
+			}
+		})
+	}
+}
+
+func TestRepeatedWorkaroundRequiresDifferentSessions(t *testing.T) {
+	t.Parallel()
+	engine := &Engine{}
+	now := time.Now().UTC()
+	user := domain.TimelineItem{ID: "00000000-0000-7000-8000-000000000081", SealedAt: now, Content: domain.UserMessage{Text: "partition the disk"}}
+	assistant := domain.TimelineItem{ID: "00000000-0000-7000-8000-000000000082", SealedAt: now, Content: domain.AssistantMessage{Text: "Used the available fallback.", Tools: []domain.ToolCall{
+		{Tool: domain.ToolKindExecCommand, Args: map[string]string{"action": "run"}, Error: &domain.ToolError{Message: "fdisk unavailable"}},
+		{Tool: domain.ToolKindExecCommand, Args: map[string]string{"action": "run"}, Result: &domain.ToolResult{Text: "sfdisk succeeded"}},
+	}}}
+	turn := chatpkg.CompletedTurn{Session: domain.Session{ID: "00000000-0000-7000-8000-000000000091"}, User: user, Assistant: assistant, Items: []domain.TimelineItem{user, assistant}}
+	first := engine.curationSignalsForCompletedTurn(turn)
+	if slices.ContainsFunc(first, func(signal knowledge.CurationSignal) bool {
+		return signal.Kind == knowledge.CurationSignalKindRepeatedWorkaround
+	}) {
+		t.Fatalf("first-session signals = %#v", first)
+	}
+	secondSameSession := engine.curationSignalsForCompletedTurn(turn)
+	if slices.ContainsFunc(secondSameSession, func(signal knowledge.CurationSignal) bool {
+		return signal.Kind == knowledge.CurationSignalKindRepeatedWorkaround
+	}) {
+		t.Fatalf("same-session signals = %#v", secondSameSession)
+	}
+	turn.Session.ID = "00000000-0000-7000-8000-000000000092"
+	secondSession := engine.curationSignalsForCompletedTurn(turn)
+	if !slices.ContainsFunc(secondSession, func(signal knowledge.CurationSignal) bool {
+		return signal.Kind == knowledge.CurationSignalKindRepeatedWorkaround
+	}) {
+		t.Fatalf("cross-session signals = %#v", secondSession)
 	}
 }

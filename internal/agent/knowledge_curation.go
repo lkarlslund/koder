@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
@@ -19,6 +21,13 @@ import (
 )
 
 const maxCuratorTimelineText = 48 << 10
+
+const maxCurationPatterns = 1024
+
+type curationPatternObservation struct {
+	firstSession string
+	repeated     bool
+}
 
 // StartKnowledgeCuration wires a provider-neutral queue to the current model
 // runtime. Completion notifications remain non-blocking; provider and store work
@@ -98,7 +107,7 @@ func (e *Engine) ObserveCompletedTurn(turn chatpkg.CompletedTurn) {
 	if coordinator == nil || !turn.User.Sealed() || !turn.Assistant.Sealed() {
 		return
 	}
-	signals := completedTurnSignals(turn)
+	signals := e.curationSignalsForCompletedTurn(turn)
 	if len(signals) == 0 {
 		return
 	}
@@ -109,6 +118,104 @@ func (e *Engine) ObserveCompletedTurn(turn chatpkg.CompletedTurn) {
 		},
 		Signals: signals,
 	})
+}
+
+func (e *Engine) curationSignalsForCompletedTurn(turn chatpkg.CompletedTurn) []knowledge.CurationSignal {
+	signals := completedTurnSignals(turn)
+	if fingerprint := workaroundFingerprint(turn.Items); fingerprint != "" && e.observeWorkaroundPattern(turn.Session.ID, fingerprint) {
+		sourceIDs := curationSignalSourceIDs(signals)
+		if len(sourceIDs) != 0 {
+			signals = append(signals, knowledge.CurationSignal{
+				Kind: knowledge.CurationSignalKindRepeatedWorkaround, SourceItemIDs: sourceIDs, Confidence: 0.85,
+			})
+		}
+	}
+	return signals
+}
+
+func curationSignalSourceIDs(signals []knowledge.CurationSignal) []string {
+	if len(signals) == 0 {
+		return nil
+	}
+	return slices.Clone(signals[0].SourceItemIDs)
+}
+
+func workaroundFingerprint(items []domain.TimelineItem) string {
+	failed := make(map[string]struct{})
+	succeeded := make(map[string]struct{})
+	inspect := func(tool domain.ToolKind, args map[string]string, result bool, hasError bool) {
+		signature := strings.ToLower(strings.TrimSpace(string(tool)))
+		if action := strings.ToLower(strings.TrimSpace(args["action"])); action != "" {
+			signature += ":" + action
+		}
+		if signature == "" {
+			return
+		}
+		if hasError {
+			failed[signature] = struct{}{}
+		}
+		if result {
+			succeeded[signature] = struct{}{}
+		}
+	}
+	for _, item := range items {
+		switch content := item.Content.(type) {
+		case domain.AssistantMessage:
+			for _, call := range content.Tools {
+				inspect(call.Tool, call.Args, call.Result != nil && call.Error == nil, call.Error != nil)
+			}
+		case domain.ToolExecution:
+			inspect(content.Tool, content.Args, content.Result != nil && content.Error == nil, content.Error != nil)
+		}
+	}
+	if len(failed) == 0 || len(succeeded) == 0 {
+		return ""
+	}
+	failures := mapKeys(failed)
+	successes := mapKeys(succeeded)
+	sort.Strings(failures)
+	sort.Strings(successes)
+	digest := sha256.Sum256([]byte("failed=" + strings.Join(failures, ",") + "\nsucceeded=" + strings.Join(successes, ",")))
+	return fmt.Sprintf("%x", digest[:])
+}
+
+func mapKeys(values map[string]struct{}) []string {
+	result := make([]string, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	return result
+}
+
+func (e *Engine) observeWorkaroundPattern(sessionID id.ID, fingerprint string) bool {
+	if e == nil || sessionID == "" || fingerprint == "" {
+		return false
+	}
+	e.curationPatternMu.Lock()
+	defer e.curationPatternMu.Unlock()
+	if e.curationPatterns == nil {
+		e.curationPatterns = make(map[string]curationPatternObservation)
+	}
+	observation, exists := e.curationPatterns[fingerprint]
+	if !exists {
+		if len(e.curationPatterns) >= maxCurationPatterns {
+			for key := range e.curationPatterns {
+				delete(e.curationPatterns, key)
+				break
+			}
+		}
+		e.curationPatterns[fingerprint] = curationPatternObservation{firstSession: string(sessionID)}
+		return false
+	}
+	if observation.repeated {
+		return true
+	}
+	if observation.firstSession == string(sessionID) {
+		return false
+	}
+	observation.repeated = true
+	e.curationPatterns[fingerprint] = observation
+	return true
 }
 
 func completedTurnSignals(turn chatpkg.CompletedTurn) []knowledge.CurationSignal {
