@@ -259,6 +259,9 @@ func (e Entry) Validate() error {
 	if err := required("title", e.Title); err != nil {
 		return err
 	}
+	if err := ValidateMarkdown("body", e.Body); err != nil {
+		return err
+	}
 	if err := e.Scope.Validate(); err != nil {
 		return err
 	}

@@ -154,6 +154,7 @@ func NormalizeChunk(value Chunk) (Chunk, error) {
 // NormalizeEntry returns a canonicalized copy suitable for validation and storage.
 func NormalizeEntry(value Entry) (Entry, error) {
 	value.Title = NormalizeTitle(value.Title)
+	value.Body = NormalizeMarkdown(value.Body)
 	value.Aliases = NormalizeAliases(value.Title, value.Aliases)
 	value.Tags = NormalizeTags(value.Tags)
 	locales := make([]string, 0, len(value.Applicability.Locales))

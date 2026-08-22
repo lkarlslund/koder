@@ -536,6 +536,11 @@ func TestCanonicalConstraints(t *testing.T) {
 		chunk.Risk = []RiskClass{RiskClassProhibitedSecret}
 		expectInvalid(t, chunk.Validate())
 	})
+	t.Run("active Markdown cannot be canonical", func(t *testing.T) {
+		entry := validEntry()
+		entry.Body = "<script>alert(1)</script>"
+		expectInvalid(t, entry.Validate())
+	})
 	t.Run("revision time equals projection update", func(t *testing.T) {
 		chunk := validChunk()
 		chunk.Revision = validRevision(testRevisionID2)
