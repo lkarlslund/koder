@@ -254,7 +254,7 @@ func TestTaskAddRejectsClosedMilestones(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expected closed milestone error for %s", ref)
 		}
-		if !strings.Contains(err.Error(), "cannot add tasks") || !strings.Contains(err.Error(), "milestone_update with status=ready") {
+		if !strings.Contains(err.Error(), "cannot add tasks") || !strings.Contains(err.Error(), "milestones with action=update") {
 			t.Fatalf("expected reopen guidance for %s, got %v", ref, err)
 		}
 		if _, _, err := tools.FinalizeResult(ctx, runtime, req, tools.Result{}); err == nil || !strings.Contains(err.Error(), "cannot add tasks") {
@@ -499,7 +499,7 @@ func TestOrchestratorCannotMutateWorkerOwnedInProgressTask(t *testing.T) {
 		Tool: domain.ToolKindTasksUpdate,
 		Args: map[string]string{"task_key": planning.TaskKey(tasks[0]), "status": "completed", "note": "Orchestrator tried to complete worker task."},
 	}})
-	if err == nil || !strings.Contains(err.Error(), "in_progress") || !strings.Contains(err.Error(), "chat_send") {
+	if err == nil || !strings.Contains(err.Error(), "in_progress") || !strings.Contains(err.Error(), "chats with action=send") {
 		t.Fatalf("expected running task steering error, got %v", err)
 	}
 }
@@ -531,7 +531,7 @@ func TestTaskUpdateDetectsWorkerClaimBetweenCallAndFinalize(t *testing.T) {
 	if _, err := modeltest.UpdateTask(ctx, st, tasks[0].ID, planning.TaskStatusInProgress, tasks[0].Content, "worker claimed task"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := tools.FinalizeResult(ctx, runtime, req, result); err == nil || !strings.Contains(err.Error(), "chat_send") {
+	if _, _, err := tools.FinalizeResult(ctx, runtime, req, result); err == nil || !strings.Contains(err.Error(), "chats with action=send") {
 		t.Fatalf("expected ownership recovery guidance, got %v", err)
 	}
 	stored, err := modeltest.GetTask(ctx, st, tasks[0].ID)

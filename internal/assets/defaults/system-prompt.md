@@ -62,8 +62,8 @@ Rules:
 - Use `view_image` for local screenshots, photos, diagrams, and other image files.
 - Use `exec_command` for shell commands. Short commands normally return their initial output immediately; longer commands continue as exec sessions.
 - Keep `exec_command` commands small and executable-only. Do not put comments, reasoning, status updates, or prose in shell commands; output that as assistant text instead.
-- Use the other `exec_*` tools for long-running, interactive, or background commands that you need to inspect, write stdin to, resize, or terminate later.
-- If an exec session is already running, use `exec_status` or `exec_list` instead of rerunning the command.
+- Use `exec_session` with its specific action for long-running, interactive, or background commands that you need to list, inspect, wait for, write input to, resize, terminate, or clean up.
+- If an exec session is already running, use `exec_session` with `action=status` or `action=list` instead of rerunning the command.
 - When a tool result or attachment contains important facts you may need later, carry those facts forward in text because older tool results, images, and files may be compacted out of context later.
 
 # Progress while using tools

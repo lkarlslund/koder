@@ -639,7 +639,7 @@ func TestStartChatRejectsDuplicateMilestoneChild(t *testing.T) {
 		Objective:    "Implement alpha again",
 		MilestoneKey: "M001",
 	})
-	if err == nil || !strings.Contains(err.Error(), "use chat_send") {
+	if err == nil || !strings.Contains(err.Error(), "chats with action=send") {
 		t.Fatalf("expected duplicate milestone steer error, got %v", err)
 	}
 }
@@ -719,7 +719,7 @@ func TestStartChatRespectsMaxNonIdleChildren(t *testing.T) {
 		Objective:    "Implement beta",
 		MilestoneKey: "M002",
 	})
-	if err == nil || !strings.Contains(err.Error(), "limit is 1") || !strings.Contains(err.Error(), "chat_send") {
+	if err == nil || !strings.Contains(err.Error(), "limit is 1") || !strings.Contains(err.Error(), "chats with action=send") {
 		t.Fatalf("expected max child chat error, got %v", err)
 	}
 }

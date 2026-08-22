@@ -13,16 +13,16 @@ or an MCP browser server.
 
 - The browser profile, cookies, site storage, and logins are shared.
 - Tabs and their console records, requests, and downloads are owned by one chat.
-- `browser_tab_list` shows this chat's tabs and unowned tabs opened manually by
+- `browser_tabs` with `action=list` shows this chat's tabs and unowned tabs opened manually by
   the user. It never shows tabs owned by another chat.
-- Use `browser_tab_claim` to atomically claim a manual tab.
+- Use `browser_tabs` with `action=claim` to atomically claim a manual tab.
 - Close tabs created by this chat when they are no longer needed.
 
 ## Workflow
 
-1. Use `browser_tab_list`, then create, claim, or select a tab.
-2. Navigate with `browser_navigate`.
-3. Use `browser_snapshot` or `browser_find` when an informational view of the
+1. Use `browser_tabs` with `action=list`, then create, claim, or select a tab through the same tool.
+2. Navigate with `browser_navigation` and `action=goto`.
+3. Use `browser_page` with `action=snapshot` or `action=find` when an informational view of the
    current page structure would help. They are not required for interaction.
 4. Interact with current elements by accessible name, associated label, or
    visible text, for example `target="Submit order"` with `role="button"`.
@@ -32,10 +32,10 @@ or an MCP browser server.
    `target="xpath=..."` only as an advanced fallback.
    For responsive images, ambiguity details include rendered dimensions; prefer
    the visible full-size image instead of relying on generated CSS class names.
-6. Use focused tools such as `browser_click`, `browser_fill`, `browser_select`,
-   and `browser_upload`. Every call resolves its target against the current DOM;
+6. Use `browser_interact` with focused actions such as `click`, `fill`, `select`,
+   and `upload`. Every call resolves its target against the current DOM;
    it never depends on a prior snapshot or retained element handle.
-7. Use `browser_screenshot` when visual state matters. Its image bytes are sent
+7. Use `browser_capture` with `action=screenshot` when visual state matters. Its image bytes are sent
    directly to model vision and the Koder UI without a workspace file.
 
 Use `browser_evaluate` for targeted DOM inspection or behavior that focused
@@ -47,20 +47,20 @@ data.
 
 ## Images And Files
 
-- Use `browser_image` to capture an image, canvas, or visual element directly.
+- Use `browser_capture` with `action=image` to capture an image, canvas, or visual element directly.
   Set `save_to_file` when the image must be persisted in the workspace; do not
   export browser cookies and redownload it with a shell command.
-- Use `browser_requests` and `browser_response_body` when original loaded bytes
+- Use `browser_network` with `action=list` and `action=get_response_body` when original loaded bytes
   matter. Request IDs are opaque and sensitive headers are redacted.
-- Use `browser_downloads` and `browser_download` for completed downloads.
-- `browser_upload` accepts only paths authorized for workspace reading.
+- Use `browser_downloads` with `action=list` and `action=get` for completed downloads.
+- `browser_interact` with `action=upload` accepts only paths authorized for workspace reading.
 - Without `save_to_file`, browser-generated files become session attachments;
   do not convert them to base64 or create temporary workspace files.
 
 ## Diagnostics
 
-Use `browser_console` for page errors and `browser_requests` for failed or slow
-requests. Inspect a specific request with `browser_request`; fetch a bounded
+Use `browser_console` for page errors and `browser_network` with `action=list` for failed or slow
+requests. Inspect a specific request with `action=get_request`; fetch a bounded
 body only when necessary. Do not repeatedly retry the same failed action.
 
 ## Safety

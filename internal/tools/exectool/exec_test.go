@@ -38,8 +38,10 @@ func TestExecSessionDefinitionAndWaitDispatch(t *testing.T) {
 			t.Fatalf("exec_session schema is missing %q: %s", action, params)
 		}
 	}
-	if _, enabled := tools.DefinitionFor(tools.ExecWriteStdin, tools.Runtime{}); enabled {
-		t.Fatal("legacy exec_write_stdin remained model-visible")
+	for _, legacy := range []tools.ID{tools.ExecStatus, tools.ExecList, tools.ExecWriteStdin, tools.ExecResize, tools.ExecTerminate, tools.ExecCleanup} {
+		if _, enabled := tools.DefinitionFor(legacy, tools.Runtime{}); enabled {
+			t.Fatalf("legacy %s remained model-visible", legacy)
+		}
 	}
 	control := &recordingExecControl{}
 	_, err := tools.Call(context.Background(), tools.Options{Runtime: tools.Runtime{

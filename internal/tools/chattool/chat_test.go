@@ -169,6 +169,23 @@ func TestChatsResourceRespectsExecutionRole(t *testing.T) {
 	}
 }
 
+func TestChatsResourceFiltersDisabledFamilyAndAction(t *testing.T) {
+	runtime := testRuntime(&fakeChatControl{})
+	runtime.AllowedTools = map[tools.ID]bool{tools.ChatSend: false}
+	definition, enabled := tools.DefinitionFor(tools.Chats, runtime)
+	if !enabled {
+		t.Fatal("disabling one action hid the whole chats resource")
+	}
+	params := string(definition.Function.Parameters)
+	if strings.Contains(params, `"send"`) || !strings.Contains(params, `"start"`) {
+		t.Fatalf("disabled action was not filtered: %s", params)
+	}
+	runtime.AllowedTools[tools.Chats] = false
+	if _, enabled := tools.DefinitionFor(tools.Chats, runtime); enabled {
+		t.Fatal("disabled chats family remained model-visible")
+	}
+}
+
 func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
 	_, err := (listTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{}, Request: tools.Request{}})
 	if err == nil || !strings.Contains(err.Error(), "active persisted chat") {

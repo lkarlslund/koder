@@ -38,6 +38,27 @@ func TestDefinitionsHideRoleForbiddenTools(t *testing.T) {
 	}
 }
 
+func TestBaseToolSurfaceRemainsCompactAndCanonical(t *testing.T) {
+	defs := tools.Definitions(tools.Runtime{ChatRole: chatrole.Orchestrator})
+	if len(defs) > 20 {
+		t.Fatalf("base tool surface grew to %d definitions; group related operations or make them runtime-specific", len(defs))
+	}
+	names := map[string]bool{}
+	for _, def := range defs {
+		names[def.Function.Name] = true
+	}
+	for _, required := range []tools.ID{tools.ExecCommand, tools.ExecSession, tools.Milestones, tools.Tasks, tools.Chats, tools.Present} {
+		if !names[required.String()] {
+			t.Errorf("canonical tool %q is missing", required)
+		}
+	}
+	for _, legacy := range []tools.ID{tools.Bash, tools.ExecStatus, tools.MilestoneList, tools.TaskList, tools.ChatList, tools.ShowMedia} {
+		if names[legacy.String()] {
+			t.Errorf("legacy operation %q is still model-visible", legacy)
+		}
+	}
+}
+
 func TestExecuteWithChatRejectsRoleForbiddenTool(t *testing.T) {
 	_, err := tools.Call(context.Background(), tools.Options{Runtime: tools.Runtime{
 		SessionID: "session-1",

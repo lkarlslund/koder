@@ -2246,7 +2246,7 @@ func preserveMilestoneLifecycle(current, next []planning.Milestone) error {
 			return fmt.Errorf("milestone %q cannot be removed by replacing the plan; archive and delete it explicitly", key)
 		}
 		if candidate.Archived != existing.Archived {
-			return fmt.Errorf("milestone %q archive state cannot be changed by replacing the plan; use milestone_archive", key)
+			return fmt.Errorf("milestone %q archive state cannot be changed by replacing the plan; use milestones with action=archive or action=restore", key)
 		}
 		if candidate.ID == "" {
 			candidate.ID = existing.ID

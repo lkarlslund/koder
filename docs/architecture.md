@@ -11,6 +11,9 @@
 - `internal/app`: browser app controller for session, chat, settings, and workspace state
 - `internal/webui`: embedded browser UI and websocket RPC bridge
 
+The model-facing resource/action conventions, runtime filtering, compatibility
+aliases, and current built-in inventory are documented in [tools.md](tools.md).
+
 Current v1 shape is a modular monolith inside one binary. The browser UI talks to in-process services over the embedded websocket server rather than a daemon.
 
 ## Storage

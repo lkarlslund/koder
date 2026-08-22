@@ -89,7 +89,7 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 			return chattool.Status{}, fmt.Errorf("milestone %q not found", milestoneKey)
 		}
 		if milestone.OwnerChatID != nil {
-			return chattool.Status{}, fmt.Errorf("milestone %q is owned by chat %s; use chat_send to steer that child chat instead of starting another one", milestoneKey, *milestone.OwnerChatID)
+			return chattool.Status{}, fmt.Errorf("milestone %q is owned by chat %s; use chats with action=send to steer that child chat instead of starting another one", milestoneKey, *milestone.OwnerChatID)
 		}
 	}
 	if taskRef != "" {
@@ -114,12 +114,12 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 	}
 	if role == chatrole.Execution && milestoneKey != "" {
 		if existing := directChildForMilestone(snapshot.Chats, parentChatID, milestoneKey); existing.ID != "" {
-			return chattool.Status{}, fmt.Errorf("milestone %q already has child chat %s; use chat_send to steer it instead of starting another one", milestoneKey, existing.ID)
+			return chattool.Status{}, fmt.Errorf("milestone %q already has child chat %s; use chats with action=send to steer it instead of starting another one", milestoneKey, existing.ID)
 		}
 	}
 	if taskRef != "" {
 		if existing := directChildForTask(snapshot.Chats, parentChatID, taskRef); existing.ID != "" {
-			return chattool.Status{}, fmt.Errorf("task %q already has child chat %s; use chat_send to steer it instead of starting another one", taskRef, existing.ID)
+			return chattool.Status{}, fmt.Errorf("task %q already has child chat %s; use chats with action=send to steer it instead of starting another one", taskRef, existing.ID)
 		}
 	}
 	if err := c.session.ensureCanStartChild(ctx, parentChatID, snapshot.Chats); err != nil {
@@ -241,7 +241,7 @@ func (c chatControl) UpdateChat(ctx context.Context, sessionID, ownerChatID, cha
 		}
 	}
 	if strings.TrimSpace(update.Message) != "" && target.ID == ownerChatID {
-		return chattool.Status{}, fmt.Errorf("chat_send cannot send a message to its own chat; target a direct child chat instead")
+		return chattool.Status{}, fmt.Errorf("chats action=send cannot message its own chat; target a direct child chat instead")
 	}
 	var waitStart int64
 	var updates <-chan chatpkg.Update
@@ -595,7 +595,7 @@ func (s *Session) ensureCanStartChild(ctx context.Context, parentChatID id.ID, c
 		}
 		parts = append(parts, fmt.Sprintf("%s (%s)", status.ID, ref))
 	}
-	return fmt.Errorf("cannot start child chat: %d non-idle child chat(s) already active, limit is %d; use chat_send to steer existing child chat(s): %s", len(active), limit, strings.Join(parts, ", "))
+	return fmt.Errorf("cannot start child chat: %d non-idle child chat(s) already active, limit is %d; use chats with action=send to steer existing child chat(s): %s", len(active), limit, strings.Join(parts, ", "))
 }
 
 func (s *Session) maxChildChats() int {

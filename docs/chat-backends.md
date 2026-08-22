@@ -38,7 +38,7 @@ agent backends do not expose per-command approvals.
 At the start of a turn it resolves the chat's backend to a turn driver:
 
 ```text
-browser / Android / chat_send
+browser / Android / `chats` with `action=send`
               |
               v
        persistent chat actor
@@ -76,7 +76,7 @@ the same thread without starting a process merely to update metadata.
 Codex agent messages, reasoning, native command/file/MCP/web tool calls, Koder
 dynamic tool calls, results, and errors are converted to canonical Koder
 timeline items. This is what makes history, generic presentations,
-`show_media`, and voice rendering work without Codex-specific UI code.
+`present` media actions, and voice rendering work without Codex-specific UI code.
 
 Codex retains its native coding tools. Koder supplies complementary dynamic
 tools such as chats, sessions, milestones, tasks, presentations, and phone
@@ -135,9 +135,9 @@ the client lease, not the backend process or session.
 ## Creation and orchestration
 
 The browser `+` creator and Android conversation creator submit the same
-`domain.ChatCreateSpec`. `chat_start` uses the same dimensions and defaults its
+`domain.ChatCreateSpec`. `chats` with `action=start` uses the same dimensions and defaults its
 backend to the calling chat, so either an ordinary or Codex orchestrator can
-create a peer on either backend. `chat_list` returns backend and interaction
+create a peer on either backend. `chats` with `action=list` returns backend and interaction
 metadata so an orchestrator can choose an appropriate existing chat.
 
 Backend discovery is live. Opening a creator probes Codex app-server for its

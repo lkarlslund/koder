@@ -89,13 +89,13 @@ not listening. The first successful `ready` after initial connection or a
 reconnect stops that cue, plays a short acknowledgement, and resumes capture.
 
 Tool mechanics live in each normal tool definition, not in the role prompt.
-The workflow role receives its normal catalog and uses `chat_list`,
-`chat_send`, and `chat_start` to coordinate work inside its selected session.
-The obsolete voice-only `session_list`, `session_delegate`, and `session_start`
+The workflow role receives its normal catalog and uses `chats` actions such as
+`list`, `send`, and `start` to coordinate work inside its selected session.
+The obsolete voice-only `sessions` bridge and its legacy operation names
 abstraction is not offered. Android, rather than the model, chooses the session
 boundary and creates quick sessions.
 
-`chat_send` waits for the target chat's sealed response when called by a voice
+`chats` with `action=send` waits for the target chat's sealed response when called by a voice
 chat. A busy target, approval
 request, or input request becomes a short voice result directing the user to
 the Web UI. The target chat remains the source of truth.
@@ -289,22 +289,22 @@ Koder only exposes artifacts already surfaced by a delegated tool result.
 Artifact URLs share the voice bearer boundary and cannot read arbitrary paths.
 
 Tool output uses a generic rendering adapter rather than phone-specific UI
-types. Deliberate `show_media`/`present` output is sent as a live `render` frame
+types. Deliberate `present` output is sent as a live `render` frame
 as soon as the tool result is durable, so Android can show it while the model
 continues working. Generic tool-activity parts use the transcript surface and
 remain attached to history after reconnect; they do not interrupt the quiet
 voice surface. The final message repeats durable parts for older clients, with
 stable render keys for deduplication.
 
-Phone photos use four explicit tools rather than an overloaded latest-photo
-operation. Search transfers metadata only; thumbnail batches support visual
+Phone photos use one `phone_photos` resource with four explicit actions rather
+than an overloaded latest-photo operation. Search transfers metadata only; thumbnail batches support visual
 triage; view loads one temporary inspection copy; transfer writes one chosen
 original to an explicit workspace path through Koder's normal filesystem
 boundary. Binary phone results are bounded to 12 artifacts and 25 MiB, are
 materialized in managed session temporary storage, and are never persisted as
 base64 in the transcript. A typical visual request searches yesterday's range,
 inspects thumbnails, views the selected ID, transfers the original only when
-editing is needed, and returns the edited result with `show_media`.
+editing is needed, and returns the edited result with `present` and `action=media`.
 
 ## Speech configuration
 

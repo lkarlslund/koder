@@ -84,7 +84,7 @@ func init() {
 		Description: "Terminate persistent exec sessions in scope.",
 		Usage:       "Terminate running persistent exec sessions in the current chat or session and report their final states.",
 		Parameters:  `{"type":"object","properties":{"scope":{"type":"string","description":"Cleanup scope. Omit for current chat.","enum":["chat","session"]},"max_output_bytes":{"type":"integer","description":"Optional output tail size for each item"}},"additionalProperties":false}`,
-		ExposeToLLM: true,
+		ExposeToLLM: true, Legacy: true,
 	})
 }
 
