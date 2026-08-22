@@ -98,3 +98,11 @@ type Store interface {
 	Checkpoint(context.Context, string) error
 	Close() error
 }
+
+// EntryScanner is an optional bulk-read capability for consumers that must
+// inspect a complete filtered corpus. Unlike repeatedly paging ListEntries, a
+// scanner makes one consistent pass and therefore remains linear as the corpus
+// grows. The callback must not retain or mutate backend-owned storage.
+type EntryScanner interface {
+	ScanEntries(context.Context, EntryFilter, func(knowledge.Entry) error) error
+}

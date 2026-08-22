@@ -485,6 +485,9 @@ rejects anything not explicitly routed there.
 
 ## Operational health
 
+Measured corpus scaling, the reproducible benchmark, and current search/traversal bounds
+are documented in [Knowledge performance and enforced bounds](knowledge-performance.md).
+
 The authenticated `GET /api/knowledge/v1/status` response reports the backend lifecycle,
 schema version and state, canonical index generation and state, rebuild progress, semantic
 index status when configured, and the mutation checkpoint used by live explorer clients.

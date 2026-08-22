@@ -60,7 +60,7 @@ func PaginateEntries(entries []knowledge.Entry, request EntryListRequest, genera
 	}
 	filtered := make([]knowledge.Entry, 0, len(entries))
 	for _, entry := range entries {
-		if entryMatchesFilter(entry, request.Filter) {
+		if EntryMatchesFilter(entry, request.Filter) {
 			filtered = append(filtered, entry)
 		}
 	}
@@ -116,61 +116,72 @@ func normalizeEntryListRequest(request EntryListRequest) (EntryListRequest, erro
 	if request.Limit > 200 {
 		return EntryListRequest{}, fmt.Errorf("%w: entry page limit must not exceed 200", knowledge.ErrInvalidRecord)
 	}
-	request.Filter.ChunkIDs = slices.Clone(request.Filter.ChunkIDs)
-	slices.Sort(request.Filter.ChunkIDs)
-	request.Filter.ChunkIDs = slices.Compact(request.Filter.ChunkIDs)
-	request.Filter.Kinds = slices.Clone(request.Filter.Kinds)
-	slices.Sort(request.Filter.Kinds)
-	request.Filter.Kinds = slices.Compact(request.Filter.Kinds)
-	request.Filter.States = slices.Clone(request.Filter.States)
-	slices.Sort(request.Filter.States)
-	request.Filter.States = slices.Compact(request.Filter.States)
-	request.Filter.Scopes = slices.Clone(request.Filter.Scopes)
-	for index := range request.Filter.Scopes {
-		request.Filter.Scopes[index].Selector = strings.TrimSpace(request.Filter.Scopes[index].Selector)
+	var err error
+	request.Filter, err = NormalizeEntryFilter(request.Filter)
+	if err != nil {
+		return EntryListRequest{}, err
 	}
-	slices.SortFunc(request.Filter.Scopes, compareScopes)
-	request.Filter.Scopes = slices.Compact(request.Filter.Scopes)
-	request.Filter.ScopeKinds = slices.Clone(request.Filter.ScopeKinds)
-	slices.Sort(request.Filter.ScopeKinds)
-	request.Filter.ScopeKinds = slices.Compact(request.Filter.ScopeKinds)
-	request.Filter.Tags = knowledge.NormalizeTags(request.Filter.Tags)
-	locales := make([]string, 0, len(request.Filter.Locales))
-	for _, raw := range request.Filter.Locales {
+	return request, nil
+}
+
+// NormalizeEntryFilter validates and canonicalizes the backend-neutral entry
+// predicate used by both paged lists and optional streaming scans.
+func NormalizeEntryFilter(filter EntryFilter) (EntryFilter, error) {
+	filter.ChunkIDs = slices.Clone(filter.ChunkIDs)
+	slices.Sort(filter.ChunkIDs)
+	filter.ChunkIDs = slices.Compact(filter.ChunkIDs)
+	filter.Kinds = slices.Clone(filter.Kinds)
+	slices.Sort(filter.Kinds)
+	filter.Kinds = slices.Compact(filter.Kinds)
+	filter.States = slices.Clone(filter.States)
+	slices.Sort(filter.States)
+	filter.States = slices.Compact(filter.States)
+	filter.Scopes = slices.Clone(filter.Scopes)
+	for index := range filter.Scopes {
+		filter.Scopes[index].Selector = strings.TrimSpace(filter.Scopes[index].Selector)
+	}
+	slices.SortFunc(filter.Scopes, compareScopes)
+	filter.Scopes = slices.Compact(filter.Scopes)
+	filter.ScopeKinds = slices.Clone(filter.ScopeKinds)
+	slices.Sort(filter.ScopeKinds)
+	filter.ScopeKinds = slices.Compact(filter.ScopeKinds)
+	filter.Tags = knowledge.NormalizeTags(filter.Tags)
+	locales := make([]string, 0, len(filter.Locales))
+	for _, raw := range filter.Locales {
 		locale, err := knowledge.NormalizeLocale(raw)
 		if err != nil {
-			return EntryListRequest{}, err
+			return EntryFilter{}, err
 		}
 		if locale != "" {
 			locales = append(locales, locale)
 		}
 	}
 	slices.Sort(locales)
-	request.Filter.Locales = slices.Compact(locales)
-	request.Filter.ValidAt = normalizeFilterTime(request.Filter.ValidAt)
-	request.Filter.ReviewDueAt = normalizeFilterTime(request.Filter.ReviewDueAt)
-	request.Filter.StaleAt = normalizeFilterTime(request.Filter.StaleAt)
-	for _, kind := range request.Filter.Kinds {
+	filter.Locales = slices.Compact(locales)
+	filter.ValidAt = normalizeFilterTime(filter.ValidAt)
+	filter.ReviewDueAt = normalizeFilterTime(filter.ReviewDueAt)
+	filter.StaleAt = normalizeFilterTime(filter.StaleAt)
+	for _, kind := range filter.Kinds {
 		if kind == knowledge.EntryKindUnspecified || !kind.IsAEntryKind() {
-			return EntryListRequest{}, fmt.Errorf("%w: invalid entry kind filter", knowledge.ErrInvalidRecord)
+			return EntryFilter{}, fmt.Errorf("%w: invalid entry kind filter", knowledge.ErrInvalidRecord)
 		}
 	}
-	for _, state := range request.Filter.States {
+	for _, state := range filter.States {
 		if state == knowledge.EntryStateUnspecified || !state.IsAEntryState() {
-			return EntryListRequest{}, fmt.Errorf("%w: invalid entry state filter", knowledge.ErrInvalidRecord)
+			return EntryFilter{}, fmt.Errorf("%w: invalid entry state filter", knowledge.ErrInvalidRecord)
 		}
 	}
-	for _, scope := range request.Filter.Scopes {
+	for _, scope := range filter.Scopes {
 		if err := scope.Validate(); err != nil {
-			return EntryListRequest{}, err
+			return EntryFilter{}, err
 		}
 	}
-	for _, scope := range request.Filter.ScopeKinds {
+	for _, scope := range filter.ScopeKinds {
 		if scope == knowledge.ScopeKindUnspecified || !scope.IsAScopeKind() {
-			return EntryListRequest{}, fmt.Errorf("%w: invalid entry scope filter", knowledge.ErrInvalidRecord)
+			return EntryFilter{}, fmt.Errorf("%w: invalid entry scope filter", knowledge.ErrInvalidRecord)
 		}
 	}
-	return request, nil
+	return filter, nil
 }
 
 func entryCursorBinding(request EntryListRequest, generation uint64) (CursorBinding, error) {
@@ -185,7 +196,9 @@ func entryCursorBinding(request EntryListRequest, generation uint64) (CursorBind
 	}, nil
 }
 
-func entryMatchesFilter(entry knowledge.Entry, filter EntryFilter) bool {
+// EntryMatchesFilter reports whether a canonical entry satisfies a normalized
+// filter. Callers accepting untrusted filters must use NormalizeEntryFilter first.
+func EntryMatchesFilter(entry knowledge.Entry, filter EntryFilter) bool {
 	if !containsOrEmpty(filter.ChunkIDs, entry.ChunkID) || !containsOrEmpty(filter.Kinds, entry.Kind) ||
 		!containsOrEmpty(filter.States, entry.State) || !containsOrEmpty(filter.Scopes, entry.Scope) ||
 		!containsOrEmpty(filter.ScopeKinds, entry.Scope.Kind) ||

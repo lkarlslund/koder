@@ -337,6 +337,17 @@ func (s *Service) listLexicalCorpusEntries(ctx context.Context, request LexicalS
 		ChunkIDs: request.ChunkIDs, States: request.EntryStates, ScopeKinds: scopeKinds, ValidAt: request.ValidAt,
 	}
 	entries := make([]knowledge.Entry, 0)
+	if scanner, ok := s.store.(knowledgeStore.EntryScanner); ok {
+		if err := scanner.ScanEntries(ctx, filter, func(entry knowledge.Entry) error {
+			if len(request.Scopes) == 0 || slices.Contains(request.Scopes, entry.Scope) {
+				entries = append(entries, entry)
+			}
+			return nil
+		}); err != nil {
+			return nil, fmt.Errorf("scan lexical search corpus: %w", err)
+		}
+		return entries, nil
+	}
 	cursor := ""
 	for {
 		page, err := s.store.ListEntries(ctx, knowledgeStore.EntryListRequest{
