@@ -58,7 +58,10 @@
             <span class="knowledge-eyebrow">Browse</span>
             <h1 id="knowledge-sources-title">Knowledge</h1>
           </div>
-          <span class="knowledge-count-placeholder" data-knowledge-count aria-label="Loading chunk count">—</span>
+          <div class="knowledge-pane-header-actions">
+            <span class="knowledge-count-placeholder" data-knowledge-count aria-label="Loading chunk count">—</span>
+            <button type="button" class="knowledge-icon-button" data-knowledge-chunk-create title="Create knowledge chunk"><i class="bi bi-plus-lg" aria-hidden="true"></i><span class="visually-hidden">Create knowledge chunk</span></button>
+          </div>
         </header>
         <div class="knowledge-pane-body knowledge-shell-list">
           <form class="knowledge-search-form" data-knowledge-search-form role="search">
@@ -180,6 +183,13 @@
             <span class="knowledge-support-status" data-knowledge-support-status></span>
           </section>
           <footer class="knowledge-inspector-actions">
+            <div class="knowledge-chunk-actions" data-knowledge-chunk-actions hidden>
+              <button type="button" class="btn btn-sm btn-outline-info" data-knowledge-chunk-edit><i class="bi bi-pencil" aria-hidden="true"></i> Edit</button>
+              <button type="button" class="btn btn-sm btn-outline-warning" data-knowledge-chunk-archive><i class="bi bi-archive" aria-hidden="true"></i> Archive</button>
+              <button type="button" class="btn btn-sm btn-outline-success" data-knowledge-chunk-restore hidden><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Restore</button>
+              <button type="button" class="btn btn-sm btn-outline-danger" data-knowledge-chunk-delete hidden><i class="bi bi-trash" aria-hidden="true"></i> Delete</button>
+              <span data-knowledge-chunk-mutation-status role="status"></span>
+            </div>
             <div class="knowledge-expand-actions" data-knowledge-expand-actions hidden>
               <button type="button" class="btn btn-sm btn-outline-info" data-knowledge-expand-incoming><i class="bi bi-box-arrow-in-down" aria-hidden="true"></i> Incoming</button>
               <button type="button" class="btn btn-sm btn-outline-info" data-knowledge-expand-outgoing><i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> Outgoing</button>
@@ -191,6 +201,45 @@
         </article>
       </aside>
     </main>
+
+    <dialog class="knowledge-editor-dialog" data-knowledge-chunk-dialog aria-labelledby="knowledge-chunk-dialog-title">
+      <form method="dialog" data-knowledge-chunk-form>
+        <header>
+          <div><span class="knowledge-eyebrow">Knowledge chunk</span><h2 id="knowledge-chunk-dialog-title" data-knowledge-chunk-dialog-title>Create chunk</h2></div>
+          <button type="button" class="knowledge-icon-button" data-knowledge-chunk-cancel title="Close editor"><i class="bi bi-x-lg" aria-hidden="true"></i><span class="visually-hidden">Close editor</span></button>
+        </header>
+        <div class="knowledge-editor-fields">
+          <label class="is-wide"><span>Title</span><input name="title" maxlength="240" required></label>
+          <label class="is-wide"><span>Description</span><textarea name="description" maxlength="8000" rows="4"></textarea></label>
+          <label><span>Type</span><select name="kind" required><option value="reference">Reference</option><option value="personal">Personal</option><option value="project">Project</option><option value="environment">Environment</option></select></label>
+          <label><span>Visibility</span><select name="visibility" required><option value="private">Private</option><option value="installation">Installation</option><option value="shared">Shared</option><option value="public">Public</option></select></label>
+          <label><span>Scope</span><select name="scope_kind" required><option value="global">Global</option><option value="personal">Personal</option><option value="project">Project</option><option value="session">Session</option><option value="environment">Environment</option></select></label>
+          <label><span>Scope selector</span><input name="scope_selector" maxlength="240" placeholder="Required except for global"></label>
+          <label class="is-wide"><span>Tags</span><input name="tags" maxlength="1000" placeholder="Comma-separated"></label>
+          <details class="is-wide">
+            <summary>Advanced metadata</summary>
+            <div class="knowledge-editor-fields">
+              <label class="is-wide"><span>Aliases</span><input name="aliases" maxlength="2000" placeholder="Comma-separated"></label>
+              <label><span>Language</span><input name="language" maxlength="35" placeholder="en"></label>
+              <label><span>Locale</span><input name="locale" maxlength="35" placeholder="en-DK"></label>
+              <label><span>Domain</span><input name="domain" maxlength="160"></label>
+              <label><span>Review after</span><input name="review_after" type="datetime-local"></label>
+              <label class="is-wide"><span>Risk classes</span><input name="risk" maxlength="1000" placeholder="medical, security_sensitive"></label>
+              <label class="is-wide"><span>Shared principals</span><input name="shared_with" maxlength="2000" placeholder="kind:id, kind:id"></label>
+              <label class="is-wide"><span>Dependency chunk IDs</span><input name="dependency_ids" maxlength="4000" placeholder="Comma-separated IDs"></label>
+              <label><span>Publisher ID</span><input name="publisher_id" maxlength="240"></label>
+              <label><span>Publisher name</span><input name="publisher_name" maxlength="240"></label>
+              <label><span>License</span><input name="license" maxlength="240"></label>
+              <label><span>Minimum Koder version</span><input name="min_koder_version" maxlength="80"></label>
+              <label class="is-wide"><span>Source policy</span><textarea name="source_policy" maxlength="4000" rows="3"></textarea></label>
+            </div>
+          </details>
+          <label class="knowledge-review-checkbox is-wide"><input name="review_approved" type="checkbox"><span>I reviewed any sensitive content before saving.</span></label>
+        </div>
+        <div class="knowledge-editor-error" data-knowledge-chunk-form-error role="alert" hidden></div>
+        <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-knowledge-chunk-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-info" data-knowledge-chunk-submit>Save chunk</button></footer>
+      </form>
+    </dialog>
 
     <noscript>
       <div class="alert alert-warning m-3">The Knowledge explorer needs JavaScript for graph navigation.</div>

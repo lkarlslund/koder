@@ -69,6 +69,16 @@ assert.deepStrictEqual(browser.inspectorWarnings('entry', {
 }, [{link: {kind: 'contradicts'}}], new Date('2026-01-01T00:00:00Z')).map(item => item.level), ['danger', 'danger', 'warning', 'danger', 'danger']);
 assert.strictEqual(browser.safeExternalURL('https://example.com/source'), 'https://example.com/source');
 assert.strictEqual(browser.safeExternalURL('javascript:alert(1)'), '');
+assert.deepStrictEqual(browser.commaValues('linux, go, linux'), ['linux', 'go']);
+assert.deepStrictEqual(browser.chunkContentFromValues({
+  title: 'Disk tools', kind: 'reference', visibility: 'installation', scope_kind: 'global', tags: 'linux, disk',
+  software: '', shared_with: '', review_after: '2026-09-01T10:00', publisher_name: 'Koder',
+}), {
+  title: 'Disk tools', kind: 'reference', visibility: 'installation', scope: {kind: 'global'}, tags: ['linux', 'disk'],
+  publisher: {id: '', name: 'Koder'}, review_after: new Date('2026-09-01T10:00').toISOString(),
+});
+assert.throws(() => browser.chunkContentFromValues({title: 'Scoped', kind: 'project', visibility: 'private', scope_kind: 'project'}), /selector/);
+assert.strictEqual(browser.chunkEditorValues({scope: {kind: 'personal', selector: 'me'}, tags: ['one', 'two']}).tags, 'one, two');
 assert.strictEqual(browser.graphDebugEnabled('?graph_debug=1'), true);
 assert.strictEqual(browser.graphDebugEnabled('?graph_debug=true'), false);
 const webglDocument = {createElement: () => ({getContext: name => name === 'webgl2' ? {} : null})};

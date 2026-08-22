@@ -215,6 +215,67 @@
     } catch (_) { return ''; }
   }
 
+  function commaValues(value) {
+    return [...new Set(String(value || '').split(',').map(item => item.trim()).filter(Boolean))];
+  }
+
+  function chunkContentFromValues(values) {
+    values = values || {};
+    const required = name => {
+      const value = String(values[name] || '').trim();
+      if (!value) throw new TypeError(`Chunk ${name.replaceAll('_', ' ')} is required.`);
+      return value;
+    };
+    const scopeKind = required('scope_kind');
+    const scopeSelector = String(values.scope_selector || '').trim();
+    if (scopeKind !== 'global' && !scopeSelector) throw new TypeError('Chunk scope selector is required outside global scope.');
+    const sharedWith = commaValues(values.shared_with).map(value => {
+      const separator = value.indexOf(':');
+      if (separator < 1 || separator === value.length - 1) throw new TypeError('Shared principals must use kind:id.');
+      return {kind: value.slice(0, separator).trim(), id: value.slice(separator + 1).trim()};
+    });
+    const content = {
+      title: required('title'), kind: required('kind'), scope: {kind: scopeKind}, visibility: required('visibility'),
+    };
+    if (scopeSelector) content.scope.selector = scopeSelector;
+    const text = (name, target) => { const value = String(values[name] || '').trim(); if (value) content[target || name] = value; };
+    text('description'); text('language'); text('locale'); text('domain'); text('license'); text('source_policy'); text('min_koder_version');
+    for (const name of ['aliases', 'tags', 'risk', 'dependency_ids']) {
+      const list = commaValues(values[name]);
+      if (list.length) content[name] = list;
+    }
+    if (sharedWith.length) content.shared_with = sharedWith;
+    const publisher = {id: String(values.publisher_id || '').trim(), name: String(values.publisher_name || '').trim()};
+    if (publisher.id || publisher.name) content.publisher = publisher;
+    const reviewAfter = String(values.review_after || '').trim();
+    if (reviewAfter) {
+      const date = new Date(reviewAfter);
+      if (Number.isNaN(date.getTime())) throw new TypeError('Chunk review date is invalid.');
+      content.review_after = date.toISOString();
+    }
+    return content;
+  }
+
+  function chunkEditorValues(record) {
+    record = record || {};
+    const localDate = value => {
+      const date = new Date(String(value || ''));
+      if (Number.isNaN(date.getTime())) return '';
+      const offset = date.getTimezoneOffset() * 60000;
+      return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+    };
+    return {
+      title: record.title || '', description: record.description || '', kind: record.kind || 'reference',
+      visibility: record.visibility || 'private', scope_kind: record.scope && record.scope.kind || 'global',
+      scope_selector: record.scope && record.scope.selector || '', aliases: (record.aliases || []).join(', '), tags: (record.tags || []).join(', '),
+      language: record.language || '', locale: record.locale || '', domain: record.domain || '', risk: (record.risk || []).join(', '),
+      shared_with: (record.shared_with || []).map(item => `${item.kind}:${item.id}`).join(', '), dependency_ids: (record.dependency_ids || []).join(', '),
+      publisher_id: record.publisher && record.publisher.id || '', publisher_name: record.publisher && record.publisher.name || '',
+      license: record.license || '', source_policy: record.source_policy || '', min_koder_version: record.min_koder_version || '',
+      review_after: localDate(record.review_after), review_approved: false,
+    };
+  }
+
   function graphDebugEnabled(search) {
     try { return new URLSearchParams(String(search || '')).get('graph_debug') === '1'; } catch (_) { return false; }
   }
@@ -293,6 +354,18 @@
       this.graphContextHeading = shell.querySelector('[data-knowledge-context-heading]');
       this.graphContextPinLabel = shell.querySelector('[data-knowledge-context-pin-label]');
       this.graphContextButtons = this.graphContextMenu ? Array.from(this.graphContextMenu.querySelectorAll('[data-knowledge-context-action]')) : [];
+      this.chunkCreateButton = shell.querySelector('[data-knowledge-chunk-create]');
+      this.chunkDialog = shell.querySelector('[data-knowledge-chunk-dialog]');
+      this.chunkForm = shell.querySelector('[data-knowledge-chunk-form]');
+      this.chunkDialogTitle = shell.querySelector('[data-knowledge-chunk-dialog-title]');
+      this.chunkFormError = shell.querySelector('[data-knowledge-chunk-form-error]');
+      this.chunkSubmitButton = shell.querySelector('[data-knowledge-chunk-submit]');
+      this.chunkActions = shell.querySelector('[data-knowledge-chunk-actions]');
+      this.chunkEditButton = shell.querySelector('[data-knowledge-chunk-edit]');
+      this.chunkArchiveButton = shell.querySelector('[data-knowledge-chunk-archive]');
+      this.chunkRestoreButton = shell.querySelector('[data-knowledge-chunk-restore]');
+      this.chunkDeleteButton = shell.querySelector('[data-knowledge-chunk-delete]');
+      this.chunkMutationStatus = shell.querySelector('[data-knowledge-chunk-mutation-status]');
       this.filters = Object.fromEntries(Array.from(shell.querySelectorAll('[data-knowledge-filter]')).map(input => [input.dataset.knowledgeFilter, input]));
       this.inspector = {
         empty: shell.querySelector('[data-knowledge-inspector-empty]'),
@@ -361,6 +434,15 @@
       }
       if (this.graphContextMenu) this.graphContextMenu.addEventListener('keydown', this.onContextMenuKeyDown);
       this.shell.ownerDocument.addEventListener('pointerdown', this.onDocumentPointerDown, true);
+      if (this.chunkCreateButton) this.chunkCreateButton.addEventListener('click', () => this.openChunkEditor());
+      if (this.chunkEditButton) this.chunkEditButton.addEventListener('click', () => this.openChunkEditor(this.inspectedRecord));
+      if (this.chunkArchiveButton) this.chunkArchiveButton.addEventListener('click', () => this.changeChunkLifecycle('archive'));
+      if (this.chunkRestoreButton) this.chunkRestoreButton.addEventListener('click', () => this.changeChunkLifecycle('restore'));
+      if (this.chunkDeleteButton) this.chunkDeleteButton.addEventListener('click', () => this.deleteInspectedChunk());
+      for (const button of shell.querySelectorAll('[data-knowledge-chunk-cancel]')) button.addEventListener('click', () => this.closeChunkEditor());
+      if (this.chunkForm) this.chunkForm.addEventListener('submit', event => { event.preventDefault(); this.saveChunkEditor(); });
+      const scopeInput = this.chunkForm && this.chunkForm.elements.namedItem('scope_kind');
+      if (scopeInput) scopeInput.addEventListener('change', () => this.syncChunkScopeField());
       if (this.inspector.sendButton) this.inspector.sendButton.addEventListener('click', () => this.sendSelectionToChat());
       this.onPopState = () => {
         this.urlState = browserStateFromSearch(globalThis.location && globalThis.location.search);
@@ -871,6 +953,7 @@
         this.inspectedRecord = null;
         if (this.inspector.sendButton) this.inspector.sendButton.disabled = true;
         if (this.graphExpandActions) this.graphExpandActions.hidden = true;
+        if (this.chunkActions) this.chunkActions.hidden = true;
       }
     }
 
@@ -1037,6 +1120,13 @@
           ? 'Send an explicit reference to the chat that opened this explorer.'
           : 'Open Knowledge from a chat to send context back.';
       }
+      const chunkSelected = objectKind === 'chunk';
+      const archivedChunk = chunkSelected && record.state === 'archived';
+      if (this.chunkActions) this.chunkActions.hidden = !chunkSelected;
+      if (this.chunkArchiveButton) this.chunkArchiveButton.hidden = !chunkSelected || archivedChunk;
+      if (this.chunkRestoreButton) this.chunkRestoreButton.hidden = !archivedChunk;
+      if (this.chunkDeleteButton) this.chunkDeleteButton.hidden = !archivedChunk;
+      if (this.chunkMutationStatus) this.chunkMutationStatus.textContent = '';
       this.setInspectorMode('content');
       this.loadInspectorSupport(objectKind, record);
       this.shell.dispatchEvent(new CustomEvent('koder:knowledge-inspected', {
@@ -1137,6 +1227,120 @@
       }
       if (this.inspector.supportStatus) {
         this.inspector.supportStatus.textContent = errors && errors.length ? 'Some supporting details are temporarily unavailable.' : truncated ? 'Showing the first bounded set of supporting records.' : '';
+      }
+    }
+
+    openChunkEditor(record) {
+      if (!this.chunkDialog || !this.chunkForm) return false;
+      this.chunkEditorRecord = record && record.id ? record : null;
+      const values = chunkEditorValues(this.chunkEditorRecord);
+      for (const [name, value] of Object.entries(values)) {
+        const input = this.chunkForm.elements.namedItem(name);
+        if (!input) continue;
+        if (input.type === 'checkbox') input.checked = !!value;
+        else input.value = value;
+      }
+      if (this.chunkDialogTitle) this.chunkDialogTitle.textContent = this.chunkEditorRecord ? 'Edit chunk' : 'Create chunk';
+      if (this.chunkSubmitButton) this.chunkSubmitButton.textContent = this.chunkEditorRecord ? 'Save changes' : 'Create chunk';
+      if (this.chunkFormError) { this.chunkFormError.hidden = true; this.chunkFormError.textContent = ''; }
+      this.syncChunkScopeField();
+      if (typeof this.chunkDialog.showModal === 'function') this.chunkDialog.showModal();
+      else this.chunkDialog.setAttribute('open', '');
+      const title = this.chunkForm.elements.namedItem('title');
+      if (title) title.focus();
+      return true;
+    }
+
+    closeChunkEditor() {
+      if (!this.chunkDialog) return;
+      if (typeof this.chunkDialog.close === 'function') this.chunkDialog.close();
+      else this.chunkDialog.removeAttribute('open');
+      this.chunkEditorRecord = null;
+    }
+
+    syncChunkScopeField() {
+      if (!this.chunkForm) return;
+      const kind = this.chunkForm.elements.namedItem('scope_kind');
+      const selector = this.chunkForm.elements.namedItem('scope_selector');
+      if (!kind || !selector) return;
+      selector.required = kind.value !== 'global';
+      selector.disabled = kind.value === 'global';
+      if (selector.disabled) selector.value = '';
+    }
+
+    async saveChunkEditor() {
+      if (!this.chunkForm || !this.client) return false;
+      if (this.chunkFormError) { this.chunkFormError.hidden = true; this.chunkFormError.textContent = ''; }
+      const values = Object.fromEntries(new FormData(this.chunkForm).entries());
+      values.review_approved = !!this.chunkForm.elements.namedItem('review_approved').checked;
+      let content;
+      try { content = chunkContentFromValues(values); }
+      catch (error) {
+        if (this.chunkFormError) { this.chunkFormError.hidden = false; this.chunkFormError.textContent = String(error && error.message || error); }
+        return false;
+      }
+      if (this.chunkSubmitButton) this.chunkSubmitButton.disabled = true;
+      try {
+        const existing = this.chunkEditorRecord;
+        const response = existing
+          ? await this.client.updateChunk(existing.id, {chunk: content, expected_revision: existing.revision.number, reason: 'Edited in Knowledge explorer', review_approved: values.review_approved}, {channel: 'chunk-mutation'})
+          : await this.client.createChunk({chunk: content, review_approved: values.review_approved}, {channel: 'chunk-mutation'});
+        const chunk = response && response.chunk;
+        this.closeChunkEditor();
+        if (chunk) {
+          this.writeURLState({...this.urlState, query: '', kind: '', scopeKind: '', state: chunk.state === 'archived' ? 'archived' : '', tag: '', objectKind: 'chunk', id: chunk.id}, false);
+          await this.refresh();
+        }
+        return true;
+      } catch (error) {
+        const requestID = String(error && error.requestID || '');
+        const message = String(error && error.message || 'Knowledge could not save this chunk.');
+        if (this.chunkFormError) { this.chunkFormError.hidden = false; this.chunkFormError.textContent = requestID ? `${message} Audit ID: ${requestID}` : message; }
+        return false;
+      } finally {
+        if (this.chunkSubmitButton) this.chunkSubmitButton.disabled = false;
+      }
+    }
+
+    async changeChunkLifecycle(action) {
+      const chunk = this.inspectedRecord;
+      if (!chunk || !this.inspectedObject || this.inspectedObject.kind !== 'chunk') return false;
+      const verb = action === 'archive' ? 'archive' : 'restore';
+      if (typeof globalThis.confirm === 'function' && !globalThis.confirm(`${verb === 'archive' ? 'Archive' : 'Restore'} “${chunk.title}”?`)) return false;
+      return this.runChunkMutation(async () => this.client.chunkLifecycle(chunk.id, action, {
+        expected_revision: chunk.revision.number, reason: `${verb === 'archive' ? 'Archived' : 'Restored'} in Knowledge explorer`,
+      }, {channel: 'chunk-mutation'}), action);
+    }
+
+    async deleteInspectedChunk() {
+      const chunk = this.inspectedRecord;
+      if (!chunk || chunk.state !== 'archived' || !this.inspectedObject || this.inspectedObject.kind !== 'chunk') return false;
+      if (typeof globalThis.confirm === 'function' && !globalThis.confirm(`Delete “${chunk.title}”? This erases it and cannot be undone.`)) return false;
+      return this.runChunkMutation(() => this.client.deleteChunk(chunk.id, {
+        expected_revision: chunk.revision.number, confirmed: true, cascade: false,
+      }, {channel: 'chunk-mutation'}), 'delete');
+    }
+
+    async runChunkMutation(operation, action) {
+      for (const button of [this.chunkEditButton, this.chunkArchiveButton, this.chunkRestoreButton, this.chunkDeleteButton]) if (button) button.disabled = true;
+      if (this.chunkMutationStatus) this.chunkMutationStatus.textContent = `${displayLabel(action)} in progress…`;
+      try {
+        const response = await operation();
+        if (action === 'delete') {
+          this.writeURLState({...this.urlState, objectKind: '', id: ''}, false);
+        } else if (response && response.chunk) {
+          const chunk = response.chunk;
+          this.writeURLState({...this.urlState, state: chunk.state === 'archived' ? 'archived' : '', objectKind: 'chunk', id: chunk.id}, false);
+        }
+        await this.refresh();
+        return true;
+      } catch (error) {
+        const requestID = String(error && error.requestID || '');
+        const message = String(error && error.message || 'Knowledge could not change this chunk.');
+        if (this.chunkMutationStatus) this.chunkMutationStatus.textContent = requestID ? `${message} Audit ID: ${requestID}` : message;
+        return false;
+      } finally {
+        for (const button of [this.chunkEditButton, this.chunkArchiveButton, this.chunkRestoreButton, this.chunkDeleteButton]) if (button) button.disabled = false;
       }
     }
 
@@ -1323,5 +1527,5 @@
     }
   }
 
-  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
+  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
 });

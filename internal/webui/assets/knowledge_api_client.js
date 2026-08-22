@@ -174,6 +174,14 @@
 
     listChunks(query, options) { return this.request('/chunks', {...options, query}); }
     getChunk(id, options) { return this.request('/chunks/' + encodeID(id), options); }
+    createChunk(body, options) { return this.request('/chunks', {...options, method: 'POST', body}); }
+    updateChunk(id, body, options) { return this.request('/chunks/' + encodeID(id), {...options, method: 'PUT', body}); }
+    chunkLifecycle(id, action, body, options) {
+      action = String(action || '');
+      if (!['archive', 'restore'].includes(action)) throw new TypeError('Knowledge chunk lifecycle action is invalid');
+      return this.request('/chunks/' + encodeID(id) + '/' + action, {...options, method: 'POST', body});
+    }
+    deleteChunk(id, body, options) { return this.request('/chunks/' + encodeID(id), {...options, method: 'DELETE', body}); }
     listEntries(query, options) { return this.request('/entries', {...options, query}); }
     getEntry(id, options) { return this.request('/entries/' + encodeID(id), options); }
     entryEvidence(id, query, options) { return this.request('/entries/' + encodeID(id) + '/evidence', {...options, query}); }

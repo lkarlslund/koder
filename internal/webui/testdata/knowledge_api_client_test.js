@@ -31,11 +31,22 @@ async function testRequestAndCursorEncoding() {
   await client.entryEvidence('entry-1', {limit: 25}, {channel: 'evidence'});
   assert.strictEqual(requests[2].url, '/api/knowledge/v1/entries/entry-1/evidence?limit=25');
 
+  await client.createChunk({chunk: {title: 'Test'}}, {channel: 'chunk-create'});
+  assert.strictEqual(requests[3].url, '/api/knowledge/v1/chunks');
+  assert.strictEqual(requests[3].options.method, 'POST');
+  await client.updateChunk('chunk-1', {expected_revision: 1, chunk: {title: 'Test'}}, {channel: 'chunk-update'});
+  assert.strictEqual(requests[4].options.method, 'PUT');
+  await client.chunkLifecycle('chunk-1', 'archive', {expected_revision: 2}, {channel: 'chunk-lifecycle'});
+  assert.strictEqual(requests[5].url, '/api/knowledge/v1/chunks/chunk-1/archive');
+  await client.deleteChunk('chunk-1', {expected_revision: 3, confirmed: true}, {channel: 'chunk-delete'});
+  assert.strictEqual(requests[6].options.method, 'DELETE');
+  assert.throws(() => client.chunkLifecycle('chunk-1', 'erase', {}), /invalid/);
+
   const selection = {session_id: 'session-1', chat_id: 'chat-2', object: {kind: 'entry', id: 'entry-3'}};
   await client.sendToChat(selection, {channel: 'send'});
-  assert.strictEqual(requests[3].url, '/api/knowledge/v1/chat-context');
-  assert.strictEqual(requests[3].options.method, 'POST');
-  assert.deepStrictEqual(JSON.parse(requests[3].options.body), selection);
+  assert.strictEqual(requests[7].url, '/api/knowledge/v1/chat-context');
+  assert.strictEqual(requests[7].options.method, 'POST');
+  assert.deepStrictEqual(JSON.parse(requests[7].options.body), selection);
 }
 
 async function testNewGenerationCancelsStaleRequest() {
