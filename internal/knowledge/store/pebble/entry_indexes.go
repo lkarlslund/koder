@@ -26,7 +26,7 @@ const (
 )
 
 func defaultEntryIndexDefinitions() []indexDefinition {
-	return []indexDefinition{
+	definitions := []indexDefinition{
 		entrySingleIndex(entryChunkIndex, func(entry knowledge.Entry) []string {
 			return []string{string(entry.ChunkID)}
 		}),
@@ -70,6 +70,7 @@ func defaultEntryIndexDefinitions() []indexDefinition {
 			return []string{indexTime(entry.ValidUntil)}
 		}),
 	}
+	return append(definitions, entryLexicalIndexDefinition())
 }
 
 func entrySingleIndex(name string, components func(knowledge.Entry) []string) indexDefinition {

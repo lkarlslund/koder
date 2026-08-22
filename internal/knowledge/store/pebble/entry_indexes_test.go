@@ -25,8 +25,8 @@ func TestEntryIndexesAreMaintainedAcrossCreateUpdateDelete(t *testing.T) {
 		t.Fatalf("create entry: %v", err)
 	}
 	assertEntryIndexSet(t, s, created, true)
-	if count := countIndexEntries(t, s, initialIndexGeneration); count != 17 {
-		t.Fatalf("create index count = %d, want 17", count)
+	if count := countIndexEntries(t, s, initialIndexGeneration); count != 23 {
+		t.Fatalf("create index count = %d, want 23", count)
 	}
 
 	updated := indexedEntry(2)
@@ -45,8 +45,8 @@ func TestEntryIndexesAreMaintainedAcrossCreateUpdateDelete(t *testing.T) {
 	}
 	assertObsoleteEntryIndexesRemoved(t, s, created, updated)
 	assertEntryIndexSet(t, s, updated, true)
-	if count := countIndexEntries(t, s, initialIndexGeneration); count != 14 {
-		t.Fatalf("update index count = %d, want 14", count)
+	if count := countIndexEntries(t, s, initialIndexGeneration); count != 18 {
+		t.Fatalf("update index count = %d, want 18", count)
 	}
 
 	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error { return tx.DeleteEntry(ctx, updated.ID, 2) }); err != nil {
@@ -78,8 +78,8 @@ func TestDefaultEntryIndexesRebuildFromCanonicalRecords(t *testing.T) {
 		t.Fatalf("RebuildIndexes() error = %v", err)
 	}
 	assertEntryIndexSet(t, s, entry, true)
-	if count := countIndexEntries(t, s, initialIndexGeneration+1); count != 17 {
-		t.Fatalf("rebuilt index count = %d, want 17", count)
+	if count := countIndexEntries(t, s, initialIndexGeneration+1); count != 23 {
+		t.Fatalf("rebuilt index count = %d, want 23", count)
 	}
 }
 
@@ -116,8 +116,18 @@ func assertEntryIndexSet(t *testing.T, s *Store, entry knowledge.Entry, want boo
 					t.Errorf("index %s missing: %v", name, err)
 					continue
 				}
-				if string(data) != string(entry.ID) {
-					t.Errorf("index %s value = %q, want %q", name, data, entry.ID)
+				valueID := string(data)
+				if name == entryLexicalIndex {
+					posting, decodeErr := decodeLexicalPosting(data)
+					if decodeErr != nil {
+						t.Errorf("decode index %s value: %v", name, decodeErr)
+						_ = closer.Close()
+						continue
+					}
+					valueID = string(posting.EntryID)
+				}
+				if valueID != string(entry.ID) {
+					t.Errorf("index %s entry ID = %q, want %q", name, valueID, entry.ID)
 				}
 				_ = closer.Close()
 				continue

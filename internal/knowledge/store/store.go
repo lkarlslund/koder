@@ -86,6 +86,7 @@ type Store interface {
 	ListChunks(context.Context, ChunkListRequest) (ChunkPage, error)
 	ListEntries(context.Context, EntryListRequest) (EntryPage, error)
 	SearchExact(context.Context, ExactSearchRequest) (ExactSearchPage, error)
+	LookupLexicalPostings(context.Context, LexicalPostingRequest) (LexicalPostingPage, error)
 	ListAdjacentLinks(context.Context, AdjacentLinkListRequest) (LinkPage, error)
 	ListRevisions(context.Context, RevisionListRequest) (RevisionPage, error)
 	Health(context.Context) (Health, error)
