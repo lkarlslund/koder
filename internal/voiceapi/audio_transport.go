@@ -175,7 +175,7 @@ func newAudioPacketEncoder(service, transport voice.AudioFormat) (*audioPacketEn
 		encoder.kind = voice.AudioFrameOutputPCM
 	case voice.Opus:
 		if service.Channels != transport.Channels {
-			return nil, errors.New("Opus transport channel count must match the service audio format")
+			return nil, errors.New("opus transport channel count must match the service audio format")
 		}
 		codec, err := voicecodec.NewOpusEncoder(transport.SampleRate, transport.Channels, normalizedOpusBitrate(transport.Bitrate, outputOpusBitrate))
 		if err != nil {
