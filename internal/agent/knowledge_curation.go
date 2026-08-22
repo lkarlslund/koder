@@ -52,7 +52,9 @@ func (e *Engine) StartKnowledgeCuration(ctx context.Context, service *knowledgeS
 		return err
 	}
 	records := curation.NewMemoryStore()
-	queue, err := curation.New(curation.Config{Store: records, Extractor: extractor, NewID: id.New})
+	queue, err := curation.New(curation.Config{
+		Store: records, Extractor: extractor, NewID: id.New, Operations: service.OperationRecorder(),
+	})
 	if err != nil {
 		return err
 	}

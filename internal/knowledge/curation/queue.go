@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
+	"github.com/lkarlslund/koder/internal/knowledge/observability"
 )
 
 var (
@@ -45,6 +46,7 @@ type Config struct {
 	NewID         func() string
 	Now           func() time.Time
 	SafeErrorCode func(error) string
+	Operations    *observability.Recorder
 }
 
 type Queue struct {
@@ -53,6 +55,7 @@ type Queue struct {
 	newID         func() string
 	now           func() time.Time
 	safeErrorCode func(error) string
+	operations    *observability.Recorder
 }
 
 type SubmitRequest struct {
@@ -61,8 +64,9 @@ type SubmitRequest struct {
 }
 
 type SubmitResult struct {
-	Record  knowledge.CurationRecord
-	Created bool
+	OperationID string
+	Record      knowledge.CurationRecord
+	Created     bool
 }
 
 func New(config Config) (*Queue, error) {
@@ -75,15 +79,27 @@ func New(config Config) (*Queue, error) {
 	if config.SafeErrorCode == nil {
 		config.SafeErrorCode = func(error) string { return "extraction_failed" }
 	}
+	if config.Operations == nil {
+		config.Operations = observability.NewRecorder(observability.Config{})
+	}
 	return &Queue{
 		store: config.Store, extractor: config.Extractor, newID: config.NewID,
-		now: config.Now, safeErrorCode: config.SafeErrorCode,
+		now: config.Now, safeErrorCode: config.SafeErrorCode, operations: config.Operations,
 	}, nil
 }
 
 // Submit idempotently schedules one completed turn. Store implementations deduplicate by
 // the complete turn identity, not by generated queue ID.
-func (q *Queue) Submit(ctx context.Context, request SubmitRequest) (SubmitResult, error) {
+func (q *Queue) Submit(ctx context.Context, request SubmitRequest) (result SubmitResult, err error) {
+	operation := q.operations.Start(observability.OperationCurationSubmit, "")
+	defer func() {
+		result.OperationID = operation.ID()
+		outputCount := uint64(0)
+		if result.Created {
+			outputCount = 1
+		}
+		operation.Finish(curationOperationOutcome(err, !result.Created), uint64(len(request.Signals)), outputCount)
+	}()
 	if err := ctx.Err(); err != nil {
 		return SubmitResult{}, err
 	}
@@ -100,13 +116,18 @@ func (q *Queue) Submit(ctx context.Context, request SubmitRequest) (SubmitResult
 	if err != nil {
 		return SubmitResult{}, fmt.Errorf("submit curation record: %w", err)
 	}
-	return SubmitResult{Record: stored, Created: created}, nil
+	return SubmitResult{OperationID: operation.ID(), Record: stored, Created: created}, nil
 }
 
 // ProcessNext claims and extracts at most one record. processed is false when the queue is
 // empty. Extractor failures are persisted using a safe class before the original error is
 // returned to the runner.
 func (q *Queue) ProcessNext(ctx context.Context) (processed bool, err error) {
+	operation := q.operations.Start(observability.OperationCurationProcess, "")
+	var outputCount uint64
+	defer func() {
+		operation.Finish(curationOperationOutcome(err, !processed), 1, outputCount)
+	}()
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -118,6 +139,7 @@ func (q *Queue) ProcessNext(ctx context.Context) (processed bool, err error) {
 		return false, nil
 	}
 	result, extractionErr := q.extractor.Extract(ctx, record)
+	outputCount = uint64(result.CandidateCount)
 	errorCode := ""
 	if extractionErr != nil {
 		errorCode = normalizeErrorCode(q.safeErrorCode(extractionErr))
@@ -133,6 +155,19 @@ func (q *Queue) ProcessNext(ctx context.Context) (processed bool, err error) {
 		return true, fmt.Errorf("extract curation candidates: %w", extractionErr)
 	}
 	return true, nil
+}
+
+func curationOperationOutcome(err error, empty bool) observability.Outcome {
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return observability.OutcomeCanceled
+	case err != nil:
+		return observability.OutcomeFailed
+	case empty:
+		return observability.OutcomeEmpty
+	default:
+		return observability.OutcomeSucceeded
+	}
 }
 
 func (q *Queue) Get(ctx context.Context, id knowledge.CurationRecordID) (knowledge.CurationRecord, error) {

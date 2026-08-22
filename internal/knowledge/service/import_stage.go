@@ -9,6 +9,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/knowledge"
 	"github.com/lkarlslund/koder/internal/knowledge/kpackage"
+	"github.com/lkarlslund/koder/internal/knowledge/observability"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 )
 
@@ -48,6 +49,7 @@ type StageImportRequest struct {
 
 // ImportStage is an actor-owned, expiring activation handle plus its approved preview.
 type ImportStage struct {
+	OperationID    string               `json:"operation_id"`
 	ID             string               `json:"id"`
 	Package        kpackage.Identity    `json:"package"`
 	ChunkID        knowledge.ChunkID    `json:"chunk_id"`
@@ -60,6 +62,7 @@ type ImportStage struct {
 
 // ActivateImportResult summarizes the records made visible by one atomic activation.
 type ActivateImportResult struct {
+	OperationID    string               `json:"operation_id"`
 	Package        kpackage.Identity    `json:"package"`
 	ChunkID        knowledge.ChunkID    `json:"chunk_id"`
 	ConflictPolicy ImportConflictPolicy `json:"conflict_policy,omitempty"`
@@ -86,7 +89,16 @@ type activatedRecords struct {
 
 // StageImport creates a short-lived in-memory stage after classification, review, policy,
 // dependency, and conflict checks. Canonical storage is not modified.
-func (s *Service) StageImport(ctx context.Context, request StageImportRequest) (ImportStage, error) {
+func (s *Service) StageImport(ctx context.Context, request StageImportRequest) (result ImportStage, err error) {
+	operation := s.operationRecorder.Start(observability.OperationImportStage, AuditIDFromContext(ctx))
+	defer func() {
+		result.OperationID = operation.ID()
+		outputCount := uint64(0)
+		if result.ID != "" {
+			outputCount = 1
+		}
+		operation.Finish(operationOutcome(err, outputCount == 0), importPackageObjectCount(request.Package), outputCount)
+	}()
 	if err := request.ConflictPolicy.Validate(); err != nil {
 		return ImportStage{}, err
 	}
@@ -145,7 +157,8 @@ func (s *Service) StageImport(ctx context.Context, request StageImportRequest) (
 	s.importStages[stageID] = state
 	s.importMu.Unlock()
 	return ImportStage{
-		ID: stageID, Package: pkg.Manifest.Package, ChunkID: knowledge.ChunkID(pkg.Manifest.Chunk.ID),
+		OperationID: operation.ID(),
+		ID:          stageID, Package: pkg.Manifest.Package, ChunkID: knowledge.ChunkID(pkg.Manifest.Chunk.ID),
 		ConflictPolicy: request.ConflictPolicy, Remapped: slices.Clone(remapped),
 		CreatedAt: state.createdAt, ExpiresAt: state.expiresAt, Preview: cloneImportPreview(preview),
 	}, nil
@@ -153,7 +166,14 @@ func (s *Service) StageImport(ctx context.Context, request StageImportRequest) (
 
 // ActivateImport atomically publishes every staged addition. All assumptions are checked
 // again inside the write transaction; any error rolls the complete import back.
-func (s *Service) ActivateImport(ctx context.Context, stageID string) (ActivateImportResult, error) {
+func (s *Service) ActivateImport(ctx context.Context, stageID string) (result ActivateImportResult, err error) {
+	operation := s.operationRecorder.Start(observability.OperationImportActivate, AuditIDFromContext(ctx))
+	defer func() {
+		result.OperationID = operation.ID()
+		outputCount := uint64(result.Added.Additions + result.Added.Unchanged + result.Added.Conflicts +
+			result.Added.References + result.Added.MissingDependencies)
+		operation.Finish(operationOutcome(err, outputCount == 0), 1, outputCount)
+	}()
 	if err := ctx.Err(); err != nil {
 		return ActivateImportResult{}, err
 	}
@@ -191,7 +211,8 @@ func (s *Service) ActivateImport(ctx context.Context, stageID string) (ActivateI
 	succeeded = true
 	s.publishImportedMutations(ctx, added)
 	return ActivateImportResult{
-		Package: pkg.Manifest.Package, ChunkID: knowledge.ChunkID(pkg.Manifest.Chunk.ID), ConflictPolicy: state.policy,
+		OperationID: operation.ID(),
+		Package:     pkg.Manifest.Package, ChunkID: knowledge.ChunkID(pkg.Manifest.Chunk.ID), ConflictPolicy: state.policy,
 		Remapped: slices.Clone(state.remapped), ActivatedAt: activatedAt, Added: importAddedSummary(added),
 		Replaced: added.replaced, KeptLocal: added.keptLocal,
 	}, nil

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
+	"github.com/lkarlslund/koder/internal/knowledge/observability"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 )
 
@@ -68,6 +69,7 @@ type OperationalStatus struct {
 	LexicalIndex         *knowledgeStore.IndexRebuildStatus `json:"lexical_index,omitempty"`
 	SemanticIndex        *SemanticIndexStatus               `json:"semantic_index,omitempty"`
 	MutationCheckpoint   MutationCheckpoint                 `json:"mutation_checkpoint"`
+	Operations           observability.Snapshot             `json:"operations"`
 }
 
 type StartIndexRebuildResult struct {
@@ -99,6 +101,7 @@ func (s *Service) OperationalStatus(ctx context.Context) (OperationalStatus, err
 			StorageState: OperationalHealthUnavailable, LastError: health.LastError,
 		},
 		MutationCheckpoint: s.MutationCheckpoint(),
+		Operations:         s.OperationMetrics(),
 	}
 	if detailsStore, ok := s.store.(knowledgeStore.OperationalDetailsStore); ok {
 		details, err := detailsStore.OperationalDetails(ctx)

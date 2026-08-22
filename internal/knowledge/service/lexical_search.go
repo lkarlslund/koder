@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
+	"github.com/lkarlslund/koder/internal/knowledge/observability"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 )
 
@@ -36,6 +37,7 @@ type LexicalSearchRequest struct {
 }
 
 type LexicalSearchResult struct {
+	OperationID          string               `json:"operation_id"`
 	Terms                []string             `json:"terms"`
 	Matches              []LexicalSearchMatch `json:"matches"`
 	GraphExpansion       *GraphExpansionStats `json:"graph_expansion,omitempty"`
@@ -75,7 +77,12 @@ type SearchDocument struct {
 
 // SearchLexical applies authorization, exact scope, lifecycle, and temporal validity
 // filters to the corpus before deriving document frequencies and scoring matches.
-func (s *Service) SearchLexical(ctx context.Context, request LexicalSearchRequest) (LexicalSearchResult, error) {
+func (s *Service) SearchLexical(ctx context.Context, request LexicalSearchRequest) (result LexicalSearchResult, err error) {
+	operation := s.operationRecorder.Start(observability.OperationSearch, AuditIDFromContext(ctx))
+	defer func() {
+		result.OperationID = operation.ID()
+		operation.Finish(operationOutcome(err, len(result.Matches) == 0), 1, uint64(len(result.Matches)))
+	}()
 	explicitValidAt := !request.IncludeInvalid && !request.ValidAt.IsZero()
 	request, terms, err := s.normalizeLexicalSearchRequest(request)
 	if err != nil {
@@ -193,7 +200,8 @@ func (s *Service) SearchLexical(ctx context.Context, request LexicalSearchReques
 		warnings = append(warnings, SearchWarning{Code: SearchWarningContradictionsTruncated})
 	}
 	return LexicalSearchResult{
-		Terms: slices.Clone(terms), Matches: pageMatches, GraphExpansion: expansion,
+		OperationID: operation.ID(),
+		Terms:       slices.Clone(terms), Matches: pageMatches, GraphExpansion: expansion,
 		Warnings: warnings, Contradictions: contradictions, AsOf: searchAsOf, NextCursor: nextCursor,
 		CorpusDocumentCount: uint64(len(entries)), MatchedDocumentCount: uint64(len(matched)),
 	}, nil

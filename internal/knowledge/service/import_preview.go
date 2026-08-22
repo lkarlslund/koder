@@ -14,6 +14,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/knowledge"
 	"github.com/lkarlslund/koder/internal/knowledge/kpackage"
+	"github.com/lkarlslund/koder/internal/knowledge/observability"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 )
 
@@ -60,6 +61,7 @@ type ImportImpactSummary struct {
 
 // ImportPreview is a deterministic read-only analysis of one validated package.
 type ImportPreview struct {
+	OperationID    string                         `json:"operation_id"`
 	Package        kpackage.Identity              `json:"package"`
 	Publisher      kpackage.Publisher             `json:"publisher"`
 	License        kpackage.License               `json:"license"`
@@ -76,12 +78,18 @@ type ImportPreview struct {
 
 // PreviewImport scans and compares a validated package against one consistent store
 // snapshot. It never opens a write transaction and never reserves IDs or revisions.
-func (s *Service) PreviewImport(ctx context.Context, pkg kpackage.ValidatedPackage) (ImportPreview, error) {
+func (s *Service) PreviewImport(ctx context.Context, pkg kpackage.ValidatedPackage) (preview ImportPreview, err error) {
+	operation := s.operationRecorder.Start(observability.OperationImportPreview, AuditIDFromContext(ctx))
+	defer func() {
+		preview.OperationID = operation.ID()
+		operation.Finish(operationOutcome(err, len(preview.Impacts) == 0), importPackageObjectCount(pkg), uint64(len(preview.Impacts)))
+	}()
 	if err := ctx.Err(); err != nil {
 		return ImportPreview{}, err
 	}
-	preview := ImportPreview{
-		Package: pkg.Manifest.Package, Publisher: pkg.Manifest.Publisher, License: pkg.Manifest.License,
+	preview = ImportPreview{
+		OperationID: operation.ID(),
+		Package:     pkg.Manifest.Package, Publisher: pkg.Manifest.Publisher, License: pkg.Manifest.License,
 		ChunkID:    knowledge.ChunkID(pkg.Manifest.Chunk.ID),
 		ChunkTitle: pkg.Manifest.Chunk.Title, SignatureState: pkg.SignatureState,
 		PublisherTrust: s.publishers.Assess(pkg.Manifest, pkg.SignatureState),

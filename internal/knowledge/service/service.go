@@ -13,6 +13,7 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/knowledge"
 	"github.com/lkarlslund/koder/internal/knowledge/kpackage"
+	"github.com/lkarlslund/koder/internal/knowledge/observability"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 )
 
@@ -39,38 +40,40 @@ type Config struct {
 	ImportStageTTL    time.Duration
 	ImportValidation  kpackage.ValidationOptions
 	PublisherRegistry *PublisherRegistry
+	Operations        *observability.Recorder
 }
 
 type Service struct {
-	store            knowledgeStore.Store
-	classifier       knowledge.Classifier
-	chunkPolicy      ChunkPolicy
-	toolPolicy       ToolOfferPolicy
-	actor            ActorSource
-	now              func() time.Time
-	newID            IDSource
-	rankSignals      RankingSignalSource
-	semantic         SemanticIndexProvider
-	scoreBlender     SearchScoreBlender
-	mutationMu       sync.Mutex
-	mutationStreamID string
-	mutationSequence uint64
-	mutationNextSub  uint64
-	mutationSubs     map[uint64]chan MutationEvent
-	operational      OperationalPolicy
-	operationalMu    sync.Mutex
-	rebuildRunning   bool
-	rebuildStartedAt time.Time
-	rebuildCancel    context.CancelFunc
-	operationsCtx    context.Context
-	operationsCancel context.CancelFunc
-	operationsClosed bool
-	operationsWG     sync.WaitGroup
-	importMu         sync.Mutex
-	importStages     map[string]*stagedImport
-	importStageTTL   time.Duration
-	importValidation kpackage.ValidationOptions
-	publishers       *PublisherRegistry
+	store             knowledgeStore.Store
+	classifier        knowledge.Classifier
+	chunkPolicy       ChunkPolicy
+	toolPolicy        ToolOfferPolicy
+	actor             ActorSource
+	now               func() time.Time
+	newID             IDSource
+	rankSignals       RankingSignalSource
+	semantic          SemanticIndexProvider
+	scoreBlender      SearchScoreBlender
+	mutationMu        sync.Mutex
+	mutationStreamID  string
+	mutationSequence  uint64
+	mutationNextSub   uint64
+	mutationSubs      map[uint64]chan MutationEvent
+	operational       OperationalPolicy
+	operationalMu     sync.Mutex
+	rebuildRunning    bool
+	rebuildStartedAt  time.Time
+	rebuildCancel     context.CancelFunc
+	operationsCtx     context.Context
+	operationsCancel  context.CancelFunc
+	operationsClosed  bool
+	operationsWG      sync.WaitGroup
+	importMu          sync.Mutex
+	importStages      map[string]*stagedImport
+	importStageTTL    time.Duration
+	importValidation  kpackage.ValidationOptions
+	publishers        *PublisherRegistry
+	operationRecorder *observability.Recorder
 }
 
 func New(cfg Config) (*Service, error) {
@@ -105,6 +108,9 @@ func New(cfg Config) (*Service, error) {
 	if cfg.ImportStageTTL == 0 {
 		cfg.ImportStageTTL = 15 * time.Minute
 	}
+	if cfg.Operations == nil {
+		cfg.Operations = observability.NewRecorder(observability.Config{})
+	}
 	if cfg.ImportStageTTL < 0 {
 		return nil, fmt.Errorf("knowledge import stage TTL must be positive")
 	}
@@ -129,7 +135,8 @@ func New(cfg Config) (*Service, error) {
 		operational:   cfg.Operational,
 		operationsCtx: operationsCtx, operationsCancel: operationsCancel,
 		importStages: make(map[string]*stagedImport), importStageTTL: cfg.ImportStageTTL, importValidation: cfg.ImportValidation,
-		publishers: cfg.PublisherRegistry,
+		publishers:        cfg.PublisherRegistry,
+		operationRecorder: cfg.Operations,
 	}, nil
 }
 

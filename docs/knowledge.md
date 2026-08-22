@@ -480,6 +480,21 @@ than durable Knowledge. The response never includes the database path, keys, rec
 queries, or raw backend errors. If metric collection fails, `storage_state` becomes `error`
 while the rest of the operational status remains available.
 
+The same status response contains a bounded, in-memory operation snapshot for lexical
+search, package validation/preview/stage/activation, and curation submit/process work.
+Each attempt receives a server-generated `operation_id`; HTTP work also carries the
+independent transport `audit_id`, allowing an API request, nested import previews, and
+background work to be correlated without treating them as one operation. Search,
+preview, stage, activation, and curation submission results return their operation ID
+where a caller consumes that result.
+
+Operation metrics expose only registered operation classes, success/failure/canceled/
+empty counters, durations, numeric input/output counts, and a bounded recent-operation
+list. They never retain search terms, titles, bodies, chat/session/item IDs, archive
+contents or paths, model output, raw errors, or user-supplied metric labels. Invalid
+audit IDs are discarded, and unknown operation classes are not recorded. Metrics reset
+when Koder restarts and are operational telemetry, not durable Knowledge.
+
 ## Combined examples
 
 ### Environment-specific procedure

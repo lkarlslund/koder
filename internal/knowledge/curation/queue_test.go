@@ -2,12 +2,15 @@ package curation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
+	"github.com/lkarlslund/koder/internal/knowledge/observability"
 )
 
 var queueTestTime = time.Date(2026, 8, 22, 19, 0, 0, 0, time.UTC)
@@ -76,6 +79,62 @@ func TestQueueSubmitsAndExtractsCandidates(t *testing.T) {
 	}
 	if processed, err := queue.ProcessNext(context.Background()); err != nil || processed {
 		t.Fatalf("ProcessNext(empty) = %v, %v", processed, err)
+	}
+}
+
+func TestQueueRecordsSafeOperationMetrics(t *testing.T) {
+	t.Parallel()
+	store := NewMemoryStore()
+	now := queueTestTime
+	operationNumber := 0
+	recorder := observability.NewRecorder(observability.Config{
+		Now: func() time.Time {
+			current := now
+			now = now.Add(time.Millisecond)
+			return current
+		},
+		NewID: func() string {
+			operationNumber++
+			return "curation-operation-" + string(rune('0'+operationNumber))
+		},
+	})
+	queue, err := New(Config{
+		Store: store,
+		Extractor: extractorFunc(func(context.Context, knowledge.CurationRecord) (ExtractionResult, error) {
+			return ExtractionResult{CandidateCount: 2}, nil
+		}),
+		NewID:      func() string { return "00000000-0000-7000-8000-000000000020" },
+		Now:        func() time.Time { return queueTestTime },
+		Operations: recorder,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	submitted, err := queue.Submit(context.Background(), queueTestRequest())
+	if err != nil || submitted.OperationID != "curation-operation-1" {
+		t.Fatalf("Submit() = %#v, %v", submitted, err)
+	}
+	if processed, err := queue.ProcessNext(context.Background()); err != nil || !processed {
+		t.Fatalf("ProcessNext() = %v, %v", processed, err)
+	}
+	if processed, err := queue.ProcessNext(context.Background()); err != nil || processed {
+		t.Fatalf("ProcessNext(empty) = %v, %v", processed, err)
+	}
+	snapshot := recorder.Snapshot()
+	if len(snapshot.Operations) != 2 || len(snapshot.Recent) != 3 ||
+		snapshot.Operations[0].Operation != observability.OperationCurationProcess ||
+		snapshot.Operations[0].Succeeded != 1 || snapshot.Operations[0].Empty != 1 ||
+		snapshot.Operations[1].Operation != observability.OperationCurationSubmit || snapshot.Operations[1].Succeeded != 1 {
+		t.Fatalf("curation metrics = %#v", snapshot)
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, private := range []string{queueTestRequest().Source.SessionID, queueTestRequest().Source.ChatID, "user_correction"} {
+		if strings.Contains(string(encoded), private) {
+			t.Fatalf("curation metrics disclosed source content %q: %s", private, encoded)
+		}
 	}
 }
 

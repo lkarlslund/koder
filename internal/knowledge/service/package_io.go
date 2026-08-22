@@ -11,6 +11,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/knowledge"
 	"github.com/lkarlslund/koder/internal/knowledge/kpackage"
+	"github.com/lkarlslund/koder/internal/knowledge/observability"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 	"github.com/lkarlslund/koder/internal/version"
 )
@@ -38,7 +39,11 @@ type ExportPackageResult struct {
 
 // ValidateImportArchive applies structural, integrity, compatibility, signature,
 // and record validation to bounded archive bytes. It does not preview, stage, or write.
-func (s *Service) ValidateImportArchive(ctx context.Context, data []byte) (kpackage.ValidatedPackage, error) {
+func (s *Service) ValidateImportArchive(ctx context.Context, data []byte) (pkg kpackage.ValidatedPackage, err error) {
+	operation := s.operationRecorder.Start(observability.OperationImportValidate, AuditIDFromContext(ctx))
+	defer func() {
+		operation.Finish(operationOutcome(err, pkg.Manifest.Chunk.ID == ""), uint64(len(data)), importPackageObjectCount(pkg))
+	}()
 	if err := ctx.Err(); err != nil {
 		return kpackage.ValidatedPackage{}, err
 	}
@@ -57,6 +62,14 @@ func (s *Service) ValidateImportArchive(ctx context.Context, data []byte) (kpack
 		return kpackage.ValidatedPackage{}, err
 	}
 	return validated, nil
+}
+
+func importPackageObjectCount(pkg kpackage.ValidatedPackage) uint64 {
+	count := len(pkg.Entries) + len(pkg.Links) + len(pkg.Evidence) + len(pkg.Assets)
+	if pkg.Manifest.Chunk.ID != "" {
+		count++
+	}
+	return uint64(count)
 }
 
 // ExportPackage writes one authorized canonical chunk as a portable package. Export
