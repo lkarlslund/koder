@@ -89,7 +89,29 @@ func (s *Store) LookupLexicalPostings(ctx context.Context, request knowledgeStor
 			return knowledgeStore.LexicalPostingPage{}, fmt.Errorf("close lexical posting iterator: %w", err)
 		}
 	}
-	return knowledgeStore.PaginateLexicalPostings(postings, request, s.meta.IndexGeneration)
+	documentCount, err := countLexicalDocuments(snapshot, s.meta.IndexGeneration)
+	if err != nil {
+		return knowledgeStore.LexicalPostingPage{}, err
+	}
+	return knowledgeStore.PaginateLexicalPostings(postings, request, s.meta.IndexGeneration, documentCount)
+}
+
+func countLexicalDocuments(reader iteratorReader, generation uint64) (uint64, error) {
+	prefix := indexKey(generation, entryStateIndex, nil)
+	lower, upper := prefixBounds(prefix)
+	iter, err := reader.NewIter(&cockroachpebble.IterOptions{LowerBound: lower, UpperBound: upper})
+	if err != nil {
+		return 0, fmt.Errorf("count lexical documents: %w", err)
+	}
+	defer func() { _ = iter.Close() }()
+	var count uint64
+	for iter.First(); iter.Valid(); iter.Next() {
+		count++
+	}
+	if err := iter.Error(); err != nil {
+		return 0, fmt.Errorf("count lexical documents: %w", err)
+	}
+	return count, nil
 }
 
 func decodeLexicalPosting(data []byte) (knowledgeStore.LexicalPosting, error) {

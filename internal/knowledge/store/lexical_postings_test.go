@@ -53,12 +53,16 @@ func TestPaginateLexicalPostingsNormalizesTermsAndUsesStableCursor(t *testing.T)
 	request := LexicalPostingRequest{Terms: []string{" Tools ", "LINUX tools"}, Limit: 1}
 	var got []string
 	for {
-		page, err := PaginateLexicalPostings(postings, request, 7)
+		page, err := PaginateLexicalPostings(postings, request, 7, 4)
 		if err != nil {
 			t.Fatalf("PaginateLexicalPostings() error = %v", err)
 		}
 		if len(page.Postings) != 1 {
 			t.Fatalf("page postings = %#v", page.Postings)
+		}
+		wantFrequencies := []LexicalDocumentFrequency{{Term: "linux", Count: 2}, {Term: "tools", Count: 1}}
+		if page.DocumentCount != 4 || !reflect.DeepEqual(page.DocumentFrequencies, wantFrequencies) {
+			t.Fatalf("corpus statistics = %d, %v", page.DocumentCount, page.DocumentFrequencies)
 		}
 		got = append(got, page.Postings[0].Term+"/"+string(page.Postings[0].EntryID))
 		if page.NextCursor == "" {
@@ -83,18 +87,18 @@ func TestPaginateLexicalPostingsRejectsInvalidAndStaleRequests(t *testing.T) {
 		{Term: "linux", EntryID: "01a01f76-1ff6-7c1d-967a-66ad5703dd34", Frequencies: LexicalFieldFrequencies{Body: 1}},
 	}
 	request := LexicalPostingRequest{Terms: []string{"linux"}, Limit: 1}
-	page, err := PaginateLexicalPostings(postings, request, 2)
+	page, err := PaginateLexicalPostings(postings, request, 2, 2)
 	if err != nil || page.NextCursor == "" {
 		t.Fatalf("first page = %#v, %v", page, err)
 	}
 	changed := request
 	changed.Terms = []string{"different"}
 	changed.Cursor = page.NextCursor
-	if _, err := PaginateLexicalPostings(postings, changed, 2); !errors.Is(err, ErrInvalidCursor) {
+	if _, err := PaginateLexicalPostings(postings, changed, 2, 2); !errors.Is(err, ErrInvalidCursor) {
 		t.Fatalf("changed terms error = %v, want ErrInvalidCursor", err)
 	}
 	request.Cursor = page.NextCursor
-	if _, err := PaginateLexicalPostings(postings, request, 3); !errors.Is(err, ErrStaleCursor) {
+	if _, err := PaginateLexicalPostings(postings, request, 3, 2); !errors.Is(err, ErrStaleCursor) {
 		t.Fatalf("retired generation error = %v, want ErrStaleCursor", err)
 	}
 

@@ -29,6 +29,9 @@ func TestLookupLexicalPostingsDerivesEntryCandidates(t *testing.T) {
 	if err != nil || len(page.Postings) != 2 {
 		t.Fatalf("LookupLexicalPostings() = %#v, %v", page, err)
 	}
+	if page.DocumentCount != 1 || len(page.DocumentFrequencies) != 2 || page.DocumentFrequencies[0].Count != 1 || page.DocumentFrequencies[1].Count != 1 {
+		t.Fatalf("lexical corpus statistics = %#v", page)
+	}
 	if page.Postings[0].Term != "linux" || page.Postings[0].Frequencies.Title != 1 ||
 		page.Postings[1].Term != "sfdisk" || page.Postings[1].Frequencies.Body != 1 {
 		t.Fatalf("lexical postings = %#v", page.Postings)

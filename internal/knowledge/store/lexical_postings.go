@@ -46,8 +46,15 @@ type LexicalPostingRequest struct {
 }
 
 type LexicalPostingPage struct {
-	Postings   []LexicalPosting `json:"postings"`
-	NextCursor string           `json:"next_cursor,omitempty"`
+	Postings            []LexicalPosting           `json:"postings"`
+	DocumentCount       uint64                     `json:"document_count"`
+	DocumentFrequencies []LexicalDocumentFrequency `json:"document_frequencies"`
+	NextCursor          string                     `json:"next_cursor,omitempty"`
+}
+
+type LexicalDocumentFrequency struct {
+	Term  string `json:"term"`
+	Count uint64 `json:"count"`
 }
 
 // EntryLexicalPostings derives deterministic term postings from an entry's searchable
@@ -111,7 +118,7 @@ func NormalizeLexicalPostingRequest(request LexicalPostingRequest) (LexicalPosti
 }
 
 // PaginateLexicalPostings applies the backend-neutral posting lookup contract.
-func PaginateLexicalPostings(postings []LexicalPosting, request LexicalPostingRequest, generation uint64) (LexicalPostingPage, error) {
+func PaginateLexicalPostings(postings []LexicalPosting, request LexicalPostingRequest, generation, documentCount uint64) (LexicalPostingPage, error) {
 	request, err := NormalizeLexicalPostingRequest(request)
 	if err != nil {
 		return LexicalPostingPage{}, err
@@ -142,6 +149,14 @@ func PaginateLexicalPostings(postings []LexicalPosting, request LexicalPostingRe
 		filtered = append(filtered, posting)
 	}
 	slices.SortFunc(filtered, compareLexicalPostings)
+	documentFrequencies := lexicalDocumentFrequencies(filtered, request.Terms)
+	matchedDocuments := make(map[knowledge.EntryID]struct{}, len(filtered))
+	for _, posting := range filtered {
+		matchedDocuments[posting.EntryID] = struct{}{}
+	}
+	if documentCount < uint64(len(matchedDocuments)) {
+		return LexicalPostingPage{}, fmt.Errorf("lexical posting document count is smaller than the matched corpus")
+	}
 
 	if request.Cursor != "" {
 		position, err := DecodeCursor(request.Cursor, binding)
@@ -159,7 +174,7 @@ func PaginateLexicalPostings(postings []LexicalPosting, request LexicalPostingRe
 		filtered = filtered[first:]
 	}
 
-	page := LexicalPostingPage{}
+	page := LexicalPostingPage{DocumentCount: documentCount, DocumentFrequencies: documentFrequencies}
 	if len(filtered) <= request.Limit {
 		page.Postings = filtered
 		return page, nil
@@ -168,6 +183,21 @@ func PaginateLexicalPostings(postings []LexicalPosting, request LexicalPostingRe
 	last := page.Postings[len(page.Postings)-1]
 	page.NextCursor, err = EncodeCursor(binding, CursorPosition{SortValue: last.Term, ObjectID: string(last.EntryID)})
 	return page, err
+}
+
+func lexicalDocumentFrequencies(postings []LexicalPosting, requestedTerms []string) []LexicalDocumentFrequency {
+	counts := make(map[string]uint64, len(requestedTerms))
+	for _, term := range requestedTerms {
+		counts[term] = 0
+	}
+	for _, posting := range postings {
+		counts[posting.Term]++
+	}
+	result := make([]LexicalDocumentFrequency, 0, len(requestedTerms))
+	for _, term := range requestedTerms {
+		result = append(result, LexicalDocumentFrequency{Term: term, Count: counts[term]})
+	}
+	return result
 }
 
 func lexicalPostingCursorBinding(request LexicalPostingRequest, generation uint64) (CursorBinding, error) {

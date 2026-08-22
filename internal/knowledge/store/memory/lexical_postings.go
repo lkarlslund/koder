@@ -22,5 +22,5 @@ func (s *Store) LookupLexicalPostings(ctx context.Context, request knowledgeStor
 		}
 		postings = append(postings, knowledgeStore.EntryLexicalPostings(entry)...)
 	}
-	return knowledgeStore.PaginateLexicalPostings(postings, request, s.indexGeneration)
+	return knowledgeStore.PaginateLexicalPostings(postings, request, s.indexGeneration, uint64(len(s.data.entries)))
 }

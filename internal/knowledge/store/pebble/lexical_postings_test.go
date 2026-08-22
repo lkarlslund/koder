@@ -55,6 +55,13 @@ func assertLexicalTerms(t *testing.T, s *Store, terms, want []string) {
 	for _, posting := range page.Postings {
 		got = append(got, posting.Term)
 	}
+	wantDocumentCount := uint64(1)
+	if want == nil {
+		wantDocumentCount = 0
+	}
+	if page.DocumentCount != wantDocumentCount {
+		t.Fatalf("lexical document count = %d, want %d", page.DocumentCount, wantDocumentCount)
+	}
 	if len(got) != len(want) {
 		t.Fatalf("LookupLexicalPostings(%v) terms = %v, want %v", terms, got, want)
 	}
