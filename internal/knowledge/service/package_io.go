@@ -17,11 +17,14 @@ import (
 
 const defaultLocalPackagePublisherID = "koder:local"
 
+var ErrPersonalExportConsent = errors.New("personal knowledge export requires explicit consent")
+
 type ExportPackageRequest struct {
-	ChunkID   knowledge.ChunkID
-	Package   kpackage.Identity
-	Publisher kpackage.Publisher
-	License   kpackage.License
+	ChunkID         knowledge.ChunkID
+	Package         kpackage.Identity
+	Publisher       kpackage.Publisher
+	License         kpackage.License
+	IncludePersonal bool
 }
 
 type ExportPackageResult struct {
@@ -74,6 +77,9 @@ func (s *Service) ExportPackage(ctx context.Context, writer io.Writer, request E
 		return ExportPackageResult{}, fmt.Errorf("%w: chunk projection is unavailable", knowledge.ErrInvalidRecord)
 	}
 	chunk := *record.Chunk
+	if personalExportRequiresConsent(chunk) && !request.IncludePersonal {
+		return ExportPackageResult{}, ErrPersonalExportConsent
+	}
 	entries, err := s.exportPackageEntries(ctx, chunk.ID)
 	if err != nil {
 		return ExportPackageResult{}, err
@@ -108,6 +114,10 @@ func (s *Service) ExportPackage(ctx context.Context, writer io.Writer, request E
 		ExportResult: result, Filename: packageFilename(chunk), Entries: len(entries), Links: len(links),
 		Evidence: len(evidence), Assets: len(assets),
 	}, nil
+}
+
+func personalExportRequiresConsent(chunk knowledge.Chunk) bool {
+	return chunk.ID == PersonalMeChunkID || chunk.Kind == knowledge.ChunkKindPersonal || chunk.Scope.Kind == knowledge.ScopeKindPersonal
 }
 
 func (s *Service) exportPackageEntries(ctx context.Context, chunkID knowledge.ChunkID) ([]knowledge.Entry, error) {

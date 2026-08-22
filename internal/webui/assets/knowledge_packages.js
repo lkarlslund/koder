@@ -49,6 +49,11 @@
     }).slice(0, limit);
   }
 
+  function isPersonalChunk(record) {
+    record = record || {};
+    return record.kind === 'personal' || record.scope && record.scope.kind === 'personal';
+  }
+
   class Controller {
     constructor(options) {
       options = options || {};
@@ -65,7 +70,7 @@
       this.previewTitle = find('[data-knowledge-package-preview-title]');
       this.previewMeta = find('[data-knowledge-package-preview-meta]');
       this.summary = find('[data-knowledge-package-summary]');
-	  this.findings = find('[data-knowledge-package-findings]');
+      this.findings = find('[data-knowledge-package-findings]');
       this.impacts = find('[data-knowledge-package-impacts]');
       this.impactNote = find('[data-knowledge-package-impact-note]');
       this.conflictField = find('[data-knowledge-package-conflict-field]');
@@ -78,7 +83,10 @@
       this.stageButton = find('[data-knowledge-package-stage-button]');
       this.activateButton = find('[data-knowledge-package-activate-button]');
       this.exportButton = find('[data-knowledge-package-export]');
-	  this.exportStatus = find('[data-knowledge-chunk-mutation-status]');
+      this.exportStatus = find('[data-knowledge-chunk-mutation-status]');
+      this.personalExportDialog = find('[data-knowledge-personal-export-dialog]');
+      this.personalExportForm = find('[data-knowledge-personal-export-form]');
+      this.personalExportSubmit = find('[data-knowledge-personal-export-submit]');
       this.selectedChunk = null;
       this.file = null;
       this.preview = null;
@@ -93,15 +101,27 @@
       if (this.previewButton) this.previewButton.addEventListener('click', () => this.previewSelected());
       if (this.stageButton) this.stageButton.addEventListener('click', () => this.stageSelected());
       if (this.activateButton) this.activateButton.addEventListener('click', () => this.activateSelected());
-      if (this.exportButton) this.exportButton.addEventListener('click', () => this.exportSelected());
+      if (this.exportButton) this.exportButton.addEventListener('click', () => this.requestExport());
       for (const button of this.shell.querySelectorAll('[data-knowledge-package-cancel]')) button.addEventListener('click', () => this.close());
       if (this.dialog) {
         this.dialog.addEventListener('cancel', event => { event.preventDefault(); this.close(); });
         this.dialog.addEventListener('close', () => this.discardStage());
       }
+      for (const button of this.shell.querySelectorAll('[data-knowledge-personal-export-cancel]')) button.addEventListener('click', () => this.closePersonalExport());
+      if (this.personalExportForm) {
+        const acknowledge = this.personalExportForm.elements.namedItem('acknowledge');
+        acknowledge.addEventListener('change', () => { if (this.personalExportSubmit) this.personalExportSubmit.disabled = !acknowledge.checked; });
+        this.personalExportForm.addEventListener('submit', event => {
+          event.preventDefault();
+          if (acknowledge.checked) this.exportSelected(true);
+        });
+      }
+      if (this.personalExportDialog) this.personalExportDialog.addEventListener('cancel', event => { event.preventDefault(); this.closePersonalExport(); });
       this.shell.addEventListener('koder:knowledge-inspected', event => {
         const detail = event && event.detail || {};
-        this.selectedChunk = detail.objectKind === 'chunk' ? {id: text(detail.id), title: text(detail.label, detail.id)} : null;
+        this.selectedChunk = detail.objectKind === 'chunk'
+          ? {id: text(detail.id), title: text(detail.label, detail.id), personal: isPersonalChunk(detail.record)}
+          : null;
       });
     }
 
@@ -269,12 +289,36 @@
       try { await this.client.discardPackage(stage.id, {channel: 'package-discard'}); } catch (_) {}
     }
 
-    async exportSelected() {
+    requestExport() {
+      if (!this.selectedChunk || this.busy) return false;
+      if (!this.selectedChunk.personal) {
+        this.exportSelected(false);
+        return true;
+      }
+      const acknowledge = this.personalExportForm && this.personalExportForm.elements.namedItem('acknowledge');
+      if (acknowledge) acknowledge.checked = false;
+      if (this.personalExportSubmit) this.personalExportSubmit.disabled = true;
+      if (this.personalExportDialog && typeof this.personalExportDialog.showModal === 'function') this.personalExportDialog.showModal();
+      else if (this.personalExportDialog) this.personalExportDialog.setAttribute('open', '');
+      if (acknowledge) acknowledge.focus();
+      return true;
+    }
+
+    closePersonalExport() {
+      if (!this.personalExportDialog) return;
+      if (typeof this.personalExportDialog.close === 'function') this.personalExportDialog.close();
+      else this.personalExportDialog.removeAttribute('open');
+    }
+
+    async exportSelected(includePersonal) {
       if (!this.selectedChunk || this.busy) return;
+      if (includePersonal) this.closePersonalExport();
       this.setBusy(true);
       if (this.exportButton) this.exportButton.textContent = 'Exporting…';
       try {
-        const result = await this.client.exportPackage(this.selectedChunk.id, {channel: 'package-export'});
+        const result = await this.client.exportPackage(this.selectedChunk.id, {
+          channel: 'package-export', query: includePersonal ? {include_personal: true} : undefined,
+        });
         const url = URL.createObjectURL(result.blob);
         const link = this.shell.ownerDocument.createElement('a');
         link.href = url;
@@ -284,10 +328,10 @@
         link.click();
         link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
-		if (this.exportStatus) this.exportStatus.textContent = `Exported ${result.filename}.`;
+        if (this.exportStatus) this.exportStatus.textContent = `Exported ${result.filename}.`;
       } catch (error) {
         if (this.exportButton) this.exportButton.title = text(error && error.message, 'Knowledge could not export this chunk.');
-		if (this.exportStatus) this.exportStatus.textContent = text(error && error.message, 'Knowledge could not export this chunk.');
+        if (this.exportStatus) this.exportStatus.textContent = text(error && error.message, 'Knowledge could not export this chunk.');
       } finally {
         if (this.exportButton) this.exportButton.innerHTML = '<i class="bi bi-download" aria-hidden="true"></i> Export';
         this.setBusy(false);
@@ -320,5 +364,5 @@
     }
   }
 
-  return Object.freeze({Controller, previewView, importantImpacts});
+  return Object.freeze({Controller, previewView, importantImpacts, isPersonalChunk});
 });

@@ -136,7 +136,9 @@ func (s *Server) exportKnowledgePackage(w http.ResponseWriter, r *http.Request, 
 		s.writeKnowledgePackageMethodError(w, requestID, http.MethodGet)
 		return
 	}
-	if !s.requireNoKnowledgeQuery(w, r, requestID) {
+	includePersonal, err := parseKnowledgePackageExportQuery(r)
+	if err != nil {
+		s.writeKnowledgeError(w, requestID, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid, "The Knowledge request is invalid.")
 		return
 	}
 	chunkID := strings.Trim(strings.TrimPrefix(r.URL.Path, knowledgeapi.PackageExportPrefix+"/"), "/")
@@ -145,7 +147,9 @@ func (s *Server) exportKnowledgePackage(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	var archive bytes.Buffer
-	result, err := service.ExportPackage(ctx, &archive, knowledgeService.ExportPackageRequest{ChunkID: knowledge.ChunkID(chunkID)})
+	result, err := service.ExportPackage(ctx, &archive, knowledgeService.ExportPackageRequest{
+		ChunkID: knowledge.ChunkID(chunkID), IncludePersonal: includePersonal,
+	})
 	if err != nil {
 		s.writeKnowledgeReadError(w, requestID, err)
 		return
@@ -157,6 +161,20 @@ func (s *Server) exportKnowledgePackage(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set("ETag", fmt.Sprintf(`"sha256-%x"`, digest))
 	w.WriteHeader(http.StatusOK)
 	_, _ = archive.WriteTo(w)
+}
+
+func parseKnowledgePackageExportQuery(r *http.Request) (bool, error) {
+	query := r.URL.Query()
+	for name, values := range query {
+		if name != "include_personal" || len(values) != 1 {
+			return false, fmt.Errorf("unsupported package export query %q", name)
+		}
+	}
+	raw := strings.TrimSpace(query.Get("include_personal"))
+	if raw == "" {
+		return false, nil
+	}
+	return strconv.ParseBool(raw)
 }
 
 func (s *Server) readKnowledgePackage(w http.ResponseWriter, r *http.Request, requestID string, service *knowledgeService.Service) (kpackage.ValidatedPackage, bool) {

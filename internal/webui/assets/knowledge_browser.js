@@ -488,8 +488,17 @@
       software: (applicability.software || []).map(item => item.version_range ? `${item.name}|${item.version_range}` : item.name).join(', '),
       locales: (applicability.locales || []).join(', '), conditions: (applicability.conditions || []).join(', '),
       valid_from: localDateTimeValue(record.valid_from), valid_until: localDateTimeValue(record.valid_until), observed_at: localDateTimeValue(record.observed_at),
-      review_after: localDateTimeValue(record.review_after), evidence_ids: (record.evidence_ids || []).join(', '), personal_origin: record.personal_origin || '', review_approved: false,
+      review_after: localDateTimeValue(record.review_after), evidence_ids: (record.evidence_ids || []).join(', '),
+      personal_origin: record.personal_origin || (scope.kind === 'personal' ? 'explicit' : ''), review_approved: false,
     };
+  }
+
+  function personalEditorMode(record, chunk) {
+    record = record || {};
+    chunk = chunk || {};
+    const scope = record.scope || chunk.scope || {};
+    const personal = scope.kind === 'personal';
+    return {personal, locked: personal && scope.selector === 'me'};
   }
 
   function comparableEditorValue(value) {
@@ -790,6 +799,9 @@
       this.entryDialogTitle = shell.querySelector('[data-knowledge-entry-dialog-title]');
       this.entryFormError = shell.querySelector('[data-knowledge-entry-form-error]');
       this.entrySubmitButton = shell.querySelector('[data-knowledge-entry-submit]');
+      this.personalEditorNote = shell.querySelector('[data-knowledge-personal-editor-note]');
+      this.personalOriginField = shell.querySelector('[data-knowledge-personal-origin-field]');
+      this.personalOriginHelp = shell.querySelector('[data-knowledge-personal-origin-help]');
       this.entryActions = shell.querySelector('[data-knowledge-entry-actions]');
       this.entryEditButton = shell.querySelector('[data-knowledge-entry-edit]');
       this.entrySupersedeButton = shell.querySelector('[data-knowledge-entry-supersede]');
@@ -930,6 +942,8 @@
       if (this.entryForm) this.entryForm.addEventListener('submit', event => { event.preventDefault(); this.saveEntryEditor(); });
       const entryScopeInput = this.entryForm && this.entryForm.elements.namedItem('scope_kind');
       if (entryScopeInput) entryScopeInput.addEventListener('change', () => this.syncEntryScopeField());
+      const personalOriginInput = this.entryForm && this.entryForm.elements.namedItem('personal_origin');
+      if (personalOriginInput) personalOriginInput.addEventListener('change', () => this.syncPersonalOriginField());
       if (this.entryConflictUI.reload) this.entryConflictUI.reload.addEventListener('click', () => this.resolveEditorConflict('entry', 'reload'));
       if (this.entryConflictUI.rebase) this.entryConflictUI.rebase.addEventListener('click', () => this.resolveEditorConflict('entry', 'rebase'));
       for (const button of shell.querySelectorAll('[data-knowledge-supersede-cancel]')) button.addEventListener('click', () => this.closeSupersedeEditor());
@@ -2451,6 +2465,8 @@
       this.clearEditorConflict('entry');
       this.entryEditorRecord = record && record.id ? record : null;
       this.entryEditorChunk = this.entryEditorRecord ? null : chunk && chunk.id ? chunk : null;
+      const personalMode = personalEditorMode(this.entryEditorRecord, this.entryEditorChunk);
+      this.entryEditorScopeLocked = personalMode.locked;
       const values = entryEditorValues(this.entryEditorRecord, this.entryEditorChunk);
       if (!values.chunk_id) return false;
       for (const [name, value] of Object.entries(values)) {
@@ -2459,7 +2475,9 @@
         if (input.type === 'checkbox') input.checked = !!value;
         else input.value = value;
       }
-      if (this.entryDialogTitle) this.entryDialogTitle.textContent = this.entryEditorRecord ? 'Edit entry' : 'Create entry';
+      if (this.entryDialogTitle) this.entryDialogTitle.textContent = personalMode.personal
+        ? (this.entryEditorRecord ? 'Edit personal knowledge' : 'Add personal knowledge')
+        : (this.entryEditorRecord ? 'Edit entry' : 'Create entry');
       if (this.entrySubmitButton) this.entrySubmitButton.textContent = this.entryEditorRecord ? 'Save changes' : 'Create entry';
       if (this.entryFormError) { this.entryFormError.hidden = true; this.entryFormError.textContent = ''; }
       this.syncEntryScopeField();
@@ -2477,6 +2495,7 @@
       else this.entryDialog.removeAttribute('open');
       this.entryEditorRecord = null;
       this.entryEditorChunk = null;
+      this.entryEditorScopeLocked = false;
       this.clearEditorConflict('entry');
     }
 
@@ -2485,15 +2504,46 @@
       const kind = this.entryForm.elements.namedItem('scope_kind');
       const selector = this.entryForm.elements.namedItem('scope_selector');
       if (!kind || !selector) return;
+      if (this.entryEditorScopeLocked) {
+        kind.value = 'personal';
+        selector.value = 'me';
+      }
+      kind.disabled = !!this.entryEditorScopeLocked;
       selector.required = kind.value !== 'global';
-      selector.disabled = kind.value === 'global';
+      selector.disabled = kind.value === 'global' || !!this.entryEditorScopeLocked;
       if (selector.disabled) selector.value = '';
+      if (this.entryEditorScopeLocked) selector.value = 'me';
+      this.syncPersonalOriginField();
+    }
+
+    syncPersonalOriginField() {
+      if (!this.entryForm) return;
+      const scopeKind = this.entryForm.elements.namedItem('scope_kind');
+      const origin = this.entryForm.elements.namedItem('personal_origin');
+      if (!scopeKind || !origin) return;
+      const personal = scopeKind.value === 'personal';
+      if (this.personalEditorNote) this.personalEditorNote.hidden = !this.entryEditorScopeLocked;
+      if (this.personalOriginField) this.personalOriginField.hidden = !personal;
+      origin.required = personal;
+      if (personal && !origin.value) origin.value = 'explicit';
+      if (!personal) origin.value = '';
+      if (this.personalOriginHelp) {
+        this.personalOriginHelp.textContent = origin.value === 'observed'
+          ? 'Observed facts require attached observation or tool-result evidence.'
+          : origin.value === 'inferred'
+            ? 'Inferences remain unconfirmed drafts when sensitive or flagged for review.'
+            : 'Use this when you explicitly supplied the fact.';
+      }
     }
 
     async saveEntryEditor() {
       if (!this.entryForm || !this.client) return false;
       if (this.entryFormError) { this.entryFormError.hidden = true; this.entryFormError.textContent = ''; }
       const values = Object.fromEntries(new FormData(this.entryForm).entries());
+      if (this.entryEditorScopeLocked) {
+        values.scope_kind = 'personal';
+        values.scope_selector = 'me';
+      }
       values.review_approved = !!this.entryForm.elements.namedItem('review_approved').checked;
       let content;
       try { content = entryContentFromValues(values); }
@@ -3099,5 +3149,5 @@
     }
   }
 
-  return Object.freeze({panes, states, localPreferencesKey, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, browserSearchHasState, browserStatesEqual, normalizeLocalPreferences, loadLocalPreferences, saveLocalPreferences, clearLocalPreferences, graphViewStateFromPreferences, preferencesFromGraphViewState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, localDateTimeValue, entryContentFromValues, entryEditorValues, editorConflict, historyProjection, historyChangedFields, historyTimeline, deletionAssessment, relationshipShapeError, linkContentFromValues, relationPreview, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
+  return Object.freeze({panes, states, localPreferencesKey, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, browserSearchHasState, browserStatesEqual, normalizeLocalPreferences, loadLocalPreferences, saveLocalPreferences, clearLocalPreferences, graphViewStateFromPreferences, preferencesFromGraphViewState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, localDateTimeValue, entryContentFromValues, entryEditorValues, personalEditorMode, editorConflict, historyProjection, historyChangedFields, historyTimeline, deletionAssessment, relationshipShapeError, linkContentFromValues, relationPreview, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
 });

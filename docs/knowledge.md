@@ -374,6 +374,12 @@ unknown-key, and publisher/key-mismatch packages. “Trusted” means only that 
 signature matches this local identity binding. It does not bypass classification,
 authorization, conflict review, import limits, or any tool/runtime policy.
 
+Exporting a personal chunk is a separate, explicit action. The service rejects personal
+package exports unless the caller opts in for that request, and the explorer explains
+that the downloaded file leaves Koder's private store before asking for confirmation.
+The Knowledge tool exposes the same opt-in only for a user-requested export in the
+current conversation; an agent must not silently turn routine lookup into data export.
+
 ## Origin of personal knowledge
 
 Personal entries additionally record how they arose:
@@ -393,6 +399,10 @@ must declare one of these origins. An inferred entry carrying personal-sensitive
 medical, legal, financial, physical-safety, or security-sensitive risk can exist only as
 a reviewable draft until it is replaced or explicitly confirmed; canonical validation
 enforces this even when a pluggable classifier returns `allow`.
+
+The explorer presents `personal/me` as a dedicated editor: its scope is locked, origin
+is required in the main form rather than hidden as advanced metadata, and observed or
+inferred choices explain their evidence and review consequences.
 
 ## Combined examples
 

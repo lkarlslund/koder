@@ -149,6 +149,10 @@ assert.deepStrictEqual(browser.entryContentFromValues({
 assert.throws(() => browser.entryContentFromValues({title: 'Bad', kind: 'fact', scope_kind: 'global', confidence: '2'}), /confidence/);
 assert.throws(() => browser.entryContentFromValues({title: 'Bad', kind: 'fact', scope_kind: 'global', valid_from: '2026-02-01T00:00', valid_until: '2026-01-01T00:00'}), /later/);
 assert.strictEqual(browser.entryEditorValues({chunk_id: 'chunk-1', applicability: {software: [{name: 'Go', version_range: '>=1.24'}]}}).software, 'Go|>=1.24');
+assert.strictEqual(browser.entryEditorValues({}, {id: 'personal', scope: {kind: 'personal', selector: 'me'}}).personal_origin, 'explicit');
+assert.deepStrictEqual(browser.personalEditorMode({}, {scope: {kind: 'personal', selector: 'me'}}), {personal: true, locked: true});
+assert.deepStrictEqual(browser.personalEditorMode({scope: {kind: 'personal', selector: 'family'}}, {}), {personal: true, locked: false});
+assert.deepStrictEqual(browser.personalEditorMode({scope: {kind: 'global'}}, {}), {personal: false, locked: false});
 assert.deepStrictEqual(browser.editorConflict(
   {title: 'Old title', description: 'Old description', tags: 'one', review_approved: false},
   {title: 'My title', description: 'Old description', tags: 'one', review_approved: true},

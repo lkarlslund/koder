@@ -62,7 +62,8 @@ const (
     "cursor":{"type":"string","description":"Opaque continuation cursor from the previous matching action"},
     "expected_revision":{"type":"integer","minimum":1,"description":"Current revision number from get/list"},
     "reason":{"type":"string","description":"Why this revision or lifecycle change is being made"},
-    "review_approved":{"type":"boolean","description":"Explicitly approve a classifier review outcome after inspecting it"},
+	"review_approved":{"type":"boolean","description":"Explicitly approve a classifier review outcome after inspecting it"},
+	"include_personal":{"type":"boolean","description":"Include private personal knowledge in package export; set true only after the user explicitly requests that export in the current conversation"},
     "confirmed":{"type":"boolean","description":"Required true for permanent deletion"},
     "cascade":{"type":"boolean","description":"Permanently delete dependent entries, links, and owned evidence atomically"},
     "chunk":{

@@ -287,6 +287,20 @@
       </form>
     </dialog>
 
+    <dialog class="knowledge-editor-dialog knowledge-compact-dialog" data-knowledge-personal-export-dialog aria-labelledby="knowledge-personal-export-dialog-title">
+      <form method="dialog" data-knowledge-personal-export-form>
+        <header>
+          <div><span class="knowledge-eyebrow">Private knowledge</span><h2 id="knowledge-personal-export-dialog-title">Export personal knowledge?</h2></div>
+          <button type="button" class="knowledge-icon-button" data-knowledge-personal-export-cancel title="Close"><i class="bi bi-x-lg" aria-hidden="true"></i><span class="visually-hidden">Close personal export confirmation</span></button>
+        </header>
+        <div class="knowledge-editor-fields">
+          <section class="knowledge-personal-editor-note is-wide"><i class="bi bi-shield-lock" aria-hidden="true"></i><div><strong>This package can contain private facts about you</strong><span>The downloaded file leaves Koder's private store. Anyone with the file may be able to read its contents.</span></div></section>
+          <label class="knowledge-review-checkbox is-wide"><input name="acknowledge" type="checkbox"><span>I understand and want to export this personal knowledge now.</span></label>
+        </div>
+        <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-knowledge-personal-export-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-warning" data-knowledge-personal-export-submit disabled>Export private package</button></footer>
+      </form>
+    </dialog>
+
     <dialog class="knowledge-editor-dialog" data-knowledge-chunk-dialog aria-labelledby="knowledge-chunk-dialog-title">
       <form method="dialog" data-knowledge-chunk-form>
         <header>
@@ -340,6 +354,7 @@
         </header>
         <div class="knowledge-editor-fields">
           <label class="is-wide"><span>Chunk</span><input name="chunk_id" readonly required></label>
+          <section class="knowledge-personal-editor-note is-wide" data-knowledge-personal-editor-note hidden><i class="bi bi-person-lock" aria-hidden="true"></i><div><strong>About me is private personal knowledge</strong><span>Its scope stays locked to you. Say whether you told Koder, Koder observed it through an authorized tool, or it is an unconfirmed inference.</span></div></section>
           <label class="is-wide"><span>Title</span><input name="title" maxlength="240" required></label>
           <label><span>Type</span><select name="kind" required><option value="fact">Fact</option><option value="procedure">Procedure</option><option value="concept">Concept</option><option value="warning">Warning</option><option value="preference">Preference</option><option value="decision">Decision</option><option value="reference">Reference</option></select></label>
           <label><span>Confidence</span><input name="confidence" type="number" min="0" max="1" step="0.01" placeholder="0–1"></label>
@@ -347,6 +362,7 @@
           <label class="is-wide"><span>Body (Markdown)</span><textarea name="body" maxlength="64000" rows="9"></textarea></label>
           <label><span>Scope</span><select name="scope_kind" required><option value="global">Global</option><option value="personal">Personal</option><option value="project">Project</option><option value="session">Session</option><option value="environment">Environment</option></select></label>
           <label><span>Scope selector</span><input name="scope_selector" maxlength="240" placeholder="Required except for global"></label>
+          <label class="is-wide" data-knowledge-personal-origin-field hidden><span>How Koder learned this</span><select name="personal_origin"><option value="explicit">You told Koder directly</option><option value="observed">Observed through an authorized tool</option><option value="inferred">Inferred — keep unconfirmed</option></select><small data-knowledge-personal-origin-help></small></label>
           <label class="is-wide"><span>Tags</span><input name="tags" maxlength="1000" placeholder="Comma-separated"></label>
           <details class="is-wide">
             <summary>Applicability and lifecycle</summary>
@@ -363,7 +379,6 @@
               <label><span>Observed at</span><input name="observed_at" type="datetime-local"></label>
               <label><span>Review after</span><input name="review_after" type="datetime-local"></label>
               <label class="is-wide"><span>Evidence IDs</span><input name="evidence_ids" maxlength="4000" placeholder="Comma-separated IDs"></label>
-              <label><span>Personal origin</span><select name="personal_origin"><option value="">Not personal</option><option value="explicit">Explicit</option><option value="observed">Observed</option><option value="inferred">Inferred</option></select></label>
             </div>
           </details>
           <label class="knowledge-review-checkbox is-wide"><input name="review_approved" type="checkbox"><span>I reviewed any sensitive content before saving.</span></label>

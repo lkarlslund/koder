@@ -160,6 +160,24 @@ func TestKnowledgePackageToolActionsRequirePersistentWorkspaceAndRoundTrip(t *te
 	}
 }
 
+func TestKnowledgePackageExportNormalizesPersonalConsent(t *testing.T) {
+	chunkID := "00000000-0000-7000-8000-000000000001"
+	normalized, err := normalizePackageExportArgs(map[string]string{
+		"id": chunkID, "path": "exports/personal.kknowledge", "include_personal": "true",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized["include_personal"] != "true" {
+		t.Fatalf("include_personal = %q, want true", normalized["include_personal"])
+	}
+	if _, err := normalizePackageExportArgs(map[string]string{
+		"id": chunkID, "path": "exports/personal.kknowledge", "include_personal": "sometimes",
+	}); err == nil {
+		t.Fatal("normalizePackageExportArgs accepted a non-boolean include_personal value")
+	}
+}
+
 func TestKnowledgeToolDefinitionFiltersActionsAndScopesFromPolicy(t *testing.T) {
 	store := memory.New()
 	t.Cleanup(func() { _ = store.Close() })

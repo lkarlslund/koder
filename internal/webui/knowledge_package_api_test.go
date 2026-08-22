@@ -130,6 +130,42 @@ func TestKnowledgePackageAPIExportsPortableArchiveAndRejectsInvalidTransport(t *
 	}
 }
 
+func TestKnowledgePackageAPIRequiresPersonalExportOptIn(t *testing.T) {
+	ctrl := newTestController(t)
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service, err := knowledgeService.New(knowledgeService.Config{
+		Store: store, Actor: knowledgeService.ContextActorSource(knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:test"}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.EnsurePersonalChunk(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctrl.SetKnowledgeService(service)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := bindKnowledgeTestDevice(t, srv)
+	exportURL := srv.URL() + knowledgeapi.PackageExportPath(knowledgeService.PersonalMeChunkID)
+
+	response := knowledgePackageRequest(t, http.MethodGet, exportURL, token, "", nil)
+	assertKnowledgeAPIError(t, response, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid)
+
+	response = knowledgePackageRequest(t, http.MethodGet, exportURL+"?include_personal=true", token, "", nil)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != knowledgeapi.PackageMediaType {
+		t.Fatalf("personal export with opt-in status=%d headers=%v", response.StatusCode, response.Header)
+	}
+
+	response = knowledgePackageRequest(t, http.MethodGet, exportURL+"?unexpected=true", token, "", nil)
+	assertKnowledgeAPIError(t, response, http.StatusBadRequest, knowledgeService.ErrorCodeInvalid)
+}
+
 func exportKnowledgePackageFixture(t *testing.T) ([]byte, knowledge.ChunkID) {
 	t.Helper()
 	store := memory.New()

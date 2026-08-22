@@ -23,14 +23,22 @@ assert.strictEqual(view.publisherTrust, 'Verified');
 assert.strictEqual(view.conflicts, 2);
 assert.strictEqual(view.reviewRequired, true);
 assert.deepStrictEqual(packages.importantImpacts(preview.impacts, 2).map(item => item.id), ['blocked', 'conflict']);
+assert.strictEqual(packages.isPersonalChunk({kind: 'personal', scope: {kind: 'personal', selector: 'me'}}), true);
+assert.strictEqual(packages.isPersonalChunk({kind: 'reference', scope: {kind: 'global'}}), false);
 
 class Element {
-  constructor() { this.hidden = false; this.disabled = false; this.value = ''; this.checked = false; this.textContent = ''; this.children = []; this.listeners = {}; }
+  constructor() { this.hidden = false; this.disabled = false; this.value = ''; this.checked = false; this.textContent = ''; this.children = []; this.listeners = {}; this.open = false; }
   addEventListener(name, fn) { this.listeners[name] = fn; }
   replaceChildren(...children) { this.children = children; }
   append(...children) { this.children.push(...children); }
   appendChild(child) { this.children.push(child); return child; }
   focus() {}
+  click() {}
+  remove() {}
+  showModal() { this.open = true; }
+  close() { this.open = false; }
+  setAttribute(name) { if (name === 'open') this.open = true; }
+  removeAttribute(name) { if (name === 'open') this.open = false; }
 }
 
 function fakeShell() {
@@ -39,6 +47,13 @@ function fakeShell() {
     'conflict-field', 'conflict-policy', 'review-field', 'review', 'error', 'status', 'preview-button', 'stage-button', 'activate-button', 'export',
   ];
   const values = new Map(selectors.map(name => [`[data-knowledge-package-${name}]`, new Element()]));
+  const personalDialog = new Element();
+  const personalForm = new Element();
+  const acknowledge = new Element();
+  personalForm.elements = {namedItem: name => name === 'acknowledge' ? acknowledge : null};
+  values.set('[data-knowledge-personal-export-dialog]', personalDialog);
+  values.set('[data-knowledge-personal-export-form]', personalForm);
+  values.set('[data-knowledge-personal-export-submit]', new Element());
   const shell = new Element();
   shell.querySelector = selector => values.get(selector) || null;
   shell.querySelectorAll = () => [];
@@ -75,6 +90,23 @@ async function testControllerFlow() {
   await controller.activateSelected();
   assert.deepStrictEqual(imported, {chunk_id: 'chunk-1'});
   assert.strictEqual(controller.stage, null);
+
+  const exports = [];
+  client.exportPackage = async (id, options) => {
+    exports.push([id, options]);
+    return {blob: new Blob(['personal']), filename: 'personal.kknowledge'};
+  };
+  controller.selectedChunk = {id: 'personal', title: 'About me', personal: true};
+  assert.strictEqual(controller.requestExport(), true);
+  assert.strictEqual(shell.querySelector('[data-knowledge-personal-export-dialog]').open, true);
+  assert.strictEqual(shell.querySelector('[data-knowledge-personal-export-submit]').disabled, true);
+  const acknowledge = shell.querySelector('[data-knowledge-personal-export-form]').elements.namedItem('acknowledge');
+  acknowledge.checked = true;
+  acknowledge.listeners.change();
+  assert.strictEqual(shell.querySelector('[data-knowledge-personal-export-submit]').disabled, false);
+  await controller.exportSelected(true);
+  assert.deepStrictEqual(exports[0], ['personal', {channel: 'package-export', query: {include_personal: true}}]);
+  assert.strictEqual(shell.querySelector('[data-knowledge-personal-export-dialog]').open, false);
 }
 
 testControllerFlow().catch(error => { console.error(error); process.exitCode = 1; });

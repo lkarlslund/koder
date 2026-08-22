@@ -69,7 +69,11 @@ func normalizePackageExportArgs(args map[string]string) (map[string]string, erro
 	if err := (knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: id}).Validate(); err != nil {
 		return nil, fmt.Errorf("invalid knowledge chunk id: %w", err)
 	}
-	return map[string]string{"action": "package_export", "id": id, "path": path}, nil
+	out := map[string]string{"action": "package_export", "id": id, "path": path}
+	if err := normalizeBool(args, out, "include_personal"); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func callPackageRead(ctx context.Context, service *knowledgeService.Service, offer knowledgeService.ToolOffer, runtime tools.Runtime, args map[string]string) (any, error) {
@@ -118,7 +122,9 @@ func callPackageExport(ctx context.Context, service *knowledgeService.Service, r
 		return packageExportResult{}, fmt.Errorf("inspect knowledge package export path: %w", err)
 	}
 	var archive bytes.Buffer
-	result, err := service.ExportPackage(ctx, &archive, knowledgeService.ExportPackageRequest{ChunkID: knowledge.ChunkID(args["id"])})
+	result, err := service.ExportPackage(ctx, &archive, knowledgeService.ExportPackageRequest{
+		ChunkID: knowledge.ChunkID(args["id"]), IncludePersonal: boolArg(args, "include_personal"),
+	})
 	if err != nil {
 		return packageExportResult{}, err
 	}

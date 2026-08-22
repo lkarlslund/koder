@@ -118,6 +118,7 @@ func classifyErrorCode(err error) ErrorCode {
 		errors.Is(err, ErrReviewRequired),
 		errors.Is(err, ErrInvalidSupersession),
 		errors.Is(err, ErrPersonalOriginPolicy),
+		errors.Is(err, ErrPersonalExportConsent),
 		errors.Is(err, ErrImportConflictPolicy),
 		errors.Is(err, kpackage.ErrInvalidArchive),
 		errors.Is(err, kpackage.ErrLimitExceeded),

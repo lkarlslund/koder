@@ -81,6 +81,41 @@ func TestLocallyCreatedChunkExportPreviewsAsUnchanged(t *testing.T) {
 	}
 }
 
+func TestExportPackageRequiresExplicitConsentForPersonalKnowledge(t *testing.T) {
+	t.Parallel()
+	backend := memory.New()
+	t.Cleanup(func() { _ = backend.Close() })
+	service, err := New(Config{
+		Store: backend, Actor: ContextActorSource(knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:test"}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.EnsurePersonalChunk(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	var denied bytes.Buffer
+	_, err = service.ExportPackage(context.Background(), &denied, ExportPackageRequest{ChunkID: PersonalMeChunkID})
+	if !errors.Is(err, ErrPersonalExportConsent) {
+		t.Fatalf("ExportPackage(personal without consent) error = %v, want ErrPersonalExportConsent", err)
+	}
+	if denied.Len() != 0 {
+		t.Fatalf("ExportPackage(personal without consent) wrote %d bytes", denied.Len())
+	}
+
+	var allowed bytes.Buffer
+	result, err := service.ExportPackage(context.Background(), &allowed, ExportPackageRequest{
+		ChunkID: PersonalMeChunkID, IncludePersonal: true,
+	})
+	if err != nil {
+		t.Fatalf("ExportPackage(personal with consent) error = %v", err)
+	}
+	if result.Size == 0 || allowed.Len() == 0 {
+		t.Fatalf("ExportPackage(personal with consent) = %#v, bytes = %d", result, allowed.Len())
+	}
+}
+
 func TestExportPackageHonorsReadPolicyAndArchiveValidationIsWriteFree(t *testing.T) {
 	t.Parallel()
 	backend := memory.New()
