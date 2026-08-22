@@ -20,10 +20,12 @@ type recordReader interface {
 }
 
 type transaction struct {
-	reader   recordReader
-	batch    *cockroachpebble.Batch
-	active   bool
-	writable bool
+	reader          recordReader
+	batch           *cockroachpebble.Batch
+	active          bool
+	writable        bool
+	indexGeneration uint64
+	indexes         []indexDefinition
 }
 
 var _ knowledgeStore.Store = (*Store)(nil)
@@ -74,10 +76,17 @@ func (s *Store) Update(ctx context.Context, fn func(knowledgeStore.WriteTx) erro
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	indexes, err := validateIndexDefinitions(s.indexes)
+	if err != nil {
+		return err
+	}
 	batch := s.db.NewIndexedBatch()
 	defer func() { _ = batch.Close() }()
-	tx := &transaction{reader: batch, batch: batch, active: true, writable: true}
-	err := func() error {
+	tx := &transaction{
+		reader: batch, batch: batch, active: true, writable: true,
+		indexGeneration: s.meta.IndexGeneration, indexes: indexes,
+	}
+	err = func() error {
 		defer func() { tx.active = false }()
 		return fn(tx)
 	}()
@@ -145,6 +154,9 @@ func (tx *transaction) PutChunk(ctx context.Context, value knowledge.Chunk, expe
 	if err := revision.CheckPut("chunk", string(value.ID), expectedRevision, value.Revision.Number, current.Revision.Number, exists); err != nil {
 		return err
 	}
+	if err := tx.replaceChunkIndexes(ctx, optionalChunk(current, exists), &value); err != nil {
+		return err
+	}
 	return tx.putRevisioned(chunkKey(string(value.ID)), revisionKey(recordChunk, string(value.ID), value.Revision.Number), value)
 }
 
@@ -159,7 +171,47 @@ func (tx *transaction) DeleteChunk(ctx context.Context, id knowledge.ChunkID, ex
 	if err := revision.CheckDelete("chunk", string(id), expectedRevision, current.Revision.Number, exists); err != nil {
 		return err
 	}
+	if err := tx.replaceChunkIndexes(ctx, &current, nil); err != nil {
+		return err
+	}
 	return tx.deleteRevisioned(chunkKey(string(id)), revisionPrefix(recordChunk, string(id)))
+}
+
+func optionalChunk(chunk knowledge.Chunk, exists bool) *knowledge.Chunk {
+	if !exists {
+		return nil
+	}
+	return &chunk
+}
+
+func (tx *transaction) replaceChunkIndexes(ctx context.Context, old, next *knowledge.Chunk) error {
+	if old != nil {
+		entries, err := buildChunkIndexEntries(ctx, tx.indexes, *old)
+		if err != nil {
+			return err
+		}
+		for name, values := range entries {
+			for _, entry := range values {
+				if err := tx.batch.Delete(indexKey(tx.indexGeneration, name, entry.Suffix), nil); err != nil {
+					return fmt.Errorf("delete knowledge index %s: %w", name, err)
+				}
+			}
+		}
+	}
+	if next != nil {
+		entries, err := buildChunkIndexEntries(ctx, tx.indexes, *next)
+		if err != nil {
+			return err
+		}
+		for name, values := range entries {
+			for _, entry := range values {
+				if err := tx.batch.Set(indexKey(tx.indexGeneration, name, entry.Suffix), entry.Value, nil); err != nil {
+					return fmt.Errorf("put knowledge index %s: %w", name, err)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (tx *transaction) PutEntry(ctx context.Context, value knowledge.Entry, expectedRevision uint64) error {

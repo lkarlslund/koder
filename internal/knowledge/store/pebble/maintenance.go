@@ -31,8 +31,6 @@ type indexDefinition struct {
 	build func(context.Context, knowledgeStore.CanonicalRecord) ([]indexEntry, error)
 }
 
-func defaultIndexDefinitions() []indexDefinition { return nil }
-
 var _ knowledgeStore.MaintenanceStore = (*Store)(nil)
 
 func (s *Store) ScanCanonical(ctx context.Context, visit func(knowledgeStore.CanonicalRecord) error) (knowledgeStore.ScanStats, error) {

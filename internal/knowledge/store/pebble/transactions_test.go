@@ -153,6 +153,9 @@ func TestTransactionCallbackErrorLeavesNoPartialRecords(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if count := countIndexEntries(t, reopened, initialIndexGeneration); count != 0 {
+		t.Fatalf("aborted transaction left %d derived index entries", count)
+	}
 }
 
 func TestTransactionCancellationLeavesNoPartialRecords(t *testing.T) {
