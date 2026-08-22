@@ -42,6 +42,8 @@ func (s *Server) registerKnowledgeAPI(mux *http.ServeMux) {
 	mux.Handle(knowledgeapi.OperationalStatusPath, s.knowledgeEndpoint(s.handleKnowledgeOperationalStatus))
 	mux.Handle(knowledgeapi.IndexRebuildPath, s.knowledgeEndpoint(s.handleKnowledgeIndexRebuild))
 	mux.Handle(knowledgeapi.ChatContextPath, s.knowledgeEndpoint(s.handleKnowledgeChatContext))
+	mux.Handle(knowledgeapi.GraphViewCollectionPath, s.knowledgeEndpoint(s.handleKnowledgeGraphViews))
+	mux.Handle(knowledgeapi.GraphViewCollectionPath+"/", s.knowledgeEndpoint(s.handleKnowledgeGraphView))
 }
 
 func (s *Server) knowledgeEndpoint(handler http.HandlerFunc) http.Handler {

@@ -147,6 +147,9 @@ func TestChunkRoutesRemainVersionedAndEscaped(t *testing.T) {
 	if got := LinkLifecyclePath(linkID, " unlink "); got != "/api/knowledge/v1/links/link%20with%2Fslash/unlink" {
 		t.Fatalf("LinkLifecyclePath() = %q", got)
 	}
+	if got := GraphViewPath("view with/slash"); got != "/api/knowledge/v1/views/view%20with%2Fslash" {
+		t.Fatalf("GraphViewPath() = %q", got)
+	}
 }
 
 func requireJSONEOF(decoder *json.Decoder) error {

@@ -63,6 +63,7 @@ const localPreferences = browser.normalizeLocalPreferences({
 });
 assert.deepStrictEqual(localPreferences, {
   version: 1,
+  savedViewID: '',
   browser: {query: 'partition', kind: 'reference', scopeKind: 'project', state: '', tag: '', objectKind: 'entry', id: 'entry-1'},
   mobilePane: 'inspector',
   graph: {
@@ -71,6 +72,16 @@ assert.deepStrictEqual(localPreferences, {
     frontier: [{kind: 'entry', id: 'entry-1', direction: 'outgoing'}],
   },
 });
+const serverViewState = browser.graphViewStateFromPreferences(localPreferences);
+assert.deepStrictEqual(serverViewState.browser, {
+  query: 'partition', kind: 'reference', scope_kind: 'project', state: '', tag: '', object_kind: 'entry', id: 'entry-1',
+});
+assert.deepStrictEqual(serverViewState.root, {kind: 'chunk', id: 'chunk-1'});
+assert.strictEqual(serverViewState.layout, 'force_atlas2');
+const restoredNamedView = browser.preferencesFromGraphViewState(serverViewState, 'view-1');
+assert.strictEqual(restoredNamedView.savedViewID, 'view-1');
+assert.deepStrictEqual(restoredNamedView.graph, localPreferences.graph);
+assert.deepStrictEqual(restoredNamedView.browser, localPreferences.browser);
 const preferenceValues = new Map();
 const preferenceStorage = {
   getItem: key => preferenceValues.get(key) || null,

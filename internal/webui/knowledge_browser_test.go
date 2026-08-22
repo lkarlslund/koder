@@ -36,6 +36,8 @@ func TestServerServesStandaloneKnowledgeExplorerShell(t *testing.T) {
 		`data-knowledge-graph-canvas`, `data-knowledge-selection-box`, `data-knowledge-selection-count`, `data-knowledge-graph-fallback`, `data-knowledge-graph-fallback-detail`, `data-knowledge-legend`, `data-knowledge-graph-center`, `data-knowledge-graph-fit`,
 		`data-knowledge-view-hide`, `data-knowledge-view-isolate`, `data-knowledge-view-reveal`, `data-knowledge-view-undo`,
 		`data-knowledge-preferences-reset`,
+		`data-knowledge-saved-view`, `data-knowledge-saved-view-create`, `data-knowledge-saved-view-update`, `data-knowledge-saved-view-delete`,
+		`data-knowledge-saved-view-dialog`, `data-knowledge-saved-view-form`, `data-knowledge-saved-view-error`,
 		`data-knowledge-context-menu`, `data-knowledge-context-action="inspect"`, `data-knowledge-context-action="hide"`,
 		`data-knowledge-search-form`, `data-knowledge-search`, `data-knowledge-filter="kind"`, `data-knowledge-filter="scope_kind"`,
 		`data-knowledge-results`, `data-knowledge-load-more`,

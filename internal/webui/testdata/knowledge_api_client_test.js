@@ -70,6 +70,17 @@ async function testRequestAndCursorEncoding() {
   assert.strictEqual(requests[15].url, '/api/knowledge/v1/chat-context');
   assert.strictEqual(requests[15].options.method, 'POST');
   assert.deepStrictEqual(JSON.parse(requests[15].options.body), selection);
+
+  await client.listGraphViews({channel: 'views'});
+  assert.strictEqual(requests[16].url, '/api/knowledge/v1/views');
+  await client.createGraphView({name: 'My view', state: {}}, {channel: 'view-create'});
+  assert.strictEqual(requests[17].options.method, 'POST');
+  await client.getGraphView('view-1', {channel: 'view'});
+  assert.strictEqual(requests[18].url, '/api/knowledge/v1/views/view-1');
+  await client.updateGraphView('view-1', {name: 'Updated', state: {}, expected_revision: 1}, {channel: 'view-update'});
+  assert.strictEqual(requests[19].options.method, 'PUT');
+  await client.deleteGraphView('view-1', {expected_revision: 2}, {channel: 'view-delete'});
+  assert.strictEqual(requests[20].options.method, 'DELETE');
 }
 
 async function testNewGenerationCancelsStaleRequest() {

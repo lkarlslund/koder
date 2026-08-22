@@ -212,6 +212,11 @@
     neighbors(body, options) { return this.request('/neighbors', {...options, method: 'POST', body}); }
     status(options) { return this.request('/status', options); }
     sendToChat(body, options) { return this.request('/chat-context', {...options, method: 'POST', body}); }
+    listGraphViews(options) { return this.request('/views', options); }
+    getGraphView(id, options) { return this.request('/views/' + encodeID(id), options); }
+    createGraphView(body, options) { return this.request('/views', {...options, method: 'POST', body}); }
+    updateGraphView(id, body, options) { return this.request('/views/' + encodeID(id), {...options, method: 'PUT', body}); }
+    deleteGraphView(id, body, options) { return this.request('/views/' + encodeID(id), {...options, method: 'DELETE', body}); }
 
     async *pages(path, options) {
       options = options || {};

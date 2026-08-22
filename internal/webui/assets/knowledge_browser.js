@@ -165,6 +165,7 @@
     });
     return Object.freeze({
       version: localPreferencesVersion,
+      savedViewID: /^[A-Za-z0-9_-]+$/.test(boundedText(value.savedViewID, 160)) ? boundedText(value.savedViewID, 160) : '',
       browser: normalizedBrowserState(value.browser),
       mobilePane: normalizePane(value.mobilePane),
       graph: Object.freeze({
@@ -198,6 +199,40 @@
   function clearLocalPreferences(storage, key) {
     if (!storage || typeof storage.removeItem !== 'function') return false;
     try { storage.removeItem(key || localPreferencesKey); return true; } catch (_) { return false; }
+  }
+
+  function graphViewStateFromPreferences(value) {
+    const preferences = normalizeLocalPreferences(value);
+    return {
+      browser: {
+        query: preferences.browser.query, kind: preferences.browser.kind, scope_kind: preferences.browser.scopeKind,
+        state: preferences.browser.state, tag: preferences.browser.tag, object_kind: preferences.browser.objectKind, id: preferences.browser.id,
+      },
+      mobile_pane: preferences.mobilePane,
+      root: preferences.graph.root,
+      hidden_nodes: preferences.graph.hiddenNodes,
+      hidden_edges: preferences.graph.hiddenEdges,
+      pinned_nodes: preferences.graph.pinnedNodes,
+      frontier: preferences.graph.frontier,
+      layout: 'force_atlas2',
+    };
+  }
+
+  function preferencesFromGraphViewState(value, savedViewID) {
+    value = value && typeof value === 'object' ? value : {};
+    const browser = value.browser && typeof value.browser === 'object' ? value.browser : {};
+    return normalizeLocalPreferences({
+      savedViewID,
+      browser: {
+        query: browser.query, kind: browser.kind, scopeKind: browser.scope_kind, state: browser.state,
+        tag: browser.tag, objectKind: browser.object_kind, id: browser.id,
+      },
+      mobilePane: value.mobile_pane,
+      graph: {
+        root: value.root, hiddenNodes: value.hidden_nodes, hiddenEdges: value.hidden_edges,
+        pinnedNodes: value.pinned_nodes, frontier: value.frontier,
+      },
+    });
   }
 
   function searchForBrowserState(search, state) {
@@ -684,6 +719,8 @@
         : (this.savedPreferences && this.savedPreferences.graph.root) || graphPreferenceObject({kind: this.urlState.objectKind, id: this.urlState.id});
       this.graphFrontier = restoreSavedView ? [...this.savedPreferences.graph.frontier] : [];
       this.restoredGraphPreferences = restoreSavedView ? this.savedPreferences.graph : normalizeLocalPreferences({}).graph;
+      this.activeSavedViewID = restoreSavedView ? this.savedPreferences.savedViewID : '';
+      this.savedViews = [];
       this.preferenceTimer = 0;
       this.suppressPreferenceWrites = false;
       this.graphLoadGeneration = 0;
@@ -713,6 +750,16 @@
       this.graphRevealButton = shell.querySelector('[data-knowledge-view-reveal]');
       this.graphUndoButton = shell.querySelector('[data-knowledge-view-undo]');
       this.preferencesResetButton = shell.querySelector('[data-knowledge-preferences-reset]');
+      this.savedViewSelect = shell.querySelector('[data-knowledge-saved-view]');
+      this.savedViewCreateButton = shell.querySelector('[data-knowledge-saved-view-create]');
+      this.savedViewUpdateButton = shell.querySelector('[data-knowledge-saved-view-update]');
+      this.savedViewDeleteButton = shell.querySelector('[data-knowledge-saved-view-delete]');
+      this.savedViewStatus = shell.querySelector('[data-knowledge-saved-view-status]');
+      this.savedViewDialog = shell.querySelector('[data-knowledge-saved-view-dialog]');
+      this.savedViewForm = shell.querySelector('[data-knowledge-saved-view-form]');
+      this.savedViewDialogTitle = shell.querySelector('[data-knowledge-saved-view-dialog-title]');
+      this.savedViewSubmitButton = shell.querySelector('[data-knowledge-saved-view-submit]');
+      this.savedViewError = shell.querySelector('[data-knowledge-saved-view-error]');
       this.graphCanvas = shell.querySelector('[data-knowledge-graph-canvas]');
       this.graphContextMenu = shell.querySelector('[data-knowledge-context-menu]');
       this.graphContextHeading = shell.querySelector('[data-knowledge-context-heading]');
@@ -831,6 +878,12 @@
       if (this.graphRevealButton) this.graphRevealButton.addEventListener('click', () => this.applyGraphViewAction('reveal'));
       if (this.graphUndoButton) this.graphUndoButton.addEventListener('click', () => this.applyGraphViewAction('undo'));
       if (this.preferencesResetButton) this.preferencesResetButton.addEventListener('click', () => this.resetLocalPreferences());
+      if (this.savedViewSelect) this.savedViewSelect.addEventListener('change', () => this.loadNamedGraphView(this.savedViewSelect.value));
+      if (this.savedViewCreateButton) this.savedViewCreateButton.addEventListener('click', () => this.openSavedViewEditor());
+      if (this.savedViewUpdateButton) this.savedViewUpdateButton.addEventListener('click', () => this.openSavedViewEditor(this.activeSavedViewID));
+      if (this.savedViewDeleteButton) this.savedViewDeleteButton.addEventListener('click', () => this.deleteNamedGraphView());
+      for (const button of shell.querySelectorAll('[data-knowledge-saved-view-cancel]')) button.addEventListener('click', () => this.closeSavedViewEditor());
+      if (this.savedViewForm) this.savedViewForm.addEventListener('submit', event => { event.preventDefault(); this.saveNamedGraphView(); });
       this.graphContextClickHandlers = new Map();
       for (const button of this.graphContextButtons) {
         const handler = () => this.runGraphContextAction(button.dataset.knowledgeContextAction);
@@ -1053,6 +1106,7 @@
         }));
       }
       return normalizeLocalPreferences({
+        savedViewID: this.activeSavedViewID,
         browser: this.urlState,
         mobilePane: this.shell.dataset.mobilePane,
         graph: {root: this.graphRoot, hiddenNodes, hiddenEdges, pinnedNodes, frontier: this.graphFrontier},
@@ -1087,6 +1141,7 @@
       this.preferenceTimer = 0;
       clearLocalPreferences(this.preferenceStorage);
       this.savedPreferences = null;
+      this.activeSavedViewID = '';
       this.graphRoot = null;
       this.graphFrontier = [];
       this.restoredGraphPreferences = normalizeLocalPreferences({}).graph;
@@ -1096,18 +1151,177 @@
       this.urlState = browserStateFromSearch('');
       const search = searchForBrowserState(globalThis.location && globalThis.location.search, this.urlState);
       globalThis.history.replaceState(null, '', globalThis.location.pathname + search);
-      this.shell.dataset.mobilePane = 'graph';
-      for (const tab of this.shell.querySelectorAll('[data-knowledge-tab]')) {
-        const selected = tab.dataset.knowledgeTab === 'graph';
-        tab.setAttribute('aria-selected', selected ? 'true' : 'false');
-        tab.tabIndex = selected ? 0 : -1;
-      }
+      this.setMobilePane('graph');
       this.syncControls();
       this.suppressPreferenceWrites = false;
+      this.renderSavedGraphViews();
       const status = this.shell.querySelector('[data-knowledge-status-label]');
       if (status) status.textContent = 'Local explorer preferences reset';
       this.refresh();
       return true;
+    }
+
+    setMobilePane(value) {
+      const pane = normalizePane(value);
+      this.shell.dataset.mobilePane = pane;
+      for (const tab of this.shell.querySelectorAll('[data-knowledge-tab]')) {
+        const selected = tab.dataset.knowledgeTab === pane;
+        tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+        tab.tabIndex = selected ? 0 : -1;
+      }
+      this.shell.dispatchEvent(new CustomEvent('koder:knowledge-pane', {detail: {pane}}));
+    }
+
+    savedViewRecord(id) {
+      id = String(id || '');
+      return this.savedViews.find(view => String(view && view.id || '') === id) || null;
+    }
+
+    renderSavedGraphViews() {
+      if (!this.savedViewSelect) return;
+      const document = this.shell.ownerDocument;
+      this.savedViewSelect.replaceChildren();
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = this.savedViews.length ? 'Named views' : 'No named views';
+      this.savedViewSelect.appendChild(placeholder);
+      for (const view of this.savedViews) {
+        const option = document.createElement('option');
+        option.value = String(view.id || '');
+        option.textContent = String(view.name || view.id || 'Untitled view');
+        this.savedViewSelect.appendChild(option);
+      }
+      const selected = !!this.savedViewRecord(this.activeSavedViewID);
+      if (!selected) this.activeSavedViewID = '';
+      this.savedViewSelect.value = this.activeSavedViewID;
+      if (this.savedViewUpdateButton) this.savedViewUpdateButton.disabled = !selected;
+      if (this.savedViewDeleteButton) this.savedViewDeleteButton.disabled = !selected;
+    }
+
+    async loadSavedGraphViews() {
+      if (!this.client || typeof this.client.listGraphViews !== 'function') return false;
+      if (this.savedViewSelect) this.savedViewSelect.disabled = true;
+      try {
+        const response = await this.client.listGraphViews({channel: 'saved-views'});
+        this.savedViews = Array.isArray(response && response.views) ? response.views : [];
+        this.renderSavedGraphViews();
+        if (this.savedViewStatus) this.savedViewStatus.textContent = `${this.savedViews.length} named ${this.savedViews.length === 1 ? 'view' : 'views'} available.`;
+        return true;
+      } catch (error) {
+        if (error && ['canceled', 'stale_response'].includes(error.code)) return false;
+        this.savedViews = [];
+        this.renderSavedGraphViews();
+        const message = String(error && error.message || 'Named views could not load.');
+        if (this.savedViewStatus) this.savedViewStatus.textContent = message;
+        const status = this.shell.querySelector('[data-knowledge-status-label]');
+        if (status) status.textContent = 'Named views unavailable';
+        return false;
+      } finally {
+        if (this.savedViewSelect) this.savedViewSelect.disabled = false;
+      }
+    }
+
+    loadNamedGraphView(id) {
+      const view = this.savedViewRecord(id);
+      if (!view) {
+        this.activeSavedViewID = '';
+        this.renderSavedGraphViews();
+        this.schedulePreferenceSave();
+        return false;
+      }
+      const preferences = preferencesFromGraphViewState(view.state, view.id);
+      this.activeSavedViewID = String(view.id);
+      this.urlState = preferences.browser;
+      this.graphRoot = preferences.graph.root;
+      this.graphFrontier = [...preferences.graph.frontier];
+      this.restoredGraphPreferences = preferences.graph;
+      const search = searchForBrowserState(globalThis.location && globalThis.location.search, this.urlState);
+      globalThis.history.pushState(null, '', globalThis.location.pathname + search);
+      this.setMobilePane(preferences.mobilePane);
+      this.syncControls();
+      saveLocalPreferences(this.preferenceStorage, preferences);
+      this.renderSavedGraphViews();
+      if (this.savedViewStatus) this.savedViewStatus.textContent = `Loaded named view ${view.name}.`;
+      this.refresh();
+      return true;
+    }
+
+    openSavedViewEditor(id) {
+      if (!this.savedViewDialog || !this.savedViewForm) return false;
+      const view = this.savedViewRecord(id);
+      this.savedViewEditorID = view ? String(view.id) : '';
+      this.savedViewForm.elements.namedItem('name').value = view ? String(view.name || '') : '';
+      if (this.savedViewDialogTitle) this.savedViewDialogTitle.textContent = view ? 'Update named view' : 'Save named view';
+      if (this.savedViewSubmitButton) this.savedViewSubmitButton.textContent = view ? 'Update view' : 'Save view';
+      if (this.savedViewError) { this.savedViewError.hidden = true; this.savedViewError.textContent = ''; }
+      if (typeof this.savedViewDialog.showModal === 'function') this.savedViewDialog.showModal();
+      else this.savedViewDialog.setAttribute('open', '');
+      this.savedViewForm.elements.namedItem('name').focus();
+      return true;
+    }
+
+    closeSavedViewEditor() {
+      if (!this.savedViewDialog) return;
+      if (typeof this.savedViewDialog.close === 'function') this.savedViewDialog.close();
+      else this.savedViewDialog.removeAttribute('open');
+      this.savedViewEditorID = '';
+    }
+
+    async saveNamedGraphView() {
+      if (!this.savedViewForm || !this.client) return false;
+      const name = String(this.savedViewForm.elements.namedItem('name').value || '').trim();
+      if (!name) return false;
+      const current = this.savedViewRecord(this.savedViewEditorID);
+      const body = {name, state: graphViewStateFromPreferences(this.localPreferenceSnapshot())};
+      if (current) body.expected_revision = Number(current.revision);
+      if (this.savedViewSubmitButton) this.savedViewSubmitButton.disabled = true;
+      if (this.savedViewError) { this.savedViewError.hidden = true; this.savedViewError.textContent = ''; }
+      try {
+        const response = current
+          ? await this.client.updateGraphView(current.id, body, {channel: 'saved-view-mutation'})
+          : await this.client.createGraphView(body, {channel: 'saved-view-mutation'});
+        const view = response && response.view;
+        if (!view) throw new Error('Koder returned no named view.');
+        this.savedViews = [...this.savedViews.filter(item => item.id !== view.id), view]
+          .sort((left, right) => String(left.name || '').localeCompare(String(right.name || '')));
+        this.activeSavedViewID = String(view.id);
+        this.closeSavedViewEditor();
+        this.renderSavedGraphViews();
+        this.flushPreferenceSave();
+        if (this.savedViewStatus) this.savedViewStatus.textContent = `${current ? 'Updated' : 'Saved'} named view ${view.name}.`;
+        return true;
+      } catch (error) {
+        if (error && error.code === 'conflict') await this.loadSavedGraphViews();
+        const requestID = String(error && error.requestID || '');
+        const message = error && error.code === 'conflict' ? 'This named view changed or its name is already used. Review the latest views and try again.' : String(error && error.message || 'Named view could not be saved.');
+        if (this.savedViewError) { this.savedViewError.hidden = false; this.savedViewError.textContent = requestID ? `${message} Audit ID: ${requestID}` : message; }
+        return false;
+      } finally {
+        if (this.savedViewSubmitButton) this.savedViewSubmitButton.disabled = false;
+      }
+    }
+
+    async deleteNamedGraphView() {
+      const view = this.savedViewRecord(this.activeSavedViewID);
+      if (!view || !this.client) return false;
+      if (typeof globalThis.confirm === 'function' && !globalThis.confirm(`Delete named view “${view.name}”? Knowledge content is not affected.`)) return false;
+      if (this.savedViewDeleteButton) this.savedViewDeleteButton.disabled = true;
+      try {
+        await this.client.deleteGraphView(view.id, {expected_revision: Number(view.revision)}, {channel: 'saved-view-mutation'});
+        this.savedViews = this.savedViews.filter(item => item.id !== view.id);
+        this.activeSavedViewID = '';
+        this.renderSavedGraphViews();
+        this.flushPreferenceSave();
+        if (this.savedViewStatus) this.savedViewStatus.textContent = `Deleted named view ${view.name}. The current graph remains as an unnamed local view.`;
+        return true;
+      } catch (error) {
+        if (error && error.code === 'conflict') await this.loadSavedGraphViews();
+        const status = this.shell.querySelector('[data-knowledge-status-label]');
+        if (status) status.textContent = String(error && error.message || 'Named view could not be deleted.');
+        return false;
+      } finally {
+        if (this.savedViewDeleteButton) this.savedViewDeleteButton.disabled = !this.savedViewRecord(this.activeSavedViewID);
+      }
     }
 
     chunkQuery(cursor) {
@@ -2791,6 +3005,7 @@
       const app = new BrowserApp(shell, client, runtime);
       shell.__koderKnowledgeApp = app;
       app.refresh();
+      app.loadSavedGraphViews();
       return app;
     } catch (error) {
       const unavailable = new BrowserApp(shell, {cancelAll() {}});
@@ -2800,5 +3015,5 @@
     }
   }
 
-  return Object.freeze({panes, states, localPreferencesKey, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, browserSearchHasState, browserStatesEqual, normalizeLocalPreferences, loadLocalPreferences, saveLocalPreferences, clearLocalPreferences, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, localDateTimeValue, entryContentFromValues, entryEditorValues, editorConflict, historyProjection, historyChangedFields, historyTimeline, deletionAssessment, relationshipShapeError, linkContentFromValues, relationPreview, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
+  return Object.freeze({panes, states, localPreferencesKey, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, browserSearchHasState, browserStatesEqual, normalizeLocalPreferences, loadLocalPreferences, saveLocalPreferences, clearLocalPreferences, graphViewStateFromPreferences, preferencesFromGraphViewState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, localDateTimeValue, entryContentFromValues, entryEditorValues, editorConflict, historyProjection, historyChangedFields, historyTimeline, deletionAssessment, relationshipShapeError, linkContentFromValues, relationPreview, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
 });

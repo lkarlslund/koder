@@ -100,6 +100,13 @@
             <h1 id="knowledge-graph-title">Graph</h1>
           </div>
           <div class="knowledge-graph-toolbar-actions">
+            <div class="knowledge-saved-views" data-knowledge-saved-views>
+              <select data-knowledge-saved-view aria-label="Named graph view"><option value="">Named views</option></select>
+              <button type="button" class="knowledge-icon-button" data-knowledge-saved-view-create title="Save current graph as a new named view"><i class="bi bi-bookmark-plus" aria-hidden="true"></i><span class="visually-hidden">Create named view</span></button>
+              <button type="button" class="knowledge-icon-button" data-knowledge-saved-view-update title="Update or rename selected named view" disabled><i class="bi bi-floppy" aria-hidden="true"></i><span class="visually-hidden">Update named view</span></button>
+              <button type="button" class="knowledge-icon-button" data-knowledge-saved-view-delete title="Delete selected named view" disabled><i class="bi bi-bookmark-x" aria-hidden="true"></i><span class="visually-hidden">Delete named view</span></button>
+              <span class="visually-hidden" data-knowledge-saved-view-status role="status"></span>
+            </div>
             <span class="knowledge-stage-status"><span class="spinner-grow spinner-grow-sm" data-knowledge-spinner aria-hidden="true"></span><span data-knowledge-status-label>Preparing explorer</span></span>
             <span class="knowledge-selection-count" data-knowledge-selection-count hidden></span>
             <button type="button" class="knowledge-icon-button" data-knowledge-link-create title="Create a relationship between exactly two selected nodes" disabled><i class="bi bi-bezier2" aria-hidden="true"></i><span class="visually-hidden">Create relationship</span></button>
@@ -224,6 +231,21 @@
         </article>
       </aside>
     </main>
+
+    <dialog class="knowledge-editor-dialog knowledge-compact-dialog" data-knowledge-saved-view-dialog aria-labelledby="knowledge-saved-view-dialog-title">
+      <form method="dialog" data-knowledge-saved-view-form>
+        <header>
+          <div><span class="knowledge-eyebrow">Explorer layout</span><h2 id="knowledge-saved-view-dialog-title" data-knowledge-saved-view-dialog-title>Save named view</h2></div>
+          <button type="button" class="knowledge-icon-button" data-knowledge-saved-view-cancel title="Close"><i class="bi bi-x-lg" aria-hidden="true"></i><span class="visually-hidden">Close named view editor</span></button>
+        </header>
+        <div class="knowledge-editor-fields">
+          <p class="knowledge-dialog-explanation is-wide">Named views are stored by Koder for your account. They save the current filters, graph root, expansions, hidden items, and pinned positions without changing Knowledge content.</p>
+          <label class="is-wide"><span>Name</span><input name="name" maxlength="120" autocomplete="off" required placeholder="For example: Linux disk tools"></label>
+        </div>
+        <div class="knowledge-editor-error" data-knowledge-saved-view-error role="alert" hidden></div>
+        <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-knowledge-saved-view-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-info" data-knowledge-saved-view-submit>Save view</button></footer>
+      </form>
+    </dialog>
 
     <dialog class="knowledge-editor-dialog" data-knowledge-chunk-dialog aria-labelledby="knowledge-chunk-dialog-title">
       <form method="dialog" data-knowledge-chunk-form>

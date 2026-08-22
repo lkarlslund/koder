@@ -24,6 +24,7 @@ var (
 	indexesPrefix    = []byte(keyFormatPrefix + "index/")
 	entryUsagePrefix = []byte(keyFormatPrefix + "usage/entry/")
 	usageEventPrefix = []byte(keyFormatPrefix + "usage-event/entry/")
+	graphViewPrefix  = []byte(keyFormatPrefix + "user-view/graph/")
 )
 
 func metadataKey() []byte {
@@ -40,6 +41,14 @@ func entryUsageEventEntryPrefix(id knowledge.EntryID) []byte {
 
 func entryUsageEventKey(id knowledge.EntryID, eventID string) []byte {
 	return append(append([]byte(nil), usageEventPrefix...), encodeIndexTuple(string(id), eventID)...)
+}
+
+func graphViewOwnerPrefix(ownerKey string) []byte {
+	return append(append([]byte(nil), graphViewPrefix...), encodeIndexTuple(ownerKey)...)
+}
+
+func graphViewKey(ownerKey, id string) []byte {
+	return append(graphViewOwnerPrefix(ownerKey), encodeIndexTuple(id)...)
 }
 
 func indexGenerationPrefix(generation uint64) []byte {

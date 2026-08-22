@@ -23,6 +23,7 @@ type Store struct {
 	data            data
 	indexGeneration uint64
 	rebuildStatus   knowledgeStore.IndexRebuildStatus
+	graphViews      map[string]knowledgeStore.SavedGraphView
 }
 
 type data struct {
@@ -53,6 +54,7 @@ func New() *Store {
 		data:            newData(),
 		indexGeneration: 1,
 		rebuildStatus:   knowledgeStore.IndexRebuildStatus{ActiveGeneration: 1},
+		graphViews:      make(map[string]knowledgeStore.SavedGraphView),
 	}
 }
 

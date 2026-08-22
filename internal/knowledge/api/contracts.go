@@ -15,18 +15,19 @@ import (
 )
 
 const (
-	Version               = "knowledge.v1"
-	RoutePrefix           = "/api/knowledge/v1"
-	ChunkCollectionPath   = RoutePrefix + "/chunks"
-	EntryCollectionPath   = RoutePrefix + "/entries"
-	LinkCollectionPath    = RoutePrefix + "/links"
-	SearchPath            = RoutePrefix + "/search"
-	GraphSnapshotPath     = RoutePrefix + "/graph/snapshot"
-	NeighborPath          = RoutePrefix + "/neighbors"
-	OperationalStatusPath = RoutePrefix + "/status"
-	IndexRebuildPath      = RoutePrefix + "/indexes/rebuild"
-	ChatContextPath       = RoutePrefix + "/chat-context"
-	ExplorerURL           = "/knowledge"
+	Version                 = "knowledge.v1"
+	RoutePrefix             = "/api/knowledge/v1"
+	ChunkCollectionPath     = RoutePrefix + "/chunks"
+	EntryCollectionPath     = RoutePrefix + "/entries"
+	LinkCollectionPath      = RoutePrefix + "/links"
+	SearchPath              = RoutePrefix + "/search"
+	GraphSnapshotPath       = RoutePrefix + "/graph/snapshot"
+	NeighborPath            = RoutePrefix + "/neighbors"
+	OperationalStatusPath   = RoutePrefix + "/status"
+	IndexRebuildPath        = RoutePrefix + "/indexes/rebuild"
+	ChatContextPath         = RoutePrefix + "/chat-context"
+	GraphViewCollectionPath = RoutePrefix + "/views"
+	ExplorerURL             = "/knowledge"
 )
 
 func ChunkPath(chunkID knowledge.ChunkID) string {
@@ -67,6 +68,10 @@ func LinkLifecyclePath(linkID knowledge.LinkID, action string) string {
 
 func LinkHistoryPath(linkID knowledge.LinkID) string {
 	return LinkPath(linkID) + "/history"
+}
+
+func GraphViewPath(viewID string) string {
+	return GraphViewCollectionPath + "/" + url.PathEscape(strings.TrimSpace(viewID))
 }
 
 type ResponseMetadata struct {
@@ -189,6 +194,32 @@ type DeleteResponse struct {
 	DeletedLinkIDs  []knowledge.LinkID     `json:"deleted_link_ids,omitempty"`
 	DeletedEvidence []knowledge.EvidenceID `json:"deleted_evidence_ids,omitempty"`
 	UpdatedChunkIDs []knowledge.ChunkID    `json:"updated_chunk_ids,omitempty"`
+}
+
+type GraphViewSaveRequest struct {
+	Name             string                        `json:"name"`
+	State            knowledgeStore.GraphViewState `json:"state"`
+	ExpectedRevision uint64                        `json:"expected_revision,omitempty"`
+}
+
+type GraphViewDeleteRequest struct {
+	ExpectedRevision uint64 `json:"expected_revision"`
+}
+
+type GraphViewResponse struct {
+	ResponseMetadata
+	View knowledgeStore.SavedGraphView `json:"view"`
+}
+
+type GraphViewListResponse struct {
+	ResponseMetadata
+	Views []knowledgeStore.SavedGraphView `json:"views"`
+}
+
+type GraphViewDeleteResponse struct {
+	ResponseMetadata
+	ID      string `json:"id"`
+	Deleted bool   `json:"deleted"`
 }
 
 // EntryContent is the complete client-editable portion of an entry.
