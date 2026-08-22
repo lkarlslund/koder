@@ -25,8 +25,8 @@ func TestEntryIndexesAreMaintainedAcrossCreateUpdateDelete(t *testing.T) {
 		t.Fatalf("create entry: %v", err)
 	}
 	assertEntryIndexSet(t, s, created, true)
-	if count := countIndexEntries(t, s, initialIndexGeneration); count != 15 {
-		t.Fatalf("create index count = %d, want 15", count)
+	if count := countIndexEntries(t, s, initialIndexGeneration); count != 17 {
+		t.Fatalf("create index count = %d, want 17", count)
 	}
 
 	updated := indexedEntry(2)
@@ -45,8 +45,8 @@ func TestEntryIndexesAreMaintainedAcrossCreateUpdateDelete(t *testing.T) {
 	}
 	assertObsoleteEntryIndexesRemoved(t, s, created, updated)
 	assertEntryIndexSet(t, s, updated, true)
-	if count := countIndexEntries(t, s, initialIndexGeneration); count != 12 {
-		t.Fatalf("update index count = %d, want 12", count)
+	if count := countIndexEntries(t, s, initialIndexGeneration); count != 14 {
+		t.Fatalf("update index count = %d, want 14", count)
 	}
 
 	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error { return tx.DeleteEntry(ctx, updated.ID, 2) }); err != nil {
@@ -78,8 +78,8 @@ func TestDefaultEntryIndexesRebuildFromCanonicalRecords(t *testing.T) {
 		t.Fatalf("RebuildIndexes() error = %v", err)
 	}
 	assertEntryIndexSet(t, s, entry, true)
-	if count := countIndexEntries(t, s, initialIndexGeneration+1); count != 15 {
-		t.Fatalf("rebuilt index count = %d, want 15", count)
+	if count := countIndexEntries(t, s, initialIndexGeneration+1); count != 17 {
+		t.Fatalf("rebuilt index count = %d, want 17", count)
 	}
 }
 
@@ -93,6 +93,8 @@ func indexedEntry(number uint64) knowledge.Entry {
 	entry.Applicability.Locales = []string{"da-DK", "en-US"}
 	entry.LastUsedAt = txTime.Add(3 * time.Minute)
 	entry.ReviewAfter = txTime.Add(24 * time.Hour)
+	entry.ValidFrom = txTime.Add(-24 * time.Hour)
+	entry.ValidUntil = txTime.Add(7 * 24 * time.Hour)
 	return entry
 }
 

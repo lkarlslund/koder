@@ -22,11 +22,13 @@ const (
 )
 
 type ChunkFilter struct {
-	Kinds      []knowledge.ChunkKind
-	States     []knowledge.ChunkState
-	ScopeKinds []knowledge.ScopeKind
-	Tags       []string
-	Locale     string
+	Kinds       []knowledge.ChunkKind
+	States      []knowledge.ChunkState
+	ScopeKinds  []knowledge.ScopeKind
+	Tags        []string
+	Locale      string
+	ReviewDueAt time.Time
+	StaleAt     time.Time
 }
 
 type ChunkListRequest struct {
@@ -117,6 +119,8 @@ func normalizeChunkListRequest(request ChunkListRequest) (ChunkListRequest, erro
 		return ChunkListRequest{}, err
 	}
 	request.Filter.Locale = locale
+	request.Filter.ReviewDueAt = normalizeFilterTime(request.Filter.ReviewDueAt)
+	request.Filter.StaleAt = normalizeFilterTime(request.Filter.StaleAt)
 	request.Filter.Kinds = slices.Clone(request.Filter.Kinds)
 	slices.Sort(request.Filter.Kinds)
 	request.Filter.Kinds = slices.Compact(request.Filter.Kinds)
@@ -157,9 +161,24 @@ func chunkCursorBinding(request ChunkListRequest, generation uint64) (CursorBind
 }
 
 func chunkMatchesFilter(chunk knowledge.Chunk, filter ChunkFilter) bool {
-	return containsOrEmpty(filter.Kinds, chunk.Kind) && containsOrEmpty(filter.States, chunk.State) &&
-		containsOrEmpty(filter.ScopeKinds, chunk.Scope.Kind) && (filter.Locale == "" || chunk.Locale == filter.Locale) &&
-		containsAll(chunk.Tags, filter.Tags)
+	if !containsOrEmpty(filter.Kinds, chunk.Kind) || !containsOrEmpty(filter.States, chunk.State) ||
+		!containsOrEmpty(filter.ScopeKinds, chunk.Scope.Kind) || (filter.Locale != "" && chunk.Locale != filter.Locale) ||
+		!containsAll(chunk.Tags, filter.Tags) {
+		return false
+	}
+	if !filter.ReviewDueAt.IsZero() {
+		status, _ := knowledge.ChunkTemporalStatusAt(chunk, filter.ReviewDueAt)
+		if !status.ReviewDue {
+			return false
+		}
+	}
+	if !filter.StaleAt.IsZero() {
+		status, _ := knowledge.ChunkTemporalStatusAt(chunk, filter.StaleAt)
+		if !status.Stale {
+			return false
+		}
+	}
+	return true
 }
 
 func containsOrEmpty[T comparable](values []T, value T) bool {

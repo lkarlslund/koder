@@ -10,15 +10,16 @@ import (
 )
 
 const (
-	chunkKindIndex       = "chunk-kind"
-	chunkScopeIndex      = "chunk-scope"
-	chunkTagIndex        = "chunk-tag"
-	chunkLocaleIndex     = "chunk-locale"
-	chunkStateIndex      = "chunk-state"
-	chunkTitleIndex      = "chunk-title"
-	chunkCreatedAtIndex  = "chunk-created-at"
-	chunkUpdatedAtIndex  = "chunk-updated-at"
-	chunkLastUsedAtIndex = "chunk-last-used-at"
+	chunkKindIndex        = "chunk-kind"
+	chunkScopeIndex       = "chunk-scope"
+	chunkTagIndex         = "chunk-tag"
+	chunkLocaleIndex      = "chunk-locale"
+	chunkStateIndex       = "chunk-state"
+	chunkTitleIndex       = "chunk-title"
+	chunkCreatedAtIndex   = "chunk-created-at"
+	chunkUpdatedAtIndex   = "chunk-updated-at"
+	chunkLastUsedAtIndex  = "chunk-last-used-at"
+	chunkReviewAfterIndex = "chunk-review-after"
 )
 
 func defaultIndexDefinitions() []indexDefinition {
@@ -62,6 +63,9 @@ func defaultIndexDefinitions() []indexDefinition {
 		}),
 		chunkSingleIndex(chunkLastUsedAtIndex, func(chunk knowledge.Chunk) []string {
 			return []string{indexTime(chunk.LastUsedAt)}
+		}),
+		chunkSingleIndex(chunkReviewAfterIndex, func(chunk knowledge.Chunk) []string {
+			return []string{indexTime(chunk.ReviewAfter)}
 		}),
 	}
 	definitions = append(definitions, defaultEntryIndexDefinitions()...)

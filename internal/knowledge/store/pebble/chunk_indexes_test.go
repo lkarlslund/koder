@@ -28,12 +28,13 @@ func TestChunkIndexesAreMaintainedAcrossCreateUpdateDelete(t *testing.T) {
 	created.Tags = []string{"go", "pebble"}
 	created.Locale = "en-US"
 	created.LastUsedAt = txTime.Add(3 * time.Minute)
+	created.ReviewAfter = txTime.Add(24 * time.Hour)
 	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error { return tx.PutChunk(ctx, created, 0) }); err != nil {
 		t.Fatalf("create chunk: %v", err)
 	}
 	assertChunkIndexSet(t, s, created, true)
-	if count := countIndexEntries(t, s, initialIndexGeneration); count != 10 {
-		t.Fatalf("create index count = %d, want 10", count)
+	if count := countIndexEntries(t, s, initialIndexGeneration); count != 11 {
+		t.Fatalf("create index count = %d, want 11", count)
 	}
 
 	updated := txChunk(2)
@@ -43,13 +44,14 @@ func TestChunkIndexesAreMaintainedAcrossCreateUpdateDelete(t *testing.T) {
 	updated.Locale = "da-DK"
 	updated.State = knowledge.ChunkStateArchived
 	updated.LastUsedAt = txTime.Add(9 * time.Minute)
+	updated.ReviewAfter = txTime.Add(48 * time.Hour)
 	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error { return tx.PutChunk(ctx, updated, 1) }); err != nil {
 		t.Fatalf("update chunk: %v", err)
 	}
 	assertObsoleteChunkIndexesRemoved(t, s, created, updated)
 	assertChunkIndexSet(t, s, updated, true)
-	if count := countIndexEntries(t, s, initialIndexGeneration); count != 9 {
-		t.Fatalf("update index count = %d, want 9", count)
+	if count := countIndexEntries(t, s, initialIndexGeneration); count != 10 {
+		t.Fatalf("update index count = %d, want 10", count)
 	}
 
 	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error { return tx.DeleteChunk(ctx, updated.ID, 2) }); err != nil {
@@ -85,8 +87,8 @@ func TestDefaultChunkIndexesRebuildFromCanonicalRecords(t *testing.T) {
 		t.Fatalf("RebuildIndexes() error = %v", err)
 	}
 	assertChunkIndexSet(t, s, chunk, true)
-	if count := countIndexEntries(t, s, initialIndexGeneration+1); count != 10 {
-		t.Fatalf("rebuilt index count = %d, want 10", count)
+	if count := countIndexEntries(t, s, initialIndexGeneration+1); count != 11 {
+		t.Fatalf("rebuilt index count = %d, want 11", count)
 	}
 }
 

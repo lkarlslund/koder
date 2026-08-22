@@ -62,6 +62,51 @@ func TestPaginateEntriesFiltersAndDefaultsToRecentFirst(t *testing.T) {
 	}
 }
 
+func TestPaginateEntriesFiltersValidityReviewAndStalenessAtExplicitTime(t *testing.T) {
+	t.Parallel()
+	entries := listTestEntries(4)
+	asOf := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	entries[0].ValidFrom = asOf.Add(time.Hour)
+	entries[1].ValidUntil = asOf
+	entries[2].ReviewAfter = asOf
+
+	valid, err := PaginateEntries(entries, EntryListRequest{Filter: EntryFilter{ValidAt: asOf}}, 1)
+	if err != nil {
+		t.Fatalf("valid-at query: %v", err)
+	}
+	if len(valid.Entries) != 2 || valid.Entries[0].ID != entries[3].ID || valid.Entries[1].ID != entries[2].ID {
+		t.Fatalf("valid-at entries = %#v", valid.Entries)
+	}
+	due, err := PaginateEntries(entries, EntryListRequest{Filter: EntryFilter{ReviewDueAt: asOf}}, 1)
+	if err != nil || len(due.Entries) != 1 || due.Entries[0].ID != entries[2].ID {
+		t.Fatalf("review-due entries = %#v, %v", due.Entries, err)
+	}
+	stale, err := PaginateEntries(entries, EntryListRequest{Filter: EntryFilter{StaleAt: asOf}}, 1)
+	if err != nil || len(stale.Entries) != 2 {
+		t.Fatalf("stale entries = %#v, %v", stale.Entries, err)
+	}
+}
+
+func TestEntryTemporalFilterCursorNormalizesTimezoneAndBindsInstant(t *testing.T) {
+	t.Parallel()
+	entries := listTestEntries(3)
+	local := time.Date(2026, 8, 23, 14, 0, 0, 0, time.FixedZone("CEST", 2*60*60))
+	request := EntryListRequest{Filter: EntryFilter{ValidAt: local}, Sort: EntrySortTitle, Limit: 1}
+	page, err := PaginateEntries(entries, request, 1)
+	if err != nil || page.NextCursor == "" {
+		t.Fatalf("first page = %#v, %v", page, err)
+	}
+	request.Cursor = page.NextCursor
+	request.Filter.ValidAt = local.UTC()
+	if _, err := PaginateEntries(entries, request, 1); err != nil {
+		t.Fatalf("equivalent UTC cursor rejected: %v", err)
+	}
+	request.Filter.ValidAt = local.Add(time.Second)
+	if _, err := PaginateEntries(entries, request, 1); !errors.Is(err, ErrInvalidCursor) {
+		t.Fatalf("changed instant error = %v, want ErrInvalidCursor", err)
+	}
+}
+
 func TestPaginateEntriesRejectsReusedStaleOrInvalidCursor(t *testing.T) {
 	t.Parallel()
 	entries := listTestEntries(3)

@@ -21,6 +21,8 @@ const (
 	entryUpdatedAtIndex   = "entry-updated-at"
 	entryLastUsedAtIndex  = "entry-last-used-at"
 	entryReviewAfterIndex = "entry-review-after"
+	entryValidFromIndex   = "entry-valid-from"
+	entryValidUntilIndex  = "entry-valid-until"
 )
 
 func defaultEntryIndexDefinitions() []indexDefinition {
@@ -60,6 +62,12 @@ func defaultEntryIndexDefinitions() []indexDefinition {
 		}),
 		entrySingleIndex(entryReviewAfterIndex, func(entry knowledge.Entry) []string {
 			return []string{indexTime(entry.ReviewAfter)}
+		}),
+		entrySingleIndex(entryValidFromIndex, func(entry knowledge.Entry) []string {
+			return []string{indexTime(entry.ValidFrom)}
+		}),
+		entrySingleIndex(entryValidUntilIndex, func(entry knowledge.Entry) []string {
+			return []string{indexTime(entry.ValidUntil)}
 		}),
 	}
 }

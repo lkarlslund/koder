@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
 )
@@ -22,12 +23,15 @@ const (
 )
 
 type EntryFilter struct {
-	ChunkIDs   []knowledge.ChunkID
-	Kinds      []knowledge.EntryKind
-	States     []knowledge.EntryState
-	ScopeKinds []knowledge.ScopeKind
-	Tags       []string
-	Locales    []string
+	ChunkIDs    []knowledge.ChunkID
+	Kinds       []knowledge.EntryKind
+	States      []knowledge.EntryState
+	ScopeKinds  []knowledge.ScopeKind
+	Tags        []string
+	Locales     []string
+	ValidAt     time.Time
+	ReviewDueAt time.Time
+	StaleAt     time.Time
 }
 
 type EntryListRequest struct {
@@ -136,6 +140,9 @@ func normalizeEntryListRequest(request EntryListRequest) (EntryListRequest, erro
 	}
 	slices.Sort(locales)
 	request.Filter.Locales = slices.Compact(locales)
+	request.Filter.ValidAt = normalizeFilterTime(request.Filter.ValidAt)
+	request.Filter.ReviewDueAt = normalizeFilterTime(request.Filter.ReviewDueAt)
+	request.Filter.StaleAt = normalizeFilterTime(request.Filter.StaleAt)
 	for _, kind := range request.Filter.Kinds {
 		if kind == knowledge.EntryKindUnspecified || !kind.IsAEntryKind() {
 			return EntryListRequest{}, fmt.Errorf("invalid entry kind filter")
@@ -167,9 +174,37 @@ func entryCursorBinding(request EntryListRequest, generation uint64) (CursorBind
 }
 
 func entryMatchesFilter(entry knowledge.Entry, filter EntryFilter) bool {
-	return containsOrEmpty(filter.ChunkIDs, entry.ChunkID) && containsOrEmpty(filter.Kinds, entry.Kind) &&
-		containsOrEmpty(filter.States, entry.State) && containsOrEmpty(filter.ScopeKinds, entry.Scope.Kind) &&
-		containsAll(entry.Tags, filter.Tags) && intersectsOrEmpty(entry.Applicability.Locales, filter.Locales)
+	if !containsOrEmpty(filter.ChunkIDs, entry.ChunkID) || !containsOrEmpty(filter.Kinds, entry.Kind) ||
+		!containsOrEmpty(filter.States, entry.State) || !containsOrEmpty(filter.ScopeKinds, entry.Scope.Kind) ||
+		!containsAll(entry.Tags, filter.Tags) || !intersectsOrEmpty(entry.Applicability.Locales, filter.Locales) {
+		return false
+	}
+	if !filter.ValidAt.IsZero() {
+		status, _ := knowledge.EntryTemporalStatusAt(entry, filter.ValidAt)
+		if !status.Valid {
+			return false
+		}
+	}
+	if !filter.ReviewDueAt.IsZero() {
+		status, _ := knowledge.EntryTemporalStatusAt(entry, filter.ReviewDueAt)
+		if !status.ReviewDue {
+			return false
+		}
+	}
+	if !filter.StaleAt.IsZero() {
+		status, _ := knowledge.EntryTemporalStatusAt(entry, filter.StaleAt)
+		if !status.Stale {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeFilterTime(value time.Time) time.Time {
+	if value.IsZero() {
+		return time.Time{}
+	}
+	return value.UTC().Round(0)
 }
 
 func intersectsOrEmpty(values, required []string) bool {

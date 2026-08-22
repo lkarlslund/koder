@@ -64,6 +64,21 @@ func TestPaginateChunksFiltersAndDefaultsToRecentFirst(t *testing.T) {
 	}
 }
 
+func TestPaginateChunksFiltersReviewDueAndStaleAtExplicitTime(t *testing.T) {
+	t.Parallel()
+	chunks := listTestChunks(3)
+	asOf := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	chunks[0].ReviewAfter = asOf.Add(-time.Hour)
+	chunks[1].ReviewAfter = asOf
+	chunks[2].ReviewAfter = asOf.Add(time.Hour)
+	for _, filter := range []ChunkFilter{{ReviewDueAt: asOf}, {StaleAt: asOf}} {
+		page, err := PaginateChunks(chunks, ChunkListRequest{Filter: filter}, 1)
+		if err != nil || len(page.Chunks) != 2 {
+			t.Fatalf("temporal chunks = %#v, %v", page.Chunks, err)
+		}
+	}
+}
+
 func TestPaginateChunksRejectsReusedOrStaleCursor(t *testing.T) {
 	t.Parallel()
 	chunks := listTestChunks(3)
