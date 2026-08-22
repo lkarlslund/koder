@@ -18,7 +18,56 @@ import (
 
 const (
 	serviceKey = "knowledge"
-	parameters = `{"type":"object","properties":{"action":{"type":"string","enum":["search","get","neighbors"]},"query":{"type":"string","description":"Natural-language terms to find in durable knowledge"},"object_kind":{"type":"string","enum":["chunk","entry","link"],"description":"Kind of object addressed by id"},"id":{"type":"string","description":"Knowledge UUID returned by search, get, or neighbors"},"chunk_ids":{"type":"array","maxItems":25,"items":{"type":"string"},"description":"Optional chunks to search"},"include_invalid":{"type":"boolean","description":"Include entries outside their validity window"},"include_superseded":{"type":"boolean","description":"Include superseded claims"},"expand_graph":{"type":"boolean","description":"Expand search by one bounded relationship hop"},"direction":{"type":"string","enum":["incoming","outgoing","both"],"description":"Neighbor direction; defaults to both"},"link_kinds":{"type":"array","maxItems":10,"items":{"type":"string","enum":["related_to","part_of","requires","alternative_to","applies_to","supersedes","contradicts","caused_by","supported_by","derived_from"]}},"limit":{"type":"integer","minimum":1,"maximum":100},"cursor":{"type":"string","description":"Opaque continuation cursor from the previous matching action"}},"required":["action"],"additionalProperties":false}`
+	parameters = `{
+  "type":"object",
+  "properties":{
+    "action":{"type":"string","enum":["search","get","neighbors","chunk_list","chunk_get","chunk_create","chunk_update","chunk_archive","chunk_restore","chunk_delete"]},
+    "query":{"type":"string","description":"Natural-language terms to find in durable knowledge"},
+    "object_kind":{"type":"string","enum":["chunk","entry","link"],"description":"Kind of object addressed by id"},
+    "id":{"type":"string","description":"Knowledge UUID returned by a prior action"},
+    "chunk_ids":{"type":"array","maxItems":25,"items":{"type":"string"},"description":"Optional chunks to search"},
+    "include_invalid":{"type":"boolean","description":"Include entries outside their validity window"},
+    "include_superseded":{"type":"boolean","description":"Include superseded claims"},
+    "expand_graph":{"type":"boolean","description":"Expand search by one bounded relationship hop"},
+    "direction":{"type":"string","enum":["incoming","outgoing","both"],"description":"Neighbor direction; defaults to both"},
+    "link_kinds":{"type":"array","maxItems":10,"items":{"type":"string","enum":["related_to","part_of","requires","alternative_to","applies_to","supersedes","contradicts","caused_by","supported_by","derived_from"]}},
+    "kinds":{"type":"array","maxItems":5,"items":{"type":"string","enum":["reference","personal","project","environment"]}},
+    "states":{"type":"array","maxItems":3,"items":{"type":"string","enum":["draft","active","archived"]}},
+    "scope_kinds":{"type":"array","maxItems":5,"items":{"type":"string","enum":["global","personal","project","session","environment"]}},
+    "tags":{"type":"array","maxItems":25,"items":{"type":"string"}},
+    "locale":{"type":"string"},
+    "sort":{"type":"string","enum":["title","created_at","updated_at","last_used_at"]},
+    "descending":{"type":"boolean"},
+    "limit":{"type":"integer","minimum":1,"maximum":200},
+    "cursor":{"type":"string","description":"Opaque continuation cursor from the previous matching action"},
+    "expected_revision":{"type":"integer","minimum":1,"description":"Current revision number from get/list"},
+    "reason":{"type":"string","description":"Why this revision or lifecycle change is being made"},
+    "review_approved":{"type":"boolean","description":"Explicitly approve a classifier review outcome after inspecting it"},
+    "confirmed":{"type":"boolean","description":"Required true for permanent deletion"},
+    "cascade":{"type":"boolean","description":"Permanently delete dependent entries, links, and owned evidence atomically"},
+    "chunk":{
+      "type":"object",
+      "properties":{
+        "title":{"type":"string"},"description":{"type":"string"},
+        "aliases":{"type":"array","maxItems":100,"items":{"type":"string"}},
+        "tags":{"type":"array","maxItems":100,"items":{"type":"string"}},
+        "kind":{"type":"string","enum":["reference","personal","project","environment"]},
+        "scope":{"type":"object","properties":{"kind":{"type":"string","enum":["global","personal","project","session","environment"]},"selector":{"type":"string"}},"required":["kind"],"additionalProperties":false},
+        "visibility":{"type":"string","enum":["private","installation","shared","public"]},
+        "shared_with":{"type":"array","maxItems":100,"items":{"type":"object","properties":{"kind":{"type":"string"},"id":{"type":"string"}},"required":["kind","id"],"additionalProperties":false}},
+        "language":{"type":"string"},"locale":{"type":"string"},"domain":{"type":"string"},
+        "risk":{"type":"array","maxItems":6,"items":{"type":"string","enum":["personal_sensitive","medical","legal","financial","physical_safety","security_sensitive"]}},
+        "publisher":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"}},"additionalProperties":false},
+        "license":{"type":"string"},"source_policy":{"type":"string"},
+        "dependency_ids":{"type":"array","maxItems":100,"items":{"type":"string"}},
+        "min_koder_version":{"type":"string"},"review_after":{"type":"string","format":"date-time"}
+      },
+      "additionalProperties":false
+    }
+  },
+  "required":["action"],
+  "additionalProperties":false
+}`
 )
 
 // RuntimeService makes an available Knowledge service visible to a chat tool
@@ -33,8 +82,8 @@ func RuntimeService(service *knowledgeService.Service) map[string]any {
 func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Knowledge",
-		Description: "Search and inspect Koder's durable, linked knowledge.",
-		Usage:       "Use search for a small ranked set of durable facts or procedures. Search returns summaries and IDs, not full bodies; use get with an exact ID when the full object is needed. Use neighbors to inspect linked context. Follow next_cursor only when more results are necessary.",
+		Description: "Search, inspect, and maintain Koder's durable, linked knowledge.",
+		Usage:       "Use search for a small ranked set of durable facts or procedures. Search returns summaries and IDs, not full bodies; use get with an exact ID when the full object is needed. Use neighbors to inspect linked context. Use chunk_list/chunk_get before lifecycle changes. chunk_update is a patch and requires the current expected_revision. Archive is reversible. Delete is permanent, requires an archived chunk plus confirmed=true, and cascade=true may remove its entries, links, and owned evidence; use deletion only when explicitly intended. Follow next_cursor only when more results are necessary.",
 		Parameters:  parameters,
 		ExposeToLLM: true,
 	})
@@ -59,6 +108,12 @@ func (tool) Preview(req tools.Request) string {
 		return "Search knowledge for " + strings.TrimSpace(req.Args["query"])
 	case "get", "neighbors":
 		return "Knowledge " + action + " " + strings.TrimSpace(req.Args["id"])
+	case "chunk_list":
+		return "List knowledge chunks"
+	case "chunk_create":
+		return "Create knowledge chunk"
+	case "chunk_get", "chunk_update", "chunk_archive", "chunk_restore", "chunk_delete":
+		return "Knowledge " + strings.TrimPrefix(action, "chunk_") + " chunk " + strings.TrimSpace(req.Args["id"])
 	default:
 		return "Knowledge " + action
 	}
@@ -72,6 +127,18 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 		return normalizeGetArgs(args)
 	case "neighbors":
 		return normalizeNeighborArgs(args)
+	case "chunk_list":
+		return normalizeChunkListArgs(args)
+	case "chunk_get":
+		return normalizeChunkGetArgs(args)
+	case "chunk_create":
+		return normalizeChunkCreateArgs(args)
+	case "chunk_update":
+		return normalizeChunkUpdateArgs(args)
+	case "chunk_archive", "chunk_restore":
+		return normalizeChunkLifecycleArgs(args, action)
+	case "chunk_delete":
+		return normalizeChunkDeleteArgs(args)
 	case "":
 		return nil, errors.New("action is required")
 	default:
@@ -84,6 +151,15 @@ func (tool) Call(ctx context.Context, options tools.Options) (tools.Result, erro
 	if err != nil {
 		return tools.Result{}, err
 	}
+	if options.Runtime.ChatID != "" {
+		ctx, err = knowledgeService.WithActor(ctx, knowledge.Actor{
+			Kind: knowledge.ActorKindChat,
+			ID:   string(options.Runtime.ChatID),
+		})
+		if err != nil {
+			return tools.Result{}, knowledgeService.ClassifyError(err)
+		}
+	}
 	var value any
 	switch options.Request.Args["action"] {
 	case "search":
@@ -92,6 +168,18 @@ func (tool) Call(ctx context.Context, options tools.Options) (tools.Result, erro
 		value, err = callGet(ctx, service, options.Request.Args)
 	case "neighbors":
 		value, err = callNeighbors(ctx, service, options.Request.Args)
+	case "chunk_list":
+		value, err = callChunkList(ctx, service, options.Request.Args)
+	case "chunk_get":
+		value, err = callChunkGet(ctx, service, options.Request.Args)
+	case "chunk_create":
+		value, err = callChunkCreate(ctx, service, options.Request.Args)
+	case "chunk_update":
+		value, err = callChunkUpdate(ctx, service, options.Request.Args)
+	case "chunk_archive", "chunk_restore":
+		value, err = callChunkLifecycle(ctx, service, options.Request.Args)
+	case "chunk_delete":
+		value, err = callChunkDelete(ctx, service, options.Request.Args)
 	default:
 		err = fmt.Errorf("unsupported knowledge action %q", options.Request.Args["action"])
 	}

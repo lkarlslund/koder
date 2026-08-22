@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/lkarlslund/koder/internal/knowledge"
 	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
 	"github.com/lkarlslund/koder/internal/knowledge/store/memory"
+	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -52,7 +54,7 @@ func TestKnowledgeToolDefinitionRequiresServiceAndOffersReadActions(t *testing.T
 	if err := json.Unmarshal(definition.Function.Parameters, &schema); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(schema.Properties["action"].Enum, ","); got != "search,get,neighbors" {
+	if got := strings.Join(schema.Properties["action"].Enum, ","); got != "search,get,neighbors,chunk_list,chunk_get,chunk_create,chunk_update,chunk_archive,chunk_restore,chunk_delete" {
 		t.Fatalf("knowledge actions = %q", got)
 	}
 }
@@ -158,12 +160,196 @@ func TestKnowledgeReadActionReturnsStructuredServiceError(t *testing.T) {
 	}
 }
 
+func TestKnowledgeChunkLifecycleActions(t *testing.T) {
+	ctx := context.Background()
+	service := newService(t)
+	runtime := runtimeFor(service)
+
+	createdCall, err := call(ctx, runtime, map[string]string{
+		"action": "chunk_create",
+		"chunk":  `{"title":"Linux tools","kind":"environment","scope":{"kind":"environment","selector":"linux"},"tags":["CLI Tools"]}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, ok := createdCall.Stored.(chunkMutationResult)
+	if !ok || !created.Created || created.Chunk.Title != "Linux tools" || created.Chunk.Revision.Number != 1 {
+		t.Fatalf("chunk_create = %#v", createdCall.Stored)
+	}
+	if created.Chunk.Revision.Actor.Kind != knowledge.ActorKindChat || created.Chunk.Revision.Actor.ID != string(runtime.ChatID) {
+		t.Fatalf("chunk_create actor = %#v, want trusted chat actor", created.Chunk.Revision.Actor)
+	}
+
+	listedCall, err := call(ctx, runtime, map[string]string{"action": "chunk_list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, ok := listedCall.Stored.(chunkPageResult)
+	if !ok || len(listed.Chunks) != 1 || listed.Chunks[0].ID != created.Chunk.ID {
+		t.Fatalf("chunk_list = %#v", listedCall.Stored)
+	}
+
+	gotCall, err := call(ctx, runtime, map[string]string{"action": "chunk_get", "id": string(created.Chunk.ID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := gotCall.Stored.(recordResult)
+	if !ok || got.Chunk == nil || got.Chunk.Title != created.Chunk.Title {
+		t.Fatalf("chunk_get = %#v", gotCall.Stored)
+	}
+
+	updatedCall, err := call(ctx, runtime, map[string]string{
+		"action": "chunk_update", "id": string(created.Chunk.ID), "expected_revision": "1",
+		"reason": "add operational detail", "chunk": `{"description":"Durable Linux command knowledge."}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, ok := updatedCall.Stored.(chunkMutationResult)
+	if !ok || !updated.Updated || updated.Chunk.Revision.Number != 2 || updated.Chunk.Title != created.Chunk.Title || updated.Chunk.Description == "" {
+		t.Fatalf("chunk_update = %#v", updatedCall.Stored)
+	}
+	_, err = call(ctx, runtime, map[string]string{
+		"action": "chunk_update", "id": string(created.Chunk.ID), "expected_revision": "1", "chunk": `{"description":"stale"}`,
+	})
+	var conflict *knowledgeService.ServiceError
+	if !errors.As(err, &conflict) || conflict.Code != knowledgeService.ErrorCodeConflict {
+		t.Fatalf("stale chunk_update error = %T %v", err, err)
+	}
+
+	archivedCall, err := call(ctx, runtime, map[string]string{
+		"action": "chunk_archive", "id": string(created.Chunk.ID), "expected_revision": "2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived := archivedCall.Stored.(chunkMutationResult)
+	if archived.Chunk.State != knowledge.ChunkStateArchived || archived.Chunk.Revision.Number != 3 {
+		t.Fatalf("chunk_archive = %#v", archived)
+	}
+	activeCall, err := call(ctx, runtime, map[string]string{"action": "chunk_list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active := activeCall.Stored.(chunkPageResult); len(active.Chunks) != 0 {
+		t.Fatalf("default chunk_list included archive: %#v", active)
+	}
+	archivesCall, err := call(ctx, runtime, map[string]string{"action": "chunk_list", "states": `["archived"]`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if archives := archivesCall.Stored.(chunkPageResult); len(archives.Chunks) != 1 {
+		t.Fatalf("archived chunk_list = %#v", archives)
+	}
+
+	restoredCall, err := call(ctx, runtime, map[string]string{
+		"action": "chunk_restore", "id": string(created.Chunk.ID), "expected_revision": "3",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored := restoredCall.Stored.(chunkMutationResult)
+	if restored.Chunk.State != knowledge.ChunkStateActive || restored.Chunk.Revision.Number != 4 {
+		t.Fatalf("chunk_restore = %#v", restored)
+	}
+	archivedCall, err = call(ctx, runtime, map[string]string{
+		"action": "chunk_archive", "id": string(created.Chunk.ID), "expected_revision": "4",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived = archivedCall.Stored.(chunkMutationResult)
+
+	_, err = call(ctx, runtime, map[string]string{
+		"action": "chunk_delete", "id": string(created.Chunk.ID),
+		"expected_revision": strconv.FormatUint(archived.Chunk.Revision.Number, 10),
+	})
+	var unconfirmed *knowledgeService.ServiceError
+	if !errors.As(err, &unconfirmed) || unconfirmed.Code != knowledgeService.ErrorCodeInvalid {
+		t.Fatalf("unconfirmed chunk_delete error = %T %v", err, err)
+	}
+	deletedCall, err := call(ctx, runtime, map[string]string{
+		"action": "chunk_delete", "id": string(created.Chunk.ID),
+		"expected_revision": strconv.FormatUint(archived.Chunk.Revision.Number, 10), "confirmed": "true",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted, ok := deletedCall.Stored.(chunkDeleteResult)
+	if !ok || !deleted.Deleted || deleted.Cascade {
+		t.Fatalf("chunk_delete = %#v", deletedCall.Stored)
+	}
+}
+
+func TestKnowledgeChunkCascadeDeleteAction(t *testing.T) {
+	ctx := context.Background()
+	service := newService(t)
+	created, err := service.CreateChunk(ctx, knowledgeService.CreateChunkRequest{Chunk: knowledge.Chunk{
+		Title: "Temporary", Kind: knowledge.ChunkKindReference, Scope: knowledge.Scope{Kind: knowledge.ScopeKindGlobal},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := service.CreateEntry(ctx, knowledgeService.CreateEntryRequest{
+		ChunkID: created.Chunk.ID, Entry: knowledge.Entry{Title: "Temporary fact", Kind: knowledge.EntryKindFact},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived, err := service.ArchiveChunk(ctx, knowledgeService.ChunkLifecycleRequest{ChunkID: created.Chunk.ID, ExpectedRevision: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = call(ctx, runtimeFor(service), map[string]string{
+		"action": "chunk_delete", "id": string(created.Chunk.ID),
+		"expected_revision": strconv.FormatUint(archived.Chunk.Revision.Number, 10), "confirmed": "true",
+	})
+	var dependency *knowledgeService.ServiceError
+	if !errors.As(err, &dependency) || dependency.Code != knowledgeService.ErrorCodeDependency || dependency.Details == nil ||
+		dependency.Details.ChunkBlockers == nil || len(dependency.Details.ChunkBlockers.EntryIDs) != 1 {
+		t.Fatalf("blocked chunk_delete error = %#v (%v)", dependency, err)
+	}
+
+	deletedCall, err := call(ctx, runtimeFor(service), map[string]string{
+		"action": "chunk_delete", "id": string(created.Chunk.ID),
+		"expected_revision": strconv.FormatUint(archived.Chunk.Revision.Number, 10),
+		"confirmed":         "true", "cascade": "true",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted := deletedCall.Stored.(chunkDeleteResult)
+	if !deleted.Deleted || !deleted.Cascade || len(deleted.DeletedEntryIDs) != 1 || deleted.DeletedEntryIDs[0] != entry.Entry.ID {
+		t.Fatalf("cascade chunk_delete = %#v", deleted)
+	}
+}
+
+func TestKnowledgeChunkInputRejectsUnknownFieldsAndOversizedCalls(t *testing.T) {
+	_, err := call(context.Background(), runtimeFor(newService(t)), map[string]string{
+		"action": "chunk_create", "chunk": `{"title":"Invalid","kind":"reference","scope":{"kind":"global"},"server_owned":true}`,
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("unknown chunk field error = %v", err)
+	}
+	_, err = tools.ParseProviderCall(provider.ToolCall{
+		ID: "knowledge_oversized",
+		Function: provider.FunctionCall{
+			Name:      tools.Knowledge.String(),
+			Arguments: `{"action":"chunk_create","chunk":{"title":"` + strings.Repeat("x", 129*1024) + `"}}`,
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "knowledge tool arguments exceeded 128 KiB") {
+		t.Fatalf("oversized knowledge call error = %v", err)
+	}
+}
+
 func call(ctx context.Context, runtime tools.Runtime, args map[string]string) (tools.Result, error) {
 	return tools.Call(ctx, tools.Options{Runtime: runtime, Request: tools.Request{Tool: tools.Knowledge, Args: args}})
 }
 
 func runtimeFor(service *knowledgeService.Service) tools.Runtime {
-	return tools.Runtime{Services: RuntimeService(service)}
+	return tools.Runtime{ChatID: "01a01688-fc5d-7f7d-8bb8-de244977fee1", Services: RuntimeService(service)}
 }
 
 func newService(t *testing.T) *knowledgeService.Service {
