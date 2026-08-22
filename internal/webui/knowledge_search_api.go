@@ -90,7 +90,7 @@ func (s *Server) handleKnowledgeGraphSnapshot(w http.ResponseWriter, r *http.Req
 		TimeLimit: time.Duration(request.TimeLimitMS) * time.Millisecond,
 	})
 	if err != nil {
-		s.writeKnowledgeServiceError(w, requestID, err)
+		s.writeKnowledgeReadError(w, requestID, err)
 		return
 	}
 	nodes := make([]knowledgeapi.GraphNode, 0, len(result.Nodes))
