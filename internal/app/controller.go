@@ -20,6 +20,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/knowledge/curation"
 	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/offeredfile"
@@ -491,6 +492,7 @@ type Controller struct {
 	providerHealth              *provider.HealthTracker
 	knowledgeEventMu            sync.Mutex
 	knowledgeEventUnsubscribe   func()
+	knowledgeCuration           *curation.ReviewManager
 
 	subMu   sync.Mutex
 	nextSub int
@@ -549,6 +551,28 @@ func (c *Controller) SetKnowledgeService(service *knowledgeService.Service) {
 		c.agent.SetKnowledgeService(service)
 		c.attachKnowledgeEvents(service)
 	}
+}
+
+// KnowledgeCuration returns the optional human review capability. Keeping it
+// separate from the canonical service lets Knowledge browsing remain available
+// when no background curator is configured.
+func (c *Controller) KnowledgeCuration() *curation.ReviewManager {
+	if c == nil {
+		return nil
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.knowledgeCuration
+}
+
+// SetKnowledgeCuration installs the process-wide curator review capability.
+func (c *Controller) SetKnowledgeCuration(manager *curation.ReviewManager) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.knowledgeCuration = manager
+	c.mu.Unlock()
 }
 
 func (c *Controller) attachKnowledgeEvents(service *knowledgeService.Service) {

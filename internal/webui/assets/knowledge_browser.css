@@ -1230,3 +1230,187 @@ body {
     animation: none;
   }
 }
+.knowledge-curation-open {
+  position: relative;
+}
+
+.knowledge-curation-badge {
+  position: absolute;
+  inset-block-start: -0.35rem;
+  inset-inline-end: -0.45rem;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding-inline: 0.25rem;
+  border: 2px solid var(--bs-body-bg);
+  border-radius: 999px;
+  background: #ffb020;
+  color: #17120a;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 0.95rem;
+  text-align: center;
+}
+
+.knowledge-curation-dialog {
+  width: min(54rem, calc(100vw - 2rem));
+  max-height: min(52rem, calc(100dvh - 2rem));
+}
+
+.knowledge-curation-dialog > section {
+  display: flex;
+  min-height: min(38rem, calc(100dvh - 4rem));
+  flex-direction: column;
+}
+
+.knowledge-curation-dialog > section > header,
+.knowledge-curation-dialog > section > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.15rem;
+  border-block-end: 1px solid var(--bs-border-color);
+}
+
+.knowledge-curation-dialog > section > footer {
+  justify-content: flex-end;
+  border-block: 1px solid var(--bs-border-color) 0;
+}
+
+.knowledge-curation-toolbar {
+  display: flex;
+  align-items: end;
+  gap: 0.75rem;
+  padding: 0.85rem 1.15rem;
+}
+
+.knowledge-curation-toolbar label {
+  display: grid;
+  flex: 1;
+  gap: 0.25rem;
+  color: var(--bs-secondary-color);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.knowledge-curation-toolbar select,
+.knowledge-curation-reject textarea {
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.45rem;
+  background: var(--bs-tertiary-bg);
+  color: var(--bs-body-color);
+  padding: 0.5rem 0.65rem;
+}
+
+.knowledge-curation-status {
+  padding: 0 1.15rem 0.75rem;
+  color: var(--bs-secondary-color);
+  font-size: 0.85rem;
+}
+
+.knowledge-curation-list {
+  display: grid;
+  flex: 1;
+  align-content: start;
+  gap: 0.75rem;
+  overflow: auto;
+  padding: 0 1.15rem 1rem;
+}
+
+.knowledge-curation-card {
+  display: grid;
+  gap: 0.65rem;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--bs-info) 18%, var(--bs-border-color));
+  border-radius: 0.8rem;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--bs-info) 7%, var(--bs-tertiary-bg)), var(--bs-tertiary-bg));
+}
+
+.knowledge-curation-card > header,
+.knowledge-curation-card > footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.knowledge-curation-card h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.knowledge-curation-card header div > span,
+.knowledge-curation-card p {
+  color: var(--bs-secondary-color);
+  font-size: 0.82rem;
+}
+
+.knowledge-curation-card p {
+  margin: 0;
+}
+
+.knowledge-curation-state {
+  flex: none;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 999px;
+  color: var(--bs-secondary-color);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.knowledge-curation-state.is-pending_review { border-color: #ffb020; color: #ffcf70; }
+.knowledge-curation-state.is-applied { border-color: var(--bs-success); color: var(--bs-success-text-emphasis); }
+.knowledge-curation-state.is-rejected,
+.knowledge-curation-state.is-undone { opacity: 0.75; }
+
+.knowledge-curation-warnings {
+  margin: 0;
+  padding: 0.6rem 0.75rem 0.6rem 1.8rem;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, #ffb020 10%, transparent);
+  color: #ffcf70;
+  font-size: 0.78rem;
+}
+
+.knowledge-curation-card > footer {
+  justify-content: flex-end;
+}
+
+.knowledge-curation-reject {
+  margin: 0 1.15rem 1rem;
+  padding: 0.85rem;
+  border: 1px solid var(--bs-danger-border-subtle);
+  border-radius: 0.65rem;
+  background: var(--bs-danger-bg-subtle);
+}
+
+.knowledge-curation-reject label {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.knowledge-curation-reject > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-block-start: 0.65rem;
+}
+
+@media (max-width: 640px) {
+  .knowledge-curation-dialog {
+    width: 100vw;
+    max-width: none;
+    height: 100dvh;
+    max-height: none;
+    margin: 0;
+    border-radius: 0;
+  }
+
+  .knowledge-curation-dialog > section { min-height: 100dvh; }
+  .knowledge-curation-toolbar { align-items: stretch; flex-direction: column; }
+  .knowledge-curation-toolbar button { align-self: end; }
+  .knowledge-curation-card > header { align-items: flex-start; }
+}

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -112,6 +113,27 @@ func TestApplyCuratedEntryKeepsRiskAndReviewCandidatesOutOfAutomaticPath(t *test
 	stats, err := store.ScanCanonical(context.Background(), func(knowledgeStore.CanonicalRecord) error { return nil })
 	if err != nil || stats.Entries != 0 || stats.Evidence != 0 {
 		t.Fatalf("rejected curation wrote records: %#v, %v", stats, err)
+	}
+}
+
+func TestApplyCuratedEntryAllowsHumanReviewedRiskCandidate(t *testing.T) {
+	t.Parallel()
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close() })
+	service := newTestService(t, store, nil)
+	chunk, err := service.CreateChunk(context.Background(), CreateChunkRequest{Chunk: testChunkCandidate()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := curatedCreateRequest(chunk.Chunk.ID)
+	request.Content.Risk = []knowledge.RiskClass{knowledge.RiskClassMedical}
+	request.ReviewApproved = true
+	result, err := service.ApplyCuratedEntry(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Created || !slices.Contains(result.Entry.Risk, knowledge.RiskClassMedical) {
+		t.Fatalf("ApplyCuratedEntry(review approved) = %#v", result)
 	}
 }
 

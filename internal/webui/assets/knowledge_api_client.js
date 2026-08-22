@@ -256,6 +256,12 @@
     activatePackage(stageID, options) { return this.request('/packages/stages/' + encodeID(stageID) + '/activate', {...options, method: 'POST', timeoutMS: 90000}); }
     discardPackage(stageID, options) { return this.request('/packages/stages/' + encodeID(stageID), {...options, method: 'DELETE'}); }
     exportPackage(chunkID, options) { return this.request('/packages/export/' + encodeID(chunkID), {...options, responseType: 'package', timeoutMS: 90000, filename: 'knowledge.kknowledge'}); }
+	listCurationCandidates(query, options) { return this.request('/curation/candidates', {...options, query}); }
+	curationCandidateDecision(id, action, body, options) {
+	  action = String(action || '');
+	  if (!['accept', 'reject', 'undo'].includes(action)) throw new TypeError('Knowledge curation action is invalid');
+	  return this.request('/curation/candidates/' + encodeID(id) + '/' + action, {...options, method: 'POST', body});
+	}
 
     async *pages(path, options) {
       options = options || {};

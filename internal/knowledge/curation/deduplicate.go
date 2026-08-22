@@ -10,7 +10,9 @@ import (
 	"reflect"
 	"slices"
 	"sync"
+	"time"
 
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/knowledge"
 )
 
@@ -135,34 +137,77 @@ func cloneDraftApplicability(value knowledge.Applicability) knowledge.Applicabil
 // curation. Persistent deployments can implement CandidateSink without changing extractors.
 type MemoryCandidateStore struct {
 	mu       sync.Mutex
-	byRecord map[knowledge.CurationRecordID][]CandidateDraft
+	byRecord map[knowledge.CurationRecordID][]CandidateID
+	byID     map[CandidateID]StoredCandidate
+	newID    func() string
+	now      func() time.Time
 }
 
 func NewMemoryCandidateStore() *MemoryCandidateStore {
-	return &MemoryCandidateStore{byRecord: make(map[knowledge.CurationRecordID][]CandidateDraft)}
+	return NewMemoryCandidateStoreWithSources(id.New, time.Now)
+}
+
+func NewMemoryCandidateStoreWithSources(newID func() string, now func() time.Time) *MemoryCandidateStore {
+	return &MemoryCandidateStore{
+		byRecord: make(map[knowledge.CurationRecordID][]CandidateID), byID: make(map[CandidateID]StoredCandidate),
+		newID: newID, now: now,
+	}
 }
 
 func (s *MemoryCandidateStore) StoreCandidates(ctx context.Context, recordID knowledge.CurationRecordID, drafts []CandidateDraft) (uint32, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
+	if !isCanonicalUUIDv7(string(recordID)) {
+		return 0, fmt.Errorf("%w: curation record ID is invalid", knowledge.ErrInvalidRecord)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cloned := cloneCandidateDrafts(drafts)
-	if existing, exists := s.byRecord[recordID]; exists {
+	if ids, exists := s.byRecord[recordID]; exists {
+		existing := make([]CandidateDraft, len(ids))
+		for index, candidateID := range ids {
+			existing[index] = s.byID[candidateID].Draft
+		}
 		if !reflect.DeepEqual(existing, cloned) {
 			return 0, ErrCandidateConflict
 		}
-		return uint32(len(existing)), nil
+		return uint32(len(ids)), nil
 	}
-	s.byRecord[recordID] = cloned
+	now := s.now().UTC().Round(0)
+	ids := make([]CandidateID, 0, len(cloned))
+	candidates := make([]StoredCandidate, 0, len(cloned))
+	for _, draft := range cloned {
+		candidateID := CandidateID(s.newID())
+		if !isCanonicalUUIDv7(string(candidateID)) {
+			return 0, fmt.Errorf("%w: generated candidate ID is invalid", knowledge.ErrInvalidRecord)
+		}
+		status := CandidateStatusPendingReview
+		if draft.Route == CandidateRouteAutomatic {
+			status = CandidateStatusPendingAutomatic
+		}
+		candidates = append(candidates, StoredCandidate{
+			ID: candidateID, RecordID: recordID, Draft: draft, Status: status,
+			Version: 1, CreatedAt: now, UpdatedAt: now,
+		})
+		ids = append(ids, candidateID)
+	}
+	for _, candidate := range candidates {
+		s.byID[candidate.ID] = candidate
+	}
+	s.byRecord[recordID] = ids
 	return uint32(len(cloned)), nil
 }
 
 func (s *MemoryCandidateStore) Candidates(_ context.Context, recordID knowledge.CurationRecordID) []CandidateDraft {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return cloneCandidateDrafts(s.byRecord[recordID])
+	ids := s.byRecord[recordID]
+	drafts := make([]CandidateDraft, len(ids))
+	for index, candidateID := range ids {
+		drafts[index] = cloneCandidateDraft(s.byID[candidateID].Draft)
+	}
+	return drafts
 }
 
 func cloneCandidateDrafts(drafts []CandidateDraft) []CandidateDraft {

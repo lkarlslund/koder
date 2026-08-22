@@ -37,6 +37,7 @@ func TestKnowledgeBrowserResponsiveTouchWorkflow(t *testing.T) {
 		t.Fatalf("new Knowledge service: %v", err)
 	}
 	ctrl.SetKnowledgeService(service)
+	ctrl.SetKnowledgeCuration(webCurationManager(t))
 	createAPIChunk(t, service, "Touch-friendly knowledge", knowledge.Scope{Kind: knowledge.ScopeKindGlobal})
 
 	ctx, cancel := context.WithCancel(context.Background())

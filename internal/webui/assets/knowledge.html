@@ -29,6 +29,7 @@
   <script defer src="/assets/knowledge_graph_interactions.js"></script>
   <script defer src="/assets/knowledge_graph_table.js"></script>
   <script defer src="/assets/knowledge_packages.js"></script>
+  <script defer src="/assets/knowledge_curation.js"></script>
   <script defer src="/assets/knowledge_browser.js"></script>
 </head>
 <body class="bg-body text-body">
@@ -41,6 +42,9 @@
           <span class="knowledge-brand-subtitle"><span class="knowledge-status-dot" aria-hidden="true"></span>Local knowledge explorer</span>
         </div>
       </div>
+      <button type="button" class="knowledge-icon-button knowledge-curation-open" data-knowledge-curation-open title="Review proposed knowledge" hidden>
+        <i class="bi bi-inbox" aria-hidden="true"></i><span class="knowledge-curation-badge" data-knowledge-curation-badge hidden></span><span class="visually-hidden">Review proposed knowledge</span>
+      </button>
       <a class="knowledge-icon-button" href="/" data-knowledge-return title="Return to Koder chat">
         <i class="bi bi-chat-left-text" aria-hidden="true"></i>
         <span class="visually-hidden">Return to Koder chat</span>
@@ -448,6 +452,26 @@
         <div class="knowledge-editor-error" data-knowledge-delete-error role="alert" hidden></div>
         <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-knowledge-delete-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-danger" data-knowledge-delete-submit disabled>Delete</button></footer>
       </form>
+    </dialog>
+
+    <dialog class="knowledge-editor-dialog knowledge-curation-dialog" data-knowledge-curation-dialog aria-labelledby="knowledge-curation-dialog-title">
+      <section>
+        <header>
+          <div><span class="knowledge-eyebrow">Curator</span><h2 id="knowledge-curation-dialog-title">Review proposed knowledge</h2></div>
+          <button type="button" class="knowledge-icon-button" data-knowledge-curation-close title="Close review queue"><i class="bi bi-x-lg" aria-hidden="true"></i><span class="visually-hidden">Close review queue</span></button>
+        </header>
+        <div class="knowledge-curation-toolbar">
+          <label><span>Status</span><select data-knowledge-curation-filter><option value="pending_review">Needs review</option><option value="applied">Accepted</option><option value="rejected">Rejected</option><option value="undone">Undone</option><option value="">All</option></select></label>
+          <button type="button" class="btn btn-sm btn-outline-info" data-knowledge-curation-refresh><i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Refresh</button>
+        </div>
+        <div class="knowledge-curation-status" data-knowledge-curation-status role="status">Loading proposed knowledge…</div>
+        <div class="knowledge-curation-list" data-knowledge-curation-list></div>
+        <section class="knowledge-curation-reject" data-knowledge-curation-reject hidden>
+          <label><span>Why should Koder discard this proposal?</span><textarea maxlength="1000" rows="3" data-knowledge-curation-reject-reason></textarea></label>
+          <div><button type="button" class="btn btn-sm btn-outline-secondary" data-knowledge-curation-reject-cancel>Cancel</button><button type="button" class="btn btn-sm btn-danger" data-knowledge-curation-reject-confirm disabled>Reject proposal</button></div>
+        </section>
+        <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-knowledge-curation-close>Close</button></footer>
+      </section>
     </dialog>
 
     <noscript>

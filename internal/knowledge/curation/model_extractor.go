@@ -91,13 +91,13 @@ type CandidateDraft struct {
 	Action         CandidateAction                `json:"action"`
 	ChunkID        knowledge.ChunkID              `json:"chunk_id"`
 	TargetEntryID  knowledge.EntryID              `json:"target_entry_id,omitempty"`
-	TargetRevision uint64                         `json:"-"`
+	TargetRevision uint64                         `json:"target_revision,omitempty"`
 	Entry          EntryDraft                     `json:"entry"`
 	Reason         string                         `json:"reason"`
 	SourceItemIDs  []string                       `json:"source_item_ids"`
-	Classification knowledge.ClassificationResult `json:"-"`
-	Route          CandidateRoute                 `json:"-"`
-	ReviewReasons  []string                       `json:"-"`
+	Classification knowledge.ClassificationResult `json:"classification,omitzero"`
+	Route          CandidateRoute                 `json:"route,omitempty"`
+	ReviewReasons  []string                       `json:"review_reasons,omitempty"`
 }
 
 type modelDraftResponse struct {

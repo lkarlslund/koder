@@ -88,3 +88,89 @@ func (a LowRiskApplier) Apply(ctx context.Context, record knowledge.CurationReco
 		},
 	})
 }
+
+func (a LowRiskApplier) ApplyCandidate(ctx context.Context, record knowledge.CurationRecord, draft curation.CandidateDraft) (curation.ApplyReceipt, error) {
+	result, err := a.Apply(ctx, record, draft)
+	if err != nil {
+		return curation.ApplyReceipt{}, err
+	}
+	return curation.ApplyReceipt{
+		EntryID: result.Entry.ID, BeforeRevision: draft.TargetRevision,
+		AfterRevision: result.Entry.Revision.Number, Created: result.Created,
+	}, nil
+}
+
+func (a LowRiskApplier) UndoCandidate(ctx context.Context, candidate curation.StoredCandidate) error {
+	return undoCandidate(ctx, a.Service, candidate)
+}
+
+// ReviewedApplier applies a candidate only after the curator explicitly accepts it.
+// Approval relaxes the automatic low-risk gate, but all canonical Knowledge policy,
+// validation, evidence, and optimistic-revision checks remain in force.
+type ReviewedApplier struct {
+	Service *knowledgeService.Service
+}
+
+func (a ReviewedApplier) ApplyCandidate(ctx context.Context, record knowledge.CurationRecord, draft curation.CandidateDraft) (curation.ApplyReceipt, error) {
+	if a.Service == nil {
+		return curation.ApplyReceipt{}, curation.ErrUnavailable
+	}
+	if record.State != knowledge.CurationStateCandidatesReady {
+		return curation.ApplyReceipt{}, fmt.Errorf("%w: curation record is not ready", knowledge.ErrInvalidRecord)
+	}
+	action := knowledgeService.CuratedEntryAction("")
+	switch draft.Action {
+	case curation.CandidateActionCreateEntry:
+		action = knowledgeService.CuratedEntryActionCreate
+	case curation.CandidateActionUpdateEntry:
+		action = knowledgeService.CuratedEntryActionUpdate
+	default:
+		return curation.ApplyReceipt{}, fmt.Errorf("%w: reviewed candidate action is not supported", knowledge.ErrInvalidRecord)
+	}
+	entry := draft.Entry
+	result, err := a.Service.ApplyCuratedEntry(ctx, knowledgeService.ApplyCuratedEntryRequest{
+		RecordID: record.ID, Source: record.Source, SourceItemIDs: draft.SourceItemIDs,
+		Action: action, ChunkID: draft.ChunkID, TargetEntryID: draft.TargetEntryID,
+		ExpectedRevision: draft.TargetRevision, Reason: draft.Reason, ReviewApproved: true,
+		Content: knowledgeService.EntryContent{
+			Kind: entry.Kind, Title: entry.Title, Summary: entry.Summary, Body: entry.Body,
+			Aliases: entry.Aliases, Tags: entry.Tags, Scope: entry.Scope, Applicability: entry.Applicability,
+			Risk: entry.Risk, Confidence: entry.Confidence, ValidFrom: entry.ValidFrom,
+			ValidUntil: entry.ValidUntil, ObservedAt: entry.ObservedAt, ReviewAfter: entry.ReviewAfter,
+			PersonalOrigin: entry.PersonalOrigin,
+		},
+	})
+	if err != nil {
+		return curation.ApplyReceipt{}, err
+	}
+	return curation.ApplyReceipt{
+		EntryID: result.Entry.ID, BeforeRevision: draft.TargetRevision,
+		AfterRevision: result.Entry.Revision.Number, Created: result.Created,
+	}, nil
+}
+
+func (a ReviewedApplier) UndoCandidate(ctx context.Context, candidate curation.StoredCandidate) error {
+	return undoCandidate(ctx, a.Service, candidate)
+}
+
+func undoCandidate(ctx context.Context, service *knowledgeService.Service, candidate curation.StoredCandidate) error {
+	if service == nil {
+		return curation.ErrUnavailable
+	}
+	receipt := candidate.Receipt
+	if receipt.EntryID == "" || receipt.AfterRevision == 0 {
+		return fmt.Errorf("%w: candidate has no apply receipt", knowledge.ErrInvalidRecord)
+	}
+	reason := "undo curation candidate " + string(candidate.ID)
+	if receipt.Created {
+		_, err := service.ArchiveEntry(ctx, knowledgeService.EntryLifecycleRequest{
+			EntryID: receipt.EntryID, ExpectedRevision: receipt.AfterRevision, Reason: reason,
+		})
+		return err
+	}
+	_, err := service.RestoreEntryRevision(ctx, knowledgeService.RestoreEntryRevisionRequest{
+		EntryID: receipt.EntryID, ExpectedRevision: receipt.AfterRevision,
+		SourceRevision: receipt.BeforeRevision, Reason: reason,
+	})
+	return err
+}

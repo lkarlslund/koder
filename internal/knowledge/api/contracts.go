@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/knowledge"
+	"github.com/lkarlslund/koder/internal/knowledge/curation"
 	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 )
@@ -32,6 +33,7 @@ const (
 	PackagePreviewPath      = PackageCollectionPath + "/preview"
 	PackageStagePath        = PackageCollectionPath + "/stages"
 	PackageExportPrefix     = PackageCollectionPath + "/export"
+	CurationCandidatePath   = RoutePrefix + "/curation/candidates"
 	ExplorerURL             = "/knowledge"
 )
 
@@ -89,6 +91,10 @@ func PackageActivatePath(stageID string) string {
 
 func PackageExportPath(chunkID knowledge.ChunkID) string {
 	return PackageExportPrefix + "/" + url.PathEscape(string(chunkID))
+}
+
+func CurationCandidateActionPath(candidateID curation.CandidateID, action string) string {
+	return CurationCandidatePath + "/" + url.PathEscape(string(candidateID)) + "/" + url.PathEscape(strings.TrimSpace(action))
 }
 
 type ResponseMetadata struct {
@@ -260,6 +266,22 @@ type PackageDiscardResponse struct {
 	ResponseMetadata
 	StageID   string `json:"stage_id"`
 	Discarded bool   `json:"discarded"`
+}
+
+type CurationCandidateListResponse struct {
+	ResponseMetadata
+	Candidates []curation.StoredCandidate `json:"candidates"`
+	Page       Page                       `json:"page"`
+}
+
+type CurationCandidateDecisionRequest struct {
+	ExpectedVersion uint64 `json:"expected_version"`
+	Reason          string `json:"reason,omitempty"`
+}
+
+type CurationCandidateResponse struct {
+	ResponseMetadata
+	Candidate curation.StoredCandidate `json:"candidate"`
 }
 
 // EntryContent is the complete client-editable portion of an entry.

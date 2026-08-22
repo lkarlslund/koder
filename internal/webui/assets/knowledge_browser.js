@@ -3137,6 +3137,12 @@
 		  },
 		});
 	  }
+	  if (globalThis.KoderKnowledgeCuration) {
+		app.curationController = new globalThis.KoderKnowledgeCuration.Controller({
+		  shell, client,
+		  onChanged: async () => app.refresh(),
+		});
+	  }
       shell.__koderKnowledgeApp = app;
       app.refresh();
       app.loadSavedGraphViews();

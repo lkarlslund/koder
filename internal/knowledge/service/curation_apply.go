@@ -31,6 +31,10 @@ type ApplyCuratedEntryRequest struct {
 	ExpectedRevision uint64
 	Content          EntryContent
 	Reason           string
+	// ReviewApproved records that a human explicitly accepted a candidate which
+	// automatic curation was not permitted to publish. It never bypasses domain,
+	// scope, evidence, or optimistic-revision validation.
+	ReviewApproved bool
 }
 
 type ApplyCuratedEntryResult struct {
@@ -55,7 +59,8 @@ func (s *Service) ApplyCuratedEntry(ctx context.Context, request ApplyCuratedEnt
 	if err != nil {
 		return ApplyCuratedEntryResult{}, fmt.Errorf("classify curated entry: %w", err)
 	}
-	if classification.Decision != knowledge.ClassificationDecisionAllow || len(candidate.Risk) != 0 {
+	if classification.Decision == knowledge.ClassificationDecisionReject ||
+		(!request.ReviewApproved && (classification.Decision != knowledge.ClassificationDecisionAllow || len(candidate.Risk) != 0)) {
 		return ApplyCuratedEntryResult{Classification: classification}, fmt.Errorf("%w: automatic curation accepts only low-risk allow-classified candidates", ErrReviewRequired)
 	}
 	candidate, err = knowledge.NormalizeEntry(candidate)

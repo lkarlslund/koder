@@ -90,6 +90,13 @@ async function testRequestAndCursorEncoding() {
   assert.strictEqual(requests[19].options.method, 'PUT');
   await client.deleteGraphView('view-1', {expected_revision: 2}, {channel: 'view-delete'});
   assert.strictEqual(requests[20].options.method, 'DELETE');
+
+  await client.listCurationCandidates({status: ['pending_review', 'applied'], limit: 20}, {channel: 'curation'});
+  assert.strictEqual(requests[21].url, '/api/knowledge/v1/curation/candidates?limit=20&status=pending_review&status=applied');
+  await client.curationCandidateDecision('candidate-1', 'accept', {expected_version: 1}, {channel: 'curation-decision'});
+  assert.strictEqual(requests[22].url, '/api/knowledge/v1/curation/candidates/candidate-1/accept');
+  assert.strictEqual(requests[22].options.method, 'POST');
+  assert.throws(() => client.curationCandidateDecision('candidate-1', 'erase', {}), /invalid/);
 }
 
 async function testNewGenerationCancelsStaleRequest() {

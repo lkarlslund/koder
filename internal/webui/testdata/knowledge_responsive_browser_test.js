@@ -121,6 +121,17 @@ async function main() {
       bodyFits: true, tabTargets: true, actionTarget: true,
     });
 
+    await waitFor(() => evaluate(`!document.querySelector('[data-knowledge-curation-open]').hidden`), 'curation review action');
+    await tap('[data-knowledge-curation-open]');
+    await waitFor(() => evaluate(`Boolean(document.querySelector('[data-knowledge-curation-dialog]').open && document.querySelector('.knowledge-curation-card'))`), 'curation review dialog');
+    const curator = await evaluate(`(() => {
+      const dialog = document.querySelector('[data-knowledge-curation-dialog]');
+      const accept = dialog.querySelector('.knowledge-curation-card footer .btn-info');
+      return {fits: dialog.scrollWidth <= innerWidth, title: dialog.querySelector('.knowledge-curation-card h3').textContent, acceptTarget: accept.getBoundingClientRect().height >= 31};
+    })()`);
+    assert.deepStrictEqual(curator, {fits: true, title: 'Use sfdisk', acceptTarget: true});
+    await tap('[data-knowledge-curation-close]');
+
     await tap('[data-knowledge-tab="sources"]');
     assert.strictEqual(await evaluate(`document.getElementById('knowledge-browser').dataset.mobilePane`), 'sources');
     await tap('[data-object-kind="chunk"]');
