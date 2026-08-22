@@ -288,11 +288,15 @@ func runDoctor(ctx context.Context, out io.Writer, loadOpts config.LoadOptions, 
 	if modelID == "" && !opts.tts {
 		modelID = strings.TrimSpace(cfg.Defaults.ModelID)
 	}
-	providerCfg, ok := cfg.Provider(providerID)
-	if !ok {
-		return fmt.Errorf("provider %q not configured", providerID)
+	sourceProviderID, sourceModelID := providerID, modelID
+	if modelID != "" {
+		sourceProviderID, sourceModelID = cfg.ResolveModel(providerID, modelID)
 	}
-	client, err := provider.New(providerID, providerCfg, nil)
+	providerCfg, ok := cfg.Provider(sourceProviderID)
+	if !ok {
+		return fmt.Errorf("provider %q not configured", sourceProviderID)
+	}
+	client, err := provider.New(sourceProviderID, providerCfg, nil)
 	if err != nil {
 		return err
 	}
@@ -305,6 +309,11 @@ func runDoctor(ctx context.Context, out io.Writer, loadOpts config.LoadOptions, 
 	if modelID != "" {
 		if _, err := fmt.Fprintf(out, "model: %s\n", modelID); err != nil {
 			return err
+		}
+		if sourceProviderID != providerID || sourceModelID != modelID {
+			if _, err := fmt.Fprintf(out, "source: %s/%s\n", sourceProviderID, sourceModelID); err != nil {
+				return err
+			}
 		}
 	}
 	if opts.tts {
@@ -319,8 +328,8 @@ func runDoctor(ctx context.Context, out io.Writer, loadOpts config.LoadOptions, 
 	if err != nil {
 		return err
 	}
-	if modelID != "" && !modelListContains(models, modelID) {
-		return fmt.Errorf("model %q was not returned by provider %q", modelID, providerID)
+	if sourceModelID != "" && !modelListContains(models, sourceModelID) {
+		return fmt.Errorf("model %q (source %q) was not returned by provider %q", modelID, sourceModelID, sourceProviderID)
 	}
 	if opts.listModels {
 		for _, model := range models {

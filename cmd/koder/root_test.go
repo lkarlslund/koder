@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -315,6 +318,52 @@ func TestDoctorCommandRejectsMissingDefaultProviderEntry(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `default provider "ghost" not configured`) {
 		t.Fatalf("expected missing default provider error, got %v", err)
+	}
+}
+
+func TestDoctorCommandResolvesConfiguredModelAlias(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			_, _ = fmt.Fprint(w, `{"status":"ok"}`)
+		case "/v1/models":
+			_, _ = fmt.Fprint(w, `{"data":[{"id":"real-model"}]}`)
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	configDir := filepath.Join(configRoot, "koder")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configBody := fmt.Sprintf(`[defaults]
+provider_id = "test"
+model_id = "friendly alias"
+
+[providers.test]
+base_url = %q
+
+[[models]]
+provider_id = "test"
+model_id = "friendly alias"
+source_model_id = "real-model"
+`, server.URL+"/v1")
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(configBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := runDoctor(context.Background(), &out, config.LoadOptions{}, doctorOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got, "model: friendly alias") || !strings.Contains(got, "source: test/real-model") {
+		t.Fatalf("doctor output = %q", got)
 	}
 }
 
