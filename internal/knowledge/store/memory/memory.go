@@ -25,10 +25,13 @@ type Store struct {
 }
 
 type data struct {
-	chunks   map[knowledge.ChunkID]knowledge.Chunk
-	entries  map[knowledge.EntryID]knowledge.Entry
-	links    map[knowledge.LinkID]knowledge.Link
-	evidence map[knowledge.EvidenceID]knowledge.Evidence
+	chunks       map[knowledge.ChunkID]knowledge.Chunk
+	entries      map[knowledge.EntryID]knowledge.Entry
+	links        map[knowledge.LinkID]knowledge.Link
+	evidence     map[knowledge.EvidenceID]knowledge.Evidence
+	chunkHistory map[knowledge.ChunkID][]knowledge.Chunk
+	entryHistory map[knowledge.EntryID][]knowledge.Entry
+	linkHistory  map[knowledge.LinkID][]knowledge.Link
 }
 
 type transaction struct {
@@ -52,10 +55,13 @@ func New() *Store {
 
 func newData() data {
 	return data{
-		chunks:   make(map[knowledge.ChunkID]knowledge.Chunk),
-		entries:  make(map[knowledge.EntryID]knowledge.Entry),
-		links:    make(map[knowledge.LinkID]knowledge.Link),
-		evidence: make(map[knowledge.EvidenceID]knowledge.Evidence),
+		chunks:       make(map[knowledge.ChunkID]knowledge.Chunk),
+		entries:      make(map[knowledge.EntryID]knowledge.Entry),
+		links:        make(map[knowledge.LinkID]knowledge.Link),
+		evidence:     make(map[knowledge.EvidenceID]knowledge.Evidence),
+		chunkHistory: make(map[knowledge.ChunkID][]knowledge.Chunk),
+		entryHistory: make(map[knowledge.EntryID][]knowledge.Entry),
+		linkHistory:  make(map[knowledge.LinkID][]knowledge.Link),
 	}
 }
 
@@ -168,6 +174,42 @@ func (s *Store) ListEntries(ctx context.Context, request knowledgeStore.EntryLis
 		entries = append(entries, cloneEntry(entry))
 	}
 	return knowledgeStore.PaginateEntries(entries, request, s.indexGeneration)
+}
+
+func (s *Store) ListRevisions(ctx context.Context, request knowledgeStore.RevisionListRequest) (knowledgeStore.RevisionPage, error) {
+	if err := ctx.Err(); err != nil {
+		return knowledgeStore.RevisionPage{}, err
+	}
+	if err := request.Object.Validate(); err != nil {
+		return knowledgeStore.RevisionPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return knowledgeStore.RevisionPage{}, knowledgeStore.ErrClosed
+	}
+	var records []knowledgeStore.CanonicalRecord
+	switch request.Object.Kind {
+	case knowledge.ObjectKindChunk:
+		for _, value := range s.data.chunkHistory[knowledge.ChunkID(request.Object.ID)] {
+			value := cloneChunk(value)
+			records = append(records, knowledgeStore.CanonicalRecord{Kind: knowledgeStore.RecordKindChunk, Chunk: &value})
+		}
+	case knowledge.ObjectKindEntry:
+		for _, value := range s.data.entryHistory[knowledge.EntryID(request.Object.ID)] {
+			value := cloneEntry(value)
+			records = append(records, knowledgeStore.CanonicalRecord{Kind: knowledgeStore.RecordKindEntry, Entry: &value})
+		}
+	case knowledge.ObjectKindLink:
+		for _, value := range s.data.linkHistory[knowledge.LinkID(request.Object.ID)] {
+			value := cloneLink(value)
+			records = append(records, knowledgeStore.CanonicalRecord{Kind: knowledgeStore.RecordKindLink, Link: &value})
+		}
+	}
+	if len(records) == 0 {
+		return knowledgeStore.RevisionPage{}, fmt.Errorf("%w: %s %s", knowledgeStore.ErrNotFound, request.Object.Kind, request.Object.ID)
+	}
+	return knowledgeStore.PaginateRevisions(records, request)
 }
 
 // Checkpoint is deliberately unsupported because the memory backend has no durable files.
@@ -317,6 +359,7 @@ func (tx *transaction) PutChunk(ctx context.Context, value knowledge.Chunk, expe
 	}
 	tx.derivedDirty = tx.derivedDirty || !exists || value.Counts != current.Counts
 	tx.data.chunks[value.ID] = cloneChunk(value)
+	tx.data.chunkHistory[value.ID] = append(tx.data.chunkHistory[value.ID], cloneChunk(value))
 	return nil
 }
 
@@ -398,6 +441,7 @@ func (tx *transaction) DeleteChunk(ctx context.Context, id knowledge.ChunkID, ex
 		return err
 	}
 	delete(tx.data.chunks, id)
+	delete(tx.data.chunkHistory, id)
 	tx.derivedDirty = true
 	return nil
 }
@@ -414,6 +458,7 @@ func (tx *transaction) PutEntry(ctx context.Context, value knowledge.Entry, expe
 		return err
 	}
 	tx.data.entries[value.ID] = cloneEntry(value)
+	tx.data.entryHistory[value.ID] = append(tx.data.entryHistory[value.ID], cloneEntry(value))
 	tx.derivedDirty = true
 	return nil
 }
@@ -427,6 +472,7 @@ func (tx *transaction) DeleteEntry(ctx context.Context, id knowledge.EntryID, ex
 		return err
 	}
 	delete(tx.data.entries, id)
+	delete(tx.data.entryHistory, id)
 	tx.derivedDirty = true
 	return nil
 }
@@ -443,6 +489,7 @@ func (tx *transaction) PutLink(ctx context.Context, value knowledge.Link, expect
 		return err
 	}
 	tx.data.links[value.ID] = cloneLink(value)
+	tx.data.linkHistory[value.ID] = append(tx.data.linkHistory[value.ID], cloneLink(value))
 	tx.derivedDirty = true
 	return nil
 }
@@ -456,6 +503,7 @@ func (tx *transaction) DeleteLink(ctx context.Context, id knowledge.LinkID, expe
 		return err
 	}
 	delete(tx.data.links, id)
+	delete(tx.data.linkHistory, id)
 	tx.derivedDirty = true
 	return nil
 }
@@ -494,11 +542,26 @@ func (tx *transaction) DeleteEvidence(ctx context.Context, id knowledge.Evidence
 
 func cloneData(source data) data {
 	return data{
-		chunks:   cloneMap(source.chunks, cloneChunk),
-		entries:  cloneMap(source.entries, cloneEntry),
-		links:    cloneMap(source.links, cloneLink),
-		evidence: cloneMap(source.evidence, func(value knowledge.Evidence) knowledge.Evidence { return value }),
+		chunks:       cloneMap(source.chunks, cloneChunk),
+		entries:      cloneMap(source.entries, cloneEntry),
+		links:        cloneMap(source.links, cloneLink),
+		evidence:     cloneMap(source.evidence, func(value knowledge.Evidence) knowledge.Evidence { return value }),
+		chunkHistory: cloneHistoryMap(source.chunkHistory, cloneChunk),
+		entryHistory: cloneHistoryMap(source.entryHistory, cloneEntry),
+		linkHistory:  cloneHistoryMap(source.linkHistory, cloneLink),
 	}
+}
+
+func cloneHistoryMap[K comparable, V any](source map[K][]V, clone func(V) V) map[K][]V {
+	output := make(map[K][]V, len(source))
+	for key, history := range source {
+		cloned := make([]V, len(history))
+		for index, value := range history {
+			cloned[index] = clone(value)
+		}
+		output[key] = cloned
+	}
+	return output
 }
 
 func cloneMap[K comparable, V any](source map[K]V, clone func(V) V) map[K]V {

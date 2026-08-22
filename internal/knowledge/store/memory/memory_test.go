@@ -168,6 +168,111 @@ func TestStoreEnforcesRevisionPreconditions(t *testing.T) {
 	}
 }
 
+func TestStoreRevisionHistoryIsAtomicAndExcludesDerivedUpdates(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+	first := chunk(1)
+	first.Revision.Reason = "created"
+	second := chunk(2)
+	second.Revision.Reason = "renamed"
+	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error { return tx.PutChunk(ctx, first, 0) }); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error { return tx.PutChunk(ctx, second, 1) }); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	usedAt := fixedTime.Add(time.Hour)
+	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error { return tx.TouchChunk(ctx, chunkID, usedAt) }); err != nil {
+		t.Fatalf("touch: %v", err)
+	}
+	page, err := s.ListRevisions(ctx, knowledgeStore.RevisionListRequest{
+		Object: knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(chunkID)}, Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("ListRevisions(): %v", err)
+	}
+	if len(page.Revisions) != 1 || page.Revisions[0].Chunk.Title != "Chunk r2" || page.Revisions[0].Chunk.Revision.Reason != "renamed" {
+		t.Fatalf("newest history record = %#v", page.Revisions)
+	}
+	if !page.Revisions[0].Chunk.LastUsedAt.IsZero() {
+		t.Fatalf("historical LastUsedAt = %v, want zero", page.Revisions[0].Chunk.LastUsedAt)
+	}
+	page, err = s.ListRevisions(ctx, knowledgeStore.RevisionListRequest{
+		Object: knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(chunkID)}, Cursor: page.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("ListRevisions(second page): %v", err)
+	}
+	if len(page.Revisions) != 1 || page.Revisions[0].Chunk.Revision.Number != 1 || page.Revisions[0].Chunk.Revision.Reason != "created" {
+		t.Fatalf("oldest history record = %#v", page.Revisions)
+	}
+
+	wantErr := errors.New("rollback")
+	third := chunk(3)
+	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+		if err := tx.PutChunk(ctx, third, 2); err != nil {
+			return err
+		}
+		return wantErr
+	}); !errors.Is(err, wantErr) {
+		t.Fatalf("rollback update error = %v", err)
+	}
+	page, err = s.ListRevisions(ctx, knowledgeStore.RevisionListRequest{
+		Object: knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(chunkID)},
+	})
+	if err != nil || len(page.Revisions) != 2 {
+		t.Fatalf("history after rollback = %#v, %v", page, err)
+	}
+	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error { return tx.DeleteChunk(ctx, chunkID, 2) }); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := s.ListRevisions(ctx, knowledgeStore.RevisionListRequest{
+		Object: knowledge.ObjectRef{Kind: knowledge.ObjectKindChunk, ID: string(chunkID)},
+	}); !errors.Is(err, knowledgeStore.ErrNotFound) {
+		t.Fatalf("history after permanent delete error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestStoreTracksEntryAndLinkRevisionHistory(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+	firstEntry, secondEntry := entry(), entry()
+	secondEntry.Revision = revision(2)
+	secondEntry.Title = "Entry r2"
+	secondEntry.UpdatedAt = secondEntry.Revision.CreatedAt
+	firstLink, secondLink := link(), link()
+	secondLink.Revision = revision(2)
+	secondLink.Label = "Link r2"
+	secondLink.UpdatedAt = secondLink.Revision.CreatedAt
+	if err := s.Update(ctx, func(tx knowledgeStore.WriteTx) error {
+		if err := tx.PutEntry(ctx, firstEntry, 0); err != nil {
+			return err
+		}
+		if err := tx.PutEntry(ctx, secondEntry, 1); err != nil {
+			return err
+		}
+		if err := tx.PutLink(ctx, firstLink, 0); err != nil {
+			return err
+		}
+		return tx.PutLink(ctx, secondLink, 1)
+	}); err != nil {
+		t.Fatalf("write histories: %v", err)
+	}
+	for _, object := range []knowledge.ObjectRef{
+		{Kind: knowledge.ObjectKindEntry, ID: string(entryID)},
+		{Kind: knowledge.ObjectKindLink, ID: string(linkID)},
+	} {
+		page, err := s.ListRevisions(ctx, knowledgeStore.RevisionListRequest{Object: object})
+		if err != nil || len(page.Revisions) != 2 || page.Revisions[0].RevisionMetadata().Number != 2 {
+			t.Fatalf("ListRevisions(%v) = %#v, %v", object, page, err)
+		}
+	}
+}
+
 func TestStoreClonesMutableRecordData(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

@@ -84,6 +84,7 @@ type Store interface {
 	Update(context.Context, func(WriteTx) error) error
 	ListChunks(context.Context, ChunkListRequest) (ChunkPage, error)
 	ListEntries(context.Context, EntryListRequest) (EntryPage, error)
+	ListRevisions(context.Context, RevisionListRequest) (RevisionPage, error)
 	Health(context.Context) (Health, error)
 	Checkpoint(context.Context, string) error
 	Close() error
