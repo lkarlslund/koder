@@ -61,6 +61,7 @@ type Service struct {
 	operationalMu    sync.Mutex
 	rebuildRunning   bool
 	rebuildStartedAt time.Time
+	rebuildCancel    context.CancelFunc
 	operationsCtx    context.Context
 	operationsCancel context.CancelFunc
 	operationsClosed bool

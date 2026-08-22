@@ -15,6 +15,19 @@ import (
 	"github.com/lkarlslund/koder/internal/knowledge/store/memory"
 )
 
+type apiBlockingMaintenanceStore struct {
+	*memory.Store
+	started chan struct{}
+	done    chan struct{}
+}
+
+func (s *apiBlockingMaintenanceStore) RebuildIndexes(ctx context.Context) error {
+	close(s.started)
+	defer close(s.done)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
 func TestKnowledgeOperationalStatusAndIndexRebuildAPI(t *testing.T) {
 	ctrl := newTestController(t)
 	store := memory.New()
@@ -84,5 +97,46 @@ func TestKnowledgeOperationalStatusAndIndexRebuildAPI(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("rebuild did not complete: status=%d response=%#v", response.StatusCode, status)
 		}
+	}
+}
+
+func TestKnowledgeIndexRebuildCancelAPI(t *testing.T) {
+	ctrl := newTestController(t)
+	store := &apiBlockingMaintenanceStore{Store: memory.New(), started: make(chan struct{}), done: make(chan struct{})}
+	t.Cleanup(func() { _ = store.Close() })
+	service, err := knowledgeService.New(knowledgeService.Config{
+		Store: store, Actor: knowledgeService.ContextActorSource(knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:test"}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctrl.SetKnowledgeService(service)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoOpenBrowser: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := bindKnowledgeTestDevice(t, srv)
+	response := knowledgeJSONRequest(t, http.MethodPost, srv.URL()+knowledgeapi.IndexRebuildPath, token, knowledgeapi.IndexRebuildRequest{Index: "lexical"})
+	response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("start rebuild status = %d", response.StatusCode)
+	}
+	select {
+	case <-store.started:
+	case <-time.After(time.Second):
+		t.Fatal("rebuild did not start")
+	}
+	response = knowledgeAPIRequest(t, http.MethodDelete, srv.URL()+knowledgeapi.IndexRebuildPath, token)
+	var canceled knowledgeapi.IndexRebuildCancelResponse
+	decodeKnowledgeResponse(t, response, &canceled)
+	if response.StatusCode != http.StatusAccepted || !canceled.Result.Accepted {
+		t.Fatalf("cancel rebuild status=%d response=%#v", response.StatusCode, canceled)
+	}
+	select {
+	case <-store.done:
+	case <-time.After(time.Second):
+		t.Fatal("canceled rebuild did not exit")
 	}
 }

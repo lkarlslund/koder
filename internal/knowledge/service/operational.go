@@ -17,6 +17,7 @@ const (
 	OperationalStatusRead    OperationalAction = "status_read"
 	OperationalIntegrityScan OperationalAction = "integrity_scan"
 	OperationalIndexRebuild  OperationalAction = "index_rebuild"
+	OperationalIndexCancel   OperationalAction = "index_cancel"
 )
 
 var ErrOperationalPolicyDenied = errors.New("knowledge operational policy denied operation")
@@ -55,6 +56,11 @@ type OperationalStatus struct {
 }
 
 type StartIndexRebuildResult struct {
+	Accepted bool                              `json:"accepted"`
+	Status   knowledgeStore.IndexRebuildStatus `json:"status"`
+}
+
+type CancelIndexRebuildResult struct {
 	Accepted bool                              `json:"accepted"`
 	Status   knowledgeStore.IndexRebuildStatus `json:"status"`
 }
@@ -149,6 +155,8 @@ func (s *Service) StartIndexRebuild(ctx context.Context) (StartIndexRebuildResul
 	}
 	s.rebuildRunning = true
 	s.rebuildStartedAt = s.now().UTC().Round(0)
+	rebuildCtx, rebuildCancel := context.WithCancel(s.operationsCtx)
+	s.rebuildCancel = rebuildCancel
 	startedAt := s.rebuildStartedAt
 	s.operationsWG.Add(1)
 	s.operationalMu.Unlock()
@@ -157,16 +165,44 @@ func (s *Service) StartIndexRebuild(ctx context.Context) (StartIndexRebuildResul
 	status.ActiveGeneration = health.IndexGeneration
 	status.StartedAt = startedAt
 	status.TargetGeneration = health.IndexGeneration + 1
-	go s.runIndexRebuild(maintenance)
+	go s.runIndexRebuild(rebuildCtx, maintenance)
 	return StartIndexRebuildResult{Accepted: true, Status: status}, nil
 }
 
-func (s *Service) runIndexRebuild(maintenance knowledgeStore.MaintenanceStore) {
+func (s *Service) CancelIndexRebuild(ctx context.Context) (CancelIndexRebuildResult, error) {
+	if err := ctx.Err(); err != nil {
+		return CancelIndexRebuildResult{}, err
+	}
+	if err := s.authorizeOperational(ctx, OperationalIndexCancel); err != nil {
+		return CancelIndexRebuildResult{}, err
+	}
+	maintenance, ok := s.store.(knowledgeStore.MaintenanceStore)
+	if !ok {
+		return CancelIndexRebuildResult{}, knowledgeStore.ErrUnsupported
+	}
+	s.operationalMu.Lock()
+	if !s.rebuildRunning || s.rebuildCancel == nil {
+		s.operationalMu.Unlock()
+		return CancelIndexRebuildResult{}, fmt.Errorf("%w: no knowledge index rebuild is running", knowledgeStore.ErrConflict)
+	}
+	cancel := s.rebuildCancel
+	s.operationalMu.Unlock()
+	cancel()
+	status, err := maintenance.IndexRebuildStatus(ctx)
+	if err != nil {
+		return CancelIndexRebuildResult{}, fmt.Errorf("read knowledge index status after cancel: %w", err)
+	}
+	status.Running = true
+	return CancelIndexRebuildResult{Accepted: true, Status: status}, nil
+}
+
+func (s *Service) runIndexRebuild(ctx context.Context, maintenance knowledgeStore.MaintenanceStore) {
 	defer s.operationsWG.Done()
-	_ = maintenance.RebuildIndexes(s.operationsCtx)
+	_ = maintenance.RebuildIndexes(ctx)
 	s.operationalMu.Lock()
 	s.rebuildRunning = false
 	s.rebuildStartedAt = time.Time{}
+	s.rebuildCancel = nil
 	s.operationalMu.Unlock()
 }
 

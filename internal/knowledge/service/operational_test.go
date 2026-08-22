@@ -66,6 +66,51 @@ func TestShutdownOperationsCancelsAndJoinsIndexRebuild(t *testing.T) {
 	}
 }
 
+func TestCancelIndexRebuildStopsOnlyTheActiveRebuild(t *testing.T) {
+	t.Parallel()
+	store := &blockingMaintenanceStore{
+		Store: memory.New(), started: make(chan struct{}), release: make(chan struct{}), done: make(chan struct{}),
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service, err := New(Config{
+		Store: store, Actor: ContextActorSource(knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:test"}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.StartIndexRebuild(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-store.started:
+	case <-time.After(time.Second):
+		t.Fatal("index rebuild did not start")
+	}
+	canceled, err := service.CancelIndexRebuild(context.Background())
+	if err != nil || !canceled.Accepted || !canceled.Status.Running {
+		t.Fatalf("CancelIndexRebuild() = %#v, %v", canceled, err)
+	}
+	select {
+	case <-store.done:
+	case <-time.After(time.Second):
+		t.Fatal("canceled index rebuild did not exit")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := service.CancelIndexRebuild(context.Background()); errors.Is(err, knowledgeStore.ErrConflict) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("rebuild remained cancelable after worker exit")
+		}
+		runtime.Gosched()
+	}
+	status, err := service.OperationalStatus(context.Background())
+	if err != nil || status.Store.IndexGeneration != 1 || status.LexicalIndex == nil || status.LexicalIndex.Running {
+		t.Fatalf("status after cancellation = %#v, %v", status, err)
+	}
+}
+
 func TestOperationalStatusAndAsynchronousIndexRebuild(t *testing.T) {
 	t.Parallel()
 	store := &blockingMaintenanceStore{

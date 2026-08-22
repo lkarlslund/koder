@@ -282,6 +282,44 @@ func TestCanonicalMaintenanceHonorsCancellationAndCorruption(t *testing.T) {
 	}
 }
 
+func TestCanceledIndexRebuildKeepsActiveGeneration(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	s := openSeededMaintenanceStore(t, ctx)
+	started := make(chan struct{})
+	s.indexes = []indexDefinition{{
+		name: "cancel-test",
+		build: func(ctx context.Context, record knowledgeStore.CanonicalRecord) ([]indexEntry, error) {
+			select {
+			case <-started:
+			default:
+				close(started)
+			}
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}}
+	done := make(chan error, 1)
+	go func() { done <- s.RebuildIndexes(ctx) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("rebuild did not start")
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("RebuildIndexes() error = %v", err)
+	}
+	status, err := s.IndexRebuildStatus(context.Background())
+	if err != nil || status.Running || !status.Canceled || status.ActiveGeneration != initialIndexGeneration || status.LastError != "" {
+		t.Fatalf("canceled status = %#v, %v", status, err)
+	}
+	health, err := s.Health(context.Background())
+	if err != nil || health.IndexGeneration != initialIndexGeneration {
+		t.Fatalf("health after cancellation = %#v, %v", health, err)
+	}
+}
+
 func openSeededMaintenanceStore(t *testing.T, ctx context.Context) *Store {
 	t.Helper()
 	s, err := Open(t.TempDir())

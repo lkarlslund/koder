@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -160,8 +161,13 @@ func (s *Store) RebuildIndexes(ctx context.Context) (rebuildErr error) {
 		}
 		status := s.currentRebuildStatus()
 		status.Running = false
+		status.Canceled = errors.Is(rebuildErr, context.Canceled)
 		status.CompletedAt = time.Now().UTC()
-		status.LastError = "knowledge index rebuild failed"
+		if status.Canceled {
+			status.LastError = ""
+		} else {
+			status.LastError = "knowledge index rebuild failed"
+		}
 		s.setRebuildStatus(status)
 	}()
 

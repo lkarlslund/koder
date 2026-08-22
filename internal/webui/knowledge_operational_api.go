@@ -41,14 +41,28 @@ func (s *Server) handleKnowledgeIndexRebuild(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		w.Header().Set("Allow", http.MethodPost+", "+http.MethodDelete)
 		s.writeKnowledgeError(w, requestID, http.StatusMethodNotAllowed, knowledgeService.ErrorCodeInvalid, "This Knowledge endpoint does not support that method.")
 		return
 	}
 	service := s.controller.KnowledgeService()
 	if service == nil {
 		s.writeKnowledgeError(w, requestID, http.StatusServiceUnavailable, knowledgeService.ErrorCodeUnavailable, "Knowledge is temporarily unavailable.")
+		return
+	}
+	if r.Method == http.MethodDelete {
+		if !s.requireNoKnowledgeQuery(w, r, requestID) {
+			return
+		}
+		result, err := service.CancelIndexRebuild(ctx)
+		if err != nil {
+			s.writeKnowledgeServiceError(w, requestID, err)
+			return
+		}
+		s.writeKnowledgeJSON(w, http.StatusAccepted, knowledgeapi.IndexRebuildCancelResponse{
+			ResponseMetadata: knowledgeapi.Metadata(requestID), Result: result,
+		})
 		return
 	}
 	var request knowledgeapi.IndexRebuildRequest

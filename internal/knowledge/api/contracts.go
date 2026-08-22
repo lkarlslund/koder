@@ -515,6 +515,11 @@ type IndexRebuildResponse struct {
 	Result knowledgeService.StartIndexRebuildResult `json:"result"`
 }
 
+type IndexRebuildCancelResponse struct {
+	ResponseMetadata
+	Result knowledgeService.CancelIndexRebuildResult `json:"result"`
+}
+
 type ChatContextRequest struct {
 	SessionID string              `json:"session_id"`
 	ChatID    string              `json:"chat_id"`

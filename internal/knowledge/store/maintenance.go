@@ -100,6 +100,7 @@ func (s *ScanStats) Add(kind RecordKind) {
 
 type IndexRebuildStatus struct {
 	Running          bool      `json:"running"`
+	Canceled         bool      `json:"canceled,omitempty"`
 	ActiveGeneration uint64    `json:"active_generation"`
 	TargetGeneration uint64    `json:"target_generation"`
 	Scanned          ScanStats `json:"scanned"`
