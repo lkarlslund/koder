@@ -37,10 +37,18 @@ type TraversalNode struct {
 }
 
 type TraversalResult struct {
-	Nodes             []TraversalNode  `json:"nodes"`
-	Edges             []knowledge.Link `json:"edges"`
-	Truncated         bool             `json:"truncated"`
-	TruncationReasons []string         `json:"truncation_reasons,omitempty"`
+	Nodes              []TraversalNode     `json:"nodes"`
+	Edges              []knowledge.Link    `json:"edges"`
+	Contradictions     []Contradiction     `json:"contradictions,omitempty"`
+	SupersessionChains []SupersessionChain `json:"supersession_chains,omitempty"`
+	Truncated          bool                `json:"truncated"`
+	TruncationReasons  []string            `json:"truncation_reasons,omitempty"`
+}
+
+type Contradiction struct {
+	LinkID knowledge.LinkID    `json:"link_id"`
+	Left   knowledge.ObjectRef `json:"left"`
+	Right  knowledge.ObjectRef `json:"right"`
 }
 
 type traversalQueueItem struct {
@@ -184,7 +192,38 @@ func (s *Service) Traverse(ctx context.Context, request TraversalRequest) (Trave
 		}
 	}
 	result.Truncated = len(result.TruncationReasons) > 0
+	if err := s.enrichTraversalSemantics(ctx, &result); err != nil {
+		return TraversalResult{}, err
+	}
 	return result, nil
+}
+
+func (s *Service) enrichTraversalSemantics(ctx context.Context, result *TraversalResult) error {
+	for _, link := range result.Edges {
+		if link.Kind == knowledge.LinkKindContradicts {
+			result.Contradictions = append(result.Contradictions, Contradiction{
+				LinkID: link.ID, Left: link.Source, Right: link.Target,
+			})
+		}
+	}
+	covered := make(map[knowledge.EntryID]struct{})
+	for _, node := range result.Nodes {
+		if node.Object.Kind != knowledgeStore.RecordKindEntry || node.Object.Entry == nil || node.Object.Entry.SupersededByID == "" {
+			continue
+		}
+		if _, exists := covered[node.Object.Entry.ID]; exists {
+			continue
+		}
+		chain, err := s.SupersessionChain(ctx, SupersessionChainRequest{EntryID: node.Object.Entry.ID})
+		if err != nil {
+			return err
+		}
+		for _, entry := range chain.Entries {
+			covered[entry.ID] = struct{}{}
+		}
+		result.SupersessionChains = append(result.SupersessionChains, chain)
+	}
+	return nil
 }
 
 func (s *Service) hasUnseenTraversalEdge(ctx context.Context, endpoint knowledge.ObjectRef, request TraversalRequest, seen map[knowledge.LinkID]struct{}) (bool, error) {
