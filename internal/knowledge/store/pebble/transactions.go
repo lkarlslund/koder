@@ -500,6 +500,9 @@ func (tx *transaction) PutLink(ctx context.Context, value knowledge.Link, expect
 	if err := revision.CheckPut("link", string(value.ID), expectedRevision, value.Revision.Number, current.Revision.Number, exists); err != nil {
 		return err
 	}
+	if err := tx.updateLinkIndexes(ctx, optionalLink(current, exists), &value); err != nil {
+		return err
+	}
 	tx.derivedDirty = true
 	return tx.putRevisioned(linkKey(string(value.ID)), revisionKey(recordLink, string(value.ID), value.Revision.Number), value)
 }
@@ -515,8 +518,48 @@ func (tx *transaction) DeleteLink(ctx context.Context, id knowledge.LinkID, expe
 	if err := revision.CheckDelete("link", string(id), expectedRevision, current.Revision.Number, exists); err != nil {
 		return err
 	}
+	if err := tx.updateLinkIndexes(ctx, &current, nil); err != nil {
+		return err
+	}
 	tx.derivedDirty = true
 	return tx.deleteRevisioned(linkKey(string(id)), revisionPrefix(recordLink, string(id)))
+}
+
+func optionalLink(value knowledge.Link, exists bool) *knowledge.Link {
+	if !exists {
+		return nil
+	}
+	return &value
+}
+
+func (tx *transaction) updateLinkIndexes(ctx context.Context, old, next *knowledge.Link) error {
+	if old != nil {
+		entries, err := buildLinkIndexEntries(ctx, tx.indexes, *old)
+		if err != nil {
+			return err
+		}
+		for name, values := range entries {
+			for _, item := range values {
+				if err := tx.batch.Delete(indexKey(tx.indexGeneration, name, item.Suffix), nil); err != nil {
+					return fmt.Errorf("delete knowledge index %s: %w", name, err)
+				}
+			}
+		}
+	}
+	if next != nil {
+		entries, err := buildLinkIndexEntries(ctx, tx.indexes, *next)
+		if err != nil {
+			return err
+		}
+		for name, values := range entries {
+			for _, item := range values {
+				if err := tx.batch.Set(indexKey(tx.indexGeneration, name, item.Suffix), item.Value, nil); err != nil {
+					return fmt.Errorf("put knowledge index %s: %w", name, err)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (tx *transaction) PutEvidence(ctx context.Context, value knowledge.Evidence) error {

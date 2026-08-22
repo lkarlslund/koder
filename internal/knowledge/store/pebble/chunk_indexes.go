@@ -69,6 +69,7 @@ func defaultIndexDefinitions() []indexDefinition {
 		}),
 	}
 	definitions = append(definitions, defaultEntryIndexDefinitions()...)
+	definitions = append(definitions, defaultLinkIndexDefinitions()...)
 	return append(definitions, defaultEvidenceIndexDefinitions()...)
 }
 
