@@ -21,23 +21,27 @@ type ActorSource func(context.Context) (knowledge.Actor, error)
 type IDSource func() string
 
 type Config struct {
-	Store       knowledgeStore.Store
-	Classifier  knowledge.Classifier
-	ChunkPolicy ChunkPolicy
-	Actor       ActorSource
-	Now         func() time.Time
-	NewID       IDSource
-	RankSignals RankingSignalSource
+	Store        knowledgeStore.Store
+	Classifier   knowledge.Classifier
+	ChunkPolicy  ChunkPolicy
+	Actor        ActorSource
+	Now          func() time.Time
+	NewID        IDSource
+	RankSignals  RankingSignalSource
+	Semantic     SemanticIndexProvider
+	ScoreBlender SearchScoreBlender
 }
 
 type Service struct {
-	store       knowledgeStore.Store
-	classifier  knowledge.Classifier
-	chunkPolicy ChunkPolicy
-	actor       ActorSource
-	now         func() time.Time
-	newID       IDSource
-	rankSignals RankingSignalSource
+	store        knowledgeStore.Store
+	classifier   knowledge.Classifier
+	chunkPolicy  ChunkPolicy
+	actor        ActorSource
+	now          func() time.Time
+	newID        IDSource
+	rankSignals  RankingSignalSource
+	semantic     SemanticIndexProvider
+	scoreBlender SearchScoreBlender
 }
 
 func New(cfg Config) (*Service, error) {
@@ -66,6 +70,7 @@ func New(cfg Config) (*Service, error) {
 	return &Service{
 		store: cfg.Store, classifier: cfg.Classifier, chunkPolicy: cfg.ChunkPolicy, actor: cfg.Actor,
 		now: cfg.Now, newID: cfg.NewID, rankSignals: cfg.RankSignals,
+		semantic: cfg.Semantic, scoreBlender: cfg.ScoreBlender,
 	}, nil
 }
 
