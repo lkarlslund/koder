@@ -64,7 +64,37 @@
     return {streamID: requiredText(value.stream_id, 'checkpoint stream'), sequence};
   }
 
-  function snapshotToPatch(snapshot) {
+  function localViewPatch(patch, localView) {
+    localView = localView && typeof localView === 'object' ? localView : {};
+    const hiddenNodes = new Set(Array.isArray(localView.hiddenNodes) ? localView.hiddenNodes.map(String) : []);
+    const hiddenEdges = new Set(Array.isArray(localView.hiddenEdges) ? localView.hiddenEdges.map(String) : []);
+    const pinnedNodes = new Map();
+    for (const item of Array.isArray(localView.pinnedNodes) ? localView.pinnedNodes : []) {
+      const key = String(item && item.key || '');
+      const x = Number(item && item.x);
+      const y = Number(item && item.y);
+      if (key && Number.isFinite(x) && Number.isFinite(y)) pinnedNodes.set(key, {x, y});
+    }
+    return {
+      ...patch,
+      upsertNodes: patch.upsertNodes.map(node => {
+        const pin = pinnedNodes.get(node.key);
+        return {
+          ...node,
+          attributes: {
+            ...node.attributes,
+            ...(hiddenNodes.has(node.key) ? {hidden: true} : {}),
+            ...(pin ? {pinned: true, x: pin.x, y: pin.y} : {}),
+          },
+        };
+      }),
+      upsertEdges: patch.upsertEdges.map(edge => ({
+        ...edge, attributes: {...edge.attributes, ...(hiddenEdges.has(edge.key) ? {hidden: true} : {})},
+      })),
+    };
+  }
+
+  function snapshotToPatch(snapshot, localView) {
     if (!snapshot || typeof snapshot !== 'object') throw new TypeError('Knowledge graph snapshot is invalid');
     const generation = Number(snapshot.generation);
     if (!Number.isSafeInteger(generation) || generation < 1) throw new TypeError('Knowledge graph generation is invalid');
@@ -73,7 +103,7 @@
       upsertNodes: (snapshot.nodes || []).map(nodeFromAPI), removeNodeKeys: [],
       upsertEdges: (snapshot.edges || []).map(edgeFromAPI), removeEdgeKeys: [],
     };
-    return validatePatch(patch);
+    return validatePatch(localViewPatch(patch, localView));
   }
 
   function uniqueKeys(values, field) {
@@ -133,9 +163,9 @@
       return event;
     }
 
-    replaceSnapshot(snapshot) {
+    replaceSnapshot(snapshot, localView) {
       this.assertActive();
-      const patch = snapshotToPatch(snapshot);
+      const patch = snapshotToPatch(snapshot, localView);
       this.emit('beforechange', {mode: 'replace', patch});
       const result = this.target.replace(patch);
       if (result && result.action && result.action !== 'applied') {
@@ -148,10 +178,10 @@
       return patch;
     }
 
-    mergeSnapshot(snapshot) {
+    mergeSnapshot(snapshot, localView) {
       this.assertActive();
       if (typeof this.target.merge !== 'function') throw new TypeError('Knowledge graph target does not support snapshot merging');
-      const patch = snapshotToPatch(snapshot);
+      const patch = snapshotToPatch(snapshot, localView);
       this.emit('beforechange', {mode: 'merge', patch});
       const result = this.target.merge(patch);
       if (result && result.action && result.action !== 'applied') {

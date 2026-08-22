@@ -6,6 +6,15 @@ const fixture = require('./knowledge_graph_fixtures.js');
 
 assert.strictEqual(graph.PATCH_VERSION, 'knowledge.graph.patch.v1');
 assert.deepStrictEqual(graph.snapshotToPatch(fixture.apiSnapshot), fixture.snapshotPatch);
+const localPatch = graph.snapshotToPatch(fixture.apiSnapshot, {
+  hiddenNodes: [`entry:${fixture.ids.partition}`], hiddenEdges: [fixture.ids.requires],
+  pinnedNodes: [{key: `entry:${fixture.ids.partition}`, x: 12, y: -7}],
+});
+assert.deepStrictEqual(
+  localPatch.upsertNodes.find(node => node.key === `entry:${fixture.ids.partition}`).attributes,
+  {...fixture.snapshotPatch.upsertNodes.find(node => node.key === `entry:${fixture.ids.partition}`).attributes, hidden: true, pinned: true, x: 12, y: -7},
+);
+assert.strictEqual(localPatch.upsertEdges.find(edge => edge.key === fixture.ids.requires).attributes.hidden, true);
 assert.strictEqual(graph.objectKey({kind: 'entry', id: fixture.ids.partition}), `entry:${fixture.ids.partition}`);
 assert.throws(() => graph.objectKey({kind: 'link', id: fixture.ids.requires}), /kind is invalid/);
 assert.throws(() => graph.snapshotToPatch({...fixture.apiSnapshot, generation: 0}), /generation/);

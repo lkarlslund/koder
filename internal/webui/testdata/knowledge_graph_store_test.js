@@ -86,6 +86,9 @@ assert.throws(() => store.apply(fixture.snapshotPatch), /destroyed/);
 const mergeStore = new graphAPI.Store();
 const mergeAdapter = new adapterAPI.Adapter(mergeStore);
 mergeAdapter.replaceSnapshot(fixture.apiSnapshot);
+mergeStore.graph.setEdgeAttribute(fixture.ids.requires, 'hidden', true);
+mergeAdapter.mergeSnapshot(fixture.apiSnapshot);
+assert.strictEqual(mergeStore.graph.getEdgeAttribute(fixture.ids.requires, 'hidden'), true, 'merge must preserve local edge visibility');
 mergeAdapter.mergeSnapshot({
   ...fixture.apiSnapshot, nodes: [fixture.apiNodes.verify], edges: [fixture.apiEdges.follows],
 });

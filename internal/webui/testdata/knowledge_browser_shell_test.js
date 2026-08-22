@@ -41,6 +41,48 @@ assert.strictEqual(
 assert.deepStrictEqual(browser.browserStateFromSearch('?kind=bad&scope_kind=bad&object_kind=entry&id=..%2Fsecret'), {
   query: '', kind: '', scopeKind: '', state: '', tag: '', objectKind: '', id: '',
 });
+assert.strictEqual(browser.browserSearchHasState('?return=%2Fs%2Fsession-1'), false);
+assert.strictEqual(browser.browserSearchHasState('?return=%2Fs%2Fsession-1&kind='), true);
+assert.strictEqual(browser.browserSearchHasState('?object_kind=entry&id=entry-1'), true);
+const localPreferences = browser.normalizeLocalPreferences({
+  version: 99,
+  browser: {query: ' partition ', kind: 'reference', scopeKind: 'project', state: 'bad', objectKind: 'entry', id: 'entry-1'},
+  mobilePane: 'inspector',
+  graph: {
+    root: {kind: 'chunk', id: 'chunk-1'},
+    hiddenNodes: ['entry:entry-1', 'entry:entry-1', '../bad'],
+    hiddenEdges: ['link-1', '../bad'],
+    pinnedNodes: [{key: 'entry:entry-1', x: 1.5, y: -2}, {key: 'bad', x: 1, y: 2}, {key: 'entry:too-far', x: 2000000, y: 0}],
+    frontier: [{kind: 'entry', id: 'entry-1', direction: 'outgoing'}, {kind: 'entry', id: 'entry-1', direction: 'outgoing'}, {kind: 'link', id: 'link-1', direction: 'incoming'}],
+  },
+});
+assert.deepStrictEqual(localPreferences, {
+  version: 1,
+  browser: {query: 'partition', kind: 'reference', scopeKind: 'project', state: '', tag: '', objectKind: 'entry', id: 'entry-1'},
+  mobilePane: 'inspector',
+  graph: {
+    root: {kind: 'chunk', id: 'chunk-1'}, hiddenNodes: ['entry:entry-1'], hiddenEdges: ['link-1'],
+    pinnedNodes: [{key: 'entry:entry-1', x: 1.5, y: -2}],
+    frontier: [{kind: 'entry', id: 'entry-1', direction: 'outgoing'}],
+  },
+});
+const preferenceValues = new Map();
+const preferenceStorage = {
+  getItem: key => preferenceValues.get(key) || null,
+  setItem: (key, value) => preferenceValues.set(key, value),
+  removeItem: key => preferenceValues.delete(key),
+};
+assert.strictEqual(browser.loadLocalPreferences(preferenceStorage), null);
+assert.deepStrictEqual(browser.saveLocalPreferences(preferenceStorage, localPreferences), localPreferences);
+assert.deepStrictEqual(browser.loadLocalPreferences(preferenceStorage), localPreferences);
+assert.strictEqual(preferenceValues.has(browser.localPreferencesKey), true);
+assert.strictEqual(browser.clearLocalPreferences(preferenceStorage), true);
+assert.strictEqual(browser.loadLocalPreferences(preferenceStorage), null);
+preferenceValues.set(browser.localPreferencesKey, '{broken');
+assert.strictEqual(browser.loadLocalPreferences(preferenceStorage), null);
+preferenceValues.set(browser.localPreferencesKey, JSON.stringify({version: 2}));
+assert.strictEqual(browser.loadLocalPreferences(preferenceStorage), null);
+assert.doesNotThrow(() => browser.saveLocalPreferences({setItem() { throw new Error('quota'); }}, localPreferences));
 assert.strictEqual(browser.displayLabel('partially_verified'), 'Partially verified');
 assert.strictEqual(browser.plainTextLabel('**Safe** [label](https://example.com) <script>bad</script>'), 'Safe label bad');
 assert.strictEqual(browser.plainTextLabel('abcdefghijklmnopqrstuvwxyz', 8), 'abcdefg…');

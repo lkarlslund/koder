@@ -10,6 +10,7 @@
 
   const PATCH_VERSION = 'knowledge.graph.patch.v1';
   const localNodeAttributes = Object.freeze(['x', 'y', 'size', 'hidden', 'highlighted', 'pinned']);
+  const localEdgeAttributes = Object.freeze(['hidden', 'highlighted']);
 
   function graphConstructor() {
     if (!graphology || typeof graphology.MultiDirectedGraph !== 'function') {
@@ -270,6 +271,10 @@
       const target = String(edge.target);
       const attributes = cloneAttributes(edge.attributes);
       if (this.graph.hasEdge(key)) {
+        const current = this.graph.getEdgeAttributes(key);
+        for (const name of localEdgeAttributes) {
+          if (current[name] !== undefined && attributes[name] === undefined) attributes[name] = current[name];
+        }
         if (this.graph.source(key) !== source || this.graph.target(key) !== target) {
           this.graph.dropEdge(key);
           this.graph.addDirectedEdgeWithKey(key, source, target, attributes);

@@ -70,6 +70,8 @@
   }
 
   const browserURLKeys = Object.freeze(['query', 'kind', 'scope_kind', 'state', 'tag', 'object_kind', 'id']);
+  const localPreferencesKey = 'koder.knowledge.explorer.preferences.v1';
+  const localPreferencesVersion = 1;
   const allowedChunkKinds = new Set(['reference', 'personal', 'project', 'environment']);
   const allowedScopeKinds = new Set(['global', 'personal', 'project', 'session', 'environment']);
   const allowedChunkStates = new Set(['draft', 'archived']);
@@ -99,6 +101,97 @@
       objectKind: objectKind && /^[A-Za-z0-9_-]+$/.test(id) ? objectKind : '',
       id: objectKind && /^[A-Za-z0-9_-]+$/.test(id) ? id : '',
     };
+  }
+
+  function browserSearchHasState(search) {
+    let params;
+    try { params = new URLSearchParams(String(search || '')); } catch (_) { return false; }
+    return browserURLKeys.some(key => params.has(key));
+  }
+
+  function normalizedBrowserState(value) {
+    return browserStateFromSearch(searchForBrowserState('', value));
+  }
+
+  function graphPreferenceObject(value) {
+    value = value && typeof value === 'object' ? value : {};
+    const kind = String(value.kind || '').trim().toLowerCase();
+    const id = boundedText(value.id, 160);
+    return ['chunk', 'entry'].includes(kind) && /^[A-Za-z0-9_-]+$/.test(id) ? {kind, id} : null;
+  }
+
+  function graphPreferenceKey(value, node) {
+    value = boundedText(value, 220);
+    const pattern = node ? /^(?:chunk|entry|evidence):[A-Za-z0-9_-]+$/ : /^[A-Za-z0-9_-]+$/;
+    return pattern.test(value) ? value : '';
+  }
+
+  function uniqueBounded(values, limit, normalize) {
+    const result = [];
+    const seen = new Set();
+    for (const value of Array.isArray(values) ? values : []) {
+      const normalized = normalize(value);
+      const token = typeof normalized === 'string' ? normalized : JSON.stringify(normalized);
+      if (!normalized || seen.has(token)) continue;
+      seen.add(token);
+      result.push(normalized);
+      if (result.length >= limit) break;
+    }
+    return result;
+  }
+
+  function normalizeLocalPreferences(value) {
+    value = value && typeof value === 'object' ? value : {};
+    const graph = value.graph && typeof value.graph === 'object' ? value.graph : {};
+    const pinnedNodes = uniqueBounded(graph.pinnedNodes, 500, item => {
+      item = item && typeof item === 'object' ? item : {};
+      const key = graphPreferenceKey(item.key, true);
+      const x = Number(item.x);
+      const y = Number(item.y);
+      return key && Number.isFinite(x) && Number.isFinite(y) && Math.abs(x) <= 1000000 && Math.abs(y) <= 1000000
+        ? {key, x, y} : null;
+    });
+    const frontier = uniqueBounded(graph.frontier, 50, item => {
+      item = item && typeof item === 'object' ? item : {};
+      const object = graphPreferenceObject(item);
+      const direction = String(item.direction || '').trim().toLowerCase();
+      return object && ['incoming', 'outgoing'].includes(direction) ? {...object, direction} : null;
+    });
+    return Object.freeze({
+      version: localPreferencesVersion,
+      browser: normalizedBrowserState(value.browser),
+      mobilePane: normalizePane(value.mobilePane),
+      graph: Object.freeze({
+        root: graphPreferenceObject(graph.root),
+        hiddenNodes: uniqueBounded(graph.hiddenNodes, 1000, item => graphPreferenceKey(item, true)),
+        hiddenEdges: uniqueBounded(graph.hiddenEdges, 2000, item => graphPreferenceKey(item, false)),
+        pinnedNodes,
+        frontier,
+      }),
+    });
+  }
+
+  function loadLocalPreferences(storage, key) {
+    if (!storage || typeof storage.getItem !== 'function') return null;
+    try {
+      const raw = storage.getItem(key || localPreferencesKey);
+      if (!raw) return null;
+      const value = JSON.parse(raw);
+      if (!value || Number(value.version) !== localPreferencesVersion) return null;
+      return normalizeLocalPreferences(value);
+    } catch (_) { return null; }
+  }
+
+  function saveLocalPreferences(storage, value, key) {
+    const normalized = normalizeLocalPreferences(value);
+    if (!storage || typeof storage.setItem !== 'function') return normalized;
+    try { storage.setItem(key || localPreferencesKey, JSON.stringify(normalized)); } catch (_) {}
+    return normalized;
+  }
+
+  function clearLocalPreferences(storage, key) {
+    if (!storage || typeof storage.removeItem !== 'function') return false;
+    try { storage.removeItem(key || localPreferencesKey); return true; } catch (_) { return false; }
   }
 
   function searchForBrowserState(search, state) {
@@ -570,7 +663,26 @@
       this.page = null;
       this.lastError = null;
       this.resultMode = 'chunks';
-      this.urlState = browserStateFromSearch(globalThis.location && globalThis.location.search);
+      const search = globalThis.location && globalThis.location.search;
+      if (Object.prototype.hasOwnProperty.call(options, 'preferenceStorage')) this.preferenceStorage = options.preferenceStorage;
+      else {
+        try { this.preferenceStorage = globalThis.localStorage || null; } catch (_) { this.preferenceStorage = null; }
+      }
+      this.savedPreferences = loadLocalPreferences(this.preferenceStorage);
+      const explicitBrowserState = browserSearchHasState(search);
+      this.urlState = explicitBrowserState || !this.savedPreferences ? browserStateFromSearch(search) : this.savedPreferences.browser;
+      this.graphRoot = explicitBrowserState
+        ? graphPreferenceObject({kind: this.urlState.objectKind, id: this.urlState.id})
+        : (this.savedPreferences && this.savedPreferences.graph.root) || graphPreferenceObject({kind: this.urlState.objectKind, id: this.urlState.id});
+      this.graphFrontier = explicitBrowserState || !this.savedPreferences ? [] : [...this.savedPreferences.graph.frontier];
+      this.restoredGraphPreferences = explicitBrowserState || !this.savedPreferences ? normalizeLocalPreferences({}).graph : this.savedPreferences.graph;
+      this.preferenceTimer = 0;
+      this.suppressPreferenceWrites = false;
+      this.graphLoadGeneration = 0;
+      if (!explicitBrowserState && this.savedPreferences && globalThis.history && globalThis.location) {
+        const restoredSearch = searchForBrowserState(search, this.urlState);
+        globalThis.history.replaceState(null, '', globalThis.location.pathname + restoredSearch);
+      }
       this.chatSelection = chatSelectionFromSearch(globalThis.location && globalThis.location.search);
       this.inspectedObject = null;
       this.searchTimer = 0;
@@ -592,6 +704,7 @@
       this.graphIsolateButton = shell.querySelector('[data-knowledge-view-isolate]');
       this.graphRevealButton = shell.querySelector('[data-knowledge-view-reveal]');
       this.graphUndoButton = shell.querySelector('[data-knowledge-view-undo]');
+      this.preferencesResetButton = shell.querySelector('[data-knowledge-preferences-reset]');
       this.graphCanvas = shell.querySelector('[data-knowledge-graph-canvas]');
       this.graphContextMenu = shell.querySelector('[data-knowledge-context-menu]');
       this.graphContextHeading = shell.querySelector('[data-knowledge-context-heading]');
@@ -709,6 +822,7 @@
       if (this.graphIsolateButton) this.graphIsolateButton.addEventListener('click', () => this.applyGraphViewAction('isolate'));
       if (this.graphRevealButton) this.graphRevealButton.addEventListener('click', () => this.applyGraphViewAction('reveal'));
       if (this.graphUndoButton) this.graphUndoButton.addEventListener('click', () => this.applyGraphViewAction('undo'));
+      if (this.preferencesResetButton) this.preferencesResetButton.addEventListener('click', () => this.resetLocalPreferences());
       this.graphContextClickHandlers = new Map();
       for (const button of this.graphContextButtons) {
         const handler = () => this.runGraphContextAction(button.dataset.knowledgeContextAction);
@@ -779,6 +893,7 @@
         if (event && event.detail && event.detail.pane === 'graph' && this.graphViewport) {
           setTimeout(() => this.graphViewport && this.graphViewport.fit({animate: false}), 0);
         }
+        this.schedulePreferenceSave();
       };
       this.shell.addEventListener('koder:knowledge-pane', this.onGraphPane);
       if (this.graphAdapter) {
@@ -796,6 +911,7 @@
         this.graphViewUnsubscribe = this.graphView.subscribe(() => {
           if (this.graphRenderer) this.graphRenderer.scheduleRefresh(false);
           this.updateGraphViewControls();
+          this.schedulePreferenceSave();
         });
       }
       if (this.graphLayout) {
@@ -836,9 +952,12 @@
             const status = this.shell.querySelector('[data-knowledge-status-label]');
             if (status) status.textContent = event.detail && event.detail.pinned ? 'Node pinned locally' : 'Node released';
             if (event.detail && !event.detail.pinned && this.graphLayout) this.graphLayout.request();
+            this.schedulePreferenceSave();
           }
         });
       }
+      this.onPageHide = () => this.flushPreferenceSave();
+      globalThis.addEventListener('pagehide', this.onPageHide);
       this.syncControls();
       this.updateGraphViewControls();
     }
@@ -907,6 +1026,80 @@
       globalThis.history[replace ? 'replaceState' : 'pushState'](null, '', target);
       this.urlState = browserStateFromSearch(search);
       this.syncControls();
+      this.schedulePreferenceSave();
+    }
+
+    graph() {
+      return this.graphAdapter && this.graphAdapter.target && this.graphAdapter.target.graph || null;
+    }
+
+    localPreferenceSnapshot() {
+      const graph = this.graph();
+      let hiddenNodes = this.restoredGraphPreferences.hiddenNodes || [];
+      let hiddenEdges = this.restoredGraphPreferences.hiddenEdges || [];
+      let pinnedNodes = this.restoredGraphPreferences.pinnedNodes || [];
+      if (graph && graph.order) {
+        if (this.graphView) ({hiddenNodes, hiddenEdges} = this.graphView.snapshot());
+        pinnedNodes = graph.filterNodes((key, attributes) => !!attributes.pinned).map(key => ({
+          key, x: Number(graph.getNodeAttribute(key, 'x')), y: Number(graph.getNodeAttribute(key, 'y')),
+        }));
+      }
+      return normalizeLocalPreferences({
+        browser: this.urlState,
+        mobilePane: this.shell.dataset.mobilePane,
+        graph: {root: this.graphRoot, hiddenNodes, hiddenEdges, pinnedNodes, frontier: this.graphFrontier},
+      });
+    }
+
+    schedulePreferenceSave() {
+      if (this.suppressPreferenceWrites || !this.preferenceStorage) return;
+      clearTimeout(this.preferenceTimer);
+      this.preferenceTimer = setTimeout(() => this.flushPreferenceSave(), 120);
+    }
+
+    flushPreferenceSave() {
+      clearTimeout(this.preferenceTimer);
+      this.preferenceTimer = 0;
+      if (this.suppressPreferenceWrites || !this.preferenceStorage) return null;
+      const saved = saveLocalPreferences(this.preferenceStorage, this.localPreferenceSnapshot());
+      this.savedPreferences = saved;
+      this.restoredGraphPreferences = saved.graph;
+      return saved;
+    }
+
+    setGraphRoot(objectKind, id) {
+      this.graphRoot = graphPreferenceObject({kind: objectKind, id});
+      this.graphFrontier = [];
+      this.restoredGraphPreferences = normalizeLocalPreferences({graph: {root: this.graphRoot}}).graph;
+    }
+
+    resetLocalPreferences() {
+      this.suppressPreferenceWrites = true;
+      clearTimeout(this.preferenceTimer);
+      this.preferenceTimer = 0;
+      clearLocalPreferences(this.preferenceStorage);
+      this.savedPreferences = null;
+      this.graphRoot = null;
+      this.graphFrontier = [];
+      this.restoredGraphPreferences = normalizeLocalPreferences({}).graph;
+      const graph = this.graph();
+      if (this.graphView) this.graphView.reset();
+      if (graph) graph.updateEachNodeAttributes((key, attributes) => ({...attributes, pinned: false}), {attributes: ['pinned']});
+      this.urlState = browserStateFromSearch('');
+      const search = searchForBrowserState(globalThis.location && globalThis.location.search, this.urlState);
+      globalThis.history.replaceState(null, '', globalThis.location.pathname + search);
+      this.shell.dataset.mobilePane = 'graph';
+      for (const tab of this.shell.querySelectorAll('[data-knowledge-tab]')) {
+        const selected = tab.dataset.knowledgeTab === 'graph';
+        tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+        tab.tabIndex = selected ? 0 : -1;
+      }
+      this.syncControls();
+      this.suppressPreferenceWrites = false;
+      const status = this.shell.querySelector('[data-knowledge-status-label]');
+      if (status) status.textContent = 'Local explorer preferences reset';
+      this.refresh();
+      return true;
     }
 
     chunkQuery(cursor) {
@@ -1060,6 +1253,7 @@
     }
 
     selectObject(objectKind, id, object) {
+      this.setGraphRoot(objectKind, id);
       this.writeURLState({...this.urlState, objectKind, id}, false);
       this.renderSelection();
       const labelSource = this.resultMode === 'search' ? object && object.document && object.document.title : object && object.title;
@@ -1353,7 +1547,10 @@
 
     async loadGraphSelection() {
       if (!this.graphAdapter || !this.graphRenderer) return;
-      const request = graphSnapshotRequest(this.urlState.objectKind, this.urlState.id);
+      const generation = ++this.graphLoadGeneration;
+      this.client.cancel('graph-restore');
+      const root = this.graphRoot || graphPreferenceObject({kind: this.urlState.objectKind, id: this.urlState.id});
+      const request = root && graphSnapshotRequest(root.kind, root.id);
       if (!request) {
         this.client.cancel('graph');
         if (this.graphLayout) this.graphLayout.stop('selection_cleared');
@@ -1365,13 +1562,35 @@
       this.setGraphState('loading');
       try {
         const response = await this.client.graphSnapshot(request, {channel: 'graph', timeoutMS: 10000});
-        this.graphAdapter.replaceSnapshot(response);
-        if (this.graphView) this.graphView.reset();
+        if (generation !== this.graphLoadGeneration) return;
+        this.graphRoot = {...request.root};
+        const preferences = this.graphPreferencesForRoot(request.root);
+        this.suppressPreferenceWrites = true;
+        this.graphAdapter.replaceSnapshot(response, preferences);
+        if (this.graphView) this.graphView.reset({preserveVisibility: true});
+        let restoredExpansions = 0;
+        for (const expansion of preferences.frontier) {
+          if (generation !== this.graphLoadGeneration) return;
+          const expansionRequest = graphExpansionRequest(expansion.kind, expansion.id, expansion.direction);
+          if (!expansionRequest) continue;
+          try {
+            const expanded = await this.client.graphSnapshot(expansionRequest, {channel: 'graph-restore', timeoutMS: 10000});
+            if (generation !== this.graphLoadGeneration) return;
+            const merged = this.graphAdapter.mergeSnapshot(expanded, preferences);
+            if (!merged.result || merged.result.action === 'applied') restoredExpansions++;
+          } catch (error) {
+            if (error && ['canceled', 'stale_response'].includes(error.code)) return;
+            break;
+          }
+        }
+        this.applyLocalGraphPreferences();
         const rootKey = `${request.root.kind}:${request.root.id}`;
-        this.graphAdapter.select('node', rootKey);
+        const selectedKey = ['chunk', 'entry', 'evidence'].includes(this.urlState.objectKind) ? `${this.urlState.objectKind}:${this.urlState.id}` : '';
+        if (!(selectedKey && this.graphAdapter.select('node', selectedKey))) this.graphAdapter.select('node', rootKey);
         const counts = this.graphAdapter.counts();
         const truncated = !!(response && response.page && response.page.truncated);
-        const detail = `${counts.nodes} ${counts.nodes === 1 ? 'node' : 'nodes'} and ${counts.edges} ${counts.edges === 1 ? 'relationship' : 'relationships'}.`;
+        const restored = restoredExpansions ? ` Restored ${restoredExpansions} local ${restoredExpansions === 1 ? 'expansion' : 'expansions'}.` : '';
+        const detail = `${counts.nodes} ${counts.nodes === 1 ? 'node' : 'nodes'} and ${counts.edges} ${counts.edges === 1 ? 'relationship' : 'relationships'}.${restored}`;
         this.setGraphState(truncated ? 'truncated' : 'ready', detail);
         if (this.graphLayout) this.graphLayout.request();
         else if (this.graphViewport) this.graphViewport.fit({animate: false});
@@ -1380,7 +1599,25 @@
         const requestID = String(error && error.requestID || '');
         const detail = String(error && error.message || 'This neighborhood could not be loaded.');
         this.setGraphState(error && error.code === 'invalid_cursor' ? 'stale' : 'error', requestID ? `${detail} Audit ID: ${requestID}` : detail);
+      } finally {
+        if (generation === this.graphLoadGeneration) {
+          this.suppressPreferenceWrites = false;
+          this.schedulePreferenceSave();
+        }
       }
+    }
+
+    graphPreferencesForRoot(root) {
+      const savedRoot = this.restoredGraphPreferences && this.restoredGraphPreferences.root;
+      if (!savedRoot || !root || savedRoot.kind !== root.kind || savedRoot.id !== root.id) {
+        return normalizeLocalPreferences({graph: {root}}).graph;
+      }
+      return this.restoredGraphPreferences;
+    }
+
+    applyLocalGraphPreferences() {
+      if (this.graphRenderer) this.graphRenderer.scheduleRefresh(false);
+      this.updateGraphViewControls();
     }
 
     renderInspector(objectKind, record) {
@@ -2383,6 +2620,10 @@
         if (this.graphExpandStatus) {
           this.graphExpandStatus.textContent = `Added up to ${nodes} ${direction} nodes and ${edges} relationships${truncated ? ' (bounded)' : ''}.`;
         }
+        const expansion = {kind: request.root.kind, id: request.root.id, direction};
+        const token = JSON.stringify(expansion);
+        this.graphFrontier = [...this.graphFrontier.filter(item => JSON.stringify(item) !== token), expansion].slice(-50);
+        this.schedulePreferenceSave();
         if (this.graphLayout) this.graphLayout.request({iterations: 70});
         return true;
       } catch (error) {
@@ -2421,7 +2662,9 @@
     destroy() {
       clearTimeout(this.searchTimer);
       clearTimeout(this.graphRefetchTimer);
+      this.flushPreferenceSave();
       globalThis.removeEventListener('popstate', this.onPopState);
+      globalThis.removeEventListener('pagehide', this.onPageHide);
       this.shell.removeEventListener('koder:knowledge-pane', this.onGraphPane);
       if (this.graphCanvas) {
         this.graphCanvas.removeEventListener('keydown', this.onGraphKeyDown);
@@ -2448,6 +2691,9 @@
     if (!shell || shell.dataset.shellMounted === 'true') return shell && shell.__koderKnowledgeApp;
     shell.dataset.shellMounted = 'true';
     const tabs = Array.from(shell.querySelectorAll('[data-knowledge-tab]'));
+    let initialPreferences = null;
+    try { initialPreferences = loadLocalPreferences(globalThis.localStorage); } catch (_) {}
+    if (initialPreferences) shell.dataset.mobilePane = initialPreferences.mobilePane;
     const returnLink = shell.querySelector('[data-knowledge-return]');
     if (returnLink) returnLink.setAttribute('href', returnPathFromSearch(globalThis.location && globalThis.location.search));
 
@@ -2546,5 +2792,5 @@
     }
   }
 
-  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, localDateTimeValue, entryContentFromValues, entryEditorValues, editorConflict, historyProjection, historyChangedFields, historyTimeline, deletionAssessment, relationshipShapeError, linkContentFromValues, relationPreview, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
+  return Object.freeze({panes, states, localPreferencesKey, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, browserSearchHasState, normalizeLocalPreferences, loadLocalPreferences, saveLocalPreferences, clearLocalPreferences, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphObjectForSelection, graphKeyboardAction, applicabilityRows, inspectorWarnings, safeExternalURL, commaValues, chunkContentFromValues, chunkEditorValues, localDateTimeValue, entryContentFromValues, entryEditorValues, editorConflict, historyProjection, historyChangedFields, historyTimeline, deletionAssessment, relationshipShapeError, linkContentFromValues, relationPreview, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
 });
