@@ -6,6 +6,8 @@ import (
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
+	"github.com/lkarlslund/koder/internal/knowledge"
+	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 	knowledgePebble "github.com/lkarlslund/koder/internal/knowledge/store/pebble"
 )
@@ -50,6 +52,22 @@ func openConfiguredKnowledgeStore(stateDir string, cfg config.Knowledge, open kn
 	subsystem := openOptionalKnowledgeStore(stateDir, open)
 	subsystem.Enabled = true
 	subsystem.Required = cfg.Required
+	if subsystem.OpenError == nil && subsystem.Store != nil {
+		service, err := knowledgeService.New(knowledgeService.Config{
+			Store: subsystem.Store,
+			Actor: func(context.Context) (knowledge.Actor, error) {
+				return knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:koder"}, nil
+			},
+		})
+		if err == nil {
+			_, err = service.EnsurePersonalChunk(context.Background())
+		}
+		if err != nil {
+			_ = subsystem.Store.Close()
+			subsystem.Store = nil
+			subsystem.OpenError = fmt.Errorf("seed built-in knowledge: %w", err)
+		}
+	}
 	if subsystem.OpenError != nil && cfg.Required {
 		return subsystem, fmt.Errorf("required knowledge store unavailable: %w", subsystem.OpenError)
 	}

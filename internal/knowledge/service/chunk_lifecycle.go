@@ -50,6 +50,9 @@ func (s *Service) changeChunkState(ctx context.Context, request ChunkLifecycleRe
 		if current.Revision.Number != request.ExpectedRevision {
 			return fmt.Errorf("%w: chunk %s expected revision %d, current revision %d", knowledgeStore.ErrConflict, request.ChunkID, request.ExpectedRevision, current.Revision.Number)
 		}
+		if current.ID == PersonalMeChunkID && target == knowledge.ChunkStateArchived {
+			return fmt.Errorf("%w: personal/me cannot be archived", ErrProtectedChunk)
+		}
 		if current.State == target {
 			result.Chunk = current
 			return nil

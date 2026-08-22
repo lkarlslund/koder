@@ -80,6 +80,9 @@ func chunkDeletionTarget(ctx context.Context, tx knowledgeStore.WriteTx, request
 	if current.Revision.Number != request.ExpectedRevision {
 		return knowledge.Chunk{}, knowledgeStore.ChunkDeletionBlockers{}, fmt.Errorf("%w: chunk %s expected revision %d, current revision %d", knowledgeStore.ErrConflict, request.ChunkID, request.ExpectedRevision, current.Revision.Number)
 	}
+	if current.ID == PersonalMeChunkID {
+		return knowledge.Chunk{}, knowledgeStore.ChunkDeletionBlockers{}, fmt.Errorf("%w: personal/me cannot be deleted", ErrProtectedChunk)
+	}
 	if current.State != knowledge.ChunkStateArchived {
 		return knowledge.Chunk{}, knowledgeStore.ChunkDeletionBlockers{}, fmt.Errorf("%w: archive chunk %s before deleting it", ErrChunkMustBeArchived, request.ChunkID)
 	}

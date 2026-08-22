@@ -96,6 +96,9 @@ func (s *Service) CreateChunk(ctx context.Context, request CreateChunkRequest) (
 	if hasServerOwnedChunkFields(candidate) {
 		return CreateChunkResult{}, fmt.Errorf("%w: create chunk contains server-owned identity, revision, timestamp, or count fields", knowledge.ErrInvalidRecord)
 	}
+	if isPersonalMeScope(candidate) {
+		return CreateChunkResult{}, fmt.Errorf("%w: personal/me is created and managed by Koder", ErrProtectedChunk)
+	}
 	classification, err := s.classifier.Classify(ctx, chunkClassificationInput(candidate))
 	if err != nil {
 		return CreateChunkResult{}, fmt.Errorf("classify chunk candidate: %w", err)

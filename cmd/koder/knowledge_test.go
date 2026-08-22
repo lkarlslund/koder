@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/config"
+	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
 	"github.com/lkarlslund/koder/internal/knowledge/store/memory"
 	knowledgePebble "github.com/lkarlslund/koder/internal/knowledge/store/pebble"
@@ -78,6 +79,18 @@ func TestConfiguredRequiredKnowledgeOpensAndCloses(t *testing.T) {
 	}
 	if !subsystem.Enabled || !subsystem.Required || subsystem.Store != memoryStore {
 		t.Fatalf("openConfiguredKnowledgeStore() = %#v", subsystem)
+	}
+	if err := memoryStore.View(context.Background(), func(tx knowledgeStore.ReadTx) error {
+		personal, err := tx.Chunk(context.Background(), knowledgeService.PersonalMeChunkID)
+		if err != nil {
+			return err
+		}
+		if personal.Counts.Entries != 0 {
+			return fmt.Errorf("personal seed created %d entries", personal.Counts.Entries)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("personal seed: %v", err)
 	}
 	if err := subsystem.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
