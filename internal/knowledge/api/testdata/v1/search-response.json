@@ -1,0 +1,25 @@
+{
+  "api_version": "knowledge.v1",
+  "terms": ["sfdisk"],
+  "matches": [
+    {
+      "entry_id": "01a01688-fc5d-7f7d-8bb8-de244977f8a5",
+      "document": {
+        "chunk_id": "01a01688-fc5d-7f7d-8bb8-de244977f8a1",
+        "kind": "procedure",
+        "title": "Use sfdisk for scripted partitioning",
+        "summary": "Back up the table, validate the plan, then apply it.",
+        "scope": {"kind": "global"},
+        "state": "active",
+        "verification": "verified"
+      },
+      "lexical_score": 1,
+      "rank": {"total": 1, "lexical": 1},
+      "reasons": [{"kind": "lexical", "term": "sfdisk", "fields": ["title", "summary"]}]
+    }
+  ],
+  "as_of": "2026-08-22T10:00:00Z",
+  "corpus_document_count": 20,
+  "matched_document_count": 1,
+  "page": {"limit": 5, "returned": 1}
+}

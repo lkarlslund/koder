@@ -1,0 +1,14 @@
+{
+  "entry": {
+    "kind": "procedure",
+    "title": "Use sfdisk for scripted partitioning",
+    "summary": "Back up the table, validate the plan, then apply it.",
+    "body": "Use `sfdisk --dump` before making changes.",
+    "tags": ["linux", "storage"],
+    "scope": {"kind": "environment", "selector": "host:halo"},
+    "confidence": 0.9,
+    "evidence_ids": ["01a01688-fc5d-7f7d-8bb8-de244977f8a4"]
+  },
+  "expected_revision": 3,
+  "reason": "Validated on the current host"
+}

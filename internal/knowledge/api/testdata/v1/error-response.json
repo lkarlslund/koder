@@ -1,0 +1,9 @@
+{
+  "api_version": "knowledge.v1",
+  "request_id": "request-456",
+  "error": {
+    "code": "conflict",
+    "message": "The knowledge object changed; reload it and retry.",
+    "details": {"entry_id": "01a01688-fc5d-7f7d-8bb8-de244977f8a5"}
+  }
+}
