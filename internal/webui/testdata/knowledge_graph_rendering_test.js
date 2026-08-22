@@ -41,3 +41,23 @@ assert.strictEqual(styled.x, 12);
 assert.strictEqual(styled.y, 8);
 assert.strictEqual(styled.label, partition.title);
 assert.strictEqual(styled.knowledgeStyle.hovered, true);
+
+const requires = rendering.edgeStyle(fixture.snapshotPatch.upsertEdges[0].attributes);
+assert.strictEqual(requires.kind, 'requires');
+assert.strictEqual(requires.arrow, 'forward');
+assert.strictEqual(requires.sigma.type, 'arrow');
+const contradiction = rendering.edgeStyle({...fixture.snapshotPatch.upsertEdges[0].attributes, relationshipKind: 'contradicts'}, {selected: true});
+assert.strictEqual(contradiction.dash, 'warning');
+assert(contradiction.width > requires.width);
+assert.notStrictEqual(contradiction.color, requires.color);
+const archivedEdge = rendering.edgeStyle({...fixture.snapshotPatch.upsertEdges[0].attributes, state: 'archived'});
+assert.strictEqual(archivedEdge.dash, 'faded');
+assert(archivedEdge.opacity < requires.opacity);
+
+const legend = rendering.legendForEdges([
+  fixture.snapshotPatch.upsertEdges[0],
+  fixture.incrementalPatches[0].upsertEdges[0],
+  fixture.snapshotPatch.upsertEdges[0],
+]);
+assert.deepStrictEqual(legend.map(entry => [entry.kind, entry.count]), [['related_to', 1], ['requires', 2]]);
+assert.deepStrictEqual(rendering.legendForEdges(fixture.snapshotPatch.upsertEdges, {enabledKinds: ['related_to']}), []);

@@ -33,6 +33,7 @@ func TestServerServesStandaloneKnowledgeExplorerShell(t *testing.T) {
 	for _, required := range []string{
 		`id="knowledge-browser"`, `id="knowledge-graph"`, "Koder Knowledge",
 		`data-knowledge-state-title`, `data-knowledge-state-detail`, `data-knowledge-retry`, `data-knowledge-banner`,
+		`data-knowledge-legend`,
 		`data-knowledge-search-form`, `data-knowledge-search`, `data-knowledge-filter="kind"`, `data-knowledge-filter="scope_kind"`,
 		`data-knowledge-results`, `data-knowledge-load-more`,
 		`data-knowledge-inspector-empty`, `data-knowledge-inspector-content`, `data-knowledge-inspector-markdown`,

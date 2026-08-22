@@ -460,6 +460,32 @@ body {
   background-size: auto, auto, 2.6rem 2.6rem, 2.6rem 2.6rem, auto;
 }
 
+.knowledge-graph-legend {
+  position: absolute;
+  z-index: 5;
+  left: 0.85rem;
+  bottom: 0.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.38rem 0.75rem;
+  max-width: calc(100% - 1.7rem);
+  padding: 0.48rem 0.62rem;
+  border: 1px solid color-mix(in srgb, var(--bs-info) 20%, var(--bs-border-color));
+  border-radius: 0.7rem;
+  background: color-mix(in srgb, var(--bs-body-bg) 87%, transparent);
+  box-shadow: 0 0.5rem 1.4rem rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(8px);
+  font-size: 0.72rem;
+  color: var(--bs-secondary-color);
+}
+
+.knowledge-legend-item { display: inline-flex; align-items: center; gap: 0.32rem; white-space: nowrap; }
+.knowledge-legend-line { width: 1.6rem; border-top: 2px solid var(--knowledge-edge-color); }
+.knowledge-legend-line.is-dashed, .knowledge-legend-line.is-warning { border-top-style: dashed; }
+.knowledge-legend-line.is-dotted { border-top-style: dotted; }
+.knowledge-legend-line.is-double { border-top-style: double; border-top-width: 4px; }
+.knowledge-legend-line.is-faded { opacity: 0.4; }
+
 .knowledge-graph-stage::after {
   position: absolute;
   inset: 0;

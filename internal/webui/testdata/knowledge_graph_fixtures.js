@@ -52,7 +52,7 @@ const apiEdges = Object.freeze({
   },
   follows: {
     id: ids.follows, source: ref('entry', ids.format), target: ref('entry', ids.verify),
-    kind: 'precedes', label: 'then verify', state: 'active', revision: revision(1, 'a06'),
+    kind: 'related_to', label: 'then verify', state: 'active', revision: revision(1, 'a06'),
   },
 });
 
