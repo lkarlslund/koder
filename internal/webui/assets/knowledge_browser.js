@@ -168,6 +168,7 @@
       this.graphAdapter = options.graphAdapter || null;
       this.graphRenderer = options.graphRenderer || null;
       this.graphViewport = options.graphViewport || null;
+      this.graphLayout = options.graphLayout || null;
       this.chunks = [];
       this.matches = [];
       this.page = null;
@@ -243,6 +244,21 @@
             this.graphRefetchTimer = 0;
             this.loadGraphSelection();
           }, 0);
+        });
+      }
+      if (this.graphLayout) {
+        this.graphLayoutUnsubscribe = this.graphLayout.subscribe(event => {
+          const status = this.shell.querySelector('[data-knowledge-status-label]');
+          if (!status) return;
+          if (event.phase === 'start' || event.phase === 'progress') {
+            const percent = event.total ? Math.round(event.completed / event.total * 100) : 0;
+            status.textContent = event.phase === 'start' ? 'Arranging graph' : `Arranging graph · ${percent}%`;
+          }
+          if (event.phase === 'ready') {
+            status.textContent = 'Graph ready';
+            if (this.graphViewport) this.graphViewport.fit({animate: false});
+          }
+          if (event.phase === 'error') status.textContent = 'Layout unavailable';
         });
       }
       this.syncControls();
@@ -548,10 +564,12 @@
       const request = graphSnapshotRequest(this.urlState.objectKind, this.urlState.id);
       if (!request) {
         this.client.cancel('graph');
+        if (this.graphLayout) this.graphLayout.stop('selection_cleared');
         this.graphRenderer.setSelection(null, null);
         this.setGraphState('empty');
         return;
       }
+      if (this.graphLayout) this.graphLayout.stop('selection_changed');
       this.setGraphState('loading');
       try {
         const response = await this.client.graphSnapshot(request, {channel: 'graph', timeoutMS: 10000});
@@ -561,7 +579,8 @@
         const truncated = !!(response && response.page && response.page.truncated);
         const detail = `${counts.nodes} ${counts.nodes === 1 ? 'node' : 'nodes'} and ${counts.edges} ${counts.edges === 1 ? 'relationship' : 'relationships'}.`;
         this.setGraphState(truncated ? 'truncated' : 'ready', detail);
-        if (this.graphViewport) this.graphViewport.fit({animate: false});
+        if (this.graphLayout) this.graphLayout.start();
+        else if (this.graphViewport) this.graphViewport.fit({animate: false});
       } catch (error) {
         if (error && (error.code === 'canceled' || error.code === 'stale_response')) return;
         const requestID = String(error && error.requestID || '');
@@ -671,6 +690,8 @@
       globalThis.removeEventListener('popstate', this.onPopState);
       this.shell.removeEventListener('koder:knowledge-pane', this.onGraphPane);
       if (this.graphUnsubscribe) this.graphUnsubscribe();
+      if (this.graphLayoutUnsubscribe) this.graphLayoutUnsubscribe();
+      if (this.graphLayout) this.graphLayout.destroy();
       if (this.graphViewport) this.graphViewport.destroy();
       if (this.graphRenderer) this.graphRenderer.destroy();
       if (this.graphAdapter) this.graphAdapter.destroy();
@@ -745,6 +766,11 @@
             };
           },
         });
+        if (globalThis.KoderKnowledgeGraphLayout && globalThis.KoderKnowledgeLayouts) {
+          runtime.graphLayout = new globalThis.KoderKnowledgeGraphLayout.ForceAtlasController({
+            graph: graphStore.graph, layouts: globalThis.KoderKnowledgeLayouts,
+          });
+        }
       }
       const app = new BrowserApp(shell, client, runtime);
       shell.__koderKnowledgeApp = app;
