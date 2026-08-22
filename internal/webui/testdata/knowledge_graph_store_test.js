@@ -82,3 +82,15 @@ assert.deepStrictEqual(store.counts(), {nodes: 3, edges: 1});
 adapter.destroy();
 assert.deepStrictEqual(store.counts(), {nodes: 0, edges: 0});
 assert.throws(() => store.apply(fixture.snapshotPatch), /destroyed/);
+
+const mergeStore = new graphAPI.Store();
+const mergeAdapter = new adapterAPI.Adapter(mergeStore);
+mergeAdapter.replaceSnapshot(fixture.apiSnapshot);
+mergeAdapter.mergeSnapshot({
+  ...fixture.apiSnapshot, nodes: [fixture.apiNodes.verify], edges: [fixture.apiEdges.follows],
+});
+assert.deepStrictEqual(mergeStore.counts(), {nodes: 4, edges: 2});
+const ahead = mergeStore.merge({
+  ...fixture.snapshotPatch, checkpoint: {streamID: 'knowledge-fixture-stream', sequence: 41},
+});
+assert.deepStrictEqual([ahead.action, ahead.reason], ['refetch', 'checkpoint_ahead']);

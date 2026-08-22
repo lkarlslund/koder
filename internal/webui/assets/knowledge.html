@@ -155,6 +155,11 @@
           <dl class="knowledge-inspector-meta" data-knowledge-inspector-meta></dl>
           <section class="knowledge-inspector-markdown markdown-body" data-knowledge-inspector-markdown hidden></section>
           <footer class="knowledge-inspector-actions">
+            <div class="knowledge-expand-actions" data-knowledge-expand-actions hidden>
+              <button type="button" class="btn btn-sm btn-outline-info" data-knowledge-expand-incoming><i class="bi bi-box-arrow-in-down" aria-hidden="true"></i> Incoming</button>
+              <button type="button" class="btn btn-sm btn-outline-info" data-knowledge-expand-outgoing><i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> Outgoing</button>
+              <span data-knowledge-expand-status>Add a bounded one-hop neighborhood to the visible graph.</span>
+            </div>
             <button type="button" class="btn btn-sm btn-info" data-knowledge-send-chat disabled><i class="bi bi-chat-square-arrow-up" aria-hidden="true"></i> Send to chat</button>
             <span data-knowledge-send-status>Open Knowledge from a chat to send context back.</span>
           </footer>

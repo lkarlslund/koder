@@ -99,22 +99,27 @@
     }
 
     replace(patch) {
-      return this.commit(patch, true);
+      return this.commit(patch, 'replace');
     }
 
     apply(patch) {
-      return this.commit(patch, false);
+      return this.commit(patch, 'apply');
     }
 
-    commit(patch, replace) {
+    merge(patch) {
+      return this.commit(patch, 'merge');
+    }
+
+    commit(patch, mode) {
       this.assertActive();
+      const replace = mode === 'replace';
       validatePatchShape(patch);
       uniquePatchKeys(patch.upsertNodes, 'upsertNodes');
       uniquePatchKeys(patch.removeNodeKeys, 'removeNodeKeys');
       uniquePatchKeys(patch.upsertEdges, 'upsertEdges');
       uniquePatchKeys(patch.removeEdgeKeys, 'removeEdgeKeys');
       this.preflight(patch, replace);
-      const decision = this.assessOrder(patch, replace);
+      const decision = this.assessOrder(patch, mode);
       if (decision) return decision;
       const startingPositions = this.startingPositions(patch, replace);
 
@@ -134,7 +139,7 @@
       this.refetchRequired = false;
       const after = this.counts();
       const detail = Object.freeze({
-        action: 'applied', mode: replace ? 'replace' : 'apply', patch, before, after,
+        action: 'applied', mode, patch, before, after,
         generation: this.generation, checkpoint: this.checkpoint,
       });
       this.emit('change', detail);
@@ -164,16 +169,27 @@
       return result;
     }
 
-    assessOrder(patch, replace) {
+    assessOrder(patch, mode) {
       const generation = Number(patch.generation);
       const next = patch.checkpoint;
       const current = this.checkpoint;
-      if (replace) {
+      if (mode === 'replace') {
         if (this.generation && generation < this.generation) return this.decision('ignored', 'stale_generation', patch);
         if (current && generation === this.generation && next.streamID === current.streamID && next.sequence < current.sequence) {
           return this.decision('ignored', 'stale_snapshot', patch);
         }
         return null;
+      }
+      if (mode === 'merge') {
+        if (this.refetchRequired) return this.decision('refetch', 'refetch_pending', patch);
+        if (!current || !this.generation) return this.decision('refetch', 'snapshot_required', patch);
+        if (generation < this.generation) return this.decision('ignored', 'stale_generation', patch);
+        if (generation > this.generation) return this.decision('refetch', 'generation_changed', patch);
+        if (next.streamID !== current.streamID) return this.decision('refetch', 'stream_changed', patch);
+        if (next.sequence < current.sequence) return this.decision('ignored', 'stale_snapshot', patch);
+        if (next.sequence > current.sequence) return this.decision('refetch', 'checkpoint_ahead', patch);
+        const revisionGap = this.revisionGap(patch);
+        return revisionGap ? this.decision('refetch', revisionGap, patch) : null;
       }
       if (this.refetchRequired) return this.decision('refetch', 'refetch_pending', patch);
       if (!current || !this.generation) return this.decision('refetch', 'snapshot_required', patch);

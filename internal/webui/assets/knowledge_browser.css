@@ -814,6 +814,10 @@ body {
   gap: .42rem;
 }
 
+.knowledge-expand-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.42rem; }
+.knowledge-expand-actions[hidden] { display: none; }
+.knowledge-expand-actions > span { grid-column: 1 / -1; }
+
 .knowledge-inspector-actions span {
   color: var(--bs-secondary-color);
   font-size: .68rem;

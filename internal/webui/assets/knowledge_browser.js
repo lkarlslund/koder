@@ -144,6 +144,14 @@
     return {root: {kind: objectKind, id}, max_depth: 2, max_nodes: 200, max_edges: 400, time_limit_ms: 2500};
   }
 
+  function graphExpansionRequest(objectKind, id, direction) {
+    objectKind = String(objectKind || '').trim().toLowerCase();
+    id = String(id || '').trim();
+    direction = String(direction || '').trim().toLowerCase();
+    if (!['chunk', 'entry'].includes(objectKind) || !/^[A-Za-z0-9_-]+$/.test(id) || !['incoming', 'outgoing'].includes(direction)) return null;
+    return {root: {kind: objectKind, id}, direction, max_depth: 1, max_nodes: 100, max_edges: 200, time_limit_ms: 2000};
+  }
+
   function graphDebugEnabled(search) {
     try { return new URLSearchParams(String(search || '')).get('graph_debug') === '1'; } catch (_) { return false; }
   }
@@ -208,6 +216,10 @@
       this.graphFitButton = shell.querySelector('[data-knowledge-graph-fit]');
       this.graphCenterButton = shell.querySelector('[data-knowledge-graph-center]');
       this.graphSelectionCount = shell.querySelector('[data-knowledge-selection-count]');
+      this.graphExpandActions = shell.querySelector('[data-knowledge-expand-actions]');
+      this.graphExpandIncoming = shell.querySelector('[data-knowledge-expand-incoming]');
+      this.graphExpandOutgoing = shell.querySelector('[data-knowledge-expand-outgoing]');
+      this.graphExpandStatus = shell.querySelector('[data-knowledge-expand-status]');
       this.filters = Object.fromEntries(Array.from(shell.querySelectorAll('[data-knowledge-filter]')).map(input => [input.dataset.knowledgeFilter, input]));
       this.inspector = {
         empty: shell.querySelector('[data-knowledge-inspector-empty]'),
@@ -245,6 +257,8 @@
         const key = this.urlState.objectKind && this.urlState.id ? `${this.urlState.objectKind}:${this.urlState.id}` : '';
         if (this.graphViewport && key) this.graphViewport.centerNode(key);
       });
+      if (this.graphExpandIncoming) this.graphExpandIncoming.addEventListener('click', () => this.expandGraph('incoming'));
+      if (this.graphExpandOutgoing) this.graphExpandOutgoing.addEventListener('click', () => this.expandGraph('outgoing'));
       if (this.inspector.sendButton) this.inspector.sendButton.addEventListener('click', () => this.sendSelectionToChat());
       this.onPopState = () => {
         this.urlState = browserStateFromSearch(globalThis.location && globalThis.location.search);
@@ -608,6 +622,7 @@
       if (mode !== 'content') {
         this.inspectedObject = null;
         if (this.inspector.sendButton) this.inspector.sendButton.disabled = true;
+        if (this.graphExpandActions) this.graphExpandActions.hidden = true;
       }
     }
 
@@ -754,6 +769,11 @@
         }
       }
       this.inspectedObject = {kind: objectKind, id: String(record.id || '')};
+      const expandable = ['chunk', 'entry'].includes(objectKind);
+      if (this.graphExpandActions) this.graphExpandActions.hidden = !expandable;
+      if (this.graphExpandIncoming) this.graphExpandIncoming.disabled = !expandable;
+      if (this.graphExpandOutgoing) this.graphExpandOutgoing.disabled = !expandable;
+      if (this.graphExpandStatus) this.graphExpandStatus.textContent = expandable ? 'Add a bounded one-hop neighborhood to the visible graph.' : '';
       if (this.inspector.sendButton) this.inspector.sendButton.disabled = !this.chatSelection;
       if (this.inspector.sendStatus) {
         this.inspector.sendStatus.textContent = this.chatSelection
@@ -764,6 +784,41 @@
       this.shell.dispatchEvent(new CustomEvent('koder:knowledge-inspected', {
         detail: {objectKind, id: String(record.id || ''), record, label: plainTextLabel(title)}
       }));
+    }
+
+    async expandGraph(direction) {
+      const selected = this.inspectedObject;
+      const request = selected && graphExpansionRequest(selected.kind, selected.id, direction);
+      if (!request || !this.graphAdapter) return false;
+      if (this.graphExpandIncoming) this.graphExpandIncoming.disabled = true;
+      if (this.graphExpandOutgoing) this.graphExpandOutgoing.disabled = true;
+      if (this.graphExpandStatus) this.graphExpandStatus.textContent = `Loading ${direction} relationships…`;
+      try {
+        const response = await this.client.graphSnapshot(request, {channel: 'graph-expand', timeoutMS: 10000});
+        const merged = this.graphAdapter.mergeSnapshot(response);
+        if (merged.result && merged.result.action !== 'applied') {
+          if (this.graphExpandStatus) this.graphExpandStatus.textContent = 'Knowledge changed; refreshing the graph consistently.';
+          return false;
+        }
+        const nodes = Array.isArray(response.nodes) ? response.nodes.length : 0;
+        const edges = Array.isArray(response.edges) ? response.edges.length : 0;
+        const truncated = !!(response.page && response.page.truncated);
+        if (this.graphExpandStatus) {
+          this.graphExpandStatus.textContent = `Added up to ${nodes} ${direction} nodes and ${edges} relationships${truncated ? ' (bounded)' : ''}.`;
+        }
+        if (this.graphLayout) this.graphLayout.request({iterations: 70});
+        return true;
+      } catch (error) {
+        if (error && (error.code === 'canceled' || error.code === 'stale_response')) return false;
+        const requestID = String(error && error.requestID || '');
+        const message = String(error && error.message || 'The neighborhood could not be expanded.');
+        if (this.graphExpandStatus) this.graphExpandStatus.textContent = requestID ? `${message} Audit ID: ${requestID}` : message;
+        return false;
+      } finally {
+        const stillExpandable = this.inspectedObject && ['chunk', 'entry'].includes(this.inspectedObject.kind);
+        if (this.graphExpandIncoming) this.graphExpandIncoming.disabled = !stillExpandable;
+        if (this.graphExpandOutgoing) this.graphExpandOutgoing.disabled = !stillExpandable;
+      }
     }
 
     async sendSelectionToChat() {
@@ -902,5 +957,5 @@
     }
   }
 
-  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
+  return Object.freeze({panes, states, BrowserApp, normalizePane, normalizeState, stateForError, presentationForState, adjacentPane, safeReturnPath, returnPathFromSearch, chatSelectionFromSearch, browserStateFromSearch, searchForBrowserState, displayLabel, plainTextLabel, graphSnapshotRequest, graphExpansionRequest, graphDebugEnabled, supportsWebGL, graphEnvironment, sanitizedMarkdownHTML, mount});
 });

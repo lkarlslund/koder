@@ -15,6 +15,7 @@ class FakeTarget {
   constructor() { this.nodes = new Map(); this.edges = new Map(); this.calls = []; }
   replace(patch) { this.nodes.clear(); this.edges.clear(); this.calls.push('replace'); this.applyValues(patch); }
   apply(patch) { this.calls.push('apply'); this.applyValues(patch); }
+  merge(patch) { this.calls.push('merge'); this.applyValues(patch); }
   applyValues(patch) {
     for (const key of patch.removeEdgeKeys) this.edges.delete(key);
     for (const key of patch.removeNodeKeys) this.nodes.delete(key);
@@ -49,11 +50,17 @@ assert.strictEqual(adapter.selectMany('node', [`entry:${fixture.ids.partition}`,
 assert.strictEqual(adapter.selectionSnapshot().items.length, 2);
 assert.strictEqual(adapter.get('node', `entry:${fixture.ids.partition}`).attributes.title, 'Partition a disk with sfdisk');
 assert.strictEqual(adapter.select('node', 'missing'), false);
+adapter.mergeSnapshot({
+  ...fixture.apiSnapshot, nodes: [fixture.apiNodes.verify], edges: [fixture.apiEdges.follows],
+  page: {limit: 100, returned: 1, truncated: false},
+});
+assert.deepStrictEqual(adapter.counts(), {nodes: 4, edges: 2});
 adapter.applyPatch(fixture.incrementalPatches[0]);
 assert.deepStrictEqual(adapter.counts(), {nodes: 4, edges: 2});
 assert.strictEqual(adapter.clearSelection(), true);
 assert.deepStrictEqual(events.map(value => value[0]), [
-  'beforechange', 'change', 'selection', 'selection', 'selection', 'selection', 'beforechange', 'change', 'selection',
+  'beforechange', 'change', 'selection', 'selection', 'selection', 'selection',
+  'beforechange', 'change', 'beforechange', 'change', 'selection',
 ]);
 unsubscribe();
 adapter.destroy();

@@ -148,6 +148,20 @@
       return patch;
     }
 
+    mergeSnapshot(snapshot) {
+      this.assertActive();
+      if (typeof this.target.merge !== 'function') throw new TypeError('Knowledge graph target does not support snapshot merging');
+      const patch = snapshotToPatch(snapshot);
+      this.emit('beforechange', {mode: 'merge', patch});
+      const result = this.target.merge(patch);
+      if (result && result.action && result.action !== 'applied') {
+        this.emit(result.action, result);
+        return Object.freeze({patch, result});
+      }
+      this.emit('change', {mode: 'merge', patch, counts: this.counts()});
+      return Object.freeze({patch, result});
+    }
+
     applyPatch(patch) {
       this.assertActive();
       validatePatch(patch);

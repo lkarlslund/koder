@@ -49,6 +49,10 @@ assert.deepStrictEqual(browser.graphSnapshotRequest('entry', 'entry-7'), {
 });
 assert.strictEqual(browser.graphSnapshotRequest('link', 'link-1'), null);
 assert.strictEqual(browser.graphSnapshotRequest('entry', '../secret'), null);
+assert.deepStrictEqual(browser.graphExpansionRequest('entry', 'entry-7', 'incoming'), {
+  root: {kind: 'entry', id: 'entry-7'}, direction: 'incoming', max_depth: 1, max_nodes: 100, max_edges: 200, time_limit_ms: 2000,
+});
+assert.strictEqual(browser.graphExpansionRequest('entry', 'entry-7', 'both'), null);
 assert.strictEqual(browser.graphDebugEnabled('?graph_debug=1'), true);
 assert.strictEqual(browser.graphDebugEnabled('?graph_debug=true'), false);
 const webglDocument = {createElement: () => ({getContext: name => name === 'webgl2' ? {} : null})};
