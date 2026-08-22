@@ -49,13 +49,16 @@
             <span class="knowledge-eyebrow">Browse</span>
             <h1 id="knowledge-sources-title">Knowledge</h1>
           </div>
-          <span class="knowledge-count-placeholder" aria-label="Loading chunk count">—</span>
+          <span class="knowledge-count-placeholder" data-knowledge-count aria-label="Loading chunk count">—</span>
         </header>
-        <div class="knowledge-pane-body knowledge-shell-list" aria-hidden="true">
-          <div class="knowledge-skeleton knowledge-skeleton-search"></div>
-          <div class="knowledge-skeleton knowledge-skeleton-row"></div>
-          <div class="knowledge-skeleton knowledge-skeleton-row is-short"></div>
-          <div class="knowledge-skeleton knowledge-skeleton-row"></div>
+        <div class="knowledge-pane-body knowledge-shell-list">
+          <div class="knowledge-loading-skeleton" aria-hidden="true">
+            <div class="knowledge-skeleton knowledge-skeleton-search"></div>
+            <div class="knowledge-skeleton knowledge-skeleton-row"></div>
+            <div class="knowledge-skeleton knowledge-skeleton-row is-short"></div>
+            <div class="knowledge-skeleton knowledge-skeleton-row"></div>
+          </div>
+          <div class="knowledge-source-status" data-knowledge-source-status role="status">Connecting to Knowledge…</div>
         </div>
       </aside>
 
@@ -65,9 +68,10 @@
             <span class="knowledge-eyebrow">Explore</span>
             <h1 id="knowledge-graph-title">Graph</h1>
           </div>
-          <span class="knowledge-stage-status"><span class="spinner-grow spinner-grow-sm" aria-hidden="true"></span>Preparing explorer</span>
+          <span class="knowledge-stage-status"><span class="spinner-grow spinner-grow-sm" data-knowledge-spinner aria-hidden="true"></span><span data-knowledge-status-label>Preparing explorer</span></span>
         </header>
         <div class="knowledge-graph-stage" id="knowledge-graph" role="region" aria-live="polite">
+          <div class="knowledge-state-banner" data-knowledge-banner hidden></div>
           <div class="knowledge-constellation" aria-hidden="true">
             <span class="knowledge-orbit orbit-one"></span>
             <span class="knowledge-orbit orbit-two"></span>
@@ -77,8 +81,9 @@
             <img src="/assets/koder-logo.svg" alt="">
           </div>
           <div class="knowledge-graph-message">
-            <strong>Building your knowledge map</strong>
-            <span>The data connection and graph renderer are next.</span>
+            <strong data-knowledge-state-title>Building your knowledge map</strong>
+            <span data-knowledge-state-detail>Connecting to the local Knowledge store.</span>
+            <button type="button" class="btn btn-sm btn-outline-info knowledge-retry-button" data-knowledge-retry hidden><i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Retry</button>
           </div>
         </div>
       </section>

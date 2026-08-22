@@ -179,6 +179,31 @@ body {
   gap: .72rem;
 }
 
+.knowledge-loading-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: .72rem;
+}
+
+.knowledge-source-status {
+  display: none;
+  padding: .85rem;
+  border: 1px solid var(--knowledge-pane-border);
+  border-radius: .7rem;
+  color: var(--bs-secondary-color);
+  background: color-mix(in srgb, var(--bs-secondary-bg) 58%, transparent);
+  font-size: .82rem;
+  line-height: 1.45;
+}
+
+.knowledge-shell:not([data-state="shell"]):not([data-state="loading"]) .knowledge-loading-skeleton {
+  display: none;
+}
+
+.knowledge-shell:not([data-state="shell"]):not([data-state="loading"]) .knowledge-source-status {
+  display: block;
+}
+
 .knowledge-skeleton {
   position: relative;
   overflow: hidden;
@@ -235,6 +260,10 @@ body {
   color: var(--knowledge-cyan);
 }
 
+.knowledge-shell:not([data-state="shell"]):not([data-state="loading"]) .knowledge-stage-status .spinner-grow {
+  display: none;
+}
+
 .knowledge-graph-stage {
   position: relative;
   display: flex;
@@ -259,6 +288,23 @@ body {
   box-shadow: inset 0 0 7rem rgba(2, 6, 15, .58);
   content: "";
   pointer-events: none;
+}
+
+.knowledge-state-banner {
+  position: absolute;
+  top: .8rem;
+  right: .8rem;
+  left: .8rem;
+  z-index: 3;
+  padding: .55rem .75rem;
+  border: 1px solid rgba(255, 193, 7, .35);
+  border-radius: .65rem;
+  color: #ffe3a0;
+  background: rgba(87, 61, 4, .78);
+  box-shadow: 0 .5rem 1.4rem rgba(0, 0, 0, .22);
+  font-size: .78rem;
+  text-align: center;
+  backdrop-filter: blur(10px);
 }
 
 .knowledge-constellation {
@@ -325,6 +371,41 @@ body {
 .knowledge-graph-message span {
   color: #8c99ad;
   font-size: .82rem;
+}
+
+.knowledge-retry-button {
+  align-self: center;
+  margin-top: .8rem;
+}
+
+.knowledge-shell[data-state="unavailable"] .knowledge-constellation,
+.knowledge-shell[data-state="error"] .knowledge-constellation,
+.knowledge-shell[data-state="stale"] .knowledge-constellation {
+  filter: grayscale(.45) opacity(.58);
+}
+
+.knowledge-shell[data-state="empty"] .knowledge-star,
+.knowledge-shell[data-state="unavailable"] .knowledge-star,
+.knowledge-shell[data-state="error"] .knowledge-star {
+  box-shadow: none;
+}
+
+.knowledge-shell[data-state="ready"] .knowledge-status-dot,
+.knowledge-shell[data-state="empty"] .knowledge-status-dot {
+  background: #68e6a3;
+  box-shadow: 0 0 .55rem rgba(104, 230, 163, .75);
+}
+
+.knowledge-shell[data-state="unavailable"] .knowledge-status-dot,
+.knowledge-shell[data-state="error"] .knowledge-status-dot {
+  background: #ff737d;
+  box-shadow: 0 0 .55rem rgba(255, 115, 125, .72);
+}
+
+.knowledge-shell[data-state="stale"] .knowledge-status-dot,
+.knowledge-shell[data-state="truncated"] .knowledge-status-dot {
+  background: #ffc857;
+  box-shadow: 0 0 .55rem rgba(255, 200, 87, .72);
 }
 
 .knowledge-pane-empty {
