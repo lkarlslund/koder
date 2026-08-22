@@ -869,6 +869,84 @@
       const value = String(action || '').replaceAll('_', ' ').trim();
       return value ? value.charAt(0).toUpperCase() + value.slice(1) : '';
     }
+    function knowledgeActionLabel(action) {
+      const labels = {
+        search: 'Search knowledge', get: 'Get knowledge', neighbors: 'Explore knowledge links',
+        chunk_list: 'List knowledge chunks', chunk_get: 'Get knowledge chunk', chunk_create: 'Create knowledge chunk',
+        chunk_update: 'Update knowledge chunk', chunk_archive: 'Archive knowledge chunk', chunk_restore: 'Restore knowledge chunk', chunk_delete: 'Delete knowledge chunk',
+        entry_create: 'Create knowledge entry', entry_update: 'Update knowledge entry', entry_supersede: 'Supersede knowledge entry',
+        entry_archive: 'Archive knowledge entry', entry_restore: 'Restore knowledge entry', entry_delete: 'Delete knowledge entry',
+        link: 'Link knowledge', unlink: 'Unlink knowledge', verify: 'Verify knowledge entry', history: 'Review knowledge history'
+      };
+      return labels[String(action || '')] || 'Use knowledge';
+    }
+    function knowledgeExplorerHref(kind = '', id = '', query = '') {
+      const params = new URLSearchParams();
+      if (kind) params.set('object_kind', String(kind));
+      if (id) params.set('id', String(id));
+      if (query) params.set('query', String(query));
+      if (/^\/s\/[^/]+\/c\/[^/]+/.test(location.pathname)) params.set('return', location.pathname);
+      const suffix = params.toString();
+      return '/knowledge' + (suffix ? '?' + suffix : '');
+    }
+    function knowledgeObjectRow(kind, id, title, detail = '') {
+      const label = String(title || id || kind || 'Knowledge');
+      const href = knowledgeExplorerHref(kind, id);
+      return '<a class="tool-knowledge-row" href="' + escapeHTML(href) + '">' +
+        '<i class="bi bi-diagram-3" aria-hidden="true"></i>' +
+        '<span class="tool-knowledge-row-copy"><span class="tool-knowledge-row-title">' + escapeHTML(label) + '</span>' +
+        (detail ? '<span class="tool-knowledge-row-detail">' + escapeHTML(detail) + '</span>' : '') + '</span>' +
+        '<i class="bi bi-chevron-right" aria-hidden="true"></i></a>';
+    }
+    function knowledgeResultObjects(action, data, args) {
+      const values = [];
+      const add = (kind, id, title, detail = '') => {
+        if (id) values.push({kind: String(kind || ''), id: String(id), title: String(title || ''), detail: String(detail || '')});
+      };
+      if (action === 'search') {
+        const matches = firstValue(data, ['matches', 'Matches']);
+        (Array.isArray(matches) ? matches : []).forEach(match => {
+          const document = firstValue(match, ['document', 'Document']) || {};
+          add('entry', firstValue(match, ['entry_id', 'EntryID']), firstValue(document, ['title', 'Title']), firstValue(document, ['summary', 'Summary']));
+        });
+      } else if (action === 'chunk_list') {
+        const chunks = firstValue(data, ['chunks', 'Chunks']);
+        (Array.isArray(chunks) ? chunks : []).forEach(chunk => add('chunk', firstValue(chunk, ['id', 'ID']), firstValue(chunk, ['title', 'Title']), firstValue(chunk, ['description', 'Description'])));
+      } else if (action === 'neighbors') {
+        const neighbors = firstValue(data, ['neighbors', 'Neighbors']);
+        (Array.isArray(neighbors) ? neighbors : []).forEach(neighbor => {
+          const object = firstValue(neighbor, ['object', 'Object']) || {};
+          const direction = firstValue(neighbor, ['direction', 'Direction']);
+          const semanticKind = firstValue(object, ['semantic_kind', 'SemanticKind']);
+          add(firstValue(object, ['kind', 'Kind']), firstValue(object, ['id', 'ID']), firstValue(object, ['title', 'Title']), [direction, semanticKind, firstValue(object, ['summary', 'Summary'])].filter(Boolean).join(' · '));
+        });
+      } else {
+        const chunk = firstValue(data, ['chunk', 'Chunk']);
+        const entry = firstValue(data, ['entry', 'Entry']);
+        const link = firstValue(data, ['link', 'Link']);
+        if (chunk) add('chunk', firstValue(chunk, ['id', 'ID']), firstValue(chunk, ['title', 'Title']), firstValue(chunk, ['description', 'Description']));
+        if (entry) add('entry', firstValue(entry, ['id', 'ID']), firstValue(entry, ['title', 'Title']), firstValue(entry, ['summary', 'Summary']));
+        if (link) add('link', firstValue(link, ['id', 'ID']), firstValue(link, ['label', 'Label']) || actionLabel(firstValue(link, ['kind', 'Kind'])) + ' link', firstValue(link, ['state', 'State']));
+        if (!values.length && (action === 'get' || action === 'chunk_get' || action === 'history')) {
+          const kind = String(firstValue(data, ['kind', 'Kind']) || firstValue(args, ['object_kind']) || (action === 'chunk_get' ? 'chunk' : ''));
+          const object = firstValue(data, [kind, kind.charAt(0).toUpperCase() + kind.slice(1)]) || {};
+          add(kind, firstValue(data, ['id', 'ID']) || firstValue(args, ['id']), firstValue(object, ['title', 'Title']) || firstValue(args, ['id']), action === 'history' ? 'Revision history' : firstValue(object, ['summary', 'Summary', 'description', 'Description']));
+        }
+      }
+      return values;
+    }
+    function renderKnowledgeBlock(action, data, args, fallbackText) {
+      const objects = knowledgeResultObjects(action, data, args);
+      const visible = objects.slice(0, 6);
+      const query = firstValue(args, ['query']);
+      const explorerHref = knowledgeExplorerHref('', '', action === 'search' ? query : '');
+      const rows = visible.map(item => knowledgeObjectRow(item.kind, item.id, item.title, item.detail)).join('');
+      const omitted = objects.length > visible.length ? '<div class="tool-result-omitted">' + escapeHTML(String(objects.length - visible.length) + ' more results') + '</div>' : '';
+      const empty = !rows ? '<div class="tool-result-body text-secondary">' + escapeHTML(fallbackText || 'No matching knowledge objects') + '</div>' : '';
+      return toolResultHeader(knowledgeActionLabel(action)) +
+        '<div class="tool-knowledge-result">' + rows + omitted + empty +
+        '<a class="tool-knowledge-open" href="' + escapeHTML(explorerHref) + '"><i class="bi bi-box-arrow-up-right"></i><span>Open Knowledge</span></a></div>';
+    }
     function compactCommandLabel(command) {
       const text = String(command || '').replace(/\s+/g, ' ').trim();
       if (!text) return '';
@@ -921,6 +999,7 @@
         }
         case 'milestones': return actionLabel(toolAction(tool)) + ' milestone';
         case 'tasks': return actionLabel(toolAction(tool)) + ' task';
+        case 'knowledge': return knowledgeActionLabel(toolAction(tool));
         case 'browser_tabs':
         case 'browser_navigation':
         case 'browser_page':
@@ -934,6 +1013,7 @@
     }
     function toolPreviewText(tool) {
       const args = toolArgs(tool);
+      if (String((tool && tool.tool) || '') === 'knowledge') return String(firstValue(args, ['query', 'id']) || '');
       if (String((tool && tool.tool) || '') === 'file_read') return '';
       if (String((tool && tool.tool) || '') === 'bash' && (toolStatus(tool) === 'done' || toolStatus(tool) === 'errored')) return '';
       if (String((tool && tool.tool) || '') === 'chat_send') return chatSendMessage(args);
@@ -1037,6 +1117,7 @@
       }
       if (kind === 'chat_send') return renderCompactBlock('Sent message', chatSendMessage(args) || toolResultText(tool));
       if (kind === 'chats' && toolAction(tool) === 'send') return renderCompactBlock('Sent message', chatSendMessage(args) || toolResultText(tool));
+      if (kind === 'knowledge') return renderKnowledgeBlock(toolAction(tool), data, args, toolResultText(tool));
       if (kind === 'view_image') {
         return renderImagePreviewBlock('Viewed image', data, toolResultText(tool), true);
       }

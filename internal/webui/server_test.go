@@ -2036,6 +2036,19 @@ func TestIndexServesHTML(t *testing.T) {
 			t.Fatalf("expected canonical action renderer %q", canonicalRenderer)
 		}
 	}
+	for _, knowledgeRenderer := range []string{
+		`case 'knowledge': return knowledgeActionLabel(toolAction(tool))`,
+		`if (kind === 'knowledge') return renderKnowledgeBlock`,
+		`function knowledgeExplorerHref(kind = '', id = '', query = '')`,
+		`params.set('object_kind', String(kind))`,
+		`params.set('return', location.pathname)`,
+		`class="tool-knowledge-row"`,
+		`.tool-knowledge-row:hover`,
+	} {
+		if !strings.Contains(fullPage, knowledgeRenderer) {
+			t.Fatalf("expected knowledge result rendering fragment %q", knowledgeRenderer)
+		}
+	}
 	if !strings.Contains(fullPage, `function chatSendMessage(args)`) ||
 		!strings.Contains(fullPage, `case 'chat_send': return 'Message chat '`) ||
 		!strings.Contains(fullPage, `if (String((tool && tool.tool) || '') === 'chat_send') return chatSendMessage(args)`) ||
