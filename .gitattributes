@@ -1,4 +1,5 @@
 # Preserve byte-for-byte upstream minified assets; their recorded hashes are
 # more useful than rewriting vendor-owned whitespace.
 internal/webui/assets/vendor/graphology/graphology.umd.min.js -whitespace
+internal/webui/assets/vendor/knowledge-layouts/knowledge-layouts.min.js -whitespace
 internal/webui/assets/vendor/sigma/sigma.min.js -whitespace

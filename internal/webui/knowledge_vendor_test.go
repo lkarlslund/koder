@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -24,6 +25,10 @@ func TestKnowledgeGraphVendorAssetsArePinnedAndLocal(t *testing.T) {
 		{
 			path: "assets/vendor/sigma/sigma.min.js", sha256: "58e30383ab428f832068d9d16a5215c65ba12430d438ed091c5703f398de9e16",
 			globalName: ".Sigma=",
+		},
+		{
+			path: "assets/vendor/knowledge-layouts/knowledge-layouts.min.js", sha256: "5e9357010a063bdbf8d26eb963108140f5729667ce00466036ea071bccf71d90",
+			globalName: ".KoderKnowledgeLayouts=",
 		},
 	}
 	for _, asset := range assets {
@@ -71,6 +76,9 @@ func TestKnowledgeGraphVendorAssetsArePinnedAndLocal(t *testing.T) {
 	}
 	for _, license := range []string{
 		"assets/vendor/graphology/LICENSE.txt",
+		"assets/vendor/knowledge-layouts/LICENSE-forceatlas2.txt",
+		"assets/vendor/knowledge-layouts/LICENSE-graphology-utils.txt",
+		"assets/vendor/knowledge-layouts/LICENSE-noverlap.txt",
 		"assets/vendor/sigma/LICENSE.txt",
 	} {
 		data, err := webAssets.ReadFile(license)
@@ -80,5 +88,17 @@ func TestKnowledgeGraphVendorAssetsArePinnedAndLocal(t *testing.T) {
 		if !strings.Contains(string(data), "Permission is hereby granted, free of charge") {
 			t.Fatalf("vendor license %q is not the expected MIT text", license)
 		}
+	}
+}
+
+func TestKnowledgeGraphVendorJavaScriptCompatibility(t *testing.T) {
+	t.Parallel()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	command := exec.CommandContext(t.Context(), node, "testdata/knowledge_vendor_test.js")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("knowledge vendor JavaScript test: %v\n%s", err, output)
 	}
 }
