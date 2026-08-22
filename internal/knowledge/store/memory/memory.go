@@ -10,6 +10,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/knowledge"
 	knowledgeStore "github.com/lkarlslund/koder/internal/knowledge/store"
+	revisioncheck "github.com/lkarlslund/koder/internal/knowledge/store/internal/revision"
 )
 
 // Store owns an isolated in-memory canonical record set.
@@ -205,7 +206,7 @@ func (tx *transaction) PutChunk(ctx context.Context, value knowledge.Chunk, expe
 		return err
 	}
 	current, exists := tx.data.chunks[value.ID]
-	if err := checkPutRevision("chunk", string(value.ID), expectedRevision, value.Revision.Number, current.Revision.Number, exists); err != nil {
+	if err := revisioncheck.CheckPut("chunk", string(value.ID), expectedRevision, value.Revision.Number, current.Revision.Number, exists); err != nil {
 		return err
 	}
 	tx.data.chunks[value.ID] = cloneChunk(value)
@@ -217,7 +218,7 @@ func (tx *transaction) DeleteChunk(ctx context.Context, id knowledge.ChunkID, ex
 		return err
 	}
 	current, exists := tx.data.chunks[id]
-	if err := checkDeleteRevision("chunk", string(id), expectedRevision, current.Revision.Number, exists); err != nil {
+	if err := revisioncheck.CheckDelete("chunk", string(id), expectedRevision, current.Revision.Number, exists); err != nil {
 		return err
 	}
 	delete(tx.data.chunks, id)
@@ -232,7 +233,7 @@ func (tx *transaction) PutEntry(ctx context.Context, value knowledge.Entry, expe
 		return err
 	}
 	current, exists := tx.data.entries[value.ID]
-	if err := checkPutRevision("entry", string(value.ID), expectedRevision, value.Revision.Number, current.Revision.Number, exists); err != nil {
+	if err := revisioncheck.CheckPut("entry", string(value.ID), expectedRevision, value.Revision.Number, current.Revision.Number, exists); err != nil {
 		return err
 	}
 	tx.data.entries[value.ID] = cloneEntry(value)
@@ -244,7 +245,7 @@ func (tx *transaction) DeleteEntry(ctx context.Context, id knowledge.EntryID, ex
 		return err
 	}
 	current, exists := tx.data.entries[id]
-	if err := checkDeleteRevision("entry", string(id), expectedRevision, current.Revision.Number, exists); err != nil {
+	if err := revisioncheck.CheckDelete("entry", string(id), expectedRevision, current.Revision.Number, exists); err != nil {
 		return err
 	}
 	delete(tx.data.entries, id)
@@ -259,7 +260,7 @@ func (tx *transaction) PutLink(ctx context.Context, value knowledge.Link, expect
 		return err
 	}
 	current, exists := tx.data.links[value.ID]
-	if err := checkPutRevision("link", string(value.ID), expectedRevision, value.Revision.Number, current.Revision.Number, exists); err != nil {
+	if err := revisioncheck.CheckPut("link", string(value.ID), expectedRevision, value.Revision.Number, current.Revision.Number, exists); err != nil {
 		return err
 	}
 	tx.data.links[value.ID] = cloneLink(value)
@@ -271,7 +272,7 @@ func (tx *transaction) DeleteLink(ctx context.Context, id knowledge.LinkID, expe
 		return err
 	}
 	current, exists := tx.data.links[id]
-	if err := checkDeleteRevision("link", string(id), expectedRevision, current.Revision.Number, exists); err != nil {
+	if err := revisioncheck.CheckDelete("link", string(id), expectedRevision, current.Revision.Number, exists); err != nil {
 		return err
 	}
 	delete(tx.data.links, id)
@@ -300,29 +301,6 @@ func (tx *transaction) DeleteEvidence(ctx context.Context, id knowledge.Evidence
 		return fmt.Errorf("%w: evidence %s", knowledgeStore.ErrNotFound, id)
 	}
 	delete(tx.data.evidence, id)
-	return nil
-}
-
-func checkPutRevision(kind, id string, expected, supplied, current uint64, exists bool) error {
-	if expected == 0 {
-		if exists || supplied != 1 {
-			return fmt.Errorf("%w: create %s %s expected absent revision 1", knowledgeStore.ErrConflict, kind, id)
-		}
-		return nil
-	}
-	if !exists || current != expected || supplied != expected+1 {
-		return fmt.Errorf("%w: update %s %s expected revision %d, current %d, supplied %d", knowledgeStore.ErrConflict, kind, id, expected, current, supplied)
-	}
-	return nil
-}
-
-func checkDeleteRevision(kind, id string, expected, current uint64, exists bool) error {
-	if !exists {
-		return fmt.Errorf("%w: %s %s", knowledgeStore.ErrNotFound, kind, id)
-	}
-	if expected == 0 || current != expected {
-		return fmt.Errorf("%w: delete %s %s expected revision %d, current %d", knowledgeStore.ErrConflict, kind, id, expected, current)
-	}
 	return nil
 }
 
