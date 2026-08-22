@@ -42,7 +42,7 @@ func TestV1FixturesStrictlyMatchContracts(t *testing.T) {
 			name: "search response", file: "search-response.json", new: func() any { return &SearchResponse{} },
 			check: func(t *testing.T, value any) {
 				response := value.(*SearchResponse)
-				if response.APIVersion != Version || len(response.Matches) != 1 || response.Matches[0].Rank.Total != 1 || response.Page.Returned != 1 {
+				if response.APIVersion != Version || response.OperationID == "" || len(response.Matches) != 1 || response.Matches[0].Rank.Total != 1 || response.Page.Returned != 1 {
 					t.Fatalf("search fixture = %#v", response)
 				}
 			},

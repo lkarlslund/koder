@@ -433,6 +433,7 @@ type SearchRequest struct {
 
 type SearchResponse struct {
 	ResponseMetadata
+	OperationID          string                                `json:"operation_id"`
 	Terms                []string                              `json:"terms"`
 	Matches              []knowledgeService.LexicalSearchMatch `json:"matches"`
 	Warnings             []knowledgeService.SearchWarning      `json:"warnings,omitempty"`

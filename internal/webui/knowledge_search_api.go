@@ -52,7 +52,8 @@ func (s *Server) handleKnowledgeSearch(w http.ResponseWriter, r *http.Request) {
 		page.TruncationReasons = result.GraphExpansion.Reasons
 	}
 	s.writeKnowledgeJSON(w, http.StatusOK, knowledgeapi.SearchResponse{
-		ResponseMetadata: knowledgeapi.Metadata(requestID), Terms: result.Terms, Matches: result.Matches,
+		ResponseMetadata: knowledgeapi.Metadata(requestID), OperationID: result.OperationID,
+		Terms: result.Terms, Matches: result.Matches,
 		Warnings: result.Warnings, Contradictions: result.Contradictions, AsOf: result.AsOf,
 		CorpusDocumentCount: result.CorpusDocumentCount, MatchedDocumentCount: result.MatchedDocumentCount,
 		GraphExpansion: result.GraphExpansion, Page: page,

@@ -55,9 +55,13 @@ func TestKnowledgeSearchAndBoundedGraphSnapshot(t *testing.T) {
 	})
 	var search knowledgeapi.SearchResponse
 	decodeKnowledgeResponse(t, response, &search)
-	if response.StatusCode != http.StatusOK || len(search.Matches) != 1 || search.Matches[0].EntryID == "" || search.Matches[0].Document.Title == "" ||
+	if response.StatusCode != http.StatusOK || search.OperationID == "" || len(search.Matches) != 1 || search.Matches[0].EntryID == "" || search.Matches[0].Document.Title == "" ||
 		search.Page.Limit != 1 || search.Page.NextCursor == "" || search.GraphExpansion == nil || search.GraphExpansion.Connections != 2 {
 		t.Fatalf("search status=%d response=%#v", response.StatusCode, search)
+	}
+	metrics := service.OperationMetrics()
+	if len(metrics.Recent) != 1 || metrics.Recent[0].OperationID != search.OperationID || metrics.Recent[0].AuditID != search.RequestID {
+		t.Fatalf("search operation correlation response=%#v metrics=%#v", search, metrics)
 	}
 
 	neighborRequest := knowledgeapi.NeighborRequest{
