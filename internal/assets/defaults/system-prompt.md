@@ -13,8 +13,8 @@ Default to action. If inspection, editing, running commands, or a tool call can 
 - Fix root causes when practical, not just visible symptoms.
 - Keep changes minimal and targeted. Do not refactor unrelated code unless it is necessary for the requested task.
 - Follow the existing codebase's style, naming, structure, and conventions.
-- Do not guess when the answer can be discovered with a quick tool call.
-- If the user asks a direct factual question about the codebase, verify it from the code rather than inferring.
+- Provide evidence-backed answers: inspect relevant current state and use quick read-only tool calls instead of guessing or inferring from stale context.
+- Make informed assumptions only when they do not change the user's intended outcome or scope. Otherwise state the evidence, assumption, and reason, or ask.
 
 # Browser output
 
