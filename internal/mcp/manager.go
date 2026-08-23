@@ -180,12 +180,13 @@ func (m *Manager) LoadConfig(cfgs map[string]config.MCPServer) error {
 }
 
 func (m *Manager) ConnectAll(ctx context.Context) error {
+	var errs []error
 	for _, id := range m.serverIDs() {
 		if err := m.ConnectServer(ctx, id); err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("connect mcp server %q: %w", id, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (m *Manager) ConnectServer(ctx context.Context, id string) error {
@@ -264,7 +265,7 @@ func (m *Manager) connectServer(ctx context.Context, id string) error {
 		return err
 	}
 
-	next, err := m.discoverState(ctx, id, cfg, client, session)
+	next, err := m.discoverState(connectCtx, id, cfg, client, session)
 	if err != nil {
 		_ = session.Close()
 		m.setServerError(id, err)
@@ -417,6 +418,7 @@ func (m *Manager) ExecuteTool(ctx context.Context, serverID, toolName string, ar
 	}
 	session := state.session
 	serverName := strings.TrimSpace(state.config.Name)
+	cfg := cloneServerConfig(state.config)
 	readOnly := toolIsReadOnly(state.tools, toolName)
 	m.mu.RUnlock()
 
@@ -426,10 +428,7 @@ func (m *Manager) ExecuteTool(ctx context.Context, serverID, toolName string, ar
 	if args == nil {
 		args = map[string]any{}
 	}
-	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name:      toolName,
-		Arguments: args,
-	})
+	res, err := callToolWithTimeout(ctx, cfg, session, toolName, args)
 	if err != nil && !isRecoverableSessionError(err) {
 		return tools.Result{}, err
 	}
@@ -441,10 +440,7 @@ func (m *Manager) ExecuteTool(ctx context.Context, serverID, toolName string, ar
 		if !readOnly {
 			return tools.Result{}, fmt.Errorf("%w; mcp server %q reconnected, but tool %q was not retried because it is not declared read-only", err, serverID, toolName)
 		}
-		res, err = recovered.CallTool(ctx, &sdkmcp.CallToolParams{
-			Name:      toolName,
-			Arguments: args,
-		})
+		res, err = callToolWithTimeout(ctx, cfg, recovered, toolName, args)
 		if err != nil {
 			return tools.Result{}, fmt.Errorf("mcp tool %s/%s failed after reconnect: %w", serverID, toolName, err)
 		}
@@ -453,15 +449,16 @@ func (m *Manager) ExecuteTool(ctx context.Context, serverID, toolName string, ar
 }
 
 func (m *Manager) ReadResource(ctx context.Context, serverID, uri string) (ResourceReadResult, error) {
-	session, err := m.sessionForServer(strings.TrimSpace(serverID))
+	serverID = strings.TrimSpace(serverID)
+	session, cfg, err := m.sessionAndConfigForServer(serverID)
 	if err != nil {
 		return ResourceReadResult{}, err
 	}
-	res, err := session.ReadResource(ctx, &sdkmcp.ReadResourceParams{URI: strings.TrimSpace(uri)})
+	res, err := readResourceWithTimeout(ctx, cfg, session, uri)
 	if err != nil && isRecoverableSessionError(err) {
 		session, err = m.recoverSession(ctx, serverID, session)
 		if err == nil {
-			res, err = session.ReadResource(ctx, &sdkmcp.ReadResourceParams{URI: strings.TrimSpace(uri)})
+			res, err = readResourceWithTimeout(ctx, cfg, session, uri)
 		}
 	}
 	if err != nil {
@@ -475,21 +472,16 @@ func (m *Manager) ReadResource(ctx context.Context, serverID, uri string) (Resou
 }
 
 func (m *Manager) GetPrompt(ctx context.Context, serverID, name string, args map[string]string) (PromptResult, error) {
-	session, err := m.sessionForServer(strings.TrimSpace(serverID))
+	serverID = strings.TrimSpace(serverID)
+	session, cfg, err := m.sessionAndConfigForServer(serverID)
 	if err != nil {
 		return PromptResult{}, err
 	}
-	res, err := session.GetPrompt(ctx, &sdkmcp.GetPromptParams{
-		Name:      strings.TrimSpace(name),
-		Arguments: args,
-	})
+	res, err := getPromptWithTimeout(ctx, cfg, session, name, args)
 	if err != nil && isRecoverableSessionError(err) {
 		session, err = m.recoverSession(ctx, serverID, session)
 		if err == nil {
-			res, err = session.GetPrompt(ctx, &sdkmcp.GetPromptParams{
-				Name:      strings.TrimSpace(name),
-				Arguments: args,
-			})
+			res, err = getPromptWithTimeout(ctx, cfg, session, name, args)
 		}
 	}
 	if err != nil {
@@ -892,16 +884,21 @@ func (m *Manager) refreshServerAsync(id string) {
 }
 
 func (m *Manager) sessionForServer(serverID string) (*sdkmcp.ClientSession, error) {
+	session, _, err := m.sessionAndConfigForServer(serverID)
+	return session, err
+}
+
+func (m *Manager) sessionAndConfigForServer(serverID string) (*sdkmcp.ClientSession, config.MCPServer, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	state, ok := m.state[serverID]
 	if !ok {
-		return nil, fmt.Errorf("mcp server %q not configured", serverID)
+		return nil, config.MCPServer{}, fmt.Errorf("mcp server %q not configured", serverID)
 	}
 	if state.session == nil {
-		return nil, fmt.Errorf("mcp server %q is not connected", serverID)
+		return nil, config.MCPServer{}, fmt.Errorf("mcp server %q is not connected", serverID)
 	}
-	return state.session, nil
+	return state.session, cloneServerConfig(state.config), nil
 }
 
 func (m *Manager) discoverState(ctx context.Context, id string, cfg config.MCPServer, client *sdkmcp.Client, session *sdkmcp.ClientSession) (*serverState, error) {
@@ -1208,18 +1205,39 @@ func normalizeSchema(schema any) json.RawMessage {
 }
 
 func newHTTPClient(cfg config.MCPServer) *http.Client {
-	timeout := cfg.RequestTimeout
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
 	return &http.Client{
-		Timeout: timeout,
 		Transport: headerRoundTripper{
 			base:        http.DefaultTransport,
 			headers:     cloneStringMap(cfg.Headers),
 			bearerToken: strings.TrimSpace(cfg.BearerToken),
 		},
 	}
+}
+
+func requestContext(ctx context.Context, cfg config.MCPServer) (context.Context, context.CancelFunc) {
+	timeout := cfg.RequestTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
+func callToolWithTimeout(ctx context.Context, cfg config.MCPServer, session *sdkmcp.ClientSession, toolName string, args map[string]any) (*sdkmcp.CallToolResult, error) {
+	callCtx, cancel := requestContext(ctx, cfg)
+	defer cancel()
+	return session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: toolName, Arguments: args})
+}
+
+func readResourceWithTimeout(ctx context.Context, cfg config.MCPServer, session *sdkmcp.ClientSession, uri string) (*sdkmcp.ReadResourceResult, error) {
+	callCtx, cancel := requestContext(ctx, cfg)
+	defer cancel()
+	return session.ReadResource(callCtx, &sdkmcp.ReadResourceParams{URI: strings.TrimSpace(uri)})
+}
+
+func getPromptWithTimeout(ctx context.Context, cfg config.MCPServer, session *sdkmcp.ClientSession, name string, args map[string]string) (*sdkmcp.GetPromptResult, error) {
+	callCtx, cancel := requestContext(ctx, cfg)
+	defer cancel()
+	return session.GetPrompt(callCtx, &sdkmcp.GetPromptParams{Name: strings.TrimSpace(name), Arguments: args})
 }
 
 type headerRoundTripper struct {

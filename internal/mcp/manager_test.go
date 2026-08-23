@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/provider"
@@ -180,6 +182,51 @@ func TestManagerConnectsDiscoversAndExecutes(t *testing.T) {
 	}
 	if len(prompt.Messages) != 1 || prompt.Messages[0].Text != "review apis" {
 		t.Fatalf("unexpected prompt result: %#v", prompt)
+	}
+}
+
+func TestHTTPClientHasNoWholeSessionTimeout(t *testing.T) {
+	client := newHTTPClient(config.MCPServer{RequestTimeout: time.Millisecond})
+	if client.Timeout != 0 {
+		t.Fatalf("http client timeout = %s, want 0 for long-lived MCP streams", client.Timeout)
+	}
+}
+
+func TestRequestContextUsesConfiguredTimeout(t *testing.T) {
+	ctx, cancel := requestContext(context.Background(), config.MCPServer{RequestTimeout: time.Millisecond})
+	defer cancel()
+	select {
+	case <-ctx.Done():
+		if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			t.Fatalf("request context error = %v", ctx.Err())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("request context did not honor configured timeout")
+	}
+}
+
+func TestConnectAllKeepsHealthyServersWhenAnotherFails(t *testing.T) {
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "healthy", Version: "v1"}, nil)
+	server.AddTool(&sdkmcp.Tool{Name: "read", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "ok"}}}, nil
+	})
+	httpServer := httptest.NewServer(sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, &sdkmcp.StreamableHTTPOptions{JSONResponse: true}))
+	defer httpServer.Close()
+
+	manager, err := NewManager(map[string]config.MCPServer{
+		"broken":  {URL: "http://127.0.0.1:1", StartupTimeout: 100 * time.Millisecond},
+		"healthy": {URL: httpServer.URL},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = manager.DisconnectServer("healthy") }()
+	if err := manager.ConnectAll(context.Background()); err == nil || !strings.Contains(err.Error(), `"broken"`) {
+		t.Fatalf("ConnectAll() error = %v, want broken server aggregate", err)
+	}
+	states := manager.ListServers()
+	if len(states) != 2 || states[1].ID != "healthy" || states[1].Status != ServerStatusConnected {
+		t.Fatalf("healthy server was not retained: %#v", states)
 	}
 }
 
