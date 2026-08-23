@@ -1104,7 +1104,6 @@ func (c *Controller) RewindLiveChat(ctx context.Context, sessionID, chatID, anch
 		Snapshot:        snapshot,
 		Status:          snapshot.Status,
 		StatusText:      snapshot.StatusText,
-		Context:         snapshot.Context,
 		Active:          snapshot.Active,
 		ReplaceTimeline: true,
 	})
@@ -1343,8 +1342,6 @@ func (c *Controller) eventForSelectedExec(ctx context.Context, owner *sessionpkg
 		Snapshot:   snapshot,
 		Status:     snapshot.Status,
 		StatusText: snapshot.StatusText,
-		Context:    snapshot.Context,
-		TokenUsage: snapshot.TokenUsage,
 		Active:     snapshot.Active,
 	}}, true
 }

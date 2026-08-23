@@ -8,7 +8,7 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-func TestMermaidObserverRendersReplacementAfterDetachedRender(t *testing.T) {
+func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 	chromium := knowledgeBrowserChromium(t)
 	ctrl := newTestController(t)
 	serverCtx, stopServer := context.WithCancel(context.Background())
@@ -48,6 +48,23 @@ func TestMermaidObserverRendersReplacementAfterDetachedRender(t *testing.T) {
 		})()`, nil),
 		chromedp.Poll(`window.__transcriptMeasurementCount === 1 && window.__transcriptCallbackCount === 3`, nil),
 		chromedp.Evaluate(`document.documentElement._x_dataStack[0].measureRenderedTimelineItems = window.__originalMeasureRenderedTimelineItems`, nil),
+		chromedp.Evaluate(`(() => {
+			const app = document.documentElement._x_dataStack[0];
+			let timeline = app.patchTimelineItemAppend([], 'chat-1', {item_id: 'item-1', seq: 2, text: 'hello'});
+			timeline = app.patchTimelineItemAppend(timeline, 'chat-1', {item_id: 'item-1', reasoning: 'think'});
+			timeline = app.patchTimelineItemAppend(timeline, 'chat-1', {item_id: 'item-1', text: ' world'});
+			timeline = app.patchTimelineItem(timeline, {
+				id: 'item-1', kind: 'assistant', sealed_at: '2026-08-23T12:00:00Z',
+				content: {text: 'authoritative final', reasoning: {text: 'final thought'}}
+			});
+			window.__timelineAppendResult = timeline[0];
+			window.__timelineStreamingOptions = app.itemMarkdownOptions({id: 'item-2'});
+			window.__timelineFinalOptions = app.itemMarkdownOptions(timeline[0]);
+		})()`, nil),
+		chromedp.Poll(`window.__timelineAppendResult?.content?.text === 'authoritative final' &&
+			window.__timelineAppendResult?.content?.reasoning?.text === 'final thought' &&
+			window.__timelineStreamingOptions?.incremental === true &&
+			window.__timelineFinalOptions?.incremental === false`, nil),
 		chromedp.Evaluate(`(() => {
 			window.__mermaidRenderCalls = [];
 			window.mermaid.render = (id, source) => {

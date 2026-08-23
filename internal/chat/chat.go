@@ -128,12 +128,8 @@ type Update struct {
 	Event             *domain.Event
 	Snapshot          Snapshot
 	Item              domain.TimelineItem
-	Turn              Turn
 	Status            Status
 	StatusText        string
-	Queue             []domain.QueuedInput
-	Context           domain.ContextUsage
-	TokenUsage        domain.Usage
 	Active            bool
 	TranscriptChanged bool
 	ReplaceTimeline   bool
@@ -3733,12 +3729,8 @@ func (r *Chat) snapshotUpdateFlags(event *domain.Event, transcriptChanged, queue
 	return Update{
 		Event:             event,
 		Snapshot:          snapshot,
-		Turn:              snapshot.Turn,
 		Status:            snapshot.Status,
 		StatusText:        snapshot.StatusText,
-		Queue:             visibleQueuedInputs(snapshot.QueuedInputs),
-		Context:           snapshot.Context,
-		TokenUsage:        snapshot.TokenUsage,
 		Active:            snapshot.Active,
 		TranscriptChanged: transcriptChanged,
 		QueueChanged:      queueChanged,

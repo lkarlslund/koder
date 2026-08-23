@@ -1924,26 +1924,31 @@ type stateDelta struct {
 }
 
 type chatDelta struct {
-	ChatID            id.ID                 `json:"chat_id"`
-	Chat              any                   `json:"chat,omitempty"`
-	Item              *domain.TimelineItem  `json:"item,omitempty"`
-	Timeline          []domain.TimelineItem `json:"timeline,omitempty"`
-	Approvals         any                   `json:"approvals,omitempty"`
-	PendingUserInput  int                   `json:"pending_user_input,omitempty"`
-	Queue             any                   `json:"queue,omitempty"`
-	ExecProcesses     any                   `json:"exec_processes,omitempty"`
-	Context           any                   `json:"context,omitempty"`
-	TokenUsage        any                   `json:"token_usage,omitempty"`
-	Status            string                `json:"status,omitempty"`
-	StatusText        string                `json:"status_text,omitempty"`
-	Active            bool                  `json:"active"`
-	TranscriptChanged bool                  `json:"transcript_changed,omitempty"`
-	ReplaceTimeline   bool                  `json:"replace_timeline,omitempty"`
-	QueueChanged      bool                  `json:"queue_changed,omitempty"`
-	StatusChanged     bool                  `json:"status_changed,omitempty"`
-	ContextChanged    bool                  `json:"context_changed,omitempty"`
-	ApprovalsChanged  bool                  `json:"approvals_changed,omitempty"`
-	Error             string                `json:"error,omitempty"`
+	ChatID           id.ID                 `json:"chat_id"`
+	Chat             any                   `json:"chat,omitempty"`
+	Item             *domain.TimelineItem  `json:"item,omitempty"`
+	ItemAppend       *assistantAppendDelta `json:"item_append,omitempty"`
+	Timeline         []domain.TimelineItem `json:"timeline,omitempty"`
+	Approvals        any                   `json:"approvals,omitempty"`
+	PendingUserInput *int                  `json:"pending_user_input"`
+	Queue            any                   `json:"queue,omitempty"`
+	ExecProcesses    any                   `json:"exec_processes,omitempty"`
+	Context          any                   `json:"context,omitempty"`
+	TokenUsage       any                   `json:"token_usage,omitempty"`
+	Status           string                `json:"status,omitempty"`
+	StatusText       string                `json:"status_text,omitempty"`
+	Active           bool                  `json:"active"`
+	ReplaceTimeline  bool                  `json:"replace_timeline,omitempty"`
+	Error            string                `json:"error,omitempty"`
+}
+
+type assistantAppendDelta struct {
+	ItemID    id.ID     `json:"item_id"`
+	Seq       int64     `json:"seq,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitzero"`
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
+	Text      string    `json:"text,omitempty"`
+	Reasoning string    `json:"reasoning,omitempty"`
 }
 
 func webEventFromControllerEvent(event app.Event) (app.Event, bool) {
@@ -1969,26 +1974,14 @@ func webEventFromControllerEvent(event app.Event) (app.Event, bool) {
 
 func chatDeltaFromUpdate(update chat.Update) chatDelta {
 	snapshot := update.Snapshot
+	pendingUserInput := snapshot.PendingUserInput
 	delta := chatDelta{
-		ChatID:            snapshot.Chat.ID,
-		Chat:              snapshot.Chat,
-		Approvals:         snapshot.Approvals,
-		PendingUserInput:  snapshot.PendingUserInput,
-		Queue:             snapshot.QueuedInputs,
-		Context:           snapshot.Context,
-		TokenUsage:        snapshot.TokenUsage,
-		Status:            string(snapshot.Status),
-		StatusText:        snapshot.StatusText,
-		Active:            snapshot.Active,
-		TranscriptChanged: update.TranscriptChanged,
-		ReplaceTimeline:   update.ReplaceTimeline,
-		QueueChanged:      update.QueueChanged,
-		StatusChanged:     update.StatusChanged,
-		ContextChanged:    update.ContextChanged,
-		ApprovalsChanged:  update.ApprovalsChanged,
-	}
-	if snapshot.ExecProcesses != nil {
-		delta.ExecProcesses = snapshot.ExecProcesses
+		ChatID:           snapshot.Chat.ID,
+		PendingUserInput: &pendingUserInput,
+		Status:           string(snapshot.Status),
+		StatusText:       snapshot.StatusText,
+		Active:           snapshot.Active,
+		ReplaceTimeline:  update.ReplaceTimeline,
 	}
 	if delta.Status == "" && update.Status != "" {
 		delta.Status = string(update.Status)
@@ -1999,12 +1992,54 @@ func chatDeltaFromUpdate(update chat.Update) chatDelta {
 	if update.Event != nil && update.Event.Err != nil {
 		delta.Error = update.Event.Err.Error()
 	}
+	if appendDelta, ok := assistantAppendFromUpdate(update); ok {
+		delta.ItemAppend = &appendDelta
+		return delta
+	}
+	delta.Chat = snapshot.Chat
+	if update.ApprovalsChanged {
+		delta.Approvals = snapshot.Approvals
+	}
+	if update.QueueChanged {
+		delta.Queue = snapshot.QueuedInputs
+	}
+	if update.ContextChanged {
+		delta.Context = snapshot.Context
+	}
+	if update.Event != nil && update.Event.Kind == domain.EventKindUsage {
+		delta.TokenUsage = snapshot.TokenUsage
+	}
+	if snapshot.ExecProcesses != nil {
+		delta.ExecProcesses = snapshot.ExecProcesses
+	}
 	if update.ReplaceTimeline {
 		delta.Timeline = snapshot.Timeline
 	} else if item, ok := changedTimelineItem(update); ok {
 		delta.Item = &item
 	}
 	return delta
+}
+
+func assistantAppendFromUpdate(update chat.Update) (assistantAppendDelta, bool) {
+	if update.Event == nil {
+		return assistantAppendDelta{}, false
+	}
+	if update.Event.Kind != domain.EventKindMessageDelta && update.Event.Kind != domain.EventKindReasoning {
+		return assistantAppendDelta{}, false
+	}
+	item, ok := changedTimelineItem(update)
+	if !ok || item.ID == "" {
+		return assistantAppendDelta{}, false
+	}
+	delta := assistantAppendDelta{
+		ItemID: item.ID, Seq: item.Seq, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+	}
+	if update.Event.Kind == domain.EventKindReasoning {
+		delta.Reasoning = update.Event.Text
+	} else {
+		delta.Text = update.Event.Text
+	}
+	return delta, true
 }
 
 func changedTimelineItem(update chat.Update) (domain.TimelineItem, bool) {

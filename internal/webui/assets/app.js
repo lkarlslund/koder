@@ -1912,6 +1912,7 @@
           }
           if (delta.exec_processes !== undefined) next.ExecProcesses = delta.exec_processes;
           if (delta.context !== undefined) next.Context = delta.context;
+          if (delta.token_usage !== undefined) next.TokenUsage = delta.token_usage;
           if (delta.status !== undefined) next.Status = delta.status;
           if (delta.status_text !== undefined) next.StatusText = delta.status_text;
           if (delta.active !== undefined) next.Active = delta.active;
@@ -1923,12 +1924,14 @@
             next.TimelineLoadedAll = timeline.length === stored.length;
             next.TimelineBefore = stored.length ? this.timelineItemID(stored[0]) : '';
             next.TimelineAfter = stored.length ? this.timelineItemID(stored[stored.length - 1]) : '';
-          } else if (delta.item) {
+          } else if (delta.item || delta.item_append) {
             const currentTimeline = this.timelineForChat(id, next);
-            const itemID = this.timelineItemID(delta.item);
+            const itemID = delta.item ? this.timelineItemID(delta.item) : String(delta.item_append.item_id || '').trim();
             const itemLoaded = currentTimeline.some(item => this.timelineItemID(item) === itemID);
             if ((!next.TimelineHasNewer && !next.timeline_has_newer) || itemLoaded) {
-              const patched = this.patchTimelineItem(currentTimeline, delta.item);
+              const patched = delta.item
+                ? this.patchTimelineItem(currentTimeline, delta.item)
+                : this.patchTimelineItemAppend(currentTimeline, id, delta.item_append);
               const stored = this.storeTimeline(id, patched);
               if (patched.length > stored.length) next.TimelineHasMore = true;
               next.TimelineBefore = stored.length ? this.timelineItemID(stored[0]) : '';
@@ -1970,6 +1973,29 @@
           });
           if (idx >= 0) out[idx] = item; else out.push(item);
           return out;
+        },
+        patchTimelineItemAppend(timeline, chatID, append) {
+          const itemID = String(append?.item_id || '').trim();
+          if (!itemID) throw new Error('timeline append missing item id');
+          const existing = (Array.isArray(timeline) ? timeline : []).find(item => this.timelineItemID(item) === itemID);
+          const content = {...(existing?.content || {})};
+          if (append.text) content.text = String(content.text || '') + append.text;
+          if (append.reasoning) {
+            const reasoning = {...(content.reasoning || {})};
+            reasoning.text = String(reasoning.text || '') + append.reasoning;
+            content.reasoning = reasoning;
+          }
+          const item = {
+            ...(existing || {}),
+            id: itemID,
+            chat_id: existing?.chat_id || chatID,
+            seq: append.seq || existing?.seq || 0,
+            kind: existing?.kind || 'assistant',
+            content,
+            created_at: append.created_at || existing?.created_at || '',
+            updated_at: append.updated_at || existing?.updated_at || '',
+          };
+          return this.patchTimelineItem(timeline, item);
         },
         patchChatList(chat) {
           const id = this.chatID(chat);

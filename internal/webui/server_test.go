@@ -1665,7 +1665,7 @@ func TestWebSocketChatUpdateCanReplaceTimeline(t *testing.T) {
 	}
 }
 
-func TestWebSocketStreamingDeltaUsesMutatedSnapshotItem(t *testing.T) {
+func TestWebSocketStreamingDeltaUsesAppendAndFinalItemReconciliation(t *testing.T) {
 	itemID := id.ID("019aa000-0000-7000-8000-000000000043")
 	emptyEventItem := domain.TimelineItem{
 		ID:      itemID,
@@ -1691,15 +1691,26 @@ func TestWebSocketStreamingDeltaUsesMutatedSnapshotItem(t *testing.T) {
 		StatusChanged:     true,
 	}
 	delta := chatDeltaFromUpdate(update)
-	if delta.Item == nil {
-		t.Fatal("expected streaming chat delta item")
+	if delta.Item != nil {
+		t.Fatalf("streaming delta sent full item: %#v", delta.Item)
 	}
-	assistant, ok := delta.Item.Content.(domain.AssistantMessage)
-	if !ok {
-		t.Fatalf("expected assistant item, got %T", delta.Item.Content)
+	if delta.ItemAppend == nil || delta.ItemAppend.ItemID != itemID {
+		t.Fatalf("expected assistant append delta, got %#v", delta.ItemAppend)
 	}
-	if assistant.Text != "partial stream" {
-		t.Fatalf("expected mutated snapshot text in streaming delta, got %q", assistant.Text)
+	if delta.ItemAppend.Text != "partial stream" || delta.ItemAppend.Reasoning != "" {
+		t.Fatalf("unexpected assistant append delta: %#v", delta.ItemAppend)
+	}
+	data, err := json.Marshal(delta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, redundant := range []string{`"chat"`, `"item"`, `"approvals"`, `"queue"`, `"exec_processes"`, `"transcript_changed"`, `"status_changed"`} {
+		if bytes.Contains(data, []byte(redundant)) {
+			t.Fatalf("streaming append included %s: %s", redundant, data)
+		}
+	}
+	if !bytes.Contains(data, []byte(`"pending_user_input":0`)) {
+		t.Fatalf("streaming delta cannot clear pending input: %s", data)
 	}
 }
 
@@ -2183,7 +2194,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `rpcOn(ws, 'hello', {})`) {
 		t.Fatalf("expected hello RPC to be bound to the socket that opened")
 	}
-	if !strings.Contains(fullPage, `applyChatDelta(delta)`) || !strings.Contains(fullPage, `patchTimelineItem`) || !strings.Contains(fullPage, `msg.type === 'chat_delta'`) {
+	if !strings.Contains(fullPage, `applyChatDelta(delta)`) || !strings.Contains(fullPage, `patchTimelineItem`) ||
+		!strings.Contains(fullPage, `patchTimelineItemAppend`) || !strings.Contains(fullPage, `delta.item || delta.item_append`) ||
+		!strings.Contains(fullPage, `msg.type === 'chat_delta'`) {
 		t.Fatalf("expected browser to patch compact chat deltas")
 	}
 	if !strings.Contains(fullPage, `kind === 'show_media' || kind === 'show_image'`) ||
