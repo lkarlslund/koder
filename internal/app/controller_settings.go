@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -311,6 +313,10 @@ func (c *Controller) SavePreferences(ctx context.Context, prefs PreferencesState
 	}
 	applyToolDefaultPreferences(&next, prefs.ToolDefaults)
 	applyBrowserToolDefaults(&next)
+	if err := applySkillsPreferences(&next, prefs.Skills); err != nil {
+		c.mu.Unlock()
+		return PreferencesState{}, err
+	}
 	if err := writePromptPreferences(next.ManagedAssetsDir(), prefs.Prompts); err != nil {
 		c.mu.Unlock()
 		return PreferencesState{}, err
@@ -1215,6 +1221,7 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 		MCPRuntime:     mcpRuntimeState(c.agent),
 		Access:         accessPreferencesFromConfig(c.cfg.Access, c.cfg.GlobalMounts),
 		ToolDefaults:   toolDefaultPreferencesFromConfig(c.cfg.Tools.Enabled),
+		Skills:         skillsPreferences(c.cfg, c.projectRoot),
 		Browser:        nativeBrowserPreferencesFromConfig(c.cfg.Browser),
 		BrowserRuntime: nativeBrowserRuntimeState(c.agent),
 		Codex:          codexPreferencesFromConfig(c.cfg.Codex),
@@ -1895,6 +1902,158 @@ func applyBrowserToolDefaults(cfg *config.Config) {
 	}
 }
 
+func skillDiscoverOptions(cfg config.Config) skills.DiscoverOptions {
+	return skills.DiscoverOptions{
+		ManagedRoots:    []string{filepath.Join(cfg.ManagedAssetsDir(), "skills")},
+		DisabledPaths:   cfg.Skills.Disabled,
+		CatalogMaxChars: cfg.Skills.CatalogMaxChars,
+	}
+}
+
+func skillsPreferences(cfg config.Config, workdir string) SkillsPreferences {
+	catalog := skills.InspectWithOptions(workdir, skillDiscoverOptions(cfg))
+	state := SkillsPreferences{
+		Items:           make([]SkillPreference, 0, len(catalog.Items)),
+		Roots:           make([]SkillRootPreference, 0, len(catalog.Roots)),
+		DisabledPaths:   slices.Clone(cfg.Skills.Disabled),
+		CatalogMaxChars: cfg.Skills.CatalogMaxChars,
+	}
+	for _, root := range catalog.Roots {
+		state.Roots = append(state.Roots, SkillRootPreference{Path: root.Path, Scope: string(root.Scope), Exists: root.Exists})
+	}
+	for _, skill := range catalog.Items {
+		state.Items = append(state.Items, skillPreference(skill))
+	}
+	return state
+}
+
+func skillPreference(skill skills.Skill) SkillPreference {
+	return SkillPreference{
+		Name: skill.Name, DisplayName: skill.Presentation.DisplayName,
+		Description: skill.Description, ShortDescription: skill.Presentation.ShortDescription,
+		License: skill.License, Compatibility: skill.Compatibility, Metadata: skill.Metadata,
+		Path: skill.Path, CanonicalPath: skill.CanonicalPath, Directory: skill.Directory, CanonicalDirectory: skill.CanonicalDirectory,
+		Scope: string(skill.Scope), Enabled: skill.Enabled, Valid: skill.Valid, Effective: skill.Effective,
+		ShadowedBy: skill.ShadowedBy, Error: skill.Error, Warnings: slices.Clone(skill.Warnings),
+		Logo: skill.Presentation.Logo, LogoDataURL: skillLogoDataURL(skill.Presentation.LogoPath),
+		BrandColor: skill.Presentation.BrandColor,
+	}
+}
+
+func skillLogoDataURL(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 256*1024 {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	mime := map[string]string{
+		".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+		".webp": "image/webp", ".gif": "image/gif",
+	}[strings.ToLower(filepath.Ext(path))]
+	if mime == "" {
+		return ""
+	}
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
+}
+
+func applySkillsPreferences(cfg *config.Config, prefs SkillsPreferences) error {
+	if prefs.CatalogMaxChars == 0 && prefs.DisabledPaths == nil {
+		return nil
+	}
+	maxChars := prefs.CatalogMaxChars
+	if maxChars == 0 {
+		maxChars = cfg.Skills.CatalogMaxChars
+	}
+	if maxChars < 512 || maxChars > 100_000 {
+		return fmt.Errorf("skill catalog prompt budget must be between 512 and 100000 characters")
+	}
+	disabled := make([]string, 0, len(prefs.DisabledPaths))
+	seen := map[string]struct{}{}
+	for _, path := range prefs.DisabledPaths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		if !filepath.IsAbs(path) {
+			return fmt.Errorf("disabled skill path %q must be absolute", path)
+		}
+		path = filepath.Clean(path)
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		disabled = append(disabled, path)
+	}
+	cfg.Skills = config.Skills{Disabled: disabled, CatalogMaxChars: maxChars}
+	return nil
+}
+
+func (c *Controller) SkillsForSelection(ctx context.Context, selection Selection) (SkillsPreferences, error) {
+	c.mu.RLock()
+	cfg := c.cfg
+	workdir := c.projectRoot
+	c.mu.RUnlock()
+	if selection.SessionID != "" {
+		session, err := c.SessionByID(ctx, selection.SessionID)
+		if err != nil {
+			return SkillsPreferences{}, err
+		}
+		workdir = session.ProjectRoot
+	}
+	return skillsPreferences(cfg, workdir), nil
+}
+
+func (c *Controller) InspectSkill(ctx context.Context, selection Selection, path string) (SkillInspection, error) {
+	state, err := c.SkillsForSelection(ctx, selection)
+	if err != nil {
+		return SkillInspection{}, err
+	}
+	path = filepath.Clean(strings.TrimSpace(path))
+	var selected *SkillPreference
+	for idx := range state.Items {
+		if state.Items[idx].CanonicalPath == path || state.Items[idx].Path == path {
+			selected = &state.Items[idx]
+			break
+		}
+	}
+	if selected == nil {
+		return SkillInspection{}, fmt.Errorf("skill is not in the current catalog")
+	}
+	body, err := os.ReadFile(selected.Path)
+	if err != nil {
+		return SkillInspection{}, err
+	}
+	if len(body) > 1024*1024 {
+		return SkillInspection{}, fmt.Errorf("SKILL.md is larger than 1 MiB")
+	}
+	files := make([]SkillFile, 0)
+	resourceDir := selected.CanonicalDirectory
+	if resourceDir == "" {
+		resourceDir = selected.Directory
+	}
+	_ = filepath.WalkDir(resourceDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || len(files) >= 200 || entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil
+		}
+		rel, err := filepath.Rel(resourceDir, path)
+		if err == nil {
+			files = append(files, SkillFile{Path: filepath.ToSlash(rel), Size: info.Size()})
+		}
+		return nil
+	})
+	return SkillInspection{Skill: *selected, Content: string(body), Files: files}, nil
+}
+
 func (c *Controller) settingsHealthLocked() SettingsHealth {
 	issues := make([]SettingsIssue, 0)
 	add := func(area, target, source, severity, message string) {
@@ -1989,6 +2148,11 @@ func (c *Controller) settingsHealthLocked() SettingsHealth {
 			message = "MCP server connection failed"
 		}
 		add("tools", "mcp", runtime.ID, "error", runtime.ID+": "+message)
+	}
+	for _, skill := range skills.InspectWithOptions(c.projectRoot, skillDiscoverOptions(c.cfg)).Items {
+		if !skill.Valid {
+			add("tools", "skills", skill.CanonicalPath, "error", "Skill "+skill.Name+": "+skill.Error)
+		}
 	}
 
 	slices.SortFunc(issues, func(a, b SettingsIssue) int {

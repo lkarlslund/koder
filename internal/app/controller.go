@@ -300,11 +300,60 @@ type PreferencesState struct {
 	MCPRuntime     []MCPRuntimeState        `json:"mcp_runtime"`
 	Access         AccessPreferences        `json:"access"`
 	ToolDefaults   []ToolDefaultPreference  `json:"tool_defaults"`
+	Skills         SkillsPreferences        `json:"skills"`
 	Browser        NativeBrowserPreferences `json:"browser"`
 	BrowserRuntime browserapi.Status        `json:"browser_runtime"`
 	Codex          CodexPreferences         `json:"codex"`
 	Health         SettingsHealth           `json:"health"`
 	RestartKeys    []string                 `json:"restart_keys,omitempty"`
+}
+
+type SkillsPreferences struct {
+	Items           []SkillPreference     `json:"items"`
+	Roots           []SkillRootPreference `json:"roots"`
+	DisabledPaths   []string              `json:"disabled_paths"`
+	CatalogMaxChars int                   `json:"catalog_max_chars"`
+}
+
+type SkillPreference struct {
+	Name               string            `json:"name"`
+	DisplayName        string            `json:"display_name"`
+	Description        string            `json:"description"`
+	ShortDescription   string            `json:"short_description"`
+	License            string            `json:"license,omitempty"`
+	Compatibility      string            `json:"compatibility,omitempty"`
+	Metadata           map[string]string `json:"metadata,omitempty"`
+	Path               string            `json:"path"`
+	CanonicalPath      string            `json:"canonical_path"`
+	Directory          string            `json:"directory"`
+	CanonicalDirectory string            `json:"canonical_directory"`
+	Scope              string            `json:"scope"`
+	Enabled            bool              `json:"enabled"`
+	Valid              bool              `json:"valid"`
+	Effective          bool              `json:"effective"`
+	ShadowedBy         string            `json:"shadowed_by,omitempty"`
+	Error              string            `json:"error,omitempty"`
+	Warnings           []string          `json:"warnings,omitempty"`
+	Logo               string            `json:"logo,omitempty"`
+	LogoDataURL        string            `json:"logo_data_url,omitempty"`
+	BrandColor         string            `json:"brand_color,omitempty"`
+}
+
+type SkillRootPreference struct {
+	Path   string `json:"path"`
+	Scope  string `json:"scope"`
+	Exists bool   `json:"exists"`
+}
+
+type SkillInspection struct {
+	Skill   SkillPreference `json:"skill"`
+	Content string          `json:"content"`
+	Files   []SkillFile     `json:"files"`
+}
+
+type SkillFile struct {
+	Path string `json:"path"`
+	Size int64  `json:"size"`
 }
 
 // SettingsHealth summarizes configuration and runtime problems that need a
@@ -2476,7 +2525,7 @@ func isComposerTokenBoundary(r rune) bool {
 
 func (c *Controller) matchingComposerSkills(workdir string, query string) []skills.Skill {
 	var matches []skills.Skill
-	opts := skills.DiscoverOptions{UserRoots: []string{filepath.Join(c.cfg.ManagedAssetsDir(), "skills")}}
+	opts := skillDiscoverOptions(c.cfg)
 	for _, item := range skills.DiscoverWithOptions(workdir, opts) {
 		name := strings.ToLower(strings.TrimSpace(item.Name))
 		if query == "" || strings.HasPrefix(name, query) {

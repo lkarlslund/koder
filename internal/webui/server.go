@@ -1421,7 +1421,22 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		}
 		return map[string]any{"ticket": ticket, "expires_at": expiresAt}, nil
 	case "preferences_state":
-		return s.controller.Preferences(ctx)
+		preferences, err := s.controller.Preferences(ctx)
+		if err != nil {
+			return nil, err
+		}
+		preferences.Skills, err = s.controller.SkillsForSelection(ctx, s.appSelection(clientID))
+		return preferences, err
+	case "skills_state":
+		return s.controller.SkillsForSelection(ctx, s.appSelection(clientID))
+	case "skill_inspect":
+		var in struct {
+			Path string `json:"path"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.InspectSkill(ctx, s.appSelection(clientID), in.Path)
 	case "browser_action":
 		var in struct {
 			Action string `json:"action"`
@@ -1457,7 +1472,12 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		return s.controller.SavePreferences(ctx, in)
+		preferences, err := s.controller.SavePreferences(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		preferences.Skills, err = s.controller.SkillsForSelection(ctx, s.appSelection(clientID))
+		return preferences, err
 	case "test_mcp_server":
 		var in app.MCPServerDraft
 		if err := decodeParams(params, &in); err != nil {

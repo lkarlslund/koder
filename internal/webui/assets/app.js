@@ -1155,6 +1155,7 @@
         showSessions: false, sessionTab: 'sessions', sessionFilter: 'active', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
 		providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
 		showModelDetails: false, modelDetails: null, settingsModelQuery: '', showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
+		settingsSkillQuery: '', showSkillInspector: false, skillInspection: null, skillInspectionLoading: false,
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary', mcpTesting: false, mcpSaving: false,
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
         userInputModal: {batchKey: '', index: 0, answers: {}, busy: false, error: ''},
@@ -5659,7 +5660,7 @@
         closeSettingsDialog() {
           if (this.settingsDirty() && !confirm('Discard unsaved settings changes?')) return;
 		  this.showSettings = false; this.settings = null; this.settingsBaselineJSON = ''; this.settingsStatus = '';
-		  this.closeProviderEditor(); this.closeModelDetails(); this.closeModelConfigEditor(); this.closeMCPEditor(); this.reportClientStateSoon();
+		  this.closeProviderEditor(); this.closeModelDetails(); this.closeModelConfigEditor(); this.closeMCPEditor(); this.closeSkillInspector(); this.reportClientStateSoon();
         },
         setSettingsState(state) {
           this.settings = state || {};
@@ -5671,6 +5672,10 @@
 		  if (!this.settings.codex) this.settings.codex = {configured: true, enabled: true, executable: 'codex', home: ''};
 		  if (!this.settings.access) this.settings.access = {settings: this.cloneAccessSettings({}), presets: [], global_mounts: []};
 		  if (!Array.isArray(this.settings.access.global_mounts)) this.settings.access.global_mounts = [];
+		  if (!this.settings.skills) this.settings.skills = {items: [], roots: [], disabled_paths: [], catalog_max_chars: 12000};
+		  if (!Array.isArray(this.settings.skills.items)) this.settings.skills.items = [];
+		  if (!Array.isArray(this.settings.skills.roots)) this.settings.skills.roots = [];
+		  if (!Array.isArray(this.settings.skills.disabled_paths)) this.settings.skills.disabled_paths = [];
 		  this.browserStatus = this.settings.browser_runtime || this.browserStatus;
 		  delete this.settings.browser_runtime;
           this.applyTTSSettings(this.settings.ui.tts);
@@ -5685,7 +5690,7 @@
           return !!(this.settings && this.settingsBaselineJSON && this.settingsSnapshotJSON() !== this.settingsBaselineJSON);
         },
         discardSettingsChanges() {
-          this.closeProviderEditor(); this.closeModelConfigEditor(); this.closeMCPEditor();
+		  this.closeProviderEditor(); this.closeModelConfigEditor(); this.closeMCPEditor(); this.closeSkillInspector();
           this.settingsLoading = true; this.settingsStatus = ''; this.settingsStatusKind = 'secondary';
           this.rpc('preferences_state', {}).then(state => {
             this.setSettingsState(state);
@@ -6467,6 +6472,73 @@
             this.settings.thinking.model_id = '';
           }
         },
+        skillRows() {
+          const query = String(this.settingsSkillQuery || '').trim().toLowerCase();
+          const rows = this.settings?.skills?.items || [];
+          if (!query) return rows;
+          return rows.filter(item => [item.name, item.display_name, item.description, item.short_description, item.scope, item.path].some(value => String(value || '').toLowerCase().includes(query)));
+        },
+        skillGroups() {
+          const labels = {project: 'Project', user: 'Shared', managed: 'Built-in'};
+          const groups = new Map();
+          for (const item of this.skillRows()) {
+            const scope = String(item.scope || 'project');
+            if (!groups.has(scope)) groups.set(scope, {id: scope, label: labels[scope] || scope, items: []});
+            groups.get(scope).items.push(item);
+          }
+          return ['project', 'user', 'managed'].filter(scope => groups.has(scope)).map(scope => groups.get(scope));
+        },
+        skillStatus(item) {
+          if (!item?.valid) return item?.error || 'Invalid';
+          if (!item?.enabled) return 'Disabled';
+          if (!item?.effective) return 'Shadowed by a higher-priority skill';
+          return 'Available';
+        },
+        skillStatusClass(item) {
+          if (!item?.valid) return 'text-bg-danger';
+          if (!item?.enabled || !item?.effective) return 'text-bg-secondary';
+          return 'text-bg-success';
+        },
+        setSkillEnabled(item, enabled) {
+          if (!this.settings?.skills || !item) return;
+          const path = String(item.canonical_path || item.path || '');
+          const disabled = new Set(this.settings.skills.disabled_paths || []);
+          if (enabled) disabled.delete(path); else disabled.add(path);
+          this.settings.skills.disabled_paths = Array.from(disabled);
+          item.enabled = enabled;
+        },
+        refreshSkills() {
+          if (this.settingsDirty()) {
+            this.showToast('Save or discard settings changes before refreshing skills');
+            return;
+          }
+          this.rpc('skills_state', {}).then(state => {
+            this.settings.skills = state;
+            this.settingsBaselineJSON = this.settingsSnapshotJSON();
+          }).catch(err => this.showToast(err.message));
+        },
+        openSkillInspector(item) {
+          if (!item?.path) return;
+          this.showSkillInspector = true; this.skillInspection = {skill: item, content: '', files: []}; this.skillInspectionLoading = true;
+          this.rpc('skill_inspect', {path: item.canonical_path || item.path}).then(result => {
+            this.skillInspection = result;
+          }).catch(err => {
+            this.skillInspection = {skill: item, content: '', files: [], error: err.message};
+          }).finally(() => { this.skillInspectionLoading = false; });
+        },
+        closeSkillInspector() { this.showSkillInspector = false; this.skillInspection = null; this.skillInspectionLoading = false; },
+        skillMarkdownBody(content) {
+          const source = String(content || '').replace(/^\uFEFF/, '');
+          if (!source.startsWith('---')) return source;
+          const match = source.match(/^---\s*\n[\s\S]*?\n---\s*\n?/);
+          return match ? source.slice(match[0].length) : source;
+        },
+        formatSkillFileSize(size) {
+          const bytes = Number(size || 0);
+          if (bytes < 1024) return bytes + ' B';
+          if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KiB';
+          return (bytes / (1024 * 1024)).toFixed(1) + ' MiB';
+        },
         mcpRows() { return this.settings?.mcp_servers || []; },
         addMCPServer() {
           this.mcpDraft = {original_id: '', id: '', name: '', url: '', headers: {}, disabled: false, startup_timeout: '', request_timeout: '', disable_standalone_sse: false, bearer_token: '', bearer_token_env: ''};
@@ -6590,6 +6662,10 @@
               mcp_servers: source.mcp_servers,
               access: source.access,
               tool_defaults: source.tool_defaults,
+			  skills: {
+				disabled_paths: source.skills?.disabled_paths || [],
+				catalog_max_chars: source.skills?.catalog_max_chars || 12000,
+			  },
             };
           } catch (err) {
             this.settingsStatus = 'Invalid JSON: ' + err.message; this.settingsStatusKind = 'danger';

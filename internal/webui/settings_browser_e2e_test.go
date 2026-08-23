@@ -63,7 +63,7 @@ func TestSettingsBrowserNavigationGroupsConfigurationByDomain(t *testing.T) {
 
 	assertSettingsPageContains(t, browserCtx, "models", "Model providers", "Models", "Default model")
 	assertSettingsPageContains(t, browserCtx, "backends", "Koder", "Codex backend")
-	assertSettingsPageContains(t, browserCtx, "tools", "Managed browser", "MCP tool sources", "Native tools")
+	assertSettingsPageContains(t, browserCtx, "tools", "Agent Skills", "Managed browser", "MCP tool sources", "Native tools")
 	assertSettingsPageContains(t, browserCtx, "voice", "Android devices", "Speech output")
 	assertSettingsPageContains(t, browserCtx, "conversation", "Turn execution", "Compaction", "Thinking helper")
 
