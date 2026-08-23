@@ -2020,6 +2020,10 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected browser markdown renderer to render inline math while skipping code")
 	}
 	if !strings.Contains(fullPage, `language-mermaid`) || !strings.Contains(fullPage, `mermaid.render`) || !strings.Contains(fullPage, `sanitizeMermaidSVG`) ||
+		!strings.Contains(fullPage, `if (!diagram.isConnected) continue;`) ||
+		!strings.Contains(fullPage, `new MutationObserver(mutations =>`) ||
+		!strings.Contains(fullPage, `addedNodesContainPendingMermaid(mutations)`) ||
+		!strings.Contains(fullPage, `this.transcriptDiagramFrame = requestAnimationFrame`) ||
 		!strings.Contains(fullPage, `flowchart: {htmlLabels: true, curve: 'basis', useMaxWidth: true}`) ||
 		!strings.Contains(fullPage, `HTML_INTEGRATION_POINTS: {foreignobject: true}`) ||
 		!strings.Contains(fullPage, `ADD_TAGS: ['foreignobject']`) ||
@@ -2340,9 +2344,9 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected queue deltas to clear all browser queue aliases")
 	}
 	if !strings.Contains(fullPage, `afterTranscriptDOMUpdate`) || !strings.Contains(fullPage, `requestAnimationFrame`) ||
-		!strings.Contains(fullPage, `Promise.resolve(rendered).then`) ||
+		!strings.Contains(fullPage, `scheduleTranscriptDiagramRender`) ||
 		!strings.Contains(fullPage, `return renderMermaidIn(root).then`) {
-		t.Fatalf("expected transcript scroll restoration to run after deferred DOM height updates with optional diagram rendering")
+		t.Fatalf("expected transcript updates to batch diagram rendering independently from scroll restoration")
 	}
 	if !strings.Contains(fullPage, `applyState(s, {scrollToBottom: true})`) {
 		t.Fatalf("expected explicit chat switches to scroll to the bottom")

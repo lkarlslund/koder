@@ -1,0 +1,66 @@
+package webui
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/chromedp/chromedp"
+)
+
+func TestMermaidObserverRendersReplacementAfterDetachedRender(t *testing.T) {
+	chromium := knowledgeBrowserChromium(t)
+	ctrl := newTestController(t)
+	serverCtx, stopServer := context.WithCancel(context.Background())
+	server := startKnowledgeBrowserTestServer(t, serverCtx, ctrl)
+	t.Cleanup(func() {
+		stopServer()
+		_ = server.server.Close()
+	})
+
+	allocatorOptions := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(chromium),
+		chromedp.WSURLReadTimeout(60*time.Second),
+		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("disable-dev-shm-usage", true),
+	)
+	allocatorCtx, stopAllocator := chromedp.NewExecAllocator(context.Background(), allocatorOptions...)
+	t.Cleanup(stopAllocator)
+	browserCtx, stopBrowser := chromedp.NewContext(allocatorCtx)
+	t.Cleanup(stopBrowser)
+	browserCtx, cancelDeadline := context.WithTimeout(browserCtx, 60*time.Second)
+	t.Cleanup(cancelDeadline)
+
+	if err := chromedp.Run(browserCtx,
+		chromedp.Navigate(server.URL()),
+		chromedp.WaitReady(`.transcript`, chromedp.ByQuery),
+		chromedp.Poll(`document.documentElement._x_dataStack?.[0]?.transcriptDiagramObserver instanceof MutationObserver`, nil),
+		chromedp.Evaluate(`(() => {
+			window.__mermaidRenderCalls = [];
+			window.mermaid.render = (id, source) => {
+				window.__mermaidRenderCalls.push(source);
+				const result = {svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>' + source + '</text></svg>'};
+				if (window.__mermaidRenderCalls.length > 1) return Promise.resolve(result);
+				return new Promise(resolve => { window.__resolveFirstMermaidRender = () => resolve(result); });
+			};
+			const host = document.createElement('div');
+			host.id = 'mermaid-observer-test';
+			document.querySelector('.transcript').append(host);
+			host.innerHTML = '<div class="mermaid-diagram" data-mermaid-state="pending"><pre>graph TD; A--&gt;B</pre></div>';
+		})()`, nil),
+		chromedp.Poll(`window.__mermaidRenderCalls?.length === 1`, nil),
+		chromedp.Evaluate(`(() => {
+			const host = document.querySelector('#mermaid-observer-test');
+			host.innerHTML = '<div class="mermaid-diagram" data-mermaid-state="pending"><pre>graph TD; C--&gt;D</pre></div>';
+			window.__resolveFirstMermaidRender();
+		})()`, nil),
+		chromedp.Poll(`(() => {
+			const diagram = document.querySelector('#mermaid-observer-test .mermaid-diagram');
+			return window.__mermaidRenderCalls?.length === 2 &&
+				diagram?.dataset.mermaidState === 'done' &&
+				diagram.textContent.includes('graph TD; C-->D');
+		})()`, nil),
+	); err != nil {
+		t.Fatalf("render replacement Mermaid diagram: %v", err)
+	}
+}

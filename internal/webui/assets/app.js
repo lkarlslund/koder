@@ -382,6 +382,7 @@
         const id = 'mermaid-' + Math.random().toString(36).slice(2);
         try {
           const result = await mermaid.render(id, source);
+          if (!diagram.isConnected) continue;
           diagram.innerHTML = '<div class="mermaid-diagram-content">' + sanitizeMermaidSVG(result.svg || '') + '</div>' + diagramExpandButton('Mermaid diagram');
           diagram.dataset.mermaidState = 'done';
           if (result.bindFunctions) result.bindFunctions(diagram);
@@ -390,6 +391,16 @@
           diagram.innerHTML = '<div class="mermaid-error">Mermaid render failed</div><pre>' + escapeHTML(source) + '</pre>';
         }
       }
+    }
+    function addedNodesContainPendingMermaid(mutations) {
+      const selector = '.mermaid-diagram[data-mermaid-state="pending"]';
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType !== Node.ELEMENT_NODE) continue;
+          if (node.matches(selector) || node.querySelector(selector)) return true;
+        }
+      }
+      return false;
     }
     function markMermaidThemeDirty(root) {
       if (!root) return;
@@ -1201,7 +1212,7 @@
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
 		chatCreator: {open: false, loading: false, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}},
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptBottomScrollPending: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptBottomScrollPending: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptDiagramObserver: null, transcriptDiagramFrame: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
           this.syncBrowserTabActivity();
@@ -1222,7 +1233,7 @@
           this.websocketHealthTimer = setInterval(() => this.checkWebsocketHealth(), 5000);
 		  this.refreshBrowserStatus();
 		  this.browserStatusTimer = setInterval(() => this.refreshBrowserStatus(), 5000);
-          this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); this.renderDiagrams(); this.observeLastTranscriptItem(); });
+          this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); this.observeTranscriptDiagrams(); this.scheduleTranscriptDiagramRender(); this.observeLastTranscriptItem(); });
         },
         initializeRouteHydration() {
           const route = this.selectionFromLocation();
@@ -1396,7 +1407,7 @@
           configureMermaid();
           if (previous && previous !== resolved) {
             markMermaidThemeDirty(this.transcriptElement());
-            this.renderDiagrams();
+            this.scheduleTranscriptDiagramRender();
           }
         },
         appShellStyle() { return '--sidebar-width: ' + this.sidebarWidth() + 'px;'; },
@@ -1775,14 +1786,8 @@
           this.syncInterruptArmed();
           this.afterTranscriptDOMUpdate(() => {
             if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
-          }, {renderDiagrams: false});
+          });
           this.reportClientStateSoon();
-        },
-        shouldRenderDiagramsAfterChatDelta(delta, previous, next) {
-          if (!delta) return false;
-          if (this.snapshotIsStreaming(next)) return false;
-          const wasStreaming = this.snapshotIsStreaming(previous);
-          return !!delta.item || !!delta.transcript_changed || !!delta.TranscriptChanged || wasStreaming;
         },
         applyRestartDelta(delta) {
           if (!delta) return;
@@ -1949,10 +1954,9 @@
           if (delta.error) { this.error = delta.error; this.showToast(delta.error); }
           this.syncInterruptArmed();
           if (active) {
-            const changedItemID = delta.item ? this.timelineItemID(delta.item) : '';
             this.afterTranscriptDOMUpdate(() => {
               if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
-            }, {itemID: changedItemID});
+            });
           }
           this.reportClientStateSoon();
         },
@@ -2279,37 +2283,33 @@
           const nearBottom = this.transcriptNearBottom(el);
           return {el, top: el.scrollTop, nearBottom, stickToBottom: !!this.transcriptStickToBottom};
         },
-        afterTranscriptDOMUpdate(fn, options = {}) {
+        afterTranscriptDOMUpdate(fn) {
           this.$nextTick(() => {
             requestAnimationFrame(() => {
-              const run = () => {
-                this.measureRenderedTimelineItems();
-                this.observeLastTranscriptItem();
-                fn();
-              };
-              if (options.renderDiagrams === false) {
-                run();
-                return;
-              }
-              const rendered = this.renderDiagrams(this.timelineItemElement(options.itemID));
-              run();
-              Promise.resolve(rendered).then(() => {
-                requestAnimationFrame(() => {
-                  this.measureRenderedTimelineItems();
-                  this.observeLastTranscriptItem();
-                  fn();
-                });
-              });
+              this.measureRenderedTimelineItems();
+              this.observeLastTranscriptItem();
+              fn();
             });
           });
         },
-        timelineItemElement(itemID) {
-          const id = String(itemID || '').trim();
-          if (!id) return null;
+        observeTranscriptDiagrams() {
           const root = this.transcriptElement();
-          if (!root) return null;
-          const escaped = window.CSS && CSS.escape ? CSS.escape(id) : id.replace(/["\\]/g, '\\$&');
-          return root.querySelector('[data-timeline-item-id="' + escaped + '"]');
+          if (!root || !window.MutationObserver) return;
+          if (this.transcriptDiagramObserver) this.transcriptDiagramObserver.disconnect();
+          this.transcriptDiagramObserver = new MutationObserver(mutations => {
+            if (addedNodesContainPendingMermaid(mutations)) this.scheduleTranscriptDiagramRender();
+          });
+          this.transcriptDiagramObserver.observe(root, {childList: true, subtree: true});
+        },
+        scheduleTranscriptDiagramRender() {
+          if (this.transcriptDiagramFrame) return;
+          this.transcriptDiagramFrame = requestAnimationFrame(() => {
+            this.transcriptDiagramFrame = 0;
+            Promise.resolve(this.renderDiagrams()).then(() => {
+              this.measureRenderedTimelineItems();
+              this.observeLastTranscriptItem();
+            });
+          });
         },
         lastTranscriptItemElement() {
           const root = this.transcriptElement();
