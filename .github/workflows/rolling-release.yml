@@ -3,6 +3,13 @@ name: Rolling release
 on:
   schedule:
     - cron: "0 0,12 * * *"
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: "Rebuild and replace assets even when the latest release is already at HEAD"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -32,6 +39,7 @@ jobs:
         id: meta
         env:
           GH_TOKEN: ${{ github.token }}
+          FORCE_REBUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild }}
         run: |
           set -euo pipefail
 
@@ -65,7 +73,7 @@ jobs:
           repair_release=false
           if [[ -n "$latest_tag" ]] && git rev-parse -q --verify "refs/tags/${latest_tag}" >/dev/null; then
             if [[ "$(git rev-parse HEAD)" == "$(git rev-parse "${latest_tag}")" ]]; then
-              if release_has_expected_assets "$latest_tag"; then
+              if [[ "${FORCE_REBUILD}" != "true" ]] && release_has_expected_assets "$latest_tag"; then
                 echo "changed=false" >>"$GITHUB_OUTPUT"
                 echo "No changes since ${latest_tag}, and all expected assets exist; skipping release."
                 exit 0
