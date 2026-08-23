@@ -1059,11 +1059,15 @@ func providerDefinition(kind ID, spec ToolSpec) provider.ToolDefinition {
 
 func BuildToolResult(req Request, result Result) (domain.ToolResult, string, error) {
 	_, body := SummarizeResult(req, result)
+	status := result.Status
+	if status == "" {
+		status = domain.ToolResultStatusOK
+	}
 	toolResult := domain.ToolResult{
 		Text:   body,
 		Diff:   strings.TrimSpace(result.DiffText),
 		Data:   result.Stored,
-		Status: domain.ToolResultStatusOK,
+		Status: status,
 	}
 	return toolResult, body, nil
 }

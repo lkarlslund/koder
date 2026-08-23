@@ -247,16 +247,20 @@ func (e *Engine) Shutdown(ctx context.Context, reason chat.CancelReason) error {
 	if e.browser != nil {
 		browserErr = e.browser.Stop(ctx)
 	}
+	var mcpErr error
+	if e.mcp != nil {
+		mcpErr = e.mcp.Close()
+	}
 	if e.registry == nil {
 		if e.codex != nil {
-			return errors.Join(browserErr, e.codex.Close())
+			return errors.Join(browserErr, mcpErr, e.codex.Close())
 		}
-		return browserErr
+		return errors.Join(browserErr, mcpErr)
 	}
 	registryErr := e.registry.Shutdown(ctx, reason)
 	var codexErr error
 	if e.codex != nil {
 		codexErr = e.codex.Close()
 	}
-	return errors.Join(browserErr, registryErr, codexErr)
+	return errors.Join(browserErr, mcpErr, registryErr, codexErr)
 }

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -488,7 +489,7 @@ func TestToolDefinitionsPassServerDescriptionsUnchanged(t *testing.T) {
 }
 
 func TestConvertCallToolResultDoesNotDuplicateStructuredContent(t *testing.T) {
-	result, err := convertCallToolResult("docs", "Docs", "lookup", &sdkmcp.CallToolResult{
+	result, err := convertCallToolResult("docs", "Docs", "lookup", nil, &sdkmcp.CallToolResult{
 		Content:           []sdkmcp.Content{&sdkmcp.TextContent{Text: `{"subject":"one copy"}`}},
 		StructuredContent: map[string]any{"subject": "one copy"},
 	})
@@ -501,6 +502,69 @@ func TestConvertCallToolResultDoesNotDuplicateStructuredContent(t *testing.T) {
 	stored, ok := result.Stored.(tools.MCPStoredResult)
 	if !ok || !strings.Contains(stored.StructuredContent, "one copy") {
 		t.Fatalf("structured content was not retained separately: %#v", result.Stored)
+	}
+}
+
+func TestConvertCallToolResultPreservesToolErrorStatus(t *testing.T) {
+	result, err := convertCallToolResult("docs", "Docs", "lookup", nil, &sdkmcp.CallToolResult{
+		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "bad query"}}, IsError: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != domain.ToolResultStatusError || result.Output != "bad query" {
+		t.Fatalf("result = %#v", result)
+	}
+	stored := result.Stored.(tools.MCPStoredResult)
+	if !stored.IsError {
+		t.Fatalf("stored error flag was lost: %#v", stored)
+	}
+}
+
+func TestConvertCallToolResultValidatesStructuredOutput(t *testing.T) {
+	schema := map[string]any{
+		"type": "object", "required": []string{"title"},
+		"properties": map[string]any{"title": map[string]any{"type": "string"}},
+	}
+	result, err := convertCallToolResult("docs", "Docs", "lookup", schema, &sdkmcp.CallToolResult{
+		StructuredContent: map[string]any{"title": 42},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != domain.ToolResultStatusError || !strings.Contains(result.Output, "failed its declared schema") {
+		t.Fatalf("invalid structured output was accepted: %#v", result)
+	}
+}
+
+func TestConvertCallToolResultPreservesBinaryContent(t *testing.T) {
+	result, err := convertCallToolResult("media", "Media", "render", nil, &sdkmcp.CallToolResult{
+		Content: []sdkmcp.Content{&sdkmcp.ImageContent{MIMEType: "image/png", Data: []byte("png-data")}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := result.Stored.(tools.MCPStoredResult)
+	if len(stored.Content) != 1 || string(stored.Content[0].Data) != "png-data" || stored.Content[0].Size != 8 || stored.Content[0].SHA256 == "" {
+		t.Fatalf("binary content was not retained: %#v", stored)
+	}
+	if !strings.Contains(result.Output, "[image content image/png, 8 bytes]") {
+		t.Fatalf("binary model output = %q", result.Output)
+	}
+}
+
+func TestConvertCallToolResultMarksInputRequiredIncomplete(t *testing.T) {
+	var response sdkmcp.CallToolResult
+	if err := json.Unmarshal([]byte(`{"resultType":"input_required","inputRequests":{},"requestState":"resume-1","content":[]}`), &response); err != nil {
+		t.Fatal(err)
+	}
+	result, err := convertCallToolResult("docs", "Docs", "lookup", nil, &response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := result.Stored.(tools.MCPStoredResult)
+	if result.Status != domain.ToolResultStatusError || !stored.NeedsInput || stored.RequestState != "resume-1" {
+		t.Fatalf("input-required result = %#v stored=%#v", result, stored)
 	}
 }
 

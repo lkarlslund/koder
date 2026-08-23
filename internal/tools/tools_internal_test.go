@@ -27,3 +27,13 @@ func TestBuildToolResultKeepsToolOwnedData(t *testing.T) {
 		t.Fatalf("expected tool-owned data to be preserved, got %#v", result.Data)
 	}
 }
+
+func TestBuildToolResultPreservesExplicitErrorStatus(t *testing.T) {
+	result, _, err := BuildToolResult(Request{Tool: FileRead}, Result{Output: "failed", Status: domain.ToolResultStatusError})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != domain.ToolResultStatusError {
+		t.Fatalf("status = %q, want error", result.Status)
+	}
+}

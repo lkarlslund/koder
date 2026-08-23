@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -16,10 +17,12 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/version"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 type ServerStatus string
@@ -39,6 +42,7 @@ type ToolDescriptor struct {
 	Title           string
 	Description     string
 	InputSchema     any
+	OutputSchema    any
 	ReadOnlyHint    bool
 	DestructiveHint *bool
 	IdempotentHint  bool
@@ -319,6 +323,30 @@ func (m *Manager) DisconnectServer(id string) error {
 	return nil
 }
 
+// Close disconnects every configured MCP server and releases persistent transports.
+func (m *Manager) Close() error {
+	m.connectMu.Lock()
+	defer m.connectMu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var errs []error
+	for id, state := range m.state {
+		if state.session != nil {
+			if err := state.session.Close(); err != nil {
+				errs = append(errs, fmt.Errorf("close mcp server %q: %w", id, err))
+			}
+		}
+		state.session = nil
+		state.client = nil
+		if state.config.Disabled {
+			state.status = ServerStatusDisabled
+		} else {
+			state.status = ServerStatusDisconnected
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func (m *Manager) ListServers() []ServerState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -423,6 +451,7 @@ func (m *Manager) ExecuteTool(ctx context.Context, serverID, toolName string, ar
 	serverName := strings.TrimSpace(state.config.Name)
 	cfg := cloneServerConfig(state.config)
 	readOnly := toolIsReadOnly(state.tools, toolName)
+	outputSchema := toolOutputSchema(state.tools, toolName)
 	m.mu.RUnlock()
 
 	if session == nil {
@@ -448,7 +477,7 @@ func (m *Manager) ExecuteTool(ctx context.Context, serverID, toolName string, ar
 			return tools.Result{}, fmt.Errorf("mcp tool %s/%s failed after reconnect: %w", serverID, toolName, err)
 		}
 	}
-	return convertCallToolResult(serverID, serverName, toolName, res)
+	return convertCallToolResult(serverID, serverName, toolName, outputSchema, res)
 }
 
 func (m *Manager) ReadResource(ctx context.Context, serverID, uri string) (ResourceReadResult, error) {
@@ -468,8 +497,9 @@ func (m *Manager) ReadResource(ctx context.Context, serverID, uri string) (Resou
 		return ResourceReadResult{}, err
 	}
 	out := ResourceReadResult{Contents: make([]tools.MCPStoredContentItem, 0, len(res.Contents))}
+	retainedBinaryBytes := int64(0)
 	for _, item := range res.Contents {
-		out.Contents = append(out.Contents, contentItemFromResourceContents(item))
+		out.Contents = append(out.Contents, contentItemFromResourceContents(item, &retainedBinaryBytes))
 	}
 	return out, nil
 }
@@ -510,6 +540,15 @@ func toolIsReadOnly(tools []ToolDescriptor, name string) bool {
 		}
 	}
 	return false
+}
+
+func toolOutputSchema(tools []ToolDescriptor, name string) any {
+	for _, tool := range tools {
+		if tool.Name == name {
+			return tool.OutputSchema
+		}
+	}
+	return nil
 }
 
 func isRecoverableSessionError(err error) bool {
@@ -1018,6 +1057,7 @@ func collectTools(ctx context.Context, serverID string, cfg config.MCPServer, se
 			Title:           title,
 			Description:     tool.Description,
 			InputSchema:     tool.InputSchema,
+			OutputSchema:    tool.OutputSchema,
 			ReadOnlyHint:    tool.Annotations != nil && tool.Annotations.ReadOnlyHint,
 			DestructiveHint: cloneBoolPointer(toolAnnotationDestructive(tool)),
 			IdempotentHint:  tool.Annotations != nil && tool.Annotations.IdempotentHint,
@@ -1127,12 +1167,18 @@ func collectPrompts(ctx context.Context, serverID string, cfg config.MCPServer, 
 	return out, nil
 }
 
-func convertCallToolResult(serverID, serverName, toolName string, res *sdkmcp.CallToolResult) (tools.Result, error) {
+const (
+	maximumMCPBinaryItemBytes = 10 << 20
+	maximumMCPBinaryCallBytes = 25 << 20
+)
+
+func convertCallToolResult(serverID, serverName, toolName string, outputSchema any, res *sdkmcp.CallToolResult) (tools.Result, error) {
 	if res == nil {
 		return tools.Result{}, errors.New("nil mcp tool result")
 	}
 	contentItems := make([]tools.MCPStoredContentItem, 0, len(res.Content))
 	lines := make([]string, 0, len(res.Content)+1)
+	retainedBinaryBytes := int64(0)
 	for _, item := range res.Content {
 		rendered := renderContent(item)
 		switch typed := item.(type) {
@@ -1146,11 +1192,11 @@ func convertCallToolResult(serverID, serverName, toolName string, res *sdkmcp.Ca
 				MIMEType: typed.MIMEType,
 			})
 		case *sdkmcp.EmbeddedResource:
-			contentItems = append(contentItems, contentItemFromResourceContents(typed.Resource))
+			contentItems = append(contentItems, contentItemFromResourceContents(typed.Resource, &retainedBinaryBytes))
 		case *sdkmcp.ImageContent:
-			contentItems = append(contentItems, tools.MCPStoredContentItem{Type: "image", MIMEType: typed.MIMEType})
+			contentItems = append(contentItems, binaryContentItem("image", "", typed.MIMEType, typed.Data, &retainedBinaryBytes))
 		case *sdkmcp.AudioContent:
-			contentItems = append(contentItems, tools.MCPStoredContentItem{Type: "audio", MIMEType: typed.MIMEType})
+			contentItems = append(contentItems, binaryContentItem("audio", "", typed.MIMEType, typed.Data, &retainedBinaryBytes))
 		default:
 			contentItems = append(contentItems, tools.MCPStoredContentItem{Type: fmt.Sprintf("%T", item), Text: rendered})
 		}
@@ -1170,6 +1216,18 @@ func convertCallToolResult(serverID, serverName, toolName string, res *sdkmcp.Ca
 	if strings.TrimSpace(structured) != "" && len(lines) == 0 {
 		lines = append(lines, structured)
 	}
+	validationError := validateStructuredContent(outputSchema, res.StructuredContent)
+	needsInput := res.NeedsInput()
+	inputRequests := ""
+	if needsInput {
+		if body, err := json.MarshalIndent(res.InputRequests, "", "  "); err == nil {
+			inputRequests = string(body)
+		}
+		lines = append(lines, "MCP tool requires additional client input before it can complete.")
+	}
+	if validationError != nil {
+		lines = append(lines, "MCP structured output failed its declared schema: "+validationError.Error())
+	}
 	output := strings.TrimSpace(strings.Join(lines, "\n\n"))
 	if output == "" {
 		if res.IsError {
@@ -1178,8 +1236,13 @@ func convertCallToolResult(serverID, serverName, toolName string, res *sdkmcp.Ca
 			output = fmt.Sprintf("MCP tool %s/%s completed with no content", serverID, toolName)
 		}
 	}
+	status := domain.ToolResultStatusOK
+	if res.IsError || needsInput || validationError != nil {
+		status = domain.ToolResultStatusError
+	}
 	return tools.Result{
 		Output: output,
+		Status: status,
 		Meta: map[string]string{
 			"server_id":   serverID,
 			"server_name": strings.TrimSpace(serverName),
@@ -1192,6 +1255,9 @@ func convertCallToolResult(serverID, serverName, toolName string, res *sdkmcp.Ca
 			ToolName:          toolName,
 			StructuredContent: structured,
 			IsError:           res.IsError,
+			NeedsInput:        needsInput,
+			InputRequests:     inputRequests,
+			RequestState:      res.RequestState,
 			Content:           contentItems,
 		},
 	}, nil
@@ -1239,20 +1305,65 @@ func renderResourceContents(item *sdkmcp.ResourceContents) string {
 	}
 }
 
-func contentItemFromResourceContents(item *sdkmcp.ResourceContents) tools.MCPStoredContentItem {
+func contentItemFromResourceContents(item *sdkmcp.ResourceContents, retained *int64) tools.MCPStoredContentItem {
 	if item == nil {
 		return tools.MCPStoredContentItem{Type: "resource"}
 	}
-	text := strings.TrimSpace(item.Text)
-	if text == "" && len(item.Blob) > 0 {
-		text = fmt.Sprintf("[%d bytes]", len(item.Blob))
+	if len(item.Blob) > 0 {
+		return binaryContentItem("resource", item.URI, item.MIMEType, item.Blob, retained)
 	}
 	return tools.MCPStoredContentItem{
 		Type:     "resource",
-		Text:     text,
+		Text:     strings.TrimSpace(item.Text),
 		URI:      strings.TrimSpace(item.URI),
 		MIMEType: strings.TrimSpace(item.MIMEType),
 	}
+}
+
+func binaryContentItem(kind, uri, mimeType string, data []byte, retained *int64) tools.MCPStoredContentItem {
+	digest := sha256.Sum256(data)
+	limit := int64(maximumMCPBinaryItemBytes)
+	if remaining := int64(maximumMCPBinaryCallBytes) - *retained; remaining < limit {
+		limit = max(0, remaining)
+	}
+	keep := min(int64(len(data)), limit)
+	stored := slices.Clone(data[:keep])
+	*retained += keep
+	return tools.MCPStoredContentItem{
+		Type: kind, URI: strings.TrimSpace(uri), MIMEType: strings.TrimSpace(mimeType),
+		Data: stored, Size: int64(len(data)), SHA256: fmt.Sprintf("%x", digest[:]), Truncated: keep < int64(len(data)),
+	}
+}
+
+func validateStructuredContent(schema, content any) error {
+	if schema == nil || content == nil {
+		return nil
+	}
+	schemaData, err := json.Marshal(schema)
+	if err != nil {
+		return fmt.Errorf("encode schema: %w", err)
+	}
+	document, err := jsonschema.UnmarshalJSON(bytes.NewReader(schemaData))
+	if err != nil {
+		return fmt.Errorf("parse schema: %w", err)
+	}
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("mcp-output.json", document); err != nil {
+		return fmt.Errorf("load schema: %w", err)
+	}
+	compiled, err := compiler.Compile("mcp-output.json")
+	if err != nil {
+		return fmt.Errorf("compile schema: %w", err)
+	}
+	contentData, err := json.Marshal(content)
+	if err != nil {
+		return fmt.Errorf("encode output: %w", err)
+	}
+	value, err := jsonschema.UnmarshalJSON(bytes.NewReader(contentData))
+	if err != nil {
+		return fmt.Errorf("parse output: %w", err)
+	}
+	return compiled.Validate(value)
 }
 
 func normalizeSchema(schema any) json.RawMessage {

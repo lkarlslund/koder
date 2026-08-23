@@ -344,10 +344,14 @@ type BrowserStoredResult struct {
 }
 
 type MCPStoredContentItem struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	URI      string `json:"uri,omitempty"`
-	MIMEType string `json:"mime_type,omitempty"`
+	Type      string `json:"type"`
+	Text      string `json:"text,omitempty"`
+	URI       string `json:"uri,omitempty"`
+	MIMEType  string `json:"mime_type,omitempty"`
+	Data      []byte `json:"data,omitempty"`
+	Size      int64  `json:"size,omitempty"`
+	SHA256    string `json:"sha256,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
 }
 
 type MCPStoredResult struct {
@@ -356,6 +360,9 @@ type MCPStoredResult struct {
 	ToolName          string                 `json:"tool_name"`
 	StructuredContent string                 `json:"structured_content,omitempty"`
 	IsError           bool                   `json:"is_error,omitempty"`
+	NeedsInput        bool                   `json:"needs_input,omitempty"`
+	InputRequests     string                 `json:"input_requests,omitempty"`
+	RequestState      string                 `json:"request_state,omitempty"`
 	Content           []MCPStoredContentItem `json:"content,omitempty"`
 }
 
