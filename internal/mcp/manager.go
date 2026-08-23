@@ -120,11 +120,13 @@ type ServerState struct {
 }
 
 type Manager struct {
-	mu        sync.RWMutex
-	connectMu sync.Mutex
-	refreshMu sync.Mutex
-	config    map[string]config.MCPServer
-	state     map[string]*serverState
+	mu           sync.RWMutex
+	connectMu    sync.Mutex
+	refreshMu    sync.Mutex
+	refreshing   map[refreshRequest]bool
+	refreshDirty map[refreshRequest]bool
+	config       map[string]config.MCPServer
+	state        map[string]*serverState
 }
 
 type serverState struct {
@@ -936,52 +938,84 @@ const (
 	refreshPrompts
 )
 
+type refreshRequest struct {
+	serverID string
+	kind     refreshKind
+}
+
 func (m *Manager) refreshServerAsync(id string, kind refreshKind) {
+	request := refreshRequest{serverID: id, kind: kind}
+	m.refreshMu.Lock()
+	if m.refreshing == nil {
+		m.refreshing = make(map[refreshRequest]bool)
+		m.refreshDirty = make(map[refreshRequest]bool)
+	}
+	if m.refreshing[request] {
+		m.refreshDirty[request] = true
+		m.refreshMu.Unlock()
+		return
+	}
+	m.refreshing[request] = true
+	m.refreshMu.Unlock()
 	go func() {
-		m.refreshMu.Lock()
-		defer m.refreshMu.Unlock()
-		session, cfg, err := m.sessionAndConfigForServer(id)
-		if err != nil {
-			return
-		}
-		ctx, cancel := requestContext(context.Background(), cfg)
-		defer cancel()
-		var toolsList []ToolDescriptor
-		var resources []ResourceDescriptor
-		var templates []ResourceTemplateDescriptor
-		var prompts []PromptDescriptor
-		switch kind {
-		case refreshTools:
-			toolsList, err = collectTools(ctx, id, cfg, session)
-		case refreshResources:
-			resources, err = collectResources(ctx, id, cfg, session)
-			if err == nil {
-				templates, err = collectResourceTemplates(ctx, id, cfg, session)
+		for {
+			m.refreshServer(id, kind)
+			m.refreshMu.Lock()
+			if m.refreshDirty[request] {
+				m.refreshDirty[request] = false
+				m.refreshMu.Unlock()
+				continue
 			}
-		case refreshPrompts:
-			prompts, err = collectPrompts(ctx, id, cfg, session)
-		}
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		state := m.state[id]
-		if state == nil || state.session != session {
+			delete(m.refreshing, request)
+			delete(m.refreshDirty, request)
+			m.refreshMu.Unlock()
 			return
 		}
-		if err != nil {
-			state.lastErr = fmt.Sprintf("refresh MCP metadata: %v", err)
-			return
-		}
-		switch kind {
-		case refreshTools:
-			state.tools = toolsList
-		case refreshResources:
-			state.resources = resources
-			state.resourceTemplates = templates
-		case refreshPrompts:
-			state.prompts = prompts
-		}
-		state.lastErr = ""
 	}()
+}
+
+func (m *Manager) refreshServer(id string, kind refreshKind) {
+	session, cfg, err := m.sessionAndConfigForServer(id)
+	if err != nil {
+		return
+	}
+	ctx, cancel := requestContext(context.Background(), cfg)
+	defer cancel()
+	var toolsList []ToolDescriptor
+	var resources []ResourceDescriptor
+	var templates []ResourceTemplateDescriptor
+	var prompts []PromptDescriptor
+	switch kind {
+	case refreshTools:
+		toolsList, err = collectTools(ctx, id, cfg, session)
+	case refreshResources:
+		resources, err = collectResources(ctx, id, cfg, session)
+		if err == nil {
+			templates, err = collectResourceTemplates(ctx, id, cfg, session)
+		}
+	case refreshPrompts:
+		prompts, err = collectPrompts(ctx, id, cfg, session)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	state := m.state[id]
+	if state == nil || state.session != session {
+		return
+	}
+	if err != nil {
+		state.lastErr = fmt.Sprintf("refresh MCP metadata: %v", err)
+		return
+	}
+	switch kind {
+	case refreshTools:
+		state.tools = toolsList
+	case refreshResources:
+		state.resources = resources
+		state.resourceTemplates = templates
+	case refreshPrompts:
+		state.prompts = prompts
+	}
+	state.lastErr = ""
 }
 
 func (m *Manager) sessionForServer(serverID string) (*sdkmcp.ClientSession, error) {
@@ -1186,10 +1220,11 @@ func convertCallToolResult(serverID, serverName, toolName string, outputSchema a
 			contentItems = append(contentItems, tools.MCPStoredContentItem{Type: "text", Text: typed.Text})
 		case *sdkmcp.ResourceLink:
 			contentItems = append(contentItems, tools.MCPStoredContentItem{
-				Type:     "resource_link",
-				Text:     coalesce(typed.Title, typed.Name),
-				URI:      typed.URI,
-				MIMEType: typed.MIMEType,
+				Type:        "resource_link",
+				Text:        coalesce(typed.Title, typed.Name),
+				Description: typed.Description,
+				URI:         typed.URI,
+				MIMEType:    typed.MIMEType,
 			})
 		case *sdkmcp.EmbeddedResource:
 			contentItems = append(contentItems, contentItemFromResourceContents(typed.Resource, &retainedBinaryBytes))

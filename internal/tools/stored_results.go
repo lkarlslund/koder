@@ -344,14 +344,15 @@ type BrowserStoredResult struct {
 }
 
 type MCPStoredContentItem struct {
-	Type      string `json:"type"`
-	Text      string `json:"text,omitempty"`
-	URI       string `json:"uri,omitempty"`
-	MIMEType  string `json:"mime_type,omitempty"`
-	Data      []byte `json:"data,omitempty"`
-	Size      int64  `json:"size,omitempty"`
-	SHA256    string `json:"sha256,omitempty"`
-	Truncated bool   `json:"truncated,omitempty"`
+	Type        string `json:"type"`
+	Text        string `json:"text,omitempty"`
+	URI         string `json:"uri,omitempty"`
+	MIMEType    string `json:"mime_type,omitempty"`
+	Description string `json:"description,omitempty"`
+	Data        []byte `json:"data,omitempty"`
+	Size        int64  `json:"size,omitempty"`
+	SHA256      string `json:"sha256,omitempty"`
+	Truncated   bool   `json:"truncated,omitempty"`
 }
 
 type MCPStoredResult struct {
