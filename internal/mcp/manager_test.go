@@ -15,6 +15,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/tools"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -406,6 +407,50 @@ func TestToolDefinitionsFallbackOnCollision(t *testing.T) {
 	want := []string{"_docs_search", "_exa_search"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("unexpected fallback names: got=%v want=%v", got, want)
+	}
+}
+
+func TestToolDefinitionsPassDescriptionsAndSafetyAnnotationsToModel(t *testing.T) {
+	destructive := true
+	openWorld := true
+	manager := &Manager{
+		state: map[string]*serverState{
+			"exchange": {tools: []ToolDescriptor{
+				{ServerID: "exchange", Name: "exchange_mail", Description: "Mail actions and their action-specific warnings.", DestructiveHint: &destructive, OpenWorldHint: &openWorld},
+				{ServerID: "exchange", Name: "exchange_lookup", Description: "Read Exchange metadata.", ReadOnlyHint: true, IdempotentHint: true},
+			}},
+		},
+	}
+	definitions := manager.ToolDefinitions()
+	if len(definitions) != 2 {
+		t.Fatalf("definitions = %d, want 2", len(definitions))
+	}
+	descriptions := make(map[string]string, len(definitions))
+	for _, definition := range definitions {
+		descriptions[definition.Function.Name] = definition.Function.Description
+	}
+	if got := descriptions["exchange_mail"]; !strings.Contains(got, "action-specific warnings") || !strings.Contains(got, "may modify or delete external data") || !strings.Contains(got, "explicitly requests") || !strings.Contains(got, "external entities") {
+		t.Fatalf("destructive model description = %q", got)
+	}
+	if got := descriptions["exchange_lookup"]; !strings.Contains(got, "Read Exchange metadata") || !strings.Contains(got, "does not modify external state") || !strings.Contains(got, "idempotent") {
+		t.Fatalf("read-only model description = %q", got)
+	}
+}
+
+func TestConvertCallToolResultDoesNotDuplicateStructuredContent(t *testing.T) {
+	result, err := convertCallToolResult("docs", "Docs", "lookup", &sdkmcp.CallToolResult{
+		Content:           []sdkmcp.Content{&sdkmcp.TextContent{Text: `{"subject":"one copy"}`}},
+		StructuredContent: map[string]any{"subject": "one copy"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(result.Output, "one copy"); got != 1 {
+		t.Fatalf("model-visible output contains value %d times: %q", got, result.Output)
+	}
+	stored, ok := result.Stored.(tools.MCPStoredResult)
+	if !ok || !strings.Contains(stored.StructuredContent, "one copy") {
+		t.Fatalf("structured content was not retained separately: %#v", result.Stored)
 	}
 }
 

@@ -32,13 +32,16 @@ const (
 )
 
 type ToolDescriptor struct {
-	ServerID     string
-	ServerName   string
-	Name         string
-	Title        string
-	Description  string
-	InputSchema  any
-	ReadOnlyHint bool
+	ServerID        string
+	ServerName      string
+	Name            string
+	Title           string
+	Description     string
+	InputSchema     any
+	ReadOnlyHint    bool
+	DestructiveHint *bool
+	IdempotentHint  bool
+	OpenWorldHint   *bool
 }
 
 type ResourceDescriptor struct {
@@ -379,6 +382,7 @@ func (m *Manager) ToolDefinitionsWithReserved(reserved []provider.ToolDefinition
 		if description == "" {
 			description = fmt.Sprintf("MCP tool %s/%s", desc.ServerID, desc.Name)
 		}
+		description = modelDescription(description, desc)
 		out = append(out, provider.ToolDefinition{
 			Type: "function",
 			Function: provider.FunctionDefinition{
@@ -389,6 +393,27 @@ func (m *Manager) ToolDefinitionsWithReserved(reserved []provider.ToolDefinition
 		})
 	}
 	return out
+}
+
+func modelDescription(description string, desc ToolDescriptor) string {
+	parts := make([]string, 0, 3)
+	if description = strings.TrimSpace(description); description != "" {
+		parts = append(parts, description)
+	}
+	if desc.ReadOnlyHint {
+		parts = append(parts, "Safety: this MCP tool declares that it does not modify external state.")
+	} else if desc.DestructiveHint == nil || *desc.DestructiveHint {
+		parts = append(parts, "Warning: this MCP tool may modify or delete external data. Use it only when the user explicitly requests that external change.")
+	} else {
+		parts = append(parts, "Warning: this MCP tool modifies external state, although it declares those changes non-destructive.")
+	}
+	if desc.IdempotentHint {
+		parts = append(parts, "Repeated calls with identical arguments are declared idempotent.")
+	}
+	if desc.OpenWorldHint != nil && *desc.OpenWorldHint {
+		parts = append(parts, "This MCP tool declares that it interacts with external entities.")
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func (m *Manager) ResolveToolName(name string, reserved []provider.ToolDefinition) (serverID, toolName string, ok bool) {
@@ -957,16 +982,41 @@ func collectTools(ctx context.Context, serverID string, cfg config.MCPServer, se
 			title = strings.TrimSpace(tool.Annotations.Title)
 		}
 		out = append(out, ToolDescriptor{
-			ServerID:     serverID,
-			ServerName:   strings.TrimSpace(cfg.Name),
-			Name:         strings.TrimSpace(tool.Name),
-			Title:        title,
-			Description:  strings.TrimSpace(tool.Description),
-			InputSchema:  tool.InputSchema,
-			ReadOnlyHint: tool.Annotations != nil && tool.Annotations.ReadOnlyHint,
+			ServerID:        serverID,
+			ServerName:      strings.TrimSpace(cfg.Name),
+			Name:            strings.TrimSpace(tool.Name),
+			Title:           title,
+			Description:     strings.TrimSpace(tool.Description),
+			InputSchema:     tool.InputSchema,
+			ReadOnlyHint:    tool.Annotations != nil && tool.Annotations.ReadOnlyHint,
+			DestructiveHint: cloneBoolPointer(toolAnnotationDestructive(tool)),
+			IdempotentHint:  tool.Annotations != nil && tool.Annotations.IdempotentHint,
+			OpenWorldHint:   cloneBoolPointer(toolAnnotationOpenWorld(tool)),
 		})
 	}
 	return out, nil
+}
+
+func toolAnnotationDestructive(tool *sdkmcp.Tool) *bool {
+	if tool == nil || tool.Annotations == nil {
+		return nil
+	}
+	return tool.Annotations.DestructiveHint
+}
+
+func toolAnnotationOpenWorld(tool *sdkmcp.Tool) *bool {
+	if tool == nil || tool.Annotations == nil {
+		return nil
+	}
+	return tool.Annotations.OpenWorldHint
+}
+
+func cloneBoolPointer(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func collectResources(ctx context.Context, serverID string, cfg config.MCPServer, session *sdkmcp.ClientSession) ([]ResourceDescriptor, error) {
@@ -1084,8 +1134,11 @@ func convertCallToolResult(serverID, serverName, toolName string, res *sdkmcp.Ca
 			structured = string(body)
 		}
 	}
-	if strings.TrimSpace(structured) != "" {
-		lines = append(lines, "Structured content:\n"+structured)
+	// Typed MCP servers commonly return the same JSON once as text content and
+	// once as structured content. Keep structured content in Stored, but only
+	// render it into model-visible output when no normal content was supplied.
+	if strings.TrimSpace(structured) != "" && len(lines) == 0 {
+		lines = append(lines, structured)
 	}
 	output := strings.TrimSpace(strings.Join(lines, "\n\n"))
 	if output == "" {

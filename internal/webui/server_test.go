@@ -2040,6 +2040,15 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `toolResultHTML(tool)`) || !strings.Contains(fullPage, `function renderToolResult(tool)`) {
 		t.Fatalf("expected tool results to render through the per-tool formatter")
 	}
+	for _, mcpRenderer := range []string{
+		`function mcpCallDetails(tool)`,
+		`return call.name + ' · ' + call.action`,
+		`if (kind === 'mcp') return renderCompactBlock(toolTitleText(tool), toolResultText(tool))`,
+	} {
+		if !strings.Contains(fullPage, mcpRenderer) {
+			t.Fatalf("expected native MCP identity rendering fragment %q", mcpRenderer)
+		}
+	}
 	for _, canonicalRenderer := range []string{
 		`kind === 'present' && toolAction(tool) === 'media'`,
 		`kind === 'present' && toolAction(tool) === 'file'`,

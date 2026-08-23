@@ -862,7 +862,22 @@
     function chatSendMessage(args) {
       return String(firstValue(args || {}, ['message', 'Message']) || '').trim();
     }
+    function mcpCallDetails(tool) {
+      const args = toolArgs(tool);
+      let callArgs = {};
+      try {
+        const parsed = JSON.parse(String(firstValue(args, ['arguments_raw', 'ArgumentsRaw']) || '{}'));
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) callArgs = parsed;
+      } catch (_) {}
+      return {
+        server: String(firstValue(args, ['server', 'Server']) || '').trim(),
+        name: String(firstValue(args, ['tool', 'Tool']) || '').trim(),
+        action: String(firstValue(callArgs, ['action', 'Action']) || '').trim(),
+        args: callArgs,
+      };
+    }
     function toolAction(tool) {
+      if (String((tool && tool.tool) || '') === 'mcp') return mcpCallDetails(tool).action;
       return String(firstValue(toolArgs(tool), ['action', 'Action']) || '').trim();
     }
     function actionLabel(action) {
@@ -1000,6 +1015,11 @@
         case 'milestones': return actionLabel(toolAction(tool)) + ' milestone';
         case 'tasks': return actionLabel(toolAction(tool)) + ' task';
         case 'knowledge': return knowledgeActionLabel(toolAction(tool));
+        case 'mcp': {
+          const call = mcpCallDetails(tool);
+          if (call.name && call.action) return call.name + ' · ' + call.action;
+          return call.name || 'MCP tool';
+        }
         case 'browser_tabs':
         case 'browser_navigation':
         case 'browser_page':
@@ -1013,6 +1033,14 @@
     }
     function toolPreviewText(tool) {
       const args = toolArgs(tool);
+      if (String((tool && tool.tool) || '') === 'mcp') {
+        const call = mcpCallDetails(tool);
+        const values = call.server ? ['server=' + call.server] : [];
+        for (const key of ['query', 'wiki', 'title', 'message_ref', 'id']) {
+          if (call.args[key] !== undefined && call.args[key] !== '') values.push(key + '=' + call.args[key]);
+        }
+        return values.slice(0, 2).join('  ');
+      }
       if (String((tool && tool.tool) || '') === 'knowledge') return String(firstValue(args, ['query', 'id']) || '');
       if (String((tool && tool.tool) || '') === 'file_read') return '';
       if (String((tool && tool.tool) || '') === 'bash' && (toolStatus(tool) === 'done' || toolStatus(tool) === 'errored')) return '';
@@ -1118,6 +1146,7 @@
       if (kind === 'chat_send') return renderCompactBlock('Sent message', chatSendMessage(args) || toolResultText(tool));
       if (kind === 'chats' && toolAction(tool) === 'send') return renderCompactBlock('Sent message', chatSendMessage(args) || toolResultText(tool));
       if (kind === 'knowledge') return renderKnowledgeBlock(toolAction(tool), data, args, toolResultText(tool));
+      if (kind === 'mcp') return renderCompactBlock(toolTitleText(tool), toolResultText(tool));
       if (kind === 'view_image') {
         return renderImagePreviewBlock('Viewed image', data, toolResultText(tool), true);
       }
