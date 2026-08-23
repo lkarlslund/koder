@@ -55,6 +55,7 @@ func TestKnowledgeBrowserPerformanceAtSnapshotLimits(t *testing.T) {
 
 	allocatorOptions := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath(chromium),
+		chromedp.WSURLReadTimeout(60*time.Second),
 		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.Flag("enable-webgl", true),

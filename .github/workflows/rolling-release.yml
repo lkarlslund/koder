@@ -1,18 +1,8 @@
 name: Rolling release
 
 on:
-  push:
-    branches:
-      - main
   schedule:
-    - cron: "0 0 * * *"
-  workflow_dispatch:
-    inputs:
-      force_rebuild:
-        description: "Rebuild and replace assets even when the latest release is already at HEAD"
-        required: false
-        type: boolean
-        default: false
+    - cron: "0 0,12 * * *"
 
 permissions:
   contents: write
@@ -42,22 +32,10 @@ jobs:
         id: meta
         env:
           GH_TOKEN: ${{ github.token }}
-          FORCE_REBUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild }}
         run: |
           set -euo pipefail
 
           latest_tag="$(gh release list --limit 100 --json tagName --jq '[.[].tagName | select(test("^r[0-9]+$"))] | sort_by(ltrimstr("r") | tonumber) | reverse | .[0] // ""')"
-          latest_published_at="$(gh release list --limit 100 --json tagName,publishedAt --jq '[.[] | select(.tagName | test("^r[0-9]+$"))] | sort_by(.tagName | ltrimstr("r") | tonumber) | reverse | .[0].publishedAt // ""')"
-          if [[ "${GITHUB_EVENT_NAME}" == "push" && -n "$latest_published_at" ]]; then
-            latest_epoch="$(date -u -d "$latest_published_at" '+%s')"
-            now_epoch="$(date -u '+%s')"
-            age_seconds="$((now_epoch - latest_epoch))"
-            if (( age_seconds < 14400 )); then
-              echo "changed=false" >>"$GITHUB_OUTPUT"
-              echo "Latest rolling release ${latest_tag} was published ${age_seconds}s ago; skipping push-triggered release inside 4h throttle window."
-              exit 0
-            fi
-          fi
           if [[ -n "$latest_tag" ]]; then
             git fetch --force origin "refs/tags/${latest_tag}:refs/tags/${latest_tag}" || true
           fi
@@ -87,7 +65,7 @@ jobs:
           repair_release=false
           if [[ -n "$latest_tag" ]] && git rev-parse -q --verify "refs/tags/${latest_tag}" >/dev/null; then
             if [[ "$(git rev-parse HEAD)" == "$(git rev-parse "${latest_tag}")" ]]; then
-              if [[ "${FORCE_REBUILD}" != "true" ]] && release_has_expected_assets "$latest_tag"; then
+              if release_has_expected_assets "$latest_tag"; then
                 echo "changed=false" >>"$GITHUB_OUTPUT"
                 echo "No changes since ${latest_tag}, and all expected assets exist; skipping release."
                 exit 0

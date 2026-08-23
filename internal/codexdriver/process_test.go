@@ -66,6 +66,7 @@ func TestSandboxProcessFactoryBuildsPrivatePerChatHome(t *testing.T) {
 }
 
 func TestSandboxProcessFactoryPolicyChangesFingerprintAndNetworkNamespace(t *testing.T) {
+	t.Setenv("KODER_BWRAP_DISABLE_NET_UNSHARE", "")
 	settings := accesssettings.Default()
 	factory := NewSandboxProcessFactory(SandboxProcessConfig{
 		Client:   codexapp.Config{Executable: "/bin/true"},
