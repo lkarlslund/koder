@@ -1150,7 +1150,7 @@
         knowledgeLive: window.KoderKnowledgeLive ? new window.KoderKnowledgeLive.Tracker() : null,
         tabActivityIcon: null,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
-        showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', showObservability: false,
+        showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'overview', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', settingsHealth: {issue_count: 0, needs_setup: false, issues: []}, showObservability: false,
 		showPhoneBinding: false, phoneBinding: null, phoneBindingLoading: false, phoneBindingError: '', voiceDevices: [], voiceDevicesLoading: false, voiceDevicesError: '',
         showSessions: false, sessionTab: 'sessions', sessionFilter: 'active', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
 		providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
@@ -2363,6 +2363,7 @@
           const currentSessionID = String(this.state?.session?.id || this.state?.session?.ID || '').trim();
           if (incomingSessionID !== currentSessionID) this.clearTimelineCaches();
           this.state = this.cacheStateTimelines(s || {});
+		  this.settingsHealth = this.state.settings_health || this.state.SettingsHealth || this.settingsHealth;
 		  if (this.browserVoiceClient && (this.browserVoiceClient.options.sessionID !== this.currentSessionID() || this.browserVoiceClient.options.chatID !== String(this.activeChatID() || '').trim())) {
 			this.stopBrowserVoice();
 			this.browserVoice = {...this.browserVoice, open: false};
@@ -5647,13 +5648,12 @@
             if (result.state) this.applyState(result.state);
           }).catch(err => this.showToast(err.message));
         },
-        openSettingsDialog(tab = 'general') {
-          this.showSettings = true; this.settingsTab = tab; this.settingsLoading = true; this.settingsStatus = ''; this.settingsStatusKind = 'secondary';
+        openSettingsDialog(tab = 'overview') {
+          this.showSettings = true; this.settingsTab = this.normalizeSettingsTab(tab); this.settingsLoading = true; this.settingsStatus = ''; this.settingsStatusKind = 'secondary';
           this.reportClientStateSoon();
           this.rpc('preferences_state', {}).then(state => {
             this.setSettingsState(state);
-            if (this.settingsTab === 'models') this.ensureDetectedDefaultModel();
-			if (this.settingsTab === 'security') this.loadVoiceDevices();
+			if (this.settingsTab === 'voice') this.loadVoiceDevices();
           }).finally(() => { this.settingsLoading = false; });
         },
         closeSettingsDialog() {
@@ -5663,6 +5663,8 @@
         },
         setSettingsState(state) {
           this.settings = state || {};
+		  this.settingsHealth = this.settings.health || this.settingsHealth;
+		  delete this.settings.health;
           if (!this.settings.ui) this.settings.ui = {};
 		  if (!this.settings.ui.tts) this.settings.ui.tts = {enabled: false, provider_id: '', model_id: '', voice: 'alloy', response_format: 'wav', speed: 1, pcm_sample_rate: 24000};
 		  if (!this.settings.browser) this.settings.browser = {enabled: true, executable: '', headed: true, operation_timeout_seconds: 30, max_tabs_per_chat: 8, max_tabs_global: 32};
@@ -5693,32 +5695,69 @@
             this.settingsStatus = err.message; this.settingsStatusKind = 'danger';
           }).finally(() => { this.settingsLoading = false; });
         },
-		settingsTabs() { return ['general', 'codex', 'security', 'browser', 'tts', 'access', 'tools', 'compaction', 'thinking', 'prompts', 'providers', 'models', 'mcp']; },
+		normalizeSettingsTab(tab) {
+		  return {general: 'overview', providers: 'models', codex: 'backends', browser: 'tools', mcp: 'tools', security: 'voice', tts: 'voice', compaction: 'conversation', thinking: 'conversation'}[tab] || tab || 'overview';
+		},
+		settingsTabs() { return ['overview', 'models', 'backends', 'tools', 'voice', 'conversation', 'access', 'prompts']; },
         selectSettingsTab(tab) {
+		  tab = this.normalizeSettingsTab(tab);
           this.settingsTab = tab;
           if (tab === 'models') this.ensureDetectedDefaultModel();
-		  if (tab === 'security') this.loadVoiceDevices();
+		  if (tab === 'voice') this.loadVoiceDevices();
         },
         settingsTabLabel(tab) {
-          return {general: 'General', codex: 'Codex', security: 'Security', browser: 'Browser', tts: 'TTS', access: 'Access', tools: 'Tools', compaction: 'Compaction', thinking: 'Thinking', prompts: 'Prompts', providers: 'Providers', models: 'Models', mcp: 'MCP'}[tab] || tab;
+		  return {overview: 'Overview', models: 'Models', backends: 'Backends', tools: 'Tools', voice: 'Voice & devices', conversation: 'Conversation', access: 'Access', prompts: 'Prompts'}[tab] || tab;
         },
+		settingsTabIcon(tab) {
+		  return {overview: 'bi-grid', models: 'bi-cpu', backends: 'bi-terminal', tools: 'bi-tools', voice: 'bi-mic', conversation: 'bi-chat-square-text', access: 'bi-shield-lock', prompts: 'bi-braces-asterisk'}[tab] || 'bi-gear';
+		},
         settingsTabDescription(tab) {
           return {
-            general: 'Defaults for new chats and the interface',
-			codex: 'External Codex turn backend',
-			security: 'Registered Android phones and device access',
-            browser: 'Managed Chromium used by browser tools',
-            tts: 'Speech output and playback testing',
+			overview: 'Readiness, appearance, and common destinations',
+			models: 'Model providers, detected models, and defaults',
+			backends: 'Engines that execute chat turns',
+			tools: 'Built-in tools, managed browser, and MCP sources',
+			voice: 'Speech output and registered Android devices',
+			conversation: this.settings?.compaction?.current_selection_text || 'Turn limits, context management, and reasoning',
             access: 'Default sandbox access for new sessions',
-            tools: 'Tool availability for new turns',
-            compaction: this.settings?.compaction?.current_selection_text || 'Long-chat context management',
-            thinking: 'Optional helper model for extended reasoning',
-            prompts: 'System prompt overrides',
-            providers: 'Model provider connections',
-            models: 'Configured and detected models',
-            mcp: 'Model Context Protocol servers',
+			prompts: 'Advanced system prompt overrides',
           }[tab] || '';
         },
+		settingsIssues() { return Array.isArray(this.settingsHealth?.issues) ? this.settingsHealth.issues : []; },
+		settingsIssueCount() { return Number(this.settingsHealth?.issue_count ?? this.settingsIssues().length) || 0; },
+		settingsNeedsSetup() { return !!this.settingsHealth?.needs_setup; },
+		settingsIssueSummary() {
+		  const count = this.settingsIssueCount();
+		  return count === 1 ? '1 setting needs attention' : count + ' settings need attention';
+		},
+		settingsButtonClass() {
+		  if (this.settingsNeedsSetup()) return 'btn-warning settings-setup-pulse';
+		  if (this.settingsIssueCount()) return 'btn-outline-warning';
+		  return 'btn-outline-secondary';
+		},
+		settingsButtonTitle() {
+		  if (this.settingsNeedsSetup()) return 'Set up Koder: a model provider is required';
+		  if (this.settingsIssueCount()) return this.settingsIssueSummary();
+		  return 'Settings';
+		},
+		settingsSuggestedTab() { return this.settingsNeedsSetup() ? 'models' : 'overview'; },
+		settingsTabIssueCount(tab) {
+		  const target = this.normalizeSettingsTab(tab);
+		  if (target === 'overview') return this.settingsIssueCount();
+		  return this.settingsIssues().filter(issue => this.normalizeSettingsTab(issue.area) === target).length;
+		},
+		settingsTargetIssueCount(target) { return this.settingsIssues().filter(issue => String(issue.target || '') === target).length; },
+		settingsIssueIcon(issue) {
+		  if (issue?.severity === 'setup') return 'bi-plus-circle text-primary';
+		  if (issue?.severity === 'warning') return 'bi-exclamation-circle text-warning';
+		  return 'bi-x-circle text-danger';
+		},
+		openSettingsIssue(issue) { this.selectSettingsTab(issue?.area || 'overview'); },
+		settingsModelOverview() {
+		  const providers = Array.isArray(this.settings?.providers?.providers) ? this.settings.providers.providers.length : 0;
+		  const models = this.settings ? this.settingsListRows('models').length : 0;
+		  return providers + ' provider' + (providers === 1 ? '' : 's') + ' · ' + models + ' model' + (models === 1 ? '' : 's');
+		},
 		openPhoneBinding() {
 			this.showPhoneBinding = true;
 			this.refreshPhoneBinding();

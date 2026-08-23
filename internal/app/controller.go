@@ -55,28 +55,29 @@ type Event struct {
 
 // State is the browser app UI snapshot consumed by browser clients.
 type State struct {
-	Session       domain.Session             `json:"session"`
-	Sessions      []domain.Session           `json:"sessions"`
-	QuickChats    []domain.Session           `json:"quick_chats"`
-	Chats         []domain.Chat              `json:"chats"`
-	ChatStatuses  []ChatSidebarStatus        `json:"chat_statuses"`
-	ActiveChatID  id.ID                      `json:"active_chat_id"`
-	Access        AccessState                `json:"access"`
-	Snapshot      chat.Snapshot              `json:"snapshot"`
-	Snapshots     map[id.ID]chat.Snapshot    `json:"snapshots"`
-	Milestones    planning.Plan              `json:"milestones"`
-	Tasks         []planning.Task            `json:"tasks"`
-	TasksByKey    map[string][]planning.Task `json:"tasks_by_milestone"`
-	Workspace     workspacepkg.Status        `json:"workspace_status"`
-	ContextWindow int                        `json:"context_window"`
-	ModelInfo     ModelInfo                  `json:"model_info"`
-	Theme         string                     `json:"theme"`
-	TTS           TTSPreferences             `json:"tts"`
-	ProjectRoot   string                     `json:"project_root"`
-	Build         version.Info               `json:"build"`
-	RestartNeeded bool                       `json:"restart_needed"`
-	RestartBuild  RestartBuildInfo           `json:"restart_build,omitempty"`
-	Error         string                     `json:"error,omitempty"`
+	Session        domain.Session             `json:"session"`
+	Sessions       []domain.Session           `json:"sessions"`
+	QuickChats     []domain.Session           `json:"quick_chats"`
+	Chats          []domain.Chat              `json:"chats"`
+	ChatStatuses   []ChatSidebarStatus        `json:"chat_statuses"`
+	ActiveChatID   id.ID                      `json:"active_chat_id"`
+	Access         AccessState                `json:"access"`
+	Snapshot       chat.Snapshot              `json:"snapshot"`
+	Snapshots      map[id.ID]chat.Snapshot    `json:"snapshots"`
+	Milestones     planning.Plan              `json:"milestones"`
+	Tasks          []planning.Task            `json:"tasks"`
+	TasksByKey     map[string][]planning.Task `json:"tasks_by_milestone"`
+	Workspace      workspacepkg.Status        `json:"workspace_status"`
+	ContextWindow  int                        `json:"context_window"`
+	ModelInfo      ModelInfo                  `json:"model_info"`
+	Theme          string                     `json:"theme"`
+	TTS            TTSPreferences             `json:"tts"`
+	ProjectRoot    string                     `json:"project_root"`
+	Build          version.Info               `json:"build"`
+	RestartNeeded  bool                       `json:"restart_needed"`
+	RestartBuild   RestartBuildInfo           `json:"restart_build,omitempty"`
+	SettingsHealth SettingsHealth             `json:"settings_health"`
+	Error          string                     `json:"error,omitempty"`
 }
 
 // Selection identifies the browser client's selected session/chat.
@@ -302,7 +303,25 @@ type PreferencesState struct {
 	Browser        NativeBrowserPreferences `json:"browser"`
 	BrowserRuntime browserapi.Status        `json:"browser_runtime"`
 	Codex          CodexPreferences         `json:"codex"`
+	Health         SettingsHealth           `json:"health"`
 	RestartKeys    []string                 `json:"restart_keys,omitempty"`
+}
+
+// SettingsHealth summarizes configuration and runtime problems that need a
+// user's attention. Area identifies the settings page; Target identifies the
+// capability within a combined page such as Models or Tools.
+type SettingsHealth struct {
+	IssueCount int             `json:"issue_count"`
+	NeedsSetup bool            `json:"needs_setup"`
+	Issues     []SettingsIssue `json:"issues"`
+}
+
+type SettingsIssue struct {
+	Area     string `json:"area"`
+	Target   string `json:"target,omitempty"`
+	Source   string `json:"source,omitempty"`
+	Severity string `json:"severity"`
+	Message  string `json:"message"`
 }
 
 type NativeBrowserPreferences struct {
@@ -772,13 +791,14 @@ func (c *Controller) Start(ctx context.Context, mode StartupMode, projectRoot st
 func (c *Controller) State() State {
 	c.mu.RLock()
 	base := State{
-		Theme:         c.theme,
-		Build:         version.Current(),
-		RestartNeeded: c.restartNeeded,
-		RestartBuild:  c.restartBuild,
-		Error:         c.lastErr,
-		TTS:           ttsPreferencesFromConfig(c.cfg.UI.TTS),
-		ProjectRoot:   c.projectRoot,
+		Theme:          c.theme,
+		Build:          version.Current(),
+		RestartNeeded:  c.restartNeeded,
+		RestartBuild:   c.restartBuild,
+		SettingsHealth: c.settingsHealthLocked(),
+		Error:          c.lastErr,
+		TTS:            ttsPreferencesFromConfig(c.cfg.UI.TTS),
+		ProjectRoot:    c.projectRoot,
 	}
 	c.mu.RUnlock()
 	ctx := context.Background()
@@ -839,12 +859,13 @@ func (c *Controller) BrowserTabScreenshot(ctx context.Context, selection Selecti
 func (c *Controller) stateForSelection(ctx context.Context, selection Selection) (State, error) {
 	c.mu.RLock()
 	base := State{
-		Theme:         c.theme,
-		Build:         version.Current(),
-		RestartNeeded: c.restartNeeded,
-		RestartBuild:  c.restartBuild,
-		Error:         c.lastErr,
-		TTS:           ttsPreferencesFromConfig(c.cfg.UI.TTS),
+		Theme:          c.theme,
+		Build:          version.Current(),
+		RestartNeeded:  c.restartNeeded,
+		RestartBuild:   c.restartBuild,
+		SettingsHealth: c.settingsHealthLocked(),
+		Error:          c.lastErr,
+		TTS:            ttsPreferencesFromConfig(c.cfg.UI.TTS),
 	}
 	c.mu.RUnlock()
 	if sessions, err := c.workspaceSessions(ctx); err == nil {
@@ -887,28 +908,29 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection)
 		statuses[chatRecord.ID] = sidebarStatusFromSnapshot(snapshot)
 	}
 	return State{
-		Session:       session,
-		Sessions:      base.Sessions,
-		QuickChats:    base.QuickChats,
-		Chats:         slices.Clone(ownerSnapshot.Chats),
-		ChatStatuses:  chatStatusesForChats(ownerSnapshot.Chats, statuses),
-		ActiveChatID:  chatRecord.ID,
-		Access:        c.accessStateForSession(session),
-		Snapshot:      snapshot,
-		Snapshots:     snapshots,
-		Milestones:    ownerSnapshot.Plan,
-		Tasks:         slices.Clone(ownerSnapshot.Tasks),
-		TasksByKey:    cloneTasksByKey(ownerSnapshot.TasksByKey),
-		Workspace:     owner.WorkspaceStatus(),
-		ContextWindow: c.contextWindowForChat(chatRecord),
-		ModelInfo:     c.modelInfoForChat(chatRecord),
-		Theme:         base.Theme,
-		TTS:           base.TTS,
-		ProjectRoot:   session.ProjectRoot,
-		Build:         base.Build,
-		RestartNeeded: base.RestartNeeded,
-		RestartBuild:  base.RestartBuild,
-		Error:         base.Error,
+		Session:        session,
+		Sessions:       base.Sessions,
+		QuickChats:     base.QuickChats,
+		Chats:          slices.Clone(ownerSnapshot.Chats),
+		ChatStatuses:   chatStatusesForChats(ownerSnapshot.Chats, statuses),
+		ActiveChatID:   chatRecord.ID,
+		Access:         c.accessStateForSession(session),
+		Snapshot:       snapshot,
+		Snapshots:      snapshots,
+		Milestones:     ownerSnapshot.Plan,
+		Tasks:          slices.Clone(ownerSnapshot.Tasks),
+		TasksByKey:     cloneTasksByKey(ownerSnapshot.TasksByKey),
+		Workspace:      owner.WorkspaceStatus(),
+		ContextWindow:  c.contextWindowForChat(chatRecord),
+		ModelInfo:      c.modelInfoForChat(chatRecord),
+		Theme:          base.Theme,
+		TTS:            base.TTS,
+		ProjectRoot:    session.ProjectRoot,
+		Build:          base.Build,
+		RestartNeeded:  base.RestartNeeded,
+		RestartBuild:   base.RestartBuild,
+		SettingsHealth: base.SettingsHealth,
+		Error:          base.Error,
 	}, nil
 }
 

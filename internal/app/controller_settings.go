@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -309,6 +310,7 @@ func (c *Controller) SavePreferences(ctx context.Context, prefs PreferencesState
 		return PreferencesState{}, err
 	}
 	applyToolDefaultPreferences(&next, prefs.ToolDefaults)
+	applyBrowserToolDefaults(&next)
 	if err := writePromptPreferences(next.ManagedAssetsDir(), prefs.Prompts); err != nil {
 		c.mu.Unlock()
 		return PreferencesState{}, err
@@ -1216,6 +1218,7 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 		Browser:        nativeBrowserPreferencesFromConfig(c.cfg.Browser),
 		BrowserRuntime: nativeBrowserRuntimeState(c.agent),
 		Codex:          codexPreferencesFromConfig(c.cfg.Codex),
+		Health:         c.settingsHealthLocked(),
 	}
 	for idx := range state.ModelConfigs {
 		state.ModelConfigs[idx] = decorateModelConfigPreference(c.cfg, state.ModelOverlays, state.ModelConfigs[idx])
@@ -1751,12 +1754,143 @@ func hideToolDefault(kind tools.ID) bool {
 	if tools.Info(kind).Legacy {
 		return true
 	}
+	if isBrowserToolDefault(kind) {
+		return true
+	}
 	switch kind {
 	case tools.MilestonePlan, tools.MilestoneWrite, tools.TaskAddItems, tools.TaskUpdateItem:
 		return true
 	default:
 		return false
 	}
+}
+
+func isBrowserToolDefault(kind tools.ID) bool {
+	group, _ := toolDefaultGroup(kind)
+	return group == "browser"
+}
+
+func applyBrowserToolDefaults(cfg *config.Config) {
+	if cfg.Tools.Enabled == nil {
+		cfg.Tools.Enabled = config.ToolDefaults{}
+	}
+	for _, kind := range tools.RegisteredIDs() {
+		if isBrowserToolDefault(kind) {
+			cfg.Tools.Enabled[kind] = cfg.Browser.Enabled
+		}
+	}
+}
+
+func (c *Controller) settingsHealthLocked() SettingsHealth {
+	issues := make([]SettingsIssue, 0)
+	add := func(area, target, source, severity, message string) {
+		issues = append(issues, SettingsIssue{Area: area, Target: target, Source: source, Severity: severity, Message: message})
+	}
+
+	usableProviders := 0
+	for providerID, providerCfg := range c.cfg.Providers {
+		if providerCfg.Disabled {
+			continue
+		}
+		usableProviders++
+		health := c.providerHealth.Provider(providerID)
+		if health.Status == provider.HealthUnhealthy {
+			add("models", "providers", providerID, "error", providerEntryLabel(providerID, providerCfg)+": "+health.Detail)
+		} else if health.Status == provider.HealthHealthy && health.Operation == "list_models" && health.ModelCount == 0 {
+			add("models", "providers", providerID, "warning", providerEntryLabel(providerID, providerCfg)+" returned no models")
+		}
+	}
+	if usableProviders == 0 {
+		message := "Add a model provider to start chatting"
+		if len(c.cfg.Providers) > 0 {
+			message = "Enable or add a model provider to start chatting"
+		}
+		add("models", "providers", "model-providers", "setup", message)
+	}
+
+	if usableProviders > 0 {
+		defaultProvider := strings.TrimSpace(c.cfg.Defaults.ProviderID)
+		defaultModel := strings.TrimSpace(c.cfg.Defaults.ModelID)
+		if defaultProvider == "" || defaultModel == "" || !c.cfg.HasUsableProvider(defaultProvider) {
+			add("models", "models", "default-model", "error", "Choose an available default model")
+		} else if advertised, known := c.providerHealth.Advertises(defaultProvider, defaultModel); known && !advertised {
+			add("models", "models", "default-model", "error", "The default model "+defaultProvider+" / "+defaultModel+" is no longer advertised; choose a replacement")
+		}
+	}
+	for _, model := range c.cfg.Models {
+		providerID := strings.TrimSpace(model.SourceProviderID)
+		if providerID == "" {
+			providerID = strings.TrimSpace(model.ProviderID)
+		}
+		modelID := strings.TrimSpace(model.SourceModelID)
+		if modelID == "" {
+			modelID = strings.TrimSpace(model.ModelID)
+		}
+		health := c.providerHealth.Model(providerID, modelID)
+		if health.Status == provider.HealthUnhealthy {
+			add("models", "models", providerID+"/"+modelID, "error", providerID+" / "+modelID+": "+health.Detail)
+		} else if advertised, known := c.providerHealth.Advertises(providerID, modelID); known && !advertised {
+			add("models", "models", providerID+"/"+modelID, "error", providerID+" / "+modelID+": backing model is no longer advertised by the provider")
+		}
+	}
+
+	if c.cfg.Codex.Enabled {
+		executable := strings.TrimSpace(c.cfg.Codex.Executable)
+		if executable == "" {
+			executable = "codex"
+		}
+		if _, err := exec.LookPath(executable); err != nil {
+			add("backends", "codex", "codex", "error", "Codex is enabled but its executable was not found")
+		}
+		if _, err := exec.LookPath("bwrap"); err != nil {
+			add("backends", "codex", "codex-sandbox", "error", "Codex is enabled but bubblewrap (bwrap) was not found")
+		}
+	}
+
+	if c.cfg.Browser.Enabled {
+		status := nativeBrowserRuntimeState(c.agent)
+		if strings.TrimSpace(status.Error) != "" || status.State == "error" {
+			message := strings.TrimSpace(status.Error)
+			if message == "" {
+				message = "The managed browser reported an error"
+			}
+			add("tools", "browser", "browser", "error", message)
+		} else if strings.TrimSpace(status.Executable) == "" {
+			add("tools", "browser", "browser", "error", "Browser tools are enabled but no compatible Chrome or Chromium executable was found")
+		}
+		if _, err := exec.LookPath("bwrap"); err != nil {
+			add("tools", "browser", "browser-sandbox", "error", "Browser tools are enabled but bubblewrap (bwrap) was not found")
+		}
+	}
+
+	for _, runtime := range mcpRuntimeState(c.agent) {
+		if runtime.Status != string(mcp.ServerStatusError) {
+			continue
+		}
+		message := strings.TrimSpace(runtime.LastError)
+		if message == "" {
+			message = "MCP server connection failed"
+		}
+		add("tools", "mcp", runtime.ID, "error", runtime.ID+": "+message)
+	}
+
+	slices.SortFunc(issues, func(a, b SettingsIssue) int {
+		if cmp := strings.Compare(a.Area, b.Area); cmp != 0 {
+			return cmp
+		}
+		if cmp := strings.Compare(a.Target, b.Target); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.Source, b.Source)
+	})
+	health := SettingsHealth{IssueCount: len(issues), Issues: issues}
+	for _, issue := range issues {
+		if issue.Severity == "setup" {
+			health.NeedsSetup = true
+			break
+		}
+	}
+	return health
 }
 
 func toolDefaultGroup(kind tools.ID) (string, string) {

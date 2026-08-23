@@ -873,7 +873,7 @@ func TestWebUIInvitesListsAndRevokesAndroidDevice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"Connect Android phone", "settingsTab === 'security'", "Bind phone"} {
+	for _, expected := range []string{"Connect Android phone", "settingsTab === 'voice'", "Bind phone"} {
 		if !strings.Contains(string(page), expected) {
 			t.Fatalf("web UI omitted %q", expected)
 		}
@@ -1966,7 +1966,7 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `.settings-field { min-width: 0; display: grid; grid-template-columns: minmax(12rem, 15rem) minmax(0, 1fr);`) ||
 		!strings.Contains(fullPage, `.settings-field-control-sm { max-width: 12rem; }`) ||
-		!strings.Contains(fullPage, `class="settings-section" x-show="settingsTab === 'compaction'"`) ||
+		!strings.Contains(fullPage, `class="settings-section" x-show="settingsTab === 'conversation'"`) ||
 		!strings.Contains(fullPage, `:title="compactionModelLabel()"`) {
 		t.Fatalf("expected settings forms to use labeled rows with compact scalar controls and full-width model selectors")
 	}
@@ -2805,7 +2805,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `openSettingsModelPicker({kind: 'compaction'`) {
 		t.Fatalf("expected compaction model and prompt settings UI")
 	}
-	if !strings.Contains(fullPage, `settingsTab === 'thinking'`) ||
+	if !strings.Contains(fullPage, `settingsTab === 'conversation'`) ||
 		!strings.Contains(fullPage, `settings.thinking.caveman_enabled`) ||
 		!strings.Contains(fullPage, `thinkingModelValue()`) ||
 		!strings.Contains(fullPage, `settings.thinking.caveman_min_tokens`) ||
@@ -2825,6 +2825,8 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected access settings to use structured controls")
 	}
 	if !strings.Contains(fullPage, `settingsTab === 'tools'`) ||
+		!strings.Contains(document, `Managed browser`) ||
+		!strings.Contains(document, `MCP tool sources`) ||
 		!strings.Contains(fullPage, `toolDefaultGroups()`) ||
 		!strings.Contains(fullPage, `setToolGroupEnabled(group, $event.target.checked)`) ||
 		!strings.Contains(fullPage, `toolGroupPartial(group)`) ||
@@ -2833,6 +2835,13 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(document, `toggle-switch-input`) ||
 		!strings.Contains(document, `toggle-switch-track`) {
 		t.Fatalf("expected tools settings and boolean preferences to use shared toggle sliders")
+	}
+	if !strings.Contains(fullPage, `settingsTabs() { return ['overview', 'models', 'backends', 'tools', 'voice', 'conversation', 'access', 'prompts']; }`) ||
+		!strings.Contains(document, `data-settings-open`) ||
+		!strings.Contains(document, `settingsTabIssueCount(tab)`) ||
+		!strings.Contains(fullPage, `settings_health`) ||
+		!strings.Contains(fullPage, `settingsSuggestedTab()`) {
+		t.Fatalf("expected consolidated settings navigation and global readiness indicator")
 	}
 	if !strings.Contains(fullPage, `showToast`) {
 		t.Fatalf("expected toast error path")

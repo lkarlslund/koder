@@ -33,15 +33,17 @@ type RuntimeHealth struct {
 // HealthTracker owns provider and model observations shared by every runtime
 // client in this process.
 type HealthTracker struct {
-	mu        sync.RWMutex
-	providers map[string]RuntimeHealth
-	models    map[string]RuntimeHealth
+	mu         sync.RWMutex
+	providers  map[string]RuntimeHealth
+	models     map[string]RuntimeHealth
+	advertised map[string]map[string]struct{}
 }
 
 func NewHealthTracker() *HealthTracker {
 	return &HealthTracker{
-		providers: map[string]RuntimeHealth{},
-		models:    map[string]RuntimeHealth{},
+		providers:  map[string]RuntimeHealth{},
+		models:     map[string]RuntimeHealth{},
+		advertised: map[string]map[string]struct{}{},
 	}
 }
 
@@ -69,6 +71,22 @@ func (t *HealthTracker) Model(providerID, modelID string) RuntimeHealth {
 		return unknownHealth()
 	}
 	return health
+}
+
+// Advertises reports whether the latest successful model discovery included
+// modelID. The second result is false until at least one discovery has
+// succeeded, so callers can distinguish "missing" from "not checked yet".
+func (t *HealthTracker) Advertises(providerID, modelID string) (bool, bool) {
+	if t == nil {
+		return false, false
+	}
+	providerID = strings.TrimSpace(providerID)
+	modelID = strings.TrimSpace(modelID)
+	t.mu.RLock()
+	models, known := t.advertised[providerID]
+	_, advertised := models[modelID]
+	t.mu.RUnlock()
+	return advertised, known
 }
 
 // Observe records the outcome of one real provider operation. A caller-driven
@@ -119,11 +137,14 @@ func (t *HealthTracker) ObserveModels(providerID string, modelIDs []string, star
 	providerHealth.Detail = "Discovered " + modelCountLabel(len(modelIDs))
 	providerHealth.ModelCount = len(modelIDs)
 	t.providers[providerID] = providerHealth
+	advertised := make(map[string]struct{}, len(modelIDs))
 	for _, modelID := range modelIDs {
-		key := healthModelKey(providerID, modelID)
-		if strings.TrimSpace(modelID) == "" {
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" {
 			continue
 		}
+		advertised[modelID] = struct{}{}
+		key := healthModelKey(providerID, modelID)
 		if existing, ok := t.models[key]; ok && existing.Operation != "list_models" {
 			continue
 		}
@@ -134,6 +155,7 @@ func (t *HealthTracker) ObserveModels(providerID string, modelIDs []string, star
 			CheckedAt: &checkedAt,
 		}
 	}
+	t.advertised[providerID] = advertised
 	t.mu.Unlock()
 }
 

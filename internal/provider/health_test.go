@@ -48,3 +48,28 @@ func TestHealthTrackerRecordsOperationFailure(t *testing.T) {
 		}
 	}
 }
+
+func TestHealthTrackerTracksLatestAdvertisedModelSet(t *testing.T) {
+	tracker := NewHealthTracker()
+	if advertised, known := tracker.Advertises("provider", "model"); advertised || known {
+		t.Fatalf("unobserved provider should be unknown: advertised=%v known=%v", advertised, known)
+	}
+
+	tracker.ObserveModels("provider", []string{" model ", "other"}, time.Now(), nil)
+	if advertised, known := tracker.Advertises("provider", "model"); !advertised || !known {
+		t.Fatalf("advertised model not tracked: advertised=%v known=%v", advertised, known)
+	}
+	if advertised, known := tracker.Advertises("provider", "missing"); advertised || !known {
+		t.Fatalf("missing model should be known absent: advertised=%v known=%v", advertised, known)
+	}
+
+	tracker.ObserveModels("provider", []string{"replacement"}, time.Now(), nil)
+	if advertised, known := tracker.Advertises("provider", "model"); advertised || !known {
+		t.Fatalf("stale advertised model remained present: advertised=%v known=%v", advertised, known)
+	}
+
+	tracker.ObserveModels("provider", nil, time.Now(), errors.New("discovery failed"))
+	if advertised, known := tracker.Advertises("provider", "replacement"); !advertised || !known {
+		t.Fatalf("failed discovery replaced the last successful set: advertised=%v known=%v", advertised, known)
+	}
+}

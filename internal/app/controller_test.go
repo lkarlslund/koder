@@ -39,6 +39,7 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/voice"
 	workspacepkg "github.com/lkarlslund/koder/internal/workspace"
@@ -91,6 +92,97 @@ func TestPreferencesSerializeBrowserRuntimeSeparately(t *testing.T) {
 	var runtime browserapi.Status
 	if err := json.Unmarshal(root["browser_runtime"], &runtime); err != nil || runtime.State != "ready" {
 		t.Fatalf("missing separate browser runtime state: runtime=%#v err=%v payload=%s", runtime, err, payload)
+	}
+}
+
+func TestSettingsHealthSurfacesSetupAndConnectionFailures(t *testing.T) {
+	cfg := config.Default()
+	cfg.Codex = config.Codex{Enabled: true, Executable: filepath.Join(t.TempDir(), "missing-codex")}
+	cfg.Browser.Enabled = true
+	cfg.Browser.Executable = filepath.Join(t.TempDir(), "missing-chromium")
+
+	health := New(cfg, nil).State().SettingsHealth
+	if !health.NeedsSetup || health.IssueCount < 3 {
+		t.Fatalf("expected provider setup, Codex, and browser issues, got %#v", health)
+	}
+	targets := map[string]bool{}
+	for _, issue := range health.Issues {
+		targets[issue.Target] = true
+	}
+	for _, target := range []string{"providers", "codex", "browser"} {
+		if !targets[target] {
+			t.Fatalf("expected %s issue in %#v", target, health.Issues)
+		}
+	}
+}
+
+func TestSettingsHealthSurfacesProviderAndModelRuntimeFailures(t *testing.T) {
+	cfg := config.Default()
+	cfg.Browser.Enabled = false
+	cfg.Codex.Enabled = false
+	cfg.Providers["test"] = config.Provider{Name: "Test provider", BaseURL: "http://provider.invalid/v1"}
+	cfg.Defaults = config.Defaults{ProviderID: "test", ModelID: "model"}
+	cfg.Models = []config.ModelConfig{{ProviderID: "test", ModelID: "model"}}
+	ctrl := New(cfg, nil)
+	ctrl.providerHealth.Observe("test", "model", "chat", time.Now(), errors.New("connection refused"))
+
+	health := ctrl.State().SettingsHealth
+	areas := map[string]bool{}
+	for _, issue := range health.Issues {
+		areas[issue.Area] = true
+	}
+	if health.NeedsSetup || !areas["models"] {
+		t.Fatalf("expected provider and model runtime issues on the models page, got %#v", health)
+	}
+}
+
+func TestSettingsHealthSurfacesModelRemovedFromLatestCatalog(t *testing.T) {
+	cfg := config.Default()
+	cfg.Browser.Enabled = false
+	cfg.Codex.Enabled = false
+	cfg.Providers["test"] = config.Provider{Name: "Test provider", BaseURL: "http://provider.invalid/v1"}
+	cfg.Defaults = config.Defaults{ProviderID: "test", ModelID: "removed"}
+	cfg.Models = []config.ModelConfig{{ProviderID: "test", ModelID: "removed"}}
+	ctrl := New(cfg, nil)
+	ctrl.providerHealth.ObserveModels("test", []string{"available"}, time.Now(), nil)
+
+	health := ctrl.State().SettingsHealth
+	foundDefault := false
+	foundConfigured := false
+	for _, issue := range health.Issues {
+		if issue.Source == "default-model" && strings.Contains(issue.Message, "choose a replacement") {
+			foundDefault = true
+		}
+		if issue.Source == "test/removed" && strings.Contains(issue.Message, "no longer advertised") {
+			foundConfigured = true
+		}
+	}
+	if !foundDefault || !foundConfigured {
+		t.Fatalf("expected default and configured removed-model issues, got %#v", health)
+	}
+}
+
+func TestBrowserEnablementOwnsBrowserToolDefaults(t *testing.T) {
+	cfg := config.Default()
+	for _, item := range toolDefaultPreferencesFromConfig(cfg.Tools.Enabled) {
+		if item.Group == "browser" {
+			t.Fatalf("browser tool %q must not duplicate the managed browser toggle", item.Tool)
+		}
+	}
+
+	cfg.Browser.Enabled = false
+	applyBrowserToolDefaults(&cfg)
+	for _, kind := range tools.RegisteredIDs() {
+		if isBrowserToolDefault(kind) && cfg.Tools.Enabled[kind] {
+			t.Fatalf("browser tool %q remained enabled with browser disabled", kind)
+		}
+	}
+	cfg.Browser.Enabled = true
+	applyBrowserToolDefaults(&cfg)
+	for _, kind := range tools.RegisteredIDs() {
+		if isBrowserToolDefault(kind) && !cfg.Tools.Enabled[kind] {
+			t.Fatalf("browser tool %q remained disabled with browser enabled", kind)
+		}
 	}
 }
 
