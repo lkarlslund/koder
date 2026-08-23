@@ -161,8 +161,11 @@ func TestDefaultContentReadsEmbeddedDefault(t *testing.T) {
 		t.Fatalf("unexpected system prompt content: %q", string(content))
 	}
 	for _, want := range []string{
+		"For answers, explanations, reviews, and diagnosis, inspect and respond without modifying the workspace",
 		"Provide evidence-backed answers",
 		"Make informed assumptions only when they do not change the user's intended outcome or scope",
+		"do not authorize broader actions or changes outside the user's requested scope",
+		"Before a destructive action, resolve the exact target with read-only checks",
 		"Tool arguments are not a place for narration",
 		"Keep `exec_command` commands small and executable-only",
 	} {
