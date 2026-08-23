@@ -2493,6 +2493,58 @@ func TestPreviewNextRequestKeepsStableMCPToolOrder(t *testing.T) {
 	}
 }
 
+func TestParseProviderToolCallResolvesExposedMCPName(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test-mcp", Version: "v1.0.0"}, nil)
+	server.AddTool(&sdkmcp.Tool{Name: "list_accounts", InputSchema: map[string]any{"type": "object"}}, func(_ context.Context, _ *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{}, nil
+	})
+
+	handler := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, &sdkmcp.StreamableHTTPOptions{JSONResponse: true})
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+
+	manager, err := mcp.NewManager(map[string]config.MCPServer{
+		"exchange-mcp": {URL: httpServer.URL},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := manager.DisconnectServer("exchange-mcp"); err != nil {
+			t.Errorf("disconnect exchange-mcp server: %v", err)
+		}
+	}()
+	if err := manager.ConnectAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := New(cfg, st, nil, manager)
+	parsed := engine.ParseProviderToolCallsForTranscript([]provider.ToolCall{{
+		ID: "call_1",
+		Function: provider.FunctionCall{
+			Name:      "list_accounts",
+			Arguments: `{}`,
+		},
+	}}, "session-1")
+	if parsed.Err != nil {
+		t.Fatal(parsed.Err)
+	}
+	if len(parsed.Requests) != 1 {
+		t.Fatalf("expected one parsed MCP request, got %#v", parsed.Requests)
+	}
+	request := parsed.Requests[0]
+	if request.Tool != domain.ToolKindMCP || request.Args["server"] != "exchange-mcp" || request.Args["tool"] != "list_accounts" {
+		t.Fatalf("unexpected parsed MCP request: %#v", request)
+	}
+}
+
 func TestBuildConversationPreservesSeparateReasoningForQwenPreset(t *testing.T) {
 	cfg := testConfig(t).WithManagedAssetsDir(t.TempDir())
 	cfg.Providers = map[string]config.Provider{

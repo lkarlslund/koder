@@ -169,7 +169,7 @@ func (r *Runtime) parseProviderToolCall(item provider.ToolCall) (tools.Request, 
 	if r.mcp != nil {
 		localDefs := tools.Definitions(tools.Runtime{})
 		if r.tools != nil {
-			localDefs = r.tools.Definitions(domain.Session{}, domain.Chat{})
+			localDefs = tools.Definitions(r.tools.Runtime(domain.Session{}, domain.Chat{}))
 		}
 		serverID, toolName, ok = r.mcp.ResolveToolName(name, localDefs)
 	}
