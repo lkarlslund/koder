@@ -186,6 +186,39 @@ func TestManagerConnectsDiscoversAndExecutes(t *testing.T) {
 	}
 }
 
+func TestManagerConnectsStatelessTypedJSONServer(t *testing.T) {
+	type input struct {
+		Query string `json:"query"`
+	}
+	type output struct {
+		Message string `json:"message"`
+	}
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "wikipedia-shaped", Version: "v1"}, nil)
+	sdkmcp.AddTool(server, &sdkmcp.Tool{Name: "wiki_search", Description: "Search offline articles.", Annotations: &sdkmcp.ToolAnnotations{ReadOnlyHint: true}}, func(_ context.Context, _ *sdkmcp.CallToolRequest, in input) (*sdkmcp.CallToolResult, output, error) {
+		return nil, output{Message: "found " + in.Query}, nil
+	})
+	httpServer := httptest.NewServer(sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, &sdkmcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, PropagateRequestCancellation: true}))
+	defer httpServer.Close()
+	manager, err := NewManager(map[string]config.MCPServer{"wikipedia": {URL: httpServer.URL}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = manager.Close() }()
+	if err := manager.ConnectAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	result, err := manager.ExecuteTool(context.Background(), "wikipedia", "wiki_search", map[string]any{"query": "Greenland"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != domain.ToolResultStatusOK || !strings.Contains(result.Output, "found Greenland") {
+		t.Fatalf("stateless typed result = %#v", result)
+	}
+	if state := manager.ListServers()[0]; state.Status != ServerStatusConnected || state.ToolCount != 1 {
+		t.Fatalf("stateless server state = %#v", state)
+	}
+}
+
 func TestHTTPClientHasNoWholeSessionTimeout(t *testing.T) {
 	client := newHTTPClient(config.MCPServer{RequestTimeout: time.Millisecond})
 	if client.Timeout != 0 {
