@@ -50,6 +50,30 @@ func TestRequestExtraBodyUsesQwen38ThinkingOptions(t *testing.T) {
 	}
 }
 
+func TestRequestExtraBodyUsesNinferThinkingOptions(t *testing.T) {
+	got := requestExtraBody(t, config.Provider{
+		Name:               "Ninfer",
+		BaseURL:            "http://127.0.0.1:8002/v1",
+		PromptProgressMode: "disabled",
+	}, config.ModelConfig{
+		ModelID:         "qwen3.8-27b",
+		ModelPreset:     ModelPresetAuto,
+		ThinkingMode:    "enabled",
+		ReasoningEffort: "low",
+	})
+	want := map[string]any{
+		"enable_thinking":   true,
+		"preserve_thinking": true,
+		"reasoning_effort":  "low",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected Ninfer Qwen3.8 body: %#v", got)
+	}
+	if transport := OverlayTransport(config.Provider{Name: "Ninfer", BaseURL: "http://127.0.0.1:8002/v1"}); transport != "ninfer" {
+		t.Fatalf("Ninfer transport = %q, want ninfer", transport)
+	}
+}
+
 func TestRequestExtraBodyDoesNotGuessUnsupportedReasoningEffort(t *testing.T) {
 	got := requestExtraBody(t, config.Provider{BaseURL: "https://api.example.invalid/v1"}, config.ModelConfig{
 		ModelID:         "reasoning-model",
@@ -204,5 +228,15 @@ func TestWithLlamaPromptCacheSkipsRemoteCompatibleProvider(t *testing.T) {
 	}
 	if got["return_progress"] != true {
 		t.Fatalf("expected existing body fields to remain, got %#v", got)
+	}
+}
+
+func TestWithLlamaPromptCacheSkipsLocalNinferProvider(t *testing.T) {
+	got := WithLlamaPromptCache(nil, config.Provider{
+		Name:    "Ninfer",
+		BaseURL: "http://127.0.0.1:8002/v1",
+	})
+	if _, ok := got["cache_prompt"]; ok {
+		t.Fatalf("did not expect llama.cpp cache_prompt for Ninfer: %#v", got)
 	}
 }

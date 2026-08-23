@@ -159,6 +159,9 @@ func OverlayTransport(cfg config.Provider) string {
 	if isDashScopeBaseURL(cfg.BaseURL) {
 		return "dashscope"
 	}
+	if looksLikeNinferProvider(cfg) {
+		return "ninfer"
+	}
 	if looksLikeLlamaProvider(cfg) {
 		return "llama"
 	}
@@ -249,6 +252,9 @@ func isDashScopeBaseURL(raw string) bool {
 }
 
 func looksLikeLlamaProvider(cfg config.Provider) bool {
+	if looksLikeNinferProvider(cfg) {
+		return false
+	}
 	for _, value := range []string{cfg.Kind, cfg.TemplateID, cfg.Name} {
 		if strings.Contains(strings.ToLower(strings.TrimSpace(value)), "llama") {
 			return true
@@ -264,4 +270,13 @@ func looksLikeLlamaProvider(cfg config.Provider) bool {
 	default:
 		return false
 	}
+}
+
+func looksLikeNinferProvider(cfg config.Provider) bool {
+	for _, value := range []string{cfg.TemplateID, cfg.Name} {
+		if strings.Contains(strings.ToLower(strings.TrimSpace(value)), "ninfer") {
+			return true
+		}
+	}
+	return false
 }

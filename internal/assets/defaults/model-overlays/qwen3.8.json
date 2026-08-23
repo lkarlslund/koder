@@ -21,6 +21,7 @@
       ],
       "bindings": [
         {"path": "chat_template_kwargs.enable_thinking", "transports": ["llama"], "omit_values": ["auto"], "value_map": {"enabled": true, "disabled": false}},
+        {"path": "enable_thinking", "transports": ["ninfer"], "omit_values": ["auto"], "value_map": {"enabled": true, "disabled": false}},
         {"path": "enable_thinking", "transports": ["dashscope"], "omit_values": ["auto"], "value_map": {"enabled": true, "disabled": false}}
       ]
     },
@@ -36,6 +37,7 @@
       ],
       "bindings": [
         {"path": "chat_template_kwargs.preserve_thinking", "transports": ["llama"], "value_map": {"enabled": true, "disabled": false}},
+        {"path": "preserve_thinking", "transports": ["ninfer"], "value_map": {"enabled": true, "disabled": false}},
         {"path": "preserve_thinking", "transports": ["dashscope"], "value_map": {"enabled": true, "disabled": false}}
       ]
     },
