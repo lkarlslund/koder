@@ -112,9 +112,10 @@ type ServerState struct {
 }
 
 type Manager struct {
-	mu     sync.RWMutex
-	config map[string]config.MCPServer
-	state  map[string]*serverState
+	mu        sync.RWMutex
+	connectMu sync.Mutex
+	config    map[string]config.MCPServer
+	state     map[string]*serverState
 }
 
 type serverState struct {
@@ -140,6 +141,9 @@ func NewManager(cfgs map[string]config.MCPServer) (*Manager, error) {
 }
 
 func (m *Manager) LoadConfig(cfgs map[string]config.MCPServer) error {
+	m.connectMu.Lock()
+	defer m.connectMu.Unlock()
+
 	next := make(map[string]config.MCPServer, len(cfgs))
 	for id, cfg := range cfgs {
 		if err := ValidateServerConfig(id, cfg); err != nil {
@@ -182,6 +186,12 @@ func (m *Manager) ConnectAll(ctx context.Context) error {
 }
 
 func (m *Manager) ConnectServer(ctx context.Context, id string) error {
+	m.connectMu.Lock()
+	defer m.connectMu.Unlock()
+	return m.connectServer(ctx, id)
+}
+
+func (m *Manager) connectServer(ctx context.Context, id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return errors.New("mcp server id is empty")
@@ -411,6 +421,7 @@ func (m *Manager) ExecuteTool(ctx context.Context, serverID, toolName string, ar
 	}
 	session := state.session
 	serverName := strings.TrimSpace(state.config.Name)
+	readOnly := toolIsReadOnly(state.tools, toolName)
 	m.mu.RUnlock()
 
 	if session == nil {
@@ -423,8 +434,24 @@ func (m *Manager) ExecuteTool(ctx context.Context, serverID, toolName string, ar
 		Name:      toolName,
 		Arguments: args,
 	})
-	if err != nil {
+	if err != nil && !isRecoverableSessionError(err) {
 		return tools.Result{}, err
+	}
+	if err != nil {
+		recovered, recoverErr := m.recoverSession(ctx, serverID, session)
+		if recoverErr != nil {
+			return tools.Result{}, fmt.Errorf("mcp server %q session failed and reconnect failed: %w", serverID, recoverErr)
+		}
+		if !readOnly {
+			return tools.Result{}, fmt.Errorf("%w; mcp server %q reconnected, but tool %q was not retried because it is not declared read-only", err, serverID, toolName)
+		}
+		res, err = recovered.CallTool(ctx, &sdkmcp.CallToolParams{
+			Name:      toolName,
+			Arguments: args,
+		})
+		if err != nil {
+			return tools.Result{}, fmt.Errorf("mcp tool %s/%s failed after reconnect: %w", serverID, toolName, err)
+		}
 	}
 	return convertCallToolResult(serverID, serverName, toolName, res)
 }
@@ -435,6 +462,12 @@ func (m *Manager) ReadResource(ctx context.Context, serverID, uri string) (Resou
 		return ResourceReadResult{}, err
 	}
 	res, err := session.ReadResource(ctx, &sdkmcp.ReadResourceParams{URI: strings.TrimSpace(uri)})
+	if err != nil && isRecoverableSessionError(err) {
+		session, err = m.recoverSession(ctx, serverID, session)
+		if err == nil {
+			res, err = session.ReadResource(ctx, &sdkmcp.ReadResourceParams{URI: strings.TrimSpace(uri)})
+		}
+	}
 	if err != nil {
 		return ResourceReadResult{}, err
 	}
@@ -454,6 +487,15 @@ func (m *Manager) GetPrompt(ctx context.Context, serverID, name string, args map
 		Name:      strings.TrimSpace(name),
 		Arguments: args,
 	})
+	if err != nil && isRecoverableSessionError(err) {
+		session, err = m.recoverSession(ctx, serverID, session)
+		if err == nil {
+			res, err = session.GetPrompt(ctx, &sdkmcp.GetPromptParams{
+				Name:      strings.TrimSpace(name),
+				Arguments: args,
+			})
+		}
+	}
 	if err != nil {
 		return PromptResult{}, err
 	}
@@ -468,6 +510,44 @@ func (m *Manager) GetPrompt(ctx context.Context, serverID, name string, args map
 		})
 	}
 	return out, nil
+}
+
+func toolIsReadOnly(tools []ToolDescriptor, name string) bool {
+	for _, tool := range tools {
+		if tool.Name == name {
+			return tool.ReadOnlyHint
+		}
+	}
+	return false
+}
+
+func isRecoverableSessionError(err error) bool {
+	return errors.Is(err, sdkmcp.ErrConnectionClosed) || errors.Is(err, sdkmcp.ErrSessionMissing)
+}
+
+func (m *Manager) recoverSession(ctx context.Context, serverID string, failed *sdkmcp.ClientSession) (*sdkmcp.ClientSession, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.connectMu.Lock()
+	defer m.connectMu.Unlock()
+
+	m.mu.RLock()
+	state, ok := m.state[serverID]
+	if !ok {
+		m.mu.RUnlock()
+		return nil, fmt.Errorf("mcp server %q not configured", serverID)
+	}
+	current := state.session
+	status := state.status
+	m.mu.RUnlock()
+	if current != nil && current != failed && status == ServerStatusConnected {
+		return current, nil
+	}
+	if err := m.connectServer(ctx, serverID); err != nil {
+		return nil, err
+	}
+	return m.sessionForServer(serverID)
 }
 
 func ToolName(serverID, toolName string) string {

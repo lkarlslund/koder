@@ -10,6 +10,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/config"
@@ -176,6 +177,119 @@ func TestManagerConnectsDiscoversAndExecutes(t *testing.T) {
 	if len(prompt.Messages) != 1 || prompt.Messages[0].Text != "review apis" {
 		t.Fatalf("unexpected prompt result: %#v", prompt)
 	}
+}
+
+func TestManagerReconnectsClosedSessionAndRetriesReadOnlyTool(t *testing.T) {
+	ctx := context.Background()
+	var calls atomic.Int32
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "recoverable", Version: "v1.0.0"}, nil)
+	server.AddTool(&sdkmcp.Tool{
+		Name:        "lookup",
+		Description: "Read a value",
+		InputSchema: map[string]any{"type": "object"},
+		Annotations: &sdkmcp.ToolAnnotations{ReadOnlyHint: true},
+	}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		calls.Add(1)
+		return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "recovered"}}}, nil
+	})
+
+	handler := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, &sdkmcp.StreamableHTTPOptions{JSONResponse: true})
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+
+	manager, err := NewManager(map[string]config.MCPServer{"docs": {URL: httpServer.URL}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = manager.DisconnectServer("docs") }()
+	if err := manager.ConnectAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	stale := managerSession(t, manager, "docs")
+	staleID := stale.ID()
+	if err := stale.Close(); err != nil {
+		t.Fatalf("close stale session: %v", err)
+	}
+
+	result, err := manager.ExecuteTool(ctx, "docs", "lookup", nil)
+	if err != nil {
+		t.Fatalf("ExecuteTool() after session close: %v", err)
+	}
+	if result.Output != "recovered" {
+		t.Fatalf("ExecuteTool() output = %q", result.Output)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("server tool calls = %d, want 1", got)
+	}
+	fresh := managerSession(t, manager, "docs")
+	if fresh == stale || fresh.ID() == staleID {
+		t.Fatalf("session was not replaced: stale=%q fresh=%q", staleID, fresh.ID())
+	}
+	if state := manager.ListServers()[0]; state.Status != ServerStatusConnected || state.LastError != "" {
+		t.Fatalf("unexpected recovered server state: %#v", state)
+	}
+}
+
+func TestManagerReconnectsButDoesNotReplayMutatingTool(t *testing.T) {
+	ctx := context.Background()
+	var calls atomic.Int32
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "recoverable", Version: "v1.0.0"}, nil)
+	server.AddTool(&sdkmcp.Tool{
+		Name:        "mutate",
+		Description: "Change a value",
+		InputSchema: map[string]any{"type": "object"},
+	}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		calls.Add(1)
+		return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "changed"}}}, nil
+	})
+
+	handler := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, &sdkmcp.StreamableHTTPOptions{JSONResponse: true})
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+
+	manager, err := NewManager(map[string]config.MCPServer{"docs": {URL: httpServer.URL}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = manager.DisconnectServer("docs") }()
+	if err := manager.ConnectAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	stale := managerSession(t, manager, "docs")
+	if err := stale.Close(); err != nil {
+		t.Fatalf("close stale session: %v", err)
+	}
+	_, err = manager.ExecuteTool(ctx, "docs", "mutate", nil)
+	if err == nil || !strings.Contains(err.Error(), "was not retried because it is not declared read-only") {
+		t.Fatalf("ExecuteTool() error = %v", err)
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("mutating tool was replayed %d times", got)
+	}
+	if managerSession(t, manager, "docs") == stale {
+		t.Fatal("closed session was not replaced")
+	}
+
+	result, err := manager.ExecuteTool(ctx, "docs", "mutate", nil)
+	if err != nil {
+		t.Fatalf("second ExecuteTool() error = %v", err)
+	}
+	if result.Output != "changed" || calls.Load() != 1 {
+		t.Fatalf("second ExecuteTool() = %q, calls = %d", result.Output, calls.Load())
+	}
+}
+
+func managerSession(t *testing.T, manager *Manager, serverID string) *sdkmcp.ClientSession {
+	t.Helper()
+	manager.mu.RLock()
+	defer manager.mu.RUnlock()
+	state := manager.state[serverID]
+	if state == nil || state.session == nil {
+		t.Fatalf("server %q has no session", serverID)
+	}
+	return state.session
 }
 
 func TestManagerConnectsStdioServer(t *testing.T) {
