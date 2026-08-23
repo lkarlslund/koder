@@ -218,6 +218,7 @@ func TestServerServesSessionFileBrowserRoute(t *testing.T) {
 		`koderFilesApp()`,
 		`/assets/vendor/marked/marked.umd.js`,
 		`/assets/vendor/highlight/highlight.min.js`,
+		`/assets/markdown_runtime.js`,
 		`/assets/file_browser.js`,
 		`imageLightbox.open`,
 		`image-lightbox`,
@@ -229,6 +230,13 @@ func TestServerServesSessionFileBrowserRoute(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("file browser HTML missing %q", want)
 		}
+	}
+	markdownRuntimeJS := getAssetBody(t, srv, "/assets/markdown_runtime.js")
+	fileBrowserJS := getAssetBody(t, srv, "/assets/file_browser.js")
+	if !strings.Contains(markdownRuntimeJS, `window.KoderMarkdownRuntime`) ||
+		!strings.Contains(fileBrowserJS, `window.KoderMarkdownRuntime`) ||
+		!strings.Contains(fileBrowserJS, `return renderMermaidDiagrams(root, {`) {
+		t.Fatalf("expected the file browser to consume the shared Markdown runtime")
 	}
 }
 
@@ -1834,15 +1842,21 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("read index: %v", err)
 	}
 	document := string(body)
+	markdownRuntimeJS := getAssetBody(t, srv, "/assets/markdown_runtime.js")
 	appJS := getAssetBody(t, srv, "/assets/app.js")
 	browserVoiceJS := getAssetBody(t, srv, "/assets/browser_voice.js")
 	appCSS := getAssetBody(t, srv, "/assets/app.css")
-	fullPage := document + "\n" + appJS + "\n" + browserVoiceJS + "\n" + appCSS
+	fullPage := document + "\n" + markdownRuntimeJS + "\n" + appJS + "\n" + browserVoiceJS + "\n" + appCSS
 	if !strings.Contains(document, `/assets/app.css`) {
 		t.Fatalf("expected app CSS to be loaded from embedded assets")
 	}
 	if !strings.Contains(document, `/assets/app.js`) {
 		t.Fatalf("expected app JS to be loaded from embedded assets")
+	}
+	if !strings.Contains(document, `/assets/markdown_runtime.js`) ||
+		!strings.Contains(markdownRuntimeJS, `window.KoderMarkdownRuntime`) ||
+		!strings.Contains(appJS, `window.KoderMarkdownRuntime`) {
+		t.Fatalf("expected the app to load and consume the shared Markdown runtime")
 	}
 	if !strings.Contains(document, `/assets/browser_voice.js`) ||
 		!strings.Contains(fullPage, `browser_voice_ticket`) ||
@@ -1902,9 +1916,11 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	appScript := strings.Index(document, `/assets/app.js`)
 	voiceScript := strings.Index(document, `/assets/browser_voice.js`)
+	markdownRuntimeScript := strings.Index(document, `/assets/markdown_runtime.js`)
 	alpineScript := strings.Index(document, `/assets/vendor/alpine/cdn.min.js`)
-	if voiceScript < 0 || appScript < 0 || alpineScript < 0 || voiceScript > appScript || appScript > alpineScript {
-		t.Fatalf("expected browser voice and app JS to load before Alpine in dependency order")
+	if voiceScript < 0 || markdownRuntimeScript < 0 || appScript < 0 || alpineScript < 0 ||
+		voiceScript > markdownRuntimeScript || markdownRuntimeScript > appScript || appScript > alpineScript {
+		t.Fatalf("expected browser voice, Markdown runtime, and app JS to load before Alpine in dependency order")
 	}
 	if !strings.Contains(fullPage, `@keydown="onComposerKeydown($event)"`) || !strings.Contains(fullPage, `if (ev.key === 'Enter' && !ev.shiftKey)`) {
 		t.Fatalf("expected plain enter to submit composer")
@@ -2356,7 +2372,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `if (this.transcriptDOMUpdateScheduled) return;`) ||
 		!strings.Contains(fullPage, `const callbacks = this.transcriptDOMUpdateCallbacks.splice(0);`) ||
 		!strings.Contains(fullPage, `scheduleTranscriptEnhancement`) ||
-		!strings.Contains(fullPage, `return renderMermaidIn(root).then`) {
+		!strings.Contains(fullPage, `return renderMermaidDiagrams(root, {configure: configureMermaid}).then`) {
 		t.Fatalf("expected transcript updates to batch media enhancement independently from scroll restoration")
 	}
 	if !strings.Contains(fullPage, `applyState(s, {scrollToBottom: true})`) {
