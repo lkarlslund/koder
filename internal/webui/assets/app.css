@@ -183,6 +183,7 @@
     .turn-header-title { min-width: 0; display: inline-flex; align-items: center; gap: .35rem; overflow: hidden; text-overflow: ellipsis; font-size: .9rem; font-weight: 600; }
     .turn-header-title .bi { flex: 0 0 auto; line-height: 1; }
     .turn-header-actions { flex: 0 0 auto; display: inline-flex; align-items: center; gap: .22rem; }
+    .tool-preview { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .turn-performance { flex: 0 0 auto; color: var(--bs-secondary-color); background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); border-radius: .3rem; padding: .12rem .3rem; font-family: var(--bs-font-monospace); font-size: .68rem; line-height: 1; white-space: nowrap; }
     .turn-timestamp { flex: 0 0 auto; color: var(--bs-secondary-color); font-family: var(--bs-font-monospace); font-size: .78rem; line-height: 1; white-space: nowrap; }
     .timeline-action-button { display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem; padding: 0; border: 1px solid transparent; border-radius: .25rem; background: transparent; color: var(--bs-secondary-color); line-height: 1; opacity: .72; }

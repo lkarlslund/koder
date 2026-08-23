@@ -2043,6 +2043,8 @@ func TestIndexServesHTML(t *testing.T) {
 	for _, mcpRenderer := range []string{
 		`function mcpCallDetails(tool)`,
 		`return call.name + ' · ' + call.action`,
+		`for (const [key, value] of Object.entries(call.args))`,
+		`return values.join('  ')`,
 		`if (kind === 'mcp') return renderCompactBlock(toolTitleText(tool), toolResultText(tool))`,
 	} {
 		if !strings.Contains(fullPage, mcpRenderer) {

@@ -876,6 +876,11 @@
         args: callArgs,
       };
     }
+    function toolPreviewValue(value) {
+      if (typeof value === 'string') return value.replace(/\s+/g, ' ').trim();
+      if (value === undefined) return '';
+      try { return JSON.stringify(value); } catch (_) { return String(value); }
+    }
     function toolAction(tool) {
       if (String((tool && tool.tool) || '') === 'mcp') return mcpCallDetails(tool).action;
       return String(firstValue(toolArgs(tool), ['action', 'Action']) || '').trim();
@@ -1036,10 +1041,10 @@
       if (String((tool && tool.tool) || '') === 'mcp') {
         const call = mcpCallDetails(tool);
         const values = call.server ? ['server=' + call.server] : [];
-        for (const key of ['query', 'wiki', 'title', 'message_ref', 'id']) {
-          if (call.args[key] !== undefined && call.args[key] !== '') values.push(key + '=' + call.args[key]);
+        for (const [key, value] of Object.entries(call.args)) {
+          if (value !== undefined && value !== '') values.push(key + '=' + toolPreviewValue(value));
         }
-        return values.slice(0, 2).join('  ');
+        return values.join('  ');
       }
       if (String((tool && tool.tool) || '') === 'knowledge') return String(firstValue(args, ['query', 'id']) || '');
       if (String((tool && tool.tool) || '') === 'file_read') return '';
