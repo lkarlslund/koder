@@ -16,7 +16,6 @@ type ChatState struct {
 	timeline  []*TimelineRecord
 	byItem    map[string]*TimelineRecord
 	approvals []Approval
-	pending   PendingAssistantTurn
 }
 
 // TimelineRecord stores one mutable timeline item.
@@ -29,12 +28,6 @@ type TimelineRecord struct {
 type dirtyTimelineItem struct {
 	Item     domain.TimelineItem
 	Revision uint64
-}
-
-type PendingAssistantTurn struct {
-	Text      string
-	Reasoning string
-	CreatedAt time.Time
 }
 
 // NewTimelineState builds a chat state from persisted timeline snapshots.
@@ -91,40 +84,6 @@ func (s *ChatState) UpdateChat(update func(*domain.Chat)) {
 		return
 	}
 	update(&s.chat)
-}
-
-func (s *ChatState) PendingAssistant() PendingAssistantTurn {
-	if s == nil {
-		return PendingAssistantTurn{}
-	}
-	return s.pending
-}
-
-func (s *ChatState) AppendPendingAssistantText(text string) {
-	if s == nil || text == "" {
-		return
-	}
-	if s.pending.CreatedAt.IsZero() {
-		s.pending.CreatedAt = time.Now().UTC()
-	}
-	s.pending.Text += text
-}
-
-func (s *ChatState) AppendPendingAssistantReasoning(text string) {
-	if s == nil || text == "" {
-		return
-	}
-	if s.pending.CreatedAt.IsZero() {
-		s.pending.CreatedAt = time.Now().UTC()
-	}
-	s.pending.Reasoning += text
-}
-
-func (s *ChatState) ClearPendingAssistant() {
-	if s == nil {
-		return
-	}
-	s.pending = PendingAssistantTurn{}
 }
 
 // DiscardActiveAssistant removes the latest unsealed assistant item from the
@@ -610,15 +569,17 @@ func (s *ChatState) AppendAssistantReasoning(chatID id.ID, text string) error {
 }
 
 // SealActiveAssistant marks the active assistant item complete.
-func (s *ChatState) SealActiveAssistant(status domain.ToolStatus) {
+func (s *ChatState) SealActiveAssistant(status domain.ToolStatus) (domain.TimelineItem, bool) {
 	if s == nil {
-		return
+		return domain.TimelineItem{}, false
 	}
 	_ = status
 	if record := s.LatestActiveAssistant(); record != nil && !record.Item.Sealed() {
 		record.Item.Seal(time.Now().UTC())
 		record.revision++
+		return record.Item, true
 	}
+	return domain.TimelineItem{}, false
 }
 
 // TimelineValue returns the current timeline item value.

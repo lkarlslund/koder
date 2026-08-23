@@ -392,12 +392,15 @@
         }
       }
     }
-    function addedNodesContainPendingMermaid(mutations) {
-      const selector = '.mermaid-diagram[data-mermaid-state="pending"]';
+    function addedNodesNeedTranscriptEnhancement(mutations) {
+      const selector = '.mermaid-diagram[data-mermaid-state="pending"], .markdown-body img:not([data-lightbox-enhanced]), .markdown-body svg:not([data-lightbox-enhanced])';
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
           if (node.nodeType !== Node.ELEMENT_NODE) continue;
-          if (node.matches(selector) || node.querySelector(selector)) return true;
+          const candidates = [];
+          if (node.matches(selector)) candidates.push(node);
+          candidates.push(...node.querySelectorAll(selector));
+          if (candidates.some(candidate => candidate.localName !== 'svg' || !candidate.closest('.mermaid-diagram'))) return true;
         }
       }
       return false;
@@ -453,9 +456,6 @@
       if (ArrayBuffer.isView(value)) return value.byteLength;
       if (value instanceof Blob) return value.size;
       return 0;
-    }
-    function isReceivingAssistantDeltasStatus(status) {
-      return status === 'streaming_response' || status === 'streaming_thoughts';
     }
     const timelinePageSize = 10;
     const timelineMemoryWindowSize = 30;
@@ -1212,7 +1212,7 @@
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
 		chatCreator: {open: false, loading: false, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}},
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptBottomScrollPending: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptDiagramObserver: null, transcriptDiagramFrame: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptBottomScrollPending: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptEnhancementObserver: null, transcriptEnhancementFrame: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
           this.syncBrowserTabActivity();
@@ -1233,7 +1233,7 @@
           this.websocketHealthTimer = setInterval(() => this.checkWebsocketHealth(), 5000);
 		  this.refreshBrowserStatus();
 		  this.browserStatusTimer = setInterval(() => this.refreshBrowserStatus(), 5000);
-          this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); this.observeTranscriptDiagrams(); this.scheduleTranscriptDiagramRender(); this.observeLastTranscriptItem(); });
+          this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); this.observeTranscriptEnhancements(); this.scheduleTranscriptEnhancement(); this.observeLastTranscriptItem(); });
         },
         initializeRouteHydration() {
           const route = this.selectionFromLocation();
@@ -1407,7 +1407,7 @@
           configureMermaid();
           if (previous && previous !== resolved) {
             markMermaidThemeDirty(this.transcriptElement());
-            this.scheduleTranscriptDiagramRender();
+            this.scheduleTranscriptEnhancement();
           }
         },
         appShellStyle() { return '--sidebar-width: ' + this.sidebarWidth() + 'px;'; },
@@ -2292,20 +2292,20 @@
             });
           });
         },
-        observeTranscriptDiagrams() {
+        observeTranscriptEnhancements() {
           const root = this.transcriptElement();
           if (!root || !window.MutationObserver) return;
-          if (this.transcriptDiagramObserver) this.transcriptDiagramObserver.disconnect();
-          this.transcriptDiagramObserver = new MutationObserver(mutations => {
-            if (addedNodesContainPendingMermaid(mutations)) this.scheduleTranscriptDiagramRender();
+          if (this.transcriptEnhancementObserver) this.transcriptEnhancementObserver.disconnect();
+          this.transcriptEnhancementObserver = new MutationObserver(mutations => {
+            if (addedNodesNeedTranscriptEnhancement(mutations)) this.scheduleTranscriptEnhancement();
           });
-          this.transcriptDiagramObserver.observe(root, {childList: true, subtree: true});
+          this.transcriptEnhancementObserver.observe(root, {childList: true, subtree: true});
         },
-        scheduleTranscriptDiagramRender() {
-          if (this.transcriptDiagramFrame) return;
-          this.transcriptDiagramFrame = requestAnimationFrame(() => {
-            this.transcriptDiagramFrame = 0;
-            Promise.resolve(this.renderDiagrams()).then(() => {
+        scheduleTranscriptEnhancement() {
+          if (this.transcriptEnhancementFrame) return;
+          this.transcriptEnhancementFrame = requestAnimationFrame(() => {
+            this.transcriptEnhancementFrame = 0;
+            Promise.resolve(this.enhanceTranscript()).then(() => {
               this.measureRenderedTimelineItems();
               this.observeLastTranscriptItem();
             });
@@ -2341,8 +2341,8 @@
           });
           this.transcriptLastItemObserver.observe(row);
         },
-        renderDiagrams(root = null) {
-          root = root || this.transcriptElement();
+        enhanceTranscript() {
+          const root = this.transcriptElement();
           this.enhanceDisplayedMedia(root);
           return renderMermaidIn(root).then(() => this.enhanceDisplayedMedia(root));
         },
@@ -2951,15 +2951,6 @@
           writePreference('showAllExecProcesses', this.showAllExecProcesses ? 'true' : 'false');
         },
         activeQueue() { const snapshot = this.activeSnapshot(); return snapshot.QueuedInputs || snapshot.queued_inputs || snapshot.queue || []; },
-        pendingText() { const snapshot = this.activeSnapshot(); const p = snapshot.PendingAssistant || snapshot.pending_assistant || {}; return [p.Reasoning || p.reasoning, p.Text || p.text].filter(Boolean).join('\n'); },
-        snapshotStatus(snapshot) { return String(snapshot?.Status || snapshot?.status || '').trim(); },
-        snapshotIsStreaming(snapshot) {
-          const status = this.snapshotStatus(snapshot);
-          return status === 'streaming_response' || status === 'streaming_thoughts' || status === 'waiting_llm';
-        },
-        snapshotIsReceivingAssistantDeltas(snapshot) {
-          return isReceivingAssistantDeltasStatus(this.snapshotStatus(snapshot));
-        },
         timelineItemID(item) { return String(item?.id || item?.ID || '').trim(); },
         timelineItemActionLabel(item) {
           const kind = String(item?.kind || item?.Kind || item?.content?.kind || '').trim();
@@ -3106,15 +3097,8 @@
           if (generationRate) lines.push('Token generation: ' + generationRate + ' tokens/s' + (values.generated > 0 ? ' (' + values.generated + ' tokens)' : ''));
           return lines.join('\n');
         },
-        timelineItemIsLatest(item) {
-          const id = this.timelineItemID(item);
-          if (!id) return false;
-          const timeline = this.timeline();
-          const latest = timeline.length ? timeline[timeline.length - 1] : null;
-          return this.timelineItemID(latest) === id;
-        },
         itemMarkdownOptions(item) {
-          const streaming = this.snapshotIsReceivingAssistantDeltas(this.activeSnapshot()) && this.timelineItemIsLatest(item);
+          const streaming = !String(item?.sealed_at || item?.SealedAt || '').trim();
           return {deferDiagrams: streaming, incremental: streaming};
         },
         thinkingLabel(reasoning) {
@@ -3159,7 +3143,6 @@
         },
         markdownHTML(text, options = {}) { return renderMarkdown(text, options); },
         timelineMarkdownHTML(item, text, options = {}) { return renderTimelineMarkdown(item, text, options); },
-        renderMarkdownElement(el, text, options = {}) { renderMarkdownIntoElement(el, text, options); },
         renderTimelineMarkdownElement(el, item, text, options = {}) { renderTimelineMarkdownIntoElement(el, item, text, options); },
         userMessageSourceQualifier(item) { return userMessageSourceQualifierText(item); },
         userMessageIcon(item) { return userMessageIconClass(item); },
@@ -4667,7 +4650,6 @@
           return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
         },
         observabilityRows() {
-          const pending = this.pendingText();
           return [
             {label: 'Connection', value: this.connectionLabel()},
             {label: 'Last websocket', value: this.websocketAgeLabel() + ' / ' + this.formatBytes(this.lastWSMessageBytes || 0)},
@@ -4676,7 +4658,6 @@
             {label: 'Model', value: [this.activeProvider(), this.activeModel()].filter(Boolean).join(' / ') || '-'},
             {label: 'Queue', value: String(this.activeQueue().length) + ' queued / ' + String(this.approvals().length) + ' approvals'},
             {label: 'Exec tools', value: String(this.runningExecProcessCount()) + ' running / ' + String(this.execProcessCount()) + ' total'},
-            {label: 'Pending text', value: this.formatBytes(byteCount(pending))},
             {label: 'Tokens', value: this.activeTokenUsageLabel() + ' / cached ' + this.activeCachedTokenLabel()},
             {label: 'Last error', value: this.error || '-'}
           ];

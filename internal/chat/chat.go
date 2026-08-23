@@ -116,7 +116,6 @@ type Snapshot struct {
 	PendingUserInput  int
 	QueuedInputs      []domain.QueuedInput
 	ExecProcesses     []tools.ExecProcess
-	PendingAssistant  PendingAssistantTurn
 	Turn              Turn
 	Status            Status
 	StatusText        string
@@ -1081,7 +1080,6 @@ func (r *Chat) Cancel(reason CancelReason) {
 		}
 		if r.state != nil {
 			r.state.DiscardActiveAssistant()
-			r.state.ClearPendingAssistant()
 		}
 		r.abortActiveTurnLocked()
 	}
@@ -1553,7 +1551,6 @@ func (r *Chat) snapshot(includeTimeline bool) Snapshot {
 		Approvals:         r.state.Approvals(),
 		PendingUserInput:  pendingUserInputCount(r.state.SnapshotTimeline()),
 		QueuedInputs:      visibleQueuedInputs(r.queue),
-		PendingAssistant:  r.state.PendingAssistant(),
 		Turn:              turnForStatus(r.status, r.active, r.cancelState),
 		Status:            r.status,
 		StatusText:        r.statusText,
@@ -2532,7 +2529,6 @@ func (r *Chat) handleAbortAndSendQueueItemNow(id id.ID) {
 	if wasActive {
 		if r.state != nil {
 			r.state.DiscardActiveAssistant()
-			r.state.ClearPendingAssistant()
 		}
 		r.abortActiveTurnLocked()
 		r.cancelState = CancelStateCancelling
@@ -2634,7 +2630,6 @@ func (r *Chat) handleInterrupt(reason CancelReason) {
 		r.abortActiveTurnLocked()
 		if r.state != nil {
 			r.state.DiscardActiveAssistant()
-			r.state.ClearPendingAssistant()
 		}
 	} else {
 		r.statusText = "Stopping after current turn"
@@ -3098,17 +3093,16 @@ func (r *Chat) handleStreamEventForTurn(turn uint64, evt domain.Event) {
 		} else {
 			r.statusText = strings.TrimSpace(evt.Text)
 		}
-		if r.state != nil {
-			r.state.ClearPendingAssistant()
-		}
 		r.active = false
 		r.cancel = nil
 		r.cancelState = CancelStateNone
 		r.running = nil
 	case domain.EventKindMessageDone:
-		if r.state != nil && evt.Item.ID != "" {
-			r.state.SealActiveAssistant("")
-			r.state.ClearPendingAssistant()
+		if r.state != nil {
+			if item, sealed := r.state.SealActiveAssistant(""); sealed && evt.Item.ID == "" {
+				evt.Item = item
+				transcriptChanged = true
+			}
 			contextChanged = true
 		}
 		r.cancelState = CancelStateNone
@@ -3298,6 +3292,7 @@ func (r *Chat) handleStreamClosedForTurn(turn uint64) {
 	shouldDispatch := r.status != StatusWaitingApproval && r.status != StatusWaitingInput
 	turnFinished := r.status != StatusErrored && r.status != StatusWaitingApproval && r.status != StatusWaitingInput
 	completed := turnFinished && !discardPartialAssistant
+	var sealedItem domain.TimelineItem
 	if turnFinished {
 		r.active = false
 		r.status = StatusIdle
@@ -3306,9 +3301,8 @@ func (r *Chat) handleStreamClosedForTurn(turn uint64) {
 			if discardPartialAssistant {
 				r.state.DiscardActiveAssistant()
 			} else {
-				r.state.SealActiveAssistant("")
+				sealedItem, _ = r.state.SealActiveAssistant("")
 			}
-			r.state.ClearPendingAssistant()
 		}
 	}
 	var completedTurn CompletedTurn
@@ -3321,7 +3315,11 @@ func (r *Chat) handleStreamClosedForTurn(turn uint64) {
 	draining := r.draining
 	r.draining = false
 	r.mu.Unlock()
-	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, true, false))
+	if sealedItem.ID != "" {
+		r.broadcast(r.snapshotUpdateWithItem(sealedItem, nil, true, false, true, true, false))
+	} else {
+		r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, true, false))
+	}
 	if completedTurn.Assistant.ID != "" {
 		r.deps.Turns.ObserveCompletedTurn(completedTurn)
 	}

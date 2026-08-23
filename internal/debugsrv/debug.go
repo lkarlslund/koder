@@ -164,18 +164,16 @@ type ClientDebug struct {
 }
 
 type ChatDebug struct {
-	ID                        id.ID  `json:"id"`
-	SessionID                 id.ID  `json:"session_id"`
-	Title                     string `json:"title,omitempty"`
-	Status                    string `json:"status"`
-	StatusText                string `json:"status_text,omitempty"`
-	Active                    bool   `json:"active"`
-	Busy                      bool   `json:"busy"`
-	QueueLen                  int    `json:"queue_len"`
-	PendingAssistantText      int    `json:"pending_assistant_text_len"`
-	PendingAssistantReasoning int    `json:"pending_assistant_reasoning_len"`
-	PendingApprovals          int    `json:"pending_approvals"`
-	RunningToolCalls          int    `json:"running_tool_calls"`
+	ID               id.ID  `json:"id"`
+	SessionID        id.ID  `json:"session_id"`
+	Title            string `json:"title,omitempty"`
+	Status           string `json:"status"`
+	StatusText       string `json:"status_text,omitempty"`
+	Active           bool   `json:"active"`
+	Busy             bool   `json:"busy"`
+	QueueLen         int    `json:"queue_len"`
+	PendingApprovals int    `json:"pending_approvals"`
+	RunningToolCalls int    `json:"running_tool_calls"`
 }
 
 type ArchitectureDebug struct {

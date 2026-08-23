@@ -917,18 +917,16 @@ func TestRuntimeDebugSeparatesClientAndChatState(t *testing.T) {
 		InterruptArmed:   true,
 	})
 	recorder.UpdateChats([]ChatDebug{{
-		ID:                        "chat-9",
-		SessionID:                 "session-7",
-		Title:                     "Main",
-		Status:                    "streaming_response",
-		StatusText:                "Streaming LLM response ...",
-		Active:                    true,
-		Busy:                      true,
-		QueueLen:                  2,
-		PendingAssistantText:      17,
-		PendingAssistantReasoning: 9,
-		PendingApprovals:          1,
-		RunningToolCalls:          3,
+		ID:               "chat-9",
+		SessionID:        "session-7",
+		Title:            "Main",
+		Status:           "streaming_response",
+		StatusText:       "Streaming LLM response ...",
+		Active:           true,
+		Busy:             true,
+		QueueLen:         2,
+		PendingApprovals: 1,
+		RunningToolCalls: 3,
 	}})
 
 	runtime := recorder.Runtime()
@@ -943,8 +941,5 @@ func TestRuntimeDebugSeparatesClientAndChatState(t *testing.T) {
 	}
 	if len(runtime.Chats) != 1 || runtime.Chats[0].Status != "streaming_response" || runtime.Chats[0].QueueLen != 2 || runtime.Chats[0].RunningToolCalls != 3 {
 		t.Fatalf("expected per-chat state, got %#v", runtime.Chats)
-	}
-	if runtime.Chats[0].PendingAssistantText != 17 || runtime.Chats[0].PendingAssistantReasoning != 9 {
-		t.Fatalf("expected pending assistant lengths, got %#v", runtime.Chats[0])
 	}
 }

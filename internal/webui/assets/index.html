@@ -252,14 +252,6 @@
           </template>
         </section>
       </template>
-      <template x-if="pendingText()">
-        <section class="turn assistant-turn mb-4">
-          <div class="turn-header">
-            <div class="turn-header-title"><i class="bi bi-robot"></i><span class="turn-source-label">agent</span></div>
-          </div>
-          <div class="markdown-body" x-effect="renderMarkdownElement($el, pendingText(), {deferDiagrams: true, incremental: true})"></div>
-        </section>
-      </template>
       <div class="timeline-spacer" aria-hidden="true" x-show="timelineBottomSpacerHeight() > 0" :style="{height: timelineBottomSpacerHeight() + 'px'}"></div>
     </main>
 

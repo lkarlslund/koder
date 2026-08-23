@@ -542,7 +542,7 @@ func (i TimelineItem) MarshalJSON() ([]byte, error) {
 		Content   json.RawMessage `json:"content"`
 		CreatedAt time.Time       `json:"created_at"`
 		UpdatedAt time.Time       `json:"updated_at"`
-		SealedAt  time.Time       `json:"sealed_at,omitempty"`
+		SealedAt  time.Time       `json:"sealed_at,omitzero"`
 	}
 	return json.Marshal(encoded{
 		ID: i.ID, ChatID: i.ChatID, Seq: i.Seq, Kind: kind, Content: raw,
@@ -560,7 +560,7 @@ func (i *TimelineItem) UnmarshalJSON(data []byte) error {
 		Content   json.RawMessage `json:"content"`
 		CreatedAt time.Time       `json:"created_at"`
 		UpdatedAt time.Time       `json:"updated_at"`
-		SealedAt  time.Time       `json:"sealed_at,omitempty"`
+		SealedAt  time.Time       `json:"sealed_at,omitzero"`
 	}
 	var in encoded
 	if err := json.Unmarshal(data, &in); err != nil {

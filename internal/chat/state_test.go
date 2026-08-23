@@ -192,8 +192,6 @@ func TestChatStateCurrentContextSizeFromTimeline(t *testing.T) {
 		},
 		nil,
 	)
-	state.AppendPendingAssistantText("delta payload")
-
 	got := state.CurrentContextSize()
 	if got.AnchorTokens != 1200 {
 		t.Fatalf("anchor = %d", got.AnchorTokens)

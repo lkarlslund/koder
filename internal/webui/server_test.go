@@ -1971,10 +1971,7 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected settings forms to use labeled rows with compact scalar controls and full-width model selectors")
 	}
 	if !strings.Contains(fullPage, `x-effect="renderTimelineMarkdownElement($el, item, item.content?.text || '', itemMarkdownOptions(item))"`) {
-		t.Fatalf("expected assistant text to render through status-aware timeline markdown element renderer")
-	}
-	if !strings.Contains(fullPage, `x-effect="renderMarkdownElement($el, pendingText(), {deferDiagrams: true, incremental: true})"`) {
-		t.Fatalf("expected streaming assistant text to render markdown incrementally with deferred diagrams")
+		t.Fatalf("expected assistant text to render through item-aware timeline markdown element renderer")
 	}
 	if !strings.Contains(fullPage, `class="turn user-turn"`) || !strings.Contains(fullPage, `.transcript-turn { width: 100%; max-width: none; }`) {
 		t.Fatalf("expected user turns to use the full transcript width")
@@ -2022,8 +2019,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `language-mermaid`) || !strings.Contains(fullPage, `mermaid.render`) || !strings.Contains(fullPage, `sanitizeMermaidSVG`) ||
 		!strings.Contains(fullPage, `if (!diagram.isConnected) continue;`) ||
 		!strings.Contains(fullPage, `new MutationObserver(mutations =>`) ||
-		!strings.Contains(fullPage, `addedNodesContainPendingMermaid(mutations)`) ||
-		!strings.Contains(fullPage, `this.transcriptDiagramFrame = requestAnimationFrame`) ||
+		!strings.Contains(fullPage, `addedNodesNeedTranscriptEnhancement(mutations)`) ||
+		!strings.Contains(fullPage, `.markdown-body img:not([data-lightbox-enhanced])`) ||
+		!strings.Contains(fullPage, `this.transcriptEnhancementFrame = requestAnimationFrame`) ||
 		!strings.Contains(fullPage, `flowchart: {htmlLabels: true, curve: 'basis', useMaxWidth: true}`) ||
 		!strings.Contains(fullPage, `HTML_INTEGRATION_POINTS: {foreignobject: true}`) ||
 		!strings.Contains(fullPage, `ADD_TAGS: ['foreignobject']`) ||
@@ -2033,10 +2031,8 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `deferStreamingDiagrams`) || !strings.Contains(fullPage, `diagram-stream-placeholder`) || !strings.Contains(fullPage, `Mermaid diagram`) || !strings.Contains(fullPage, `SVG`) ||
 		!strings.Contains(fullPage, `stableMarkdownPrefixLength`) || !strings.Contains(fullPage, `data-markdown-tail`) || !strings.Contains(fullPage, `itemMarkdownOptions(item)`) ||
-		!strings.Contains(fullPage, `snapshotIsReceivingAssistantDeltas`) ||
-		!strings.Contains(fullPage, `function isReceivingAssistantDeltasStatus(status)`) ||
-		!strings.Contains(fullPage, `return status === 'streaming_response' || status === 'streaming_thoughts';`) {
-		t.Fatalf("expected streaming markdown renderer to defer Mermaid and SVG rendering")
+		!strings.Contains(fullPage, `const streaming = !String(item?.sealed_at || item?.SealedAt || '').trim();`) {
+		t.Fatalf("expected unsealed timeline items to defer Mermaid and SVG rendering")
 	}
 	if !strings.Contains(fullPage, `.markdown-body svg { max-width: 100%; height: auto; }`) || !strings.Contains(fullPage, `foreignObject`) {
 		t.Fatalf("expected inline SVG output to be constrained and sanitized")
@@ -2344,9 +2340,9 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected queue deltas to clear all browser queue aliases")
 	}
 	if !strings.Contains(fullPage, `afterTranscriptDOMUpdate`) || !strings.Contains(fullPage, `requestAnimationFrame`) ||
-		!strings.Contains(fullPage, `scheduleTranscriptDiagramRender`) ||
+		!strings.Contains(fullPage, `scheduleTranscriptEnhancement`) ||
 		!strings.Contains(fullPage, `return renderMermaidIn(root).then`) {
-		t.Fatalf("expected transcript updates to batch diagram rendering independently from scroll restoration")
+		t.Fatalf("expected transcript updates to batch media enhancement independently from scroll restoration")
 	}
 	if !strings.Contains(fullPage, `applyState(s, {scrollToBottom: true})`) {
 		t.Fatalf("expected explicit chat switches to scroll to the bottom")

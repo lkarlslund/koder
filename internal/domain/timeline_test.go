@@ -53,6 +53,16 @@ func TestTimelineItemMarshalRoundTripsLintMessage(t *testing.T) {
 	}
 }
 
+func TestTimelineItemMarshalOmitsZeroSealedAt(t *testing.T) {
+	data, err := json.Marshal(TimelineItem{ID: "item-1", Content: AssistantMessage{Text: "streaming"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"sealed_at"`) {
+		t.Fatalf("unsealed item exposed a completion timestamp: %s", data)
+	}
+}
+
 func TestReasoningReplayTextUsesOnlyShorterCaveman(t *testing.T) {
 	original := "inspect repository carefully before changing anything"
 	short := ReasoningContent{Text: original, Caveman: "me inspect first"}

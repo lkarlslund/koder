@@ -34,7 +34,7 @@ func TestMermaidObserverRendersReplacementAfterDetachedRender(t *testing.T) {
 	if err := chromedp.Run(browserCtx,
 		chromedp.Navigate(server.URL()),
 		chromedp.WaitReady(`.transcript`, chromedp.ByQuery),
-		chromedp.Poll(`document.documentElement._x_dataStack?.[0]?.transcriptDiagramObserver instanceof MutationObserver`, nil),
+		chromedp.Poll(`document.documentElement._x_dataStack?.[0]?.transcriptEnhancementObserver instanceof MutationObserver`, nil),
 		chromedp.Evaluate(`(() => {
 			window.__mermaidRenderCalls = [];
 			window.mermaid.render = (id, source) => {
@@ -58,9 +58,11 @@ func TestMermaidObserverRendersReplacementAfterDetachedRender(t *testing.T) {
 			const diagram = document.querySelector('#mermaid-observer-test .mermaid-diagram');
 			return window.__mermaidRenderCalls?.length === 2 &&
 				diagram?.dataset.mermaidState === 'done' &&
-				diagram.textContent.includes('graph TD; C-->D');
+					diagram.textContent.includes('graph TD; C-->D');
 		})()`, nil),
+		chromedp.Evaluate(`document.querySelector('#mermaid-observer-test').insertAdjacentHTML('beforeend', '<div class="markdown-body"><img alt="preview" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></div>')`, nil),
+		chromedp.Poll(`document.querySelector('#mermaid-observer-test img')?.closest('.markdown-media-preview')?.querySelector('.media-expand-button') !== null`, nil),
 	); err != nil {
-		t.Fatalf("render replacement Mermaid diagram: %v", err)
+		t.Fatalf("enhance replacement Markdown media: %v", err)
 	}
 }

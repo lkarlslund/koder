@@ -2144,18 +2144,16 @@ func chatDebugFromState(state app.State) []debugsrv.ChatDebug {
 			queue = item.QueuedInputs
 		}
 		out = append(out, debugsrv.ChatDebug{
-			ID:                        item.ID,
-			SessionID:                 item.SessionID,
-			Title:                     item.Title,
-			Status:                    value,
-			StatusText:                text,
-			Active:                    snapshot.Active,
-			Busy:                      status.Busy || snapshot.Active,
-			QueueLen:                  len(queue),
-			PendingAssistantText:      len(snapshot.PendingAssistant.Text),
-			PendingAssistantReasoning: len(snapshot.PendingAssistant.Reasoning),
-			PendingApprovals:          len(snapshot.Approvals),
-			RunningToolCalls:          runningToolCalls(snapshot.Timeline),
+			ID:               item.ID,
+			SessionID:        item.SessionID,
+			Title:            item.Title,
+			Status:           value,
+			StatusText:       text,
+			Active:           snapshot.Active,
+			Busy:             status.Busy || snapshot.Active,
+			QueueLen:         len(queue),
+			PendingApprovals: len(snapshot.Approvals),
+			RunningToolCalls: runningToolCalls(snapshot.Timeline),
 		})
 	}
 	return out
