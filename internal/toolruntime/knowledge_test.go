@@ -33,3 +33,11 @@ func TestRuntimeIncludesConfiguredKnowledgeService(t *testing.T) {
 		t.Fatal("nil Knowledge service must remove the runtime capability")
 	}
 }
+
+func TestRuntimePropagatesSessionKind(t *testing.T) {
+	runtime := New(Config{})
+	got := runtime.Runtime(domain.Session{Kind: domain.SessionKindQuick}, domain.Chat{})
+	if got.SessionKind != domain.SessionKindQuick {
+		t.Fatalf("session kind = %v, want quick", got.SessionKind)
+	}
+}

@@ -149,6 +149,59 @@ func TestDefinitionsHideDisabledTools(t *testing.T) {
 	}
 }
 
+func TestQuickChatDefinitionsHideMilestoneAndTaskTools(t *testing.T) {
+	runtime := tools.Runtime{
+		SessionID:   "session-1",
+		SessionKind: domain.SessionKindQuick,
+		ChatID:      "chat-1",
+		ChatRole:    chatrole.Orchestrator,
+	}
+	definitions := tools.Definitions(runtime)
+	for _, definition := range definitions {
+		switch definition.Function.Name {
+		case tools.Task.String(), tools.Milestones.String(), tools.Tasks.String():
+			t.Fatalf("quick chat definitions exposed %q", definition.Function.Name)
+		}
+	}
+
+	regular := runtime
+	regular.SessionKind = domain.SessionKindRegular
+	for _, kind := range []tools.ID{tools.Milestones, tools.Tasks} {
+		if _, enabled := tools.DefinitionFor(kind, regular); !enabled {
+			t.Fatalf("regular chat definition unexpectedly hid %q", kind)
+		}
+		if _, enabled := tools.DefinitionFor(kind, runtime); enabled {
+			t.Fatalf("quick chat definition exposed %q", kind)
+		}
+	}
+}
+
+func TestQuickChatCallsRejectMilestoneAndTaskTools(t *testing.T) {
+	tests := []tools.Request{
+		{Tool: tools.Task, Args: map[string]string{"body": "background work"}},
+		{Tool: tools.Milestones, Args: map[string]string{"action": "list"}},
+		{Tool: tools.MilestoneList, Args: map[string]string{}},
+		{Tool: tools.Tasks, Args: map[string]string{"action": "list"}},
+		{Tool: tools.TaskList, Args: map[string]string{"milestone_key": "M001"}},
+	}
+	for _, request := range tests {
+		t.Run(request.Tool.String(), func(t *testing.T) {
+			_, err := tools.Call(context.Background(), tools.Options{
+				Runtime: tools.Runtime{
+					SessionID:   "session-1",
+					SessionKind: domain.SessionKindQuick,
+					ChatID:      "chat-1",
+					ChatRole:    chatrole.Orchestrator,
+				},
+				Request: request,
+			})
+			if err == nil || !tools.IsDenied(err) || !strings.Contains(err.Error(), "not available in quick chats") {
+				t.Fatalf("expected quick-chat denial, got %T %[1]v", err)
+			}
+		})
+	}
+}
+
 func TestCallRejectsDisabledTool(t *testing.T) {
 	_, err := tools.Call(context.Background(), tools.Options{
 		Runtime: tools.Runtime{

@@ -155,6 +155,7 @@ type Runtime struct {
 	Workdir               string
 	HTTPClient            *http.Client
 	SessionID             id.ID
+	SessionKind           domain.SessionKind
 	ChatID                id.ID
 	ChatRole              chatrole.Role
 	InteractionMode       chatinteraction.Mode
@@ -303,6 +304,9 @@ func Call(ctx context.Context, options Options) (Result, error) {
 		return Result{}, err
 	}
 	runtime = normalizeRuntime(runtime)
+	if err := checkSessionToolAllowed(runtime, req.Tool); err != nil {
+		return Result{}, err
+	}
 	if err := chatrole.CheckToolAllowed(runtime.ChatRole, req.Tool); err != nil {
 		return Result{}, DeniedError{Tool: req.Tool, Reason: err.Error()}
 	}
@@ -326,6 +330,26 @@ func checkToolEnabled(runtime Runtime, kind ID) error {
 		return DeniedError{Tool: kind, Reason: "disabled for this session"}
 	}
 	return nil
+}
+
+func checkSessionToolAllowed(runtime Runtime, kind ID) error {
+	if runtime.SessionKind != domain.SessionKindQuick || !isMilestoneOrTaskTool(kind) {
+		return nil
+	}
+	return DeniedError{Tool: kind, Reason: "milestone and task tools are not available in quick chats"}
+}
+
+func isMilestoneOrTaskTool(kind ID) bool {
+	switch kind {
+	case Task,
+		Milestones, MilestoneList, MilestoneAdd, MilestoneUpdate, MilestoneDepend,
+		MilestoneArchive, MilestoneDelete, MilestonePlan, MilestoneWrite,
+		Tasks, TaskList, TaskAddItems, TaskUpdateItem, TaskFetchNext,
+		TaskArchive, TaskDelete, TasksAdd, TasksUpdate:
+		return true
+	default:
+		return false
+	}
 }
 
 func checkRuntimeAccess(runtime Runtime, req Request) error {
@@ -464,6 +488,9 @@ func DefinitionFor(kind ID, runtime Runtime) (provider.ToolDefinition, bool) {
 		return provider.ToolDefinition{}, false
 	}
 	if spec.Legacy {
+		return provider.ToolDefinition{}, false
+	}
+	if checkSessionToolAllowed(runtime, kind) != nil {
 		return provider.ToolDefinition{}, false
 	}
 	if !chatrole.AllowsTool(runtime.ChatRole, kind) {
@@ -816,7 +843,7 @@ func canonicalPhoneRequest(req Request) (Request, bool) {
 
 func legacyOperationAvailable(kind ID, runtime Runtime) bool {
 	tool, spec, ok := lookupWithSpec(kind)
-	if !ok || !chatrole.AllowsTool(runtime.ChatRole, kind) || !chatinteraction.AllowsTool(runtime.InteractionMode, kind) {
+	if !ok || checkSessionToolAllowed(runtime, kind) != nil || !chatrole.AllowsTool(runtime.ChatRole, kind) || !chatinteraction.AllowsTool(runtime.InteractionMode, kind) {
 		return false
 	}
 	if enabled, ok := runtime.AllowedTools[kind]; ok && !enabled {

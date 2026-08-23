@@ -188,6 +188,7 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 	runtime := tools.Runtime{
 		Workdir:               projectRoot,
 		SessionID:             session.ID,
+		SessionKind:           session.Kind,
 		ChatID:                chat.ID,
 		ChatRole:              chat.EffectiveWorkflowRole(),
 		InteractionMode:       chat.EffectiveInteractionMode(),
