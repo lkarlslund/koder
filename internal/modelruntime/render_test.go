@@ -180,6 +180,8 @@ func TestConversationMessagesForToolErrorGivesRecoveryGuidance(t *testing.T) {
 	for _, want := range []string{
 		"Tool call did not succeed.",
 		"Do not retry the same tool call with the same arguments.",
+		"different user-allowed tool",
+		"explicit user restriction on tools or sources",
 		"Failed tool: exec_write_stdin",
 		`"process_id":""`,
 		"Tool error:",

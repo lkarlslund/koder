@@ -362,7 +362,7 @@ func modelToolResultBody(tool domain.ToolCall, status domain.ToolResultStatus, b
 	var guidance strings.Builder
 	guidance.WriteString("Tool call did not succeed.\n")
 	guidance.WriteString("Do not retry the same tool call with the same arguments.\n")
-	guidance.WriteString("Read the error, identify what is wrong, and either fix the arguments, use a different tool, ask the user for missing information, or provide a final answer using the information already available.\n")
+	guidance.WriteString("Read the error, identify what is wrong, and either fix the arguments, use a different user-allowed tool, ask the user for missing information, or provide a final answer using the information already available. Continue to honor any explicit user restriction on tools or sources.\n")
 	if tool.Tool != "" {
 		guidance.WriteString("Failed tool: ")
 		guidance.WriteString(tool.Tool.String())

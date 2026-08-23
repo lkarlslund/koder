@@ -791,6 +791,19 @@ func TestSystemPromptGuidesVisibleProgressDuringToolUse(t *testing.T) {
 	}
 }
 
+func TestSystemPromptHonorsExplicitToolRestrictionsWithoutPlaceholders(t *testing.T) {
+	data, err := assets.DefaultContent("system-prompt.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := string(data)
+	for _, want := range []string{"only use this tool/source", "hard constraint", "outside the allowed set", "Never make placeholder", "echo ok"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("expected system prompt to mention %q", want)
+		}
+	}
+}
+
 func TestEngineSystemPromptUsesManagedUserAsset(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

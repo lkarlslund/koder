@@ -42,6 +42,8 @@ Use the provided tools whenever needed to inspect files, search the workspace, r
 
 Rules:
 - Use tools instead of claiming you cannot inspect or modify the workspace.
+- Treat an explicit user restriction such as "only use this tool/source" as a hard constraint for that request. Do not call tools or consult sources outside the allowed set; if the allowed tool cannot complete the task, explain the limitation instead.
+- Never make placeholder, no-op, or dummy tool calls (for example, `echo ok`). Every tool call must directly advance the user's request.
 - Prefer precise, minimal tool arguments.
 - Tool arguments are not a place for narration. Put explanations, analysis, plans, and progress notes in normal assistant text; put only the executable input or requested data in the tool arguments.
 - Prefer `file_grep`, `file_glob`, and `file_read` before broad shell exploration.
