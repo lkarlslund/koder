@@ -148,7 +148,10 @@ type Chat struct {
 	deps    Deps
 	onClose func(id.ID)
 
-	mu                sync.RWMutex
+	mu sync.RWMutex
+	// toolUpdateMu keeps full-item persistence in the same order as in-memory
+	// mutations when several tool calls in one assistant item finish together.
+	toolUpdateMu      sync.Mutex
 	session           domain.Session
 	chat              domain.Chat
 	state             *ChatState
@@ -2108,6 +2111,8 @@ func (r *Chat) failToolCallsMatching(ctx context.Context, message string, match 
 	if err := r.EnsureTimeline(ctx); err != nil {
 		return 0, err
 	}
+	r.toolUpdateMu.Lock()
+	defer r.toolUpdateMu.Unlock()
 	message = strings.TrimSpace(message)
 	if message == "" {
 		message = "Tool execution failed because koder restarted before the tool completed."
@@ -2187,6 +2192,8 @@ func (r *Chat) updateToolCall(ctx context.Context, toolCallID string, update fun
 	if err := r.EnsureTimeline(ctx); err != nil {
 		return domain.TimelineItem{}, err
 	}
+	r.toolUpdateMu.Lock()
+	defer r.toolUpdateMu.Unlock()
 	now := time.Now().UTC()
 	var item domain.TimelineItem
 	r.mu.Lock()

@@ -778,6 +778,73 @@ func TestChatMarksImageRequirementForViewImageResult(t *testing.T) {
 	}
 }
 
+func TestConcurrentToolResultsPersistCompleteAssistantItem(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	rt := newTestChat(t, st, session, chatRecord, &runtimeFakeRunner{})
+
+	const callCount = 64
+	calls := make([]domain.ToolCall, 0, callCount)
+	for index := range callCount {
+		calls = append(calls, domain.ToolCall{
+			ToolCallID: domain.ToolCallID(fmt.Sprintf("parallel-%02d", index)),
+			Tool:       domain.ToolKindMCP,
+			Status:     domain.ToolStatusPending,
+		})
+	}
+	item, err := rt.AppendAssistantToolCalls(ctx, domain.TimelineItem{}, calls, "", domain.ReasoningContent{}, domain.Usage{}, domain.ModelPerformance{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, callCount)
+	var workers sync.WaitGroup
+	for index := range callCount {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			callID := fmt.Sprintf("parallel-%02d", index)
+			_, resultErr := rt.AttachToolResult(ctx, callID, domain.ToolResult{
+				Status: domain.ToolResultStatusOK,
+				Text:   "result " + callID,
+			})
+			errs <- resultErr
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(errs)
+	for resultErr := range errs {
+		if resultErr != nil {
+			t.Fatal(resultErr)
+		}
+	}
+
+	persisted, err := timelineForChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored domain.AssistantMessage
+	for _, candidate := range persisted {
+		if candidate.ID == item.ID {
+			stored, _ = candidate.Content.(domain.AssistantMessage)
+			break
+		}
+	}
+	if len(stored.Tools) != callCount {
+		t.Fatalf("persisted tool count = %d, want %d", len(stored.Tools), callCount)
+	}
+	for _, call := range stored.Tools {
+		if call.Status != domain.ToolStatusDone || call.Result == nil || call.Result.Status != domain.ToolResultStatusOK {
+			t.Errorf("persisted tool %q = status %q, result %#v", call.ToolCallID, call.Status, call.Result)
+		}
+	}
+}
+
 func TestLoadRepairsImageRequirementForExistingChat(t *testing.T) {
 	ctx := context.Background()
 	st := openTestStore(t)
