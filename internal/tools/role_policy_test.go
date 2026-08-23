@@ -159,7 +159,7 @@ func TestQuickChatDefinitionsHideMilestoneAndTaskTools(t *testing.T) {
 	definitions := tools.Definitions(runtime)
 	for _, definition := range definitions {
 		switch definition.Function.Name {
-		case tools.Task.String(), tools.UpdatePlan.String(), tools.Milestones.String(), tools.Tasks.String():
+		case tools.Task.String(), tools.Milestones.String(), tools.Tasks.String():
 			t.Fatalf("quick chat definitions exposed %q", definition.Function.Name)
 		}
 	}
@@ -179,7 +179,6 @@ func TestQuickChatDefinitionsHideMilestoneAndTaskTools(t *testing.T) {
 func TestQuickChatCallsRejectMilestoneAndTaskTools(t *testing.T) {
 	tests := []tools.Request{
 		{Tool: tools.Task, Args: map[string]string{"body": "background work"}},
-		{Tool: tools.UpdatePlan, Args: map[string]string{"plan": `[{"step":"background work","status":"pending"}]`}},
 		{Tool: tools.Milestones, Args: map[string]string{"action": "list"}},
 		{Tool: tools.MilestoneList, Args: map[string]string{}},
 		{Tool: tools.Tasks, Args: map[string]string{"action": "list"}},

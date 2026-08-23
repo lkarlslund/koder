@@ -64,7 +64,6 @@ const (
 	ToolKindTask                ToolKind = "task"
 	ToolKindRequestUserInput    ToolKind = "request_user_input"
 	ToolKindQuestion            ToolKind = "question" // Legacy stored tool kind.
-	ToolKindUpdatePlan          ToolKind = "update_plan"
 	ToolKindMilestones          ToolKind = "milestones"
 	ToolKindMilestoneList       ToolKind = "milestone_list"
 	ToolKindMilestoneAdd        ToolKind = "milestone_add"
@@ -191,7 +190,6 @@ var builtinToolKinds = []ToolKind{
 	ToolKindFileWrite,
 	ToolKindTask,
 	ToolKindRequestUserInput,
-	ToolKindUpdatePlan,
 	ToolKindMilestones,
 	ToolKindMilestoneList,
 	ToolKindMilestoneAdd,

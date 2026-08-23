@@ -195,7 +195,9 @@ type PlanStoredStep struct {
 	Status string `json:"status"`
 }
 
-type UpdatePlanStoredResult struct {
+// PlanUpdateStoredResult preserves rendering for historical plan-update parts.
+// Koder no longer exposes a tool that creates these records.
+type PlanUpdateStoredResult struct {
 	Explanation string           `json:"explanation,omitempty"`
 	Steps       []PlanStoredStep `json:"steps"`
 }
@@ -376,7 +378,7 @@ func (GlobStoredResult) storedResultPayload()              {}
 func (GrepStoredResult) storedResultPayload()              {}
 func (QuestionStoredResult) storedResultPayload()          {}
 func (TaskStoredResult) storedResultPayload()              {}
-func (UpdatePlanStoredResult) storedResultPayload()        {}
+func (PlanUpdateStoredResult) storedResultPayload()        {}
 func (MilestonePlanStoredResult) storedResultPayload()     {}
 func (ChatListStoredResult) storedResultPayload()          {}
 func (TaskListStoredResult) storedResultPayload()          {}
@@ -862,14 +864,13 @@ func storedResultFromPart(part domain.Part) (storedResultEnvelope, bool) {
 		for _, step := range payload.Steps {
 			steps = append(steps, PlanStoredStep{Step: step.Step, Status: step.Status})
 		}
-		raw, err := json.Marshal(UpdatePlanStoredResult{Explanation: payload.Explanation, Steps: steps})
+		raw, err := json.Marshal(PlanUpdateStoredResult{Explanation: payload.Explanation, Steps: steps})
 		if err != nil {
 			return storedResultEnvelope{}, false
 		}
 		return storedResultEnvelope{
 			Version:  2,
 			PartKind: domain.PartKindPlanUpdate,
-			Tool:     UpdatePlan,
 			Status:   StoredResultStatusOK,
 			Payload:  raw,
 		}, true
@@ -904,7 +905,7 @@ func formatStoredResultForPart(env storedResultEnvelope) (string, bool) {
 	case domain.PartKindTaskUpdate:
 		return decodeAndFormat[TaskStoredResult](env.Payload, formatTaskStoredResult)
 	case domain.PartKindPlanUpdate:
-		return decodeAndFormat[UpdatePlanStoredResult](env.Payload, formatUpdatePlanStoredResult)
+		return decodeAndFormat[PlanUpdateStoredResult](env.Payload, formatPlanUpdateStoredResult)
 	default:
 		return "", false
 	}
@@ -1232,7 +1233,7 @@ func formatTaskStoredResult(result TaskStoredResult) string {
 	return strings.TrimSpace(result.Body)
 }
 
-func formatUpdatePlanStoredResult(result UpdatePlanStoredResult) string {
+func formatPlanUpdateStoredResult(result PlanUpdateStoredResult) string {
 	lines := make([]string, 0, len(result.Steps)+1)
 	if explanation := strings.TrimSpace(result.Explanation); explanation != "" {
 		lines = append(lines, explanation)

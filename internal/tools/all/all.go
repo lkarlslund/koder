@@ -24,7 +24,6 @@ import (
 	_ "github.com/lkarlslund/koder/internal/tools/skilltool"
 	_ "github.com/lkarlslund/koder/internal/tools/taskstool"
 	_ "github.com/lkarlslund/koder/internal/tools/tasktool"
-	_ "github.com/lkarlslund/koder/internal/tools/updateplantool"
 	_ "github.com/lkarlslund/koder/internal/tools/viewimagetool"
 	_ "github.com/lkarlslund/koder/internal/tools/webfetchtool"
 	_ "github.com/lkarlslund/koder/internal/tools/websearchtool"

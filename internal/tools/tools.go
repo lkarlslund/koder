@@ -341,7 +341,7 @@ func checkSessionToolAllowed(runtime Runtime, kind ID) error {
 
 func isMilestoneOrTaskTool(kind ID) bool {
 	switch kind {
-	case Task, UpdatePlan,
+	case Task,
 		Milestones, MilestoneList, MilestoneAdd, MilestoneUpdate, MilestoneDepend,
 		MilestoneArchive, MilestoneDelete, MilestonePlan, MilestoneWrite,
 		Tasks, TaskList, TaskAddItems, TaskUpdateItem, TaskFetchNext,

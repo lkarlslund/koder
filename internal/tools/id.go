@@ -28,7 +28,6 @@ const (
 	Task                ID = domain.ToolKindTask
 	Question            ID = domain.ToolKindQuestion
 	RequestUserInput    ID = domain.ToolKindRequestUserInput
-	UpdatePlan          ID = domain.ToolKindUpdatePlan
 	Milestones          ID = domain.ToolKindMilestones
 	MilestoneList       ID = domain.ToolKindMilestoneList
 	MilestoneAdd        ID = domain.ToolKindMilestoneAdd
