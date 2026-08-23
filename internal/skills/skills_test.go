@@ -152,6 +152,25 @@ func TestCatalogEscapesValuesAndHonorsBudget(t *testing.T) {
 	}
 }
 
+func TestDiscoverWithEmptyWorkdirUsesCurrentProject(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := t.TempDir()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+	writeSkill(t, filepath.Join(repo, ".agents", "skills", "local", fileName), "local", "Current project skill")
+	items := Discover("")
+	if len(items) != 1 || items[0].Name != "local" {
+		t.Fatalf("empty workdir did not use current project: %#v", items)
+	}
+}
+
 func TestToolDescriptionIncludesAvailableSkills(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

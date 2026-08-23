@@ -310,6 +310,15 @@ func projectRoots(workdir string, projectRoot string) []Root {
 	var roots []Root
 	current := cleanPath(workdir)
 	projectRoot = cleanPath(projectRoot)
+	if current == "" {
+		current = projectRoot
+	}
+	if projectRoot == "" {
+		projectRoot = current
+	}
+	if current == "" {
+		return roots
+	}
 	for {
 		roots = append(roots, Root{Path: filepath.Join(current, ".agents", "skills"), Scope: ScopeProject})
 		if current == projectRoot {
