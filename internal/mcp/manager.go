@@ -375,45 +375,16 @@ func (m *Manager) ToolDefinitionsWithReserved(reserved []provider.ToolDefinition
 	for _, desc := range descriptors {
 		schema := normalizeSchema(desc.InputSchema)
 		name := nameMap[toolKey(desc.ServerID, desc.Name)]
-		description := strings.TrimSpace(desc.Description)
-		if description == "" {
-			description = strings.TrimSpace(desc.Title)
-		}
-		if description == "" {
-			description = fmt.Sprintf("MCP tool %s/%s", desc.ServerID, desc.Name)
-		}
-		description = modelDescription(description, desc)
 		out = append(out, provider.ToolDefinition{
 			Type: "function",
 			Function: provider.FunctionDefinition{
 				Name:        name,
-				Description: description,
+				Description: desc.Description,
 				Parameters:  schema,
 			},
 		})
 	}
 	return out
-}
-
-func modelDescription(description string, desc ToolDescriptor) string {
-	parts := make([]string, 0, 3)
-	if description = strings.TrimSpace(description); description != "" {
-		parts = append(parts, description)
-	}
-	if desc.ReadOnlyHint {
-		parts = append(parts, "Safety: this MCP tool declares that it does not modify external state.")
-	} else if desc.DestructiveHint == nil || *desc.DestructiveHint {
-		parts = append(parts, "Warning: this MCP tool may modify or delete external data. Use it only when the user explicitly requests that external change.")
-	} else {
-		parts = append(parts, "Warning: this MCP tool modifies external state, although it declares those changes non-destructive.")
-	}
-	if desc.IdempotentHint {
-		parts = append(parts, "Repeated calls with identical arguments are declared idempotent.")
-	}
-	if desc.OpenWorldHint != nil && *desc.OpenWorldHint {
-		parts = append(parts, "This MCP tool declares that it interacts with external entities.")
-	}
-	return strings.Join(parts, "\n\n")
 }
 
 func (m *Manager) ResolveToolName(name string, reserved []provider.ToolDefinition) (serverID, toolName string, ok bool) {
@@ -986,7 +957,7 @@ func collectTools(ctx context.Context, serverID string, cfg config.MCPServer, se
 			ServerName:      strings.TrimSpace(cfg.Name),
 			Name:            strings.TrimSpace(tool.Name),
 			Title:           title,
-			Description:     strings.TrimSpace(tool.Description),
+			Description:     tool.Description,
 			InputSchema:     tool.InputSchema,
 			ReadOnlyHint:    tool.Annotations != nil && tool.Annotations.ReadOnlyHint,
 			DestructiveHint: cloneBoolPointer(toolAnnotationDestructive(tool)),

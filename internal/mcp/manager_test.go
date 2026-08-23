@@ -55,7 +55,7 @@ func TestManagerConnectsDiscoversAndExecutes(t *testing.T) {
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "remote-docs", Version: "v1.0.0"}, nil)
 	server.AddTool(&sdkmcp.Tool{
 		Name:        "greet",
-		Description: "Say hi",
+		Description: "  Say hi\n",
 		InputSchema: map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string"}}, "additionalProperties": false},
 	}, func(_ context.Context, req *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
 		return &sdkmcp.CallToolResult{
@@ -153,6 +153,9 @@ func TestManagerConnectsDiscoversAndExecutes(t *testing.T) {
 	}
 	if defs[0].Function.Name != "greet" {
 		t.Fatalf("unexpected tool definition name: %s", defs[0].Function.Name)
+	}
+	if got, want := defs[0].Function.Description, "  Say hi\n"; got != want {
+		t.Fatalf("tool description = %q, want exact server description %q", got, want)
 	}
 
 	result, err := manager.ExecuteTool(ctx, "docs", "greet", map[string]any{"name": "Pat"})
@@ -410,14 +413,14 @@ func TestToolDefinitionsFallbackOnCollision(t *testing.T) {
 	}
 }
 
-func TestToolDefinitionsPassDescriptionsAndSafetyAnnotationsToModel(t *testing.T) {
+func TestToolDefinitionsPassServerDescriptionsUnchanged(t *testing.T) {
 	destructive := true
 	openWorld := true
 	manager := &Manager{
 		state: map[string]*serverState{
 			"exchange": {tools: []ToolDescriptor{
-				{ServerID: "exchange", Name: "exchange_mail", Description: "Mail actions and their action-specific warnings.", DestructiveHint: &destructive, OpenWorldHint: &openWorld},
-				{ServerID: "exchange", Name: "exchange_lookup", Description: "Read Exchange metadata.", ReadOnlyHint: true, IdempotentHint: true},
+				{ServerID: "exchange", Name: "exchange_mail", Description: "  Mail actions and their action-specific warnings.\n", DestructiveHint: &destructive, OpenWorldHint: &openWorld},
+				{ServerID: "exchange", Name: "exchange_lookup", Title: "Lookup", ReadOnlyHint: true, IdempotentHint: true},
 			}},
 		},
 	}
@@ -429,11 +432,11 @@ func TestToolDefinitionsPassDescriptionsAndSafetyAnnotationsToModel(t *testing.T
 	for _, definition := range definitions {
 		descriptions[definition.Function.Name] = definition.Function.Description
 	}
-	if got := descriptions["exchange_mail"]; !strings.Contains(got, "action-specific warnings") || !strings.Contains(got, "may modify or delete external data") || !strings.Contains(got, "explicitly requests") || !strings.Contains(got, "external entities") {
-		t.Fatalf("destructive model description = %q", got)
+	if got, want := descriptions["exchange_mail"], "  Mail actions and their action-specific warnings.\n"; got != want {
+		t.Fatalf("mail description = %q, want exact server description %q", got, want)
 	}
-	if got := descriptions["exchange_lookup"]; !strings.Contains(got, "Read Exchange metadata") || !strings.Contains(got, "does not modify external state") || !strings.Contains(got, "idempotent") {
-		t.Fatalf("read-only model description = %q", got)
+	if got := descriptions["exchange_lookup"]; got != "" {
+		t.Fatalf("lookup description = %q, want empty server description", got)
 	}
 }
 
