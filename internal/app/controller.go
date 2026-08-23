@@ -407,6 +407,21 @@ type MCPServerPreference struct {
 	BearerTokenEnv       string            `json:"bearer_token_env"`
 }
 
+// MCPServerDraft is the editable MCP server shape used by test and save RPCs.
+type MCPServerDraft struct {
+	OriginalID           string            `json:"original_id"`
+	ID                   string            `json:"id"`
+	Name                 string            `json:"name"`
+	URL                  string            `json:"url"`
+	Headers              map[string]string `json:"headers"`
+	Disabled             bool              `json:"disabled"`
+	StartupTimeout       string            `json:"startup_timeout"`
+	RequestTimeout       string            `json:"request_timeout"`
+	DisableStandaloneSSE bool              `json:"disable_standalone_sse"`
+	BearerToken          string            `json:"bearer_token"`
+	BearerTokenEnv       string            `json:"bearer_token_env"`
+}
+
 // MCPRuntimeState is read-only process state from the MCP manager.
 type MCPRuntimeState struct {
 	ID                    string `json:"id"`

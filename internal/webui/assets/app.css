@@ -426,6 +426,17 @@
 	.settings-provider-health { display: inline-flex; align-items: center; gap: .3rem; min-width: 0; max-width: 100%; width: fit-content; margin-top: .12rem; color: var(--bs-secondary-color); font-size: .82rem; }
 	.settings-provider-health > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.settings-provider-health.text-success, .settings-provider-health.text-danger, .settings-provider-health.text-primary { font-weight: 600; }
+	.settings-model-tree { display: grid; gap: .85rem; }
+	.settings-model-provider { overflow: hidden; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: color-mix(in srgb, var(--bs-body-bg) 94%, var(--bs-primary) 6%); }
+	.settings-model-provider-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .7rem .85rem; border-bottom: 1px solid var(--bs-border-color); background: color-mix(in srgb, var(--bs-tertiary-bg) 88%, var(--bs-primary) 12%); }
+	.settings-model-provider-title { display: flex; align-items: center; gap: .55rem; min-width: 0; font-weight: 700; }
+	.settings-model-provider-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.settings-model-branch + .settings-model-branch { border-top: 1px solid var(--bs-border-color); }
+	.settings-model-base { background: var(--bs-body-bg); }
+	.settings-model-variants { margin-left: 1.75rem; border-left: 2px solid color-mix(in srgb, var(--bs-primary) 38%, var(--bs-border-color)); }
+	.settings-model-variant { position: relative; background: color-mix(in srgb, var(--bs-body-bg) 96%, var(--bs-primary) 4%); }
+	.settings-model-variant::before { content: ''; position: absolute; left: -.05rem; top: 1.35rem; width: .8rem; border-top: 2px solid color-mix(in srgb, var(--bs-primary) 38%, var(--bs-border-color)); }
+	.settings-model-missing { display: flex; align-items: center; gap: .65rem; padding: .75rem .9rem; color: var(--bs-danger); background: color-mix(in srgb, var(--bs-danger-bg-subtle) 55%, var(--bs-body-bg)); }
 	.settings-model-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: .75rem; }
 	.settings-model-detail-grid > div { min-width: 0; display: grid; gap: .18rem; padding: .65rem; border: 1px solid var(--bs-border-color); border-radius: .4rem; background: var(--bs-tertiary-bg); }
     .settings-empty { color: var(--bs-secondary-color); border: 1px dashed var(--bs-border-color); border-radius: .35rem; padding: .75rem; }

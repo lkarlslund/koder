@@ -202,6 +202,24 @@ func (e *Engine) ProviderHealthTracker() *provider.HealthTracker {
 }
 
 func (e *Engine) UpdateConfig(cfg config.Config) {
+	if err := e.updateConfig(cfg, true); err != nil {
+		slog.Warn("reload MCP configuration", "error", err)
+	}
+}
+
+// UpdateConfigAndReloadMCP applies configuration and waits for MCP discovery.
+// Settings saves use this path so their response reflects terminal runtime state.
+func (e *Engine) UpdateConfigAndReloadMCP(ctx context.Context, cfg config.Config) error {
+	if err := e.updateConfig(cfg, false); err != nil {
+		return err
+	}
+	if e.mcp == nil {
+		return nil
+	}
+	return e.mcp.ConnectAll(ctx)
+}
+
+func (e *Engine) updateConfig(cfg config.Config, connectMCPAsync bool) error {
 	e.cfg = cfg
 	e.modelOverlays = modeloverlay.Load(cfg.ManagedAssetsDir())
 	if e.settings != nil {
@@ -235,11 +253,18 @@ func (e *Engine) UpdateConfig(cfg config.Config) {
 		}
 	}
 	if e.mcp != nil {
-		_ = e.mcp.LoadConfig(cfg.MCPServers)
-		go func() {
-			_ = e.mcp.ConnectAll(context.Background())
-		}()
+		if err := e.mcp.LoadConfig(cfg.MCPServers); err != nil {
+			return err
+		}
+		if connectMCPAsync {
+			go func() {
+				if err := e.mcp.ConnectAll(context.Background()); err != nil {
+					slog.Warn("connect MCP servers after configuration change", "error", err)
+				}
+			}()
+		}
 	}
+	return nil
 }
 
 // CancelActiveProviderRequests cancels in-flight provider HTTP requests for one chat.

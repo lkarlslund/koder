@@ -1719,6 +1719,120 @@ func mcpRuntimeStateFromServers(states []mcp.ServerState) []MCPRuntimeState {
 	return out
 }
 
+// TestMCPServer connects to an MCP draft and reports its discovered offerings
+// without changing the persisted configuration or live agent manager.
+func (c *Controller) TestMCPServer(ctx context.Context, draft MCPServerDraft) (MCPRuntimeState, error) {
+	id, server, err := mcpServerConfigFromDraft(draft)
+	if err != nil {
+		return MCPRuntimeState{}, err
+	}
+	if server.Disabled {
+		return MCPRuntimeState{}, fmt.Errorf("enable MCP server %q before testing it", id)
+	}
+	manager, err := mcp.NewManager(map[string]config.MCPServer{id: server})
+	if err != nil {
+		return MCPRuntimeState{}, err
+	}
+	defer func() { _ = manager.DisconnectServer(id) }()
+	if err := manager.ConnectServer(ctx, id); err != nil {
+		return MCPRuntimeState{}, err
+	}
+	states := mcpRuntimeStateFromServers(manager.ListServers())
+	if len(states) != 1 {
+		return MCPRuntimeState{}, fmt.Errorf("MCP server %q returned no runtime state", id)
+	}
+	return states[0], nil
+}
+
+// SaveMCPServer verifies and persists one MCP draft, then reloads the live MCP
+// manager. Save is intentionally immediate, matching provider editor behavior.
+func (c *Controller) SaveMCPServer(ctx context.Context, draft MCPServerDraft) (MCPRuntimeState, error) {
+	id, server, err := mcpServerConfigFromDraft(draft)
+	if err != nil {
+		return MCPRuntimeState{}, err
+	}
+	if !server.Disabled {
+		if _, err := c.TestMCPServer(ctx, draft); err != nil {
+			return MCPRuntimeState{}, err
+		}
+	}
+
+	originalID := strings.TrimSpace(draft.OriginalID)
+	c.mu.Lock()
+	if c.cfg.MCPServers == nil {
+		c.cfg.MCPServers = map[string]config.MCPServer{}
+	}
+	if originalID != "" && originalID != id {
+		if _, exists := c.cfg.MCPServers[id]; exists {
+			c.mu.Unlock()
+			return MCPRuntimeState{}, fmt.Errorf("MCP server %q already exists", id)
+		}
+		delete(c.cfg.MCPServers, originalID)
+	}
+	c.cfg.MCPServers[id] = server
+	if err := c.cfg.Save(); err != nil {
+		c.mu.Unlock()
+		return MCPRuntimeState{}, err
+	}
+	engine := c.agent
+	next := c.cfg
+	c.mu.Unlock()
+
+	state := MCPRuntimeState{ID: id, Status: string(mcp.ServerStatusDisconnected)}
+	if engine != nil {
+		if err := engine.UpdateConfigAndReloadMCP(ctx, next); err != nil {
+			return MCPRuntimeState{}, err
+		}
+		for _, runtime := range mcpRuntimeState(engine) {
+			if runtime.ID == id {
+				state = runtime
+				break
+			}
+		}
+	}
+	c.broadcast("snapshot", c.State())
+	return state, nil
+}
+
+func mcpServerConfigFromDraft(draft MCPServerDraft) (string, config.MCPServer, error) {
+	id := strings.TrimSpace(draft.ID)
+	startup, err := parseOptionalDuration("startup timeout", draft.StartupTimeout)
+	if err != nil {
+		return "", config.MCPServer{}, err
+	}
+	request, err := parseOptionalDuration("request timeout", draft.RequestTimeout)
+	if err != nil {
+		return "", config.MCPServer{}, err
+	}
+	server := config.MCPServer{
+		Name:                 strings.TrimSpace(draft.Name),
+		URL:                  strings.TrimSpace(draft.URL),
+		Headers:              cloneHeaderMap(draft.Headers),
+		Disabled:             draft.Disabled,
+		StartupTimeout:       startup,
+		RequestTimeout:       request,
+		DisableStandaloneSSE: draft.DisableStandaloneSSE,
+		BearerToken:          strings.TrimSpace(draft.BearerToken),
+		BearerTokenEnv:       strings.TrimSpace(draft.BearerTokenEnv),
+	}
+	if err := mcp.ValidateServerConfig(id, server); err != nil {
+		return "", config.MCPServer{}, err
+	}
+	return id, server, nil
+}
+
+func parseOptionalDuration(label, value string) (time.Duration, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, nil
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative duration such as 10s", label)
+	}
+	return duration, nil
+}
+
 func accessPreferencesFromConfig(src accesssettings.Settings, globalMounts []accesssettings.Mount) AccessPreferences {
 	return AccessPreferences{
 		Settings:     accesssettings.Normalize(src),
@@ -1813,8 +1927,11 @@ func (c *Controller) settingsHealthLocked() SettingsHealth {
 		defaultModel := strings.TrimSpace(c.cfg.Defaults.ModelID)
 		if defaultProvider == "" || defaultModel == "" || !c.cfg.HasUsableProvider(defaultProvider) {
 			add("models", "models", "default-model", "error", "Choose an available default model")
-		} else if advertised, known := c.providerHealth.Advertises(defaultProvider, defaultModel); known && !advertised {
-			add("models", "models", "default-model", "error", "The default model "+defaultProvider+" / "+defaultModel+" is no longer advertised; choose a replacement")
+		} else {
+			sourceProvider, sourceModel := c.cfg.ResolveModel(defaultProvider, defaultModel)
+			if advertised, known := c.providerHealth.Advertises(sourceProvider, sourceModel); known && !advertised {
+				add("models", "models", "default-model", "error", "The default model "+defaultProvider+" / "+defaultModel+" is no longer advertised; choose a replacement")
+			}
 		}
 	}
 	for _, model := range c.cfg.Models {

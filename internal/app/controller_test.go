@@ -43,6 +43,7 @@ import (
 	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/voice"
 	workspacepkg "github.com/lkarlslund/koder/internal/workspace"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func testChatCollection(st *store.Store) store.Collection[domain.Chat] {
@@ -159,6 +160,81 @@ func TestSettingsHealthSurfacesModelRemovedFromLatestCatalog(t *testing.T) {
 	}
 	if !foundDefault || !foundConfigured {
 		t.Fatalf("expected default and configured removed-model issues, got %#v", health)
+	}
+}
+
+func TestSettingsHealthResolvesCustomDefaultToAdvertisedSource(t *testing.T) {
+	cfg := config.Default()
+	cfg.Browser.Enabled = false
+	cfg.Codex.Enabled = false
+	cfg.Providers["test"] = config.Provider{Name: "Test provider", BaseURL: "http://provider.invalid/v1"}
+	cfg.Defaults = config.Defaults{ProviderID: "test", ModelID: "base medium"}
+	cfg.Models = []config.ModelConfig{{ProviderID: "test", ModelID: "base medium", SourceModelID: "base"}}
+	ctrl := New(cfg, nil)
+	ctrl.providerHealth.ObserveModels("test", []string{"base"}, time.Now(), nil)
+
+	for _, issue := range ctrl.State().SettingsHealth.Issues {
+		if issue.Source == "default-model" {
+			t.Fatalf("advertised source for custom default was reported missing: %#v", issue)
+		}
+	}
+}
+
+func TestMCPDraftTestAndImmediateSave(t *testing.T) {
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "settings-test", Version: "1.0.0"}, nil)
+	server.AddTool(&sdkmcp.Tool{
+		Name:        "lookup",
+		Description: "Look something up",
+		InputSchema: map[string]any{"type": "object"},
+	}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{}, nil
+	})
+	handler := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, &sdkmcp.StreamableHTTPOptions{JSONResponse: true})
+	httpServer := httptest.NewServer(handler)
+	t.Cleanup(httpServer.Close)
+
+	cfg, err := config.LoadWithOptions(config.LoadOptions{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	manager, err := mcp.NewManager(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctrl := New(cfg, agent.New(cfg, st, nil, manager))
+	projectRoot := t.TempDir()
+	if err := ctrl.Start(context.Background(), StartupModeNew, projectRoot); err != nil {
+		t.Fatal(err)
+	}
+	activateTestSession(t, ctrl, projectRoot)
+	t.Cleanup(func() { _ = ctrl.ShutdownWithCancelReason(context.Background(), chat.CancelReasonShutdownInterrupt) })
+	draft := MCPServerDraft{ID: "docs", Name: "Docs", URL: httpServer.URL, StartupTimeout: "2s", RequestTimeout: "3s"}
+	probe, err := ctrl.TestMCPServer(context.Background(), draft)
+	if err != nil {
+		t.Fatalf("test MCP draft: %v", err)
+	}
+	if probe.Status != string(mcp.ServerStatusConnected) || probe.ToolCount != 1 {
+		t.Fatalf("unexpected MCP probe: %#v", probe)
+	}
+
+	runtime, err := ctrl.SaveMCPServer(context.Background(), draft)
+	if err != nil {
+		t.Fatalf("save MCP draft: %v", err)
+	}
+	if runtime.Status != string(mcp.ServerStatusConnected) || runtime.ToolCount != 1 {
+		t.Fatalf("unexpected saved MCP runtime: %#v", runtime)
+	}
+	prefs, err := ctrl.Preferences(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prefs.MCPServers) != 1 || prefs.MCPServers[0].ID != "docs" || len(prefs.MCPRuntime) != 1 || prefs.MCPRuntime[0].Status != string(mcp.ServerStatusConnected) {
+		t.Fatalf("MCP save was not immediately persisted and connected: %#v %#v", prefs.MCPServers, prefs.MCPRuntime)
 	}
 }
 

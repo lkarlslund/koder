@@ -1458,6 +1458,30 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return s.controller.SavePreferences(ctx, in)
+	case "test_mcp_server":
+		var in app.MCPServerDraft
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.TestMCPServer(ctx, in)
+	case "save_mcp_server":
+		var in app.MCPServerDraft
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		runtime, err := s.controller.SaveMCPServer(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		preferences, err := s.controller.Preferences(ctx)
+		if err != nil {
+			return nil, err
+		}
+		state, err := s.stateForClient(ctx, clientID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"runtime": runtime, "preferences": preferences, "state": state}, nil
 	case "reset_prompt":
 		var in struct {
 			Target string `json:"target"`

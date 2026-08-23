@@ -1482,36 +1482,52 @@
                   </div>
 				  <button type="button" class="btn btn-sm btn-outline-primary" title="Create custom model" aria-label="Create custom model" @click="openSettingsModelPicker({kind: 'custom', title: 'Choose base model', subtitle: 'Create a named model with parameter overrides'})"><i class="bi bi-plus-lg"></i></button>
                 </div>
-				<div class="mb-2"><input class="form-control" type="search" x-model="settingsModelQuery" placeholder="Filter detected and custom models" aria-label="Filter models"></div>
-                <div class="settings-item-list">
-                  <template x-if="settingsListRows('models').length === 0">
-					<div class="settings-empty">No models detected</div>
-                  </template>
-				  <template x-for="item in settingsListRows('models')" :key="modelConfigKey(item)">
-					<div class="settings-item-row settings-model-row">
-					  <button type="button" class="settings-item-main" @click="openSettingsModel(modelConfigKey(item))">
-                        <span class="settings-item-title" x-text="settingsItemTitle('models', item)"></span>
-                        <span class="settings-item-subtitle" x-text="settingsItemSubtitle('models', item)"></span>
-						<span class="settings-provider-health" :class="modelHealthClass(item)" :title="modelHealthTitle(item)">
-						  <i class="bi" :class="modelHealthIcon(item)"></i>
-						  <span x-text="modelHealthSummary(item)"></span>
-						</span>
-                        <span class="settings-item-badges">
-                          <template x-for="badge in settingsItemBadges('models', item)" :key="badge">
-                            <span class="badge text-bg-secondary" x-text="badge"></span>
-                          </template>
-                        </span>
-                      </button>
-					  <div class="settings-item-actions" x-show="item.custom" role="group" :aria-label="'Actions for ' + item.model_id">
-						<button type="button" class="btn btn-sm btn-outline-success" title="Make default model" x-show="!modelConfigIsDefault(item)" @click="setModelConfigAsDefault(item)"><i class="bi bi-bookmark-check"></i></button>
-						<button type="button" class="btn btn-sm btn-outline-secondary" title="Duplicate custom model" @click="duplicateModelConfig(modelConfigKey(item))"><i class="bi bi-copy"></i></button>
-						<button type="button" class="btn btn-sm btn-outline-secondary" title="Edit custom model" @click="editModelConfig(modelConfigKey(item))"><i class="bi bi-pencil"></i></button>
-						<button type="button" class="btn btn-sm btn-outline-danger" title="Delete custom model" @click="deleteModelConfig(modelConfigKey(item))"><i class="bi bi-trash"></i></button>
-					  </div>
-					  <i class="bi bi-chevron-right text-secondary" x-show="!item.custom" aria-hidden="true"></i>
-                    </div>
-                  </template>
-                </div>
+				<div class="mb-2"><input class="form-control" type="search" x-model="settingsModelQuery" placeholder="Filter providers, models, and custom variants" aria-label="Filter models"></div>
+				<div class="settings-model-tree">
+				  <template x-if="settingsModelTree().length === 0"><div class="settings-empty">No models detected</div></template>
+				  <template x-for="provider in settingsModelTree()" :key="provider.id">
+					<section class="settings-model-provider">
+					  <header class="settings-model-provider-header">
+						<div class="settings-model-provider-title"><i class="bi bi-hdd-stack text-primary"></i><span x-text="provider.label"></span></div>
+						<span class="badge text-bg-secondary" x-text="provider.count + (provider.count === 1 ? ' entry' : ' entries')"></span>
+					  </header>
+					  <template x-for="model in provider.models" :key="provider.id + '/' + model.id">
+						<div class="settings-model-branch">
+						  <template x-if="model.detected">
+							<div class="settings-item-row settings-model-row settings-model-base">
+							  <button type="button" class="settings-item-main" @click="openSettingsModel(modelConfigKey(model.detected))">
+								<span class="settings-item-title" x-text="model.detected.model_id"></span>
+								<span class="settings-item-subtitle" x-text="settingsItemSubtitle('models', model.detected)"></span>
+								<span class="settings-provider-health" :class="modelHealthClass(model.detected)" :title="modelHealthTitle(model.detected)"><i class="bi" :class="modelHealthIcon(model.detected)"></i><span x-text="modelHealthSummary(model.detected)"></span></span>
+								<span class="settings-item-badges"><template x-for="badge in settingsItemBadges('models', model.detected)" :key="badge"><span class="badge text-bg-secondary" x-text="badge"></span></template></span>
+							  </button>
+							  <i class="bi bi-chevron-right text-secondary" aria-hidden="true"></i>
+							</div>
+						  </template>
+						  <template x-if="!model.detected"><div class="settings-model-missing"><i class="bi bi-exclamation-triangle-fill"></i><span><strong x-text="model.id"></strong><small class="d-block">Backing model is not advertised by this provider</small></span></div></template>
+						  <div class="settings-model-variants" x-show="model.variants.length">
+							<template x-for="item in model.variants" :key="modelConfigKey(item)">
+							  <div class="settings-item-row settings-model-row settings-model-variant">
+								<button type="button" class="settings-item-main" @click="editModelConfig(modelConfigKey(item))">
+								  <span class="settings-item-title"><i class="bi bi-sliders2 me-1 text-primary"></i><span x-text="item.model_id"></span></span>
+								  <span class="settings-item-subtitle">Custom variant</span>
+								  <span class="settings-provider-health" :class="modelHealthClass(item)" :title="modelHealthTitle(item)"><i class="bi" :class="modelHealthIcon(item)"></i><span x-text="modelHealthSummary(item)"></span></span>
+								  <span class="settings-item-badges"><template x-for="badge in settingsItemBadges('models', item)" :key="badge"><span class="badge text-bg-secondary" x-text="badge"></span></template></span>
+								</button>
+								<div class="settings-item-actions" role="group" :aria-label="'Actions for ' + item.model_id">
+								  <button type="button" class="btn btn-sm btn-outline-success" title="Make default model" x-show="!modelConfigIsDefault(item)" @click="setModelConfigAsDefault(item)"><i class="bi bi-bookmark-check"></i></button>
+								  <button type="button" class="btn btn-sm btn-outline-secondary" title="Duplicate custom model" @click="duplicateModelConfig(modelConfigKey(item))"><i class="bi bi-copy"></i></button>
+								  <button type="button" class="btn btn-sm btn-outline-secondary" title="Edit custom model" @click="editModelConfig(modelConfigKey(item))"><i class="bi bi-pencil"></i></button>
+								  <button type="button" class="btn btn-sm btn-outline-danger" title="Delete custom model" @click="deleteModelConfig(modelConfigKey(item))"><i class="bi bi-trash"></i></button>
+								</div>
+							  </div>
+							</template>
+						  </div>
+						</div>
+					  </template>
+					</section>
+				  </template>
+				</div>
               </div>
 
               <div class="settings-page-block" x-show="settingsTab === 'tools'">
@@ -1838,7 +1854,8 @@
           <div class="small text-secondary" x-text="mcpDraft?.id || 'New MCP server'"></div>
         </div>
         <div class="d-flex align-items-center gap-2">
-          <button type="button" class="btn btn-sm btn-primary" title="Save MCP server" @click="saveMCPServer()" :disabled="!mcpDraft"><i class="bi bi-check-lg"></i></button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" title="Test MCP server" @click="testMCPServer()" :disabled="!mcpDraft || mcpTesting || mcpSaving"><i class="bi" :class="mcpTesting ? 'bi-arrow-repeat' : 'bi-activity'"></i><span class="ms-1">Test</span></button>
+          <button type="button" class="btn btn-sm btn-primary" title="Save MCP server" @click="saveMCPServer()" :disabled="!mcpDraft || mcpTesting || mcpSaving"><i class="bi" :class="mcpSaving ? 'bi-arrow-repeat' : 'bi-check-lg'"></i><span class="ms-1">Save</span></button>
           <button type="button" class="btn btn-sm btn-outline-secondary" title="Close" @click="closeMCPEditor()"><i class="bi bi-x-lg"></i></button>
         </div>
       </header>

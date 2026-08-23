@@ -2753,6 +2753,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `test_provider`) {
 		t.Fatalf("expected provider dialog test action")
 	}
+	if !strings.Contains(fullPage, `test_mcp_server`) || !strings.Contains(fullPage, `save_mcp_server`) {
+		t.Fatalf("expected MCP dialog test and immediate save actions")
+	}
 	if !strings.Contains(fullPage, `save_provider`) {
 		t.Fatalf("expected provider dialog save action")
 	}
@@ -2780,12 +2783,13 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `showMCPEditor`) {
 		t.Fatalf("expected providers and MCP to use shared preferences list editors")
 	}
-	if !strings.Contains(fullPage, `settingsListRows('models')`) ||
+	if !strings.Contains(fullPage, `settingsModelTree()`) ||
 		!strings.Contains(fullPage, `showModelConfigEditor`) ||
 		!strings.Contains(fullPage, `settingsModelRows()`) ||
 		!strings.Contains(fullPage, `showModelDetails`) ||
 		!strings.Contains(fullPage, `createCustomModelFromDetected`) ||
-		!strings.Contains(document, `Filter detected and custom models`) ||
+		!strings.Contains(document, `Filter providers, models, and custom variants`) ||
+		!strings.Contains(document, `settings-model-variants`) ||
 		!strings.Contains(document, `Create custom model`) ||
 		!strings.Contains(fullPage, `list="model-config-options"`) ||
 		!strings.Contains(fullPage, `providerModelOptions`) ||

@@ -1155,7 +1155,7 @@
         showSessions: false, sessionTab: 'sessions', sessionFilter: 'active', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
 		providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
 		showModelDetails: false, modelDetails: null, settingsModelQuery: '', showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
-        showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
+        showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary', mcpTesting: false, mcpSaving: false,
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
         userInputModal: {batchKey: '', index: 0, answers: {}, busy: false, error: ''},
         toolCommandModal: {open: false, command: '', subtitle: '', meta: [], output: ''},
@@ -6102,7 +6102,7 @@
         },
 		mcpRuntimeState(item) {
 		  const id = String(item?.id || '');
-		  return (this.settings?.mcp_runtime || []).find(state => state.id === id) || {id, status: item?.disabled ? 'disabled' : 'disconnected'};
+		  return (this.settings?.mcp_runtime || []).find(state => state.id === id) || {id, status: item?.disabled ? 'disabled' : 'not_loaded'};
 		},
 		mcpRuntimeClass(item) {
 		  return {connected: 'text-success', connecting: 'text-primary', error: 'text-danger', disabled: 'text-secondary'}[this.mcpRuntimeState(item).status] || 'text-secondary';
@@ -6119,6 +6119,7 @@
 		  if (state.status === 'connecting') return 'Connecting…';
 		  if (state.status === 'error') return 'Error · ' + (state.last_error || 'Connection failed');
 		  if (state.status === 'disabled') return 'Disabled';
+		  if (state.status === 'not_loaded') return 'Not loaded';
 		  return 'Disconnected';
 		},
 		mcpRuntimeTitle(item) {
@@ -6212,6 +6213,38 @@
 		  const rows = this.settingsModelRows();
 		  if (!query) return rows;
 		  return rows.filter(model => [model.provider_id, model.provider_label, model.model_id, model.source_provider_id, model.source_model_id, model.owned_by, ...this.modelCapabilityBadges(model)].filter(Boolean).join(' ').toLowerCase().includes(query));
+		},
+		settingsModelTree() {
+		  const allRows = this.settingsModelRows();
+		  const visibleRows = this.filteredSettingsModelRows();
+		  const providers = new Map();
+		  const ensureProvider = (id, label = '') => {
+			if (!providers.has(id)) providers.set(id, {id, label: label || id || 'Unknown provider', models: new Map()});
+			return providers.get(id);
+		  };
+		  const ensureBase = (provider, modelID) => {
+			if (!provider.models.has(modelID)) {
+			  const detected = allRows.find(row => !row.custom && row.provider_id === provider.id && row.model_id === modelID);
+			  provider.models.set(modelID, {id: modelID, detected: detected || null, variants: []});
+			}
+			return provider.models.get(modelID);
+		  };
+		  for (const row of visibleRows) {
+			const sourceProviderID = String(row.custom ? (row.source_provider_id || row.provider_id) : row.provider_id || '').trim();
+			const sourceModelID = String(row.custom ? (row.source_model_id || row.model_id) : row.model_id || '').trim();
+			const configuredProvider = this.providerRows().find(item => item.id === sourceProviderID) || {};
+			const provider = ensureProvider(sourceProviderID, configuredProvider.name || row.provider_label || sourceProviderID);
+			const base = ensureBase(provider, sourceModelID);
+			if (row.custom) base.variants.push(row); else base.detected = row;
+		  }
+		  return Array.from(providers.values()).map(provider => {
+			provider.models = Array.from(provider.models.values()).map(model => {
+			  model.variants.sort((a, b) => String(a.model_id || '').localeCompare(String(b.model_id || '')));
+			  return model;
+			}).sort((a, b) => String(a.id).localeCompare(String(b.id)));
+			provider.count = provider.models.reduce((count, model) => count + 1 + model.variants.length, 0);
+			return provider;
+		  }).sort((a, b) => String(a.label).localeCompare(String(b.label)));
 		},
 		modelCapabilityBadges(model) {
 		  const badges = [];
@@ -6446,7 +6479,7 @@
           this.mcpHeadersText = JSON.stringify(this.mcpDraft.headers || {}, null, 2);
           this.mcpStatus = ''; this.mcpStatusKind = 'secondary'; this.showMCPEditor = true;
         },
-        closeMCPEditor() { this.showMCPEditor = false; this.mcpDraft = null; this.mcpStatus = ''; this.mcpStatusKind = 'secondary'; },
+        closeMCPEditor() { this.showMCPEditor = false; this.mcpDraft = null; this.mcpStatus = ''; this.mcpStatusKind = 'secondary'; this.mcpTesting = false; this.mcpSaving = false; },
         mcpDraftPayload() {
           if (!this.mcpDraft) return null;
           let headers = {};
@@ -6477,15 +6510,25 @@
           delete payload.original_id;
           return payload;
         },
+        mcpProbeSummary(result, prefix = 'Connected') {
+          return prefix + ': ' + Number(result?.tool_count || 0) + ' tools, ' + Number(result?.resource_count || 0) + ' resources, ' + Number(result?.resource_template_count || 0) + ' resource templates, and ' + Number(result?.prompt_count || 0) + ' prompts.';
+        },
+        testMCPServer() {
+          const payload = this.mcpDraftPayload(); if (!payload) return;
+          this.mcpTesting = true; this.mcpStatus = 'Testing connection…'; this.mcpStatusKind = 'secondary';
+          this.rpc('test_mcp_server', payload).then(result => {
+            this.mcpStatus = this.mcpProbeSummary(result, 'Test passed'); this.mcpStatusKind = 'success';
+          }).catch(err => { this.mcpStatus = err.message; this.mcpStatusKind = 'danger'; }).finally(() => { this.mcpTesting = false; });
+        },
         saveMCPServer() {
-          const payload = this.mcpDraftPayload(); if (!payload || !this.settings) return;
-          const original = this.mcpDraft.original_id || payload.id;
-          const rows = this.mcpRows().filter(item => item.id !== original && item.id !== payload.id);
-          rows.push(payload);
-          rows.sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
-          this.settings.mcp_servers = rows;
-          this.mcpStatus = 'Saved MCP server'; this.mcpStatusKind = 'success';
-          this.showMCPEditor = false;
+          const payload = this.mcpDraftPayload(); if (!payload) return;
+          this.mcpSaving = true; this.mcpStatus = 'Testing and saving…'; this.mcpStatusKind = 'secondary';
+          this.rpc('save_mcp_server', payload).then(result => {
+            if (result.preferences) this.setSettingsState(result.preferences);
+            if (result.state) this.applyState(result.state);
+            this.showMCPEditor = false;
+            this.showToast(this.mcpProbeSummary(result.runtime, 'MCP server saved'));
+          }).catch(err => { this.mcpStatus = err.message; this.mcpStatusKind = 'danger'; }).finally(() => { this.mcpSaving = false; });
         },
         deleteMCPServer(id) {
           if (!this.settings || !id || !confirm('Delete this MCP server?')) return;
