@@ -531,6 +531,60 @@ func TestToolDefinitionsFallbackOnLocalCollision(t *testing.T) {
 	}
 }
 
+func TestToolDefinitionsDisambiguateSanitizedFallbackCollisions(t *testing.T) {
+	manager := &Manager{state: map[string]*serverState{
+		"docs-one": {tools: []ToolDescriptor{{ServerID: "docs-one", Name: "read"}}},
+		"docs_one": {tools: []ToolDescriptor{{ServerID: "docs_one", Name: "read"}}},
+	}}
+	defs := manager.ToolDefinitions()
+	if len(defs) != 2 {
+		t.Fatalf("definitions = %d, want 2", len(defs))
+	}
+	if defs[0].Function.Name == defs[1].Function.Name {
+		t.Fatalf("sanitized names collided: %q", defs[0].Function.Name)
+	}
+	for _, def := range defs {
+		serverID, toolName, ok := manager.ResolveToolName(def.Function.Name, nil)
+		if !ok || serverID == "" || toolName == "" {
+			t.Fatalf("failed to resolve %q", def.Function.Name)
+		}
+	}
+}
+
+func TestToolListChangedRefreshesWithoutReplacingSession(t *testing.T) {
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "changing", Version: "v1"}, nil)
+	server.AddTool(&sdkmcp.Tool{Name: "first", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{}, nil
+	})
+	httpServer := httptest.NewServer(sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, &sdkmcp.StreamableHTTPOptions{JSONResponse: true}))
+	defer httpServer.Close()
+	manager, err := NewManager(map[string]config.MCPServer{"docs": {URL: httpServer.URL, RequestTimeout: time.Second}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = manager.DisconnectServer("docs") }()
+	if err := manager.ConnectAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	original := managerSession(t, manager, "docs")
+	server.AddTool(&sdkmcp.Tool{Name: "second", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{}, nil
+	})
+	deadline := time.After(time.Second)
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for len(manager.ListTools()) != 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("tool metadata did not refresh: %#v", manager.ListTools())
+		case <-ticker.C:
+		}
+	}
+	if current := managerSession(t, manager, "docs"); current != original || current.ID() != original.ID() {
+		t.Fatalf("list change replaced session: original=%q current=%q", original.ID(), current.ID())
+	}
+}
+
 func TestListToolsSortsDescriptorsDeterministically(t *testing.T) {
 	manager := &Manager{
 		state: map[string]*serverState{

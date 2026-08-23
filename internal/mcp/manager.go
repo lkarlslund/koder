@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -117,6 +118,7 @@ type ServerState struct {
 type Manager struct {
 	mu        sync.RWMutex
 	connectMu sync.Mutex
+	refreshMu sync.Mutex
 	config    map[string]config.MCPServer
 	state     map[string]*serverState
 }
@@ -243,14 +245,15 @@ func (m *Manager) connectServer(ctx context.Context, id string) error {
 		Name:    "koder",
 		Version: version.Current().Version,
 	}, &sdkmcp.ClientOptions{
+		Capabilities: &sdkmcp.ClientCapabilities{},
 		ToolListChangedHandler: func(context.Context, *sdkmcp.ToolListChangedRequest) {
-			m.refreshServerAsync(id)
+			m.refreshServerAsync(id, refreshTools)
 		},
 		PromptListChangedHandler: func(context.Context, *sdkmcp.PromptListChangedRequest) {
-			m.refreshServerAsync(id)
+			m.refreshServerAsync(id, refreshPrompts)
 		},
 		ResourceListChangedHandler: func(context.Context, *sdkmcp.ResourceListChangedRequest) {
-			m.refreshServerAsync(id)
+			m.refreshServerAsync(id, refreshResources)
 		},
 	})
 
@@ -588,10 +591,21 @@ func buildToolNameMap(descriptors []ToolDescriptor, reserved map[string]struct{}
 		}
 		fallback := ToolName(desc.ServerID, desc.Name)
 		if fallback == "" {
-			continue
+			fallback = "_mcp_tool"
 		}
-		resolved[key] = fallback
-		reserved[fallback] = struct{}{}
+		candidate := fallback
+		if _, collision := reserved[candidate]; collision {
+			digest := sha256.Sum256([]byte(key))
+			candidate = fmt.Sprintf("%s_%x", fallback, digest[:4])
+			for suffix := 2; ; suffix++ {
+				if _, exists := reserved[candidate]; !exists {
+					break
+				}
+				candidate = fmt.Sprintf("%s_%x_%d", fallback, digest[:4], suffix)
+			}
+		}
+		resolved[key] = candidate
+		reserved[candidate] = struct{}{}
 	}
 	return resolved
 }
@@ -875,11 +889,59 @@ func (m *Manager) setServerError(id string, err error) {
 	state.client = nil
 }
 
-func (m *Manager) refreshServerAsync(id string) {
+type refreshKind uint8
+
+const (
+	refreshTools refreshKind = iota
+	refreshResources
+	refreshPrompts
+)
+
+func (m *Manager) refreshServerAsync(id string, kind refreshKind) {
 	go func() {
-		ctx, cancel := context.WithCancel(context.Background())
+		m.refreshMu.Lock()
+		defer m.refreshMu.Unlock()
+		session, cfg, err := m.sessionAndConfigForServer(id)
+		if err != nil {
+			return
+		}
+		ctx, cancel := requestContext(context.Background(), cfg)
 		defer cancel()
-		_ = m.ConnectServer(ctx, id)
+		var toolsList []ToolDescriptor
+		var resources []ResourceDescriptor
+		var templates []ResourceTemplateDescriptor
+		var prompts []PromptDescriptor
+		switch kind {
+		case refreshTools:
+			toolsList, err = collectTools(ctx, id, cfg, session)
+		case refreshResources:
+			resources, err = collectResources(ctx, id, cfg, session)
+			if err == nil {
+				templates, err = collectResourceTemplates(ctx, id, cfg, session)
+			}
+		case refreshPrompts:
+			prompts, err = collectPrompts(ctx, id, cfg, session)
+		}
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		state := m.state[id]
+		if state == nil || state.session != session {
+			return
+		}
+		if err != nil {
+			state.lastErr = fmt.Sprintf("refresh MCP metadata: %v", err)
+			return
+		}
+		switch kind {
+		case refreshTools:
+			state.tools = toolsList
+		case refreshResources:
+			state.resources = resources
+			state.resourceTemplates = templates
+		case refreshPrompts:
+			state.prompts = prompts
+		}
+		state.lastErr = ""
 	}()
 }
 
