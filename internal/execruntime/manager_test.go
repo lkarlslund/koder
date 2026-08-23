@@ -31,7 +31,21 @@ func TestManagerStartExportsSessionRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if snap.Output != root+"\n/tmp" {
+	want := root + "\n/tmp"
+	deadline := time.Now().Add(time.Second)
+	for snap.Output != want && time.Now().Before(deadline) {
+		snap, err = mgr.Status(context.Background(), StatusRequest{
+			SessionID: "session-1",
+			ChatID:    "chat-2",
+			ProcessID: snap.ProcessID,
+			MaxBytes:  len(want),
+		})
+		if err != nil {
+			t.Fatalf("status: %v", err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if snap.Output != want {
 		t.Fatalf("expected session root and sandbox TMPDIR, got %q", snap.Output)
 	}
 }

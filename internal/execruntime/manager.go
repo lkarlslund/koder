@@ -174,6 +174,7 @@ type Manager struct {
 
 type process struct {
 	mu          sync.RWMutex
+	outputWG    sync.WaitGroup
 	processID   string
 	sessionID   id.ID
 	chatID      id.ID
@@ -306,11 +307,11 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 		if err := cmd.Start(); err != nil {
 			return Snapshot{}, err
 		}
-		go m.readOutput(p, stdout)
-		go m.readOutput(p, stderr)
+		m.startOutputReader(p, stdout)
+		m.startOutputReader(p, stderr)
 	}
 	if req.TTY {
-		go m.readOutput(p, p.ptyHandle)
+		m.startOutputReader(p, p.ptyHandle)
 	}
 
 	m.mu.Lock()
@@ -481,7 +482,16 @@ func (m *Manager) readOutput(p *process, r io.Reader) {
 	}
 }
 
+func (m *Manager) startOutputReader(p *process, r io.Reader) {
+	p.outputWG.Add(1)
+	go func() {
+		defer p.outputWG.Done()
+		m.readOutput(p, r)
+	}()
+}
+
 func (m *Manager) waitForExit(p *process) {
+	p.outputWG.Wait()
 	err := p.proc.Wait()
 	p.mu.Lock()
 	if p.state == StateRunning {

@@ -2913,8 +2913,14 @@ func TestHandleModelToolCallsStopsAfterToolBatchWhenStopRequested(t *testing.T) 
 		ToolCallID: "call_1",
 		Args:       map[string]string{"command": "printf hi"},
 	}
-	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
-	needsApproval, err := engine.handleModelToolCalls(ctx, session, chat, []tools.Request{req}, out)
+	rt, err := engine.Chat(context.Background(), session, chat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.AppendAssistantToolRequests(context.Background(), domain.TimelineItem{}, []tools.Request{req}, "", domain.ReasoningContent{}, domain.Usage{}, domain.ModelPerformance{}); err != nil {
+		t.Fatal(err)
+	}
+	needsApproval, err := rt.RunToolCalls(ctx, []tools.Request{req}, out)
 	if err != nil {
 		t.Fatalf("expected graceful stop after tool call, got %v", err)
 	}
