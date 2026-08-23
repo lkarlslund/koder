@@ -35,6 +35,19 @@ func TestMermaidObserverRendersReplacementAfterDetachedRender(t *testing.T) {
 		chromedp.Navigate(server.URL()),
 		chromedp.WaitReady(`.transcript`, chromedp.ByQuery),
 		chromedp.Poll(`document.documentElement._x_dataStack?.[0]?.transcriptEnhancementObserver instanceof MutationObserver`, nil),
+		chromedp.Evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, nil),
+		chromedp.Evaluate(`(() => {
+			const app = document.documentElement._x_dataStack[0];
+			window.__transcriptMeasurementCount = 0;
+			window.__transcriptCallbackCount = 0;
+			window.__originalMeasureRenderedTimelineItems = app.measureRenderedTimelineItems;
+			app.measureRenderedTimelineItems = () => { window.__transcriptMeasurementCount++; };
+			for (let index = 0; index < 3; index++) {
+				app.afterTranscriptDOMUpdate(() => { window.__transcriptCallbackCount++; });
+			}
+		})()`, nil),
+		chromedp.Poll(`window.__transcriptMeasurementCount === 1 && window.__transcriptCallbackCount === 3`, nil),
+		chromedp.Evaluate(`document.documentElement._x_dataStack[0].measureRenderedTimelineItems = window.__originalMeasureRenderedTimelineItems`, nil),
 		chromedp.Evaluate(`(() => {
 			window.__mermaidRenderCalls = [];
 			window.mermaid.render = (id, source) => {

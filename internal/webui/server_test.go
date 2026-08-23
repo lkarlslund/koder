@@ -2340,6 +2340,8 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected queue deltas to clear all browser queue aliases")
 	}
 	if !strings.Contains(fullPage, `afterTranscriptDOMUpdate`) || !strings.Contains(fullPage, `requestAnimationFrame`) ||
+		!strings.Contains(fullPage, `if (this.transcriptDOMUpdateScheduled) return;`) ||
+		!strings.Contains(fullPage, `const callbacks = this.transcriptDOMUpdateCallbacks.splice(0);`) ||
 		!strings.Contains(fullPage, `scheduleTranscriptEnhancement`) ||
 		!strings.Contains(fullPage, `return renderMermaidIn(root).then`) {
 		t.Fatalf("expected transcript updates to batch media enhancement independently from scroll restoration")

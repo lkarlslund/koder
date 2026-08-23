@@ -1212,7 +1212,7 @@
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
 		chatCreator: {open: false, loading: false, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}},
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptBottomScrollPending: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptEnhancementObserver: null, transcriptEnhancementFrame: 0, scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptBottomScrollPending: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptEnhancementObserver: null, transcriptEnhancementFrame: 0, transcriptDOMUpdateScheduled: false, transcriptDOMUpdateCallbacks: [], scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
           this.syncBrowserTabActivity();
@@ -2284,11 +2284,16 @@
           return {el, top: el.scrollTop, nearBottom, stickToBottom: !!this.transcriptStickToBottom};
         },
         afterTranscriptDOMUpdate(fn) {
+          this.transcriptDOMUpdateCallbacks.push(fn);
+          if (this.transcriptDOMUpdateScheduled) return;
+          this.transcriptDOMUpdateScheduled = true;
           this.$nextTick(() => {
             requestAnimationFrame(() => {
+              const callbacks = this.transcriptDOMUpdateCallbacks.splice(0);
+              this.transcriptDOMUpdateScheduled = false;
               this.measureRenderedTimelineItems();
               this.observeLastTranscriptItem();
-              fn();
+              callbacks.forEach(callback => callback());
             });
           });
         },
