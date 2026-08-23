@@ -167,6 +167,8 @@ type Runtime struct {
 	Services              map[string]any
 	AllowedTools          map[ID]bool
 	ManagedSkillsDir      string
+	DisabledSkillPaths    []string
+	SkillCatalogMaxChars  int
 	Exec                  execruntime.Control
 	MCP                   MCPExecutor
 	Browser               browserapi.Service

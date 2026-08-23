@@ -94,6 +94,14 @@ type Tools struct {
 	Enabled ToolDefaults `toml:"enabled"`
 }
 
+// Skills controls the portable Agent Skills catalog. Disabled entries are
+// canonical SKILL.md paths or directories, so identically named skills at a
+// lower precedence can still become active.
+type Skills struct {
+	Disabled        []string `toml:"disabled"`
+	CatalogMaxChars int      `toml:"catalog_max_chars"`
+}
+
 type Browser struct {
 	Enabled          bool          `toml:"enabled"`
 	Executable       string        `toml:"executable"`
@@ -175,6 +183,7 @@ type Config struct {
 	MaxToolLoopSteps int                     `toml:"max_tool_loop_steps"`
 	MaxChildChats    int                     `toml:"max_child_chats"`
 	Tools            Tools                   `toml:"tools"`
+	Skills           Skills                  `toml:"skills"`
 	Providers        map[string]Provider     `toml:"providers"`
 	Models           []ModelConfig           `toml:"models"`
 	MCPServers       map[string]MCPServer    `toml:"mcp_servers"`
@@ -388,11 +397,19 @@ func Default() Config {
 			CavemanParallelism: defaultCavemanParallelism,
 			CavemanMinTokens:   DefaultCavemanMinTokens,
 		},
+		Skills: Skills{CatalogMaxChars: 12_000},
 	}
 }
 
 func (c *Config) applyDefaults() {
 	def := Default()
+	if c.Skills.CatalogMaxChars <= 0 {
+		c.Skills.CatalogMaxChars = def.Skills.CatalogMaxChars
+	}
+	if c.Skills.CatalogMaxChars < 512 {
+		c.Skills.CatalogMaxChars = 512
+	}
+	c.Skills.Disabled = normalizeSkillPaths(c.Skills.Disabled)
 	c.Codex.Executable = strings.TrimSpace(c.Codex.Executable)
 	if c.Codex.Executable == "" {
 		c.Codex.Executable = def.Codex.Executable
@@ -973,6 +990,34 @@ func cacheDir() string {
 func managedAssetsDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".koder")
+}
+
+func normalizeSkillPaths(paths []string) []string {
+	home, _ := os.UserHomeDir()
+	seen := make(map[string]struct{}, len(paths))
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		if path == "~" && home != "" {
+			path = home
+		} else if strings.HasPrefix(path, "~/") && home != "" {
+			path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+		}
+		if abs, err := filepath.Abs(path); err == nil {
+			path = filepath.Clean(abs)
+		} else {
+			path = filepath.Clean(path)
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	return out
 }
 
 type resolvedPaths struct {

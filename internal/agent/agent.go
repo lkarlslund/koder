@@ -184,6 +184,8 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		Attachments:      e.files,
 		OfferedFiles:     e.offeredFiles,
 		ManagedSkillsDir: filepath.Join(cfg.ManagedAssetsDir(), "skills"),
+		DisabledSkills:   cfg.Skills.Disabled,
+		SkillCatalogMax:  cfg.Skills.CatalogMaxChars,
 	})
 	e.modelRuntime.SetToolsRuntime(e.toolsRuntime)
 	if e.codex != nil {
@@ -236,6 +238,7 @@ func (e *Engine) updateConfig(cfg config.Config, connectMCPAsync bool) error {
 	}
 	if e.toolsRuntime != nil {
 		e.toolsRuntime.UpdateSettings(e.settings)
+		e.toolsRuntime.UpdateSkills(cfg.Skills.Disabled, cfg.Skills.CatalogMaxChars)
 	}
 	if e.browser != nil {
 		e.browser.UpdateConfig(cfg.Browser)
@@ -1290,7 +1293,12 @@ func (e *Engine) baseInstructionsForChat(session domain.Session, chat domain.Cha
 			Text: "Resolved project AGENTS.md instructions:\n" + agentsText,
 		})
 	}
-	if skillText := strings.TrimSpace(skills.PromptContext(sessionProjectRoot(session))); skillText != "" {
+	skillOpts := skills.DiscoverOptions{
+		ManagedRoots:    []string{filepath.Join(e.cfg.ManagedAssetsDir(), "skills")},
+		DisabledPaths:   e.cfg.Skills.Disabled,
+		CatalogMaxChars: e.cfg.Skills.CatalogMaxChars,
+	}
+	if skillText := strings.TrimSpace(skills.PromptContextWithOptions(sessionProjectRoot(session), skillOpts)); skillText != "" {
 		instructions = append(instructions, provider.InstructionBlock{
 			Kind: provider.InstructionKindSkills,
 			Text: skillText,

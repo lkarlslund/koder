@@ -259,6 +259,35 @@ func TestGlobalMountsRoundTripAndExpandHome(t *testing.T) {
 	}
 }
 
+func TestSkillsConfigurationRoundTripAndNormalize(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Skills = Skills{
+		Disabled:        []string{"~/.agents/skills/review/SKILL.md", "~/.agents/skills/review/SKILL.md", ""},
+		CatalogMaxChars: 8_000,
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".agents", "skills", "review", "SKILL.md")
+	if loaded.Skills.CatalogMaxChars != 8_000 || len(loaded.Skills.Disabled) != 1 || loaded.Skills.Disabled[0] != want {
+		t.Fatalf("skills settings did not normalize and round-trip: %#v", loaded.Skills)
+	}
+}
+
 func TestOldDefaultCavemanPromptUpgrades(t *testing.T) {
 	for _, prompt := range []string{oldDefaultCavemanThinkingPrompt, previousDefaultCavemanThinkingPrompt} {
 		t.Run(prompt[:min(12, len(prompt))], func(t *testing.T) {

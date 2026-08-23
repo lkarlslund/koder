@@ -2,8 +2,11 @@ package toolruntime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -24,6 +27,7 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/settings"
+	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
@@ -42,6 +46,9 @@ type Runtime struct {
 	attachments      *attachment.Manager
 	offeredFiles     *offeredfile.Manager
 	managedSkillsDir string
+	skillsMu         sync.RWMutex
+	disabledSkills   []string
+	skillCatalogMax  int
 	voiceSessions    sessiontool.Control
 	phoneDevice      phonedevice.Control
 	knowledgeMu      sync.RWMutex
@@ -58,6 +65,8 @@ type Config struct {
 	Attachments      *attachment.Manager
 	OfferedFiles     *offeredfile.Manager
 	ManagedSkillsDir string
+	DisabledSkills   []string
+	SkillCatalogMax  int
 	VoiceSessions    sessiontool.Control
 	PhoneDevice      phonedevice.Control
 }
@@ -77,6 +86,8 @@ func New(cfg Config) *Runtime {
 		attachments:      cfg.Attachments,
 		offeredFiles:     cfg.OfferedFiles,
 		managedSkillsDir: strings.TrimSpace(cfg.ManagedSkillsDir),
+		disabledSkills:   append([]string(nil), cfg.DisabledSkills...),
+		skillCatalogMax:  cfg.SkillCatalogMax,
 		voiceSessions:    cfg.VoiceSessions,
 		phoneDevice:      cfg.PhoneDevice,
 	}
@@ -121,6 +132,18 @@ func (r *Runtime) UpdateSettings(store *settings.Store) {
 	r.settings = store
 }
 
+// UpdateSkills changes process-wide skill catalog policy for subsequent tool
+// snapshots without interrupting active chats.
+func (r *Runtime) UpdateSkills(disabled []string, catalogMax int) {
+	if r == nil {
+		return
+	}
+	r.skillsMu.Lock()
+	r.disabledSkills = append([]string(nil), disabled...)
+	r.skillCatalogMax = catalogMax
+	r.skillsMu.Unlock()
+}
+
 func (r *Runtime) ExecManager() *execruntime.Manager {
 	if r == nil {
 		return nil
@@ -151,12 +174,17 @@ func (r *Runtime) ToolRuntime(ctx context.Context, rt *chatpkg.Chat) (tools.Runt
 		rt.SetSession(session)
 	}
 	runtime := r.Runtime(session, chat)
+	runtime.AccessSettings = withLoadedSkillMounts(runtime.AccessSettings, snapshot.Timeline)
 	runtime.ChatStatusControl = rt
 	return runtime, nil
 }
 
 func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtime {
 	projectRoot := sessionProjectRoot(session)
+	r.skillsMu.RLock()
+	disabledSkills := append([]string(nil), r.disabledSkills...)
+	skillCatalogMax := r.skillCatalogMax
+	r.skillsMu.RUnlock()
 	runtime := tools.Runtime{
 		Workdir:               projectRoot,
 		SessionID:             session.ID,
@@ -173,6 +201,8 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		OfferedFiles:          r.offeredFiles,
 		AllowedTools:          r.toolStates(session),
 		ManagedSkillsDir:      r.managedSkillsDir,
+		DisabledSkillPaths:    disabledSkills,
+		SkillCatalogMaxChars:  skillCatalogMax,
 		FileTracker:           codeIntelFileTracker{root: projectRoot},
 		AccessSettings:        r.accessSettings(session),
 	}
@@ -200,6 +230,77 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		runtime.Services[key] = service
 	}
 	return runtime
+}
+
+func withLoadedSkillMounts(current accesssettings.Settings, timeline []domain.TimelineItem) accesssettings.Settings {
+	mounts := make([]accesssettings.Mount, 0)
+	seen := map[string]struct{}{}
+	add := func(result *domain.ToolResult) {
+		path := loadedSkillPath(result)
+		if path == "" {
+			return
+		}
+		if _, err := skills.InspectFile(path); err != nil {
+			return
+		}
+		dir := filepath.Dir(path)
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			dir = resolved
+		}
+		info, err := os.Stat(dir)
+		if err != nil || !info.IsDir() {
+			return
+		}
+		dir, err = filepath.Abs(dir)
+		if err != nil {
+			return
+		}
+		if _, ok := seen[dir]; ok {
+			return
+		}
+		seen[dir] = struct{}{}
+		mounts = append(mounts, accesssettings.Mount{Path: dir, Mode: accesssettings.ModeReadOnly})
+	}
+	for _, item := range timeline {
+		switch content := item.Content.(type) {
+		case domain.AssistantMessage:
+			for _, call := range content.Tools {
+				if call.Tool == domain.ToolKindSkill {
+					add(call.Result)
+				}
+			}
+		case domain.ToolExecution:
+			if content.Tool == domain.ToolKindSkill {
+				add(content.Result)
+			}
+		}
+	}
+	return accesssettings.WithInheritedMounts(current, mounts)
+}
+
+func loadedSkillPath(result *domain.ToolResult) string {
+	if result == nil {
+		return ""
+	}
+	switch data := result.Data.(type) {
+	case tools.SkillStoredResult:
+		return strings.TrimSpace(data.Path)
+	case *tools.SkillStoredResult:
+		if data != nil {
+			return strings.TrimSpace(data.Path)
+		}
+	case json.RawMessage:
+		var stored tools.SkillStoredResult
+		if json.Unmarshal(data, &stored) == nil {
+			return strings.TrimSpace(stored.Path)
+		}
+	case []byte:
+		var stored tools.SkillStoredResult
+		if json.Unmarshal(data, &stored) == nil {
+			return strings.TrimSpace(stored.Path)
+		}
+	}
+	return ""
 }
 
 func (r *Runtime) Definitions(session domain.Session, chat domain.Chat) []provider.ToolDefinition {
