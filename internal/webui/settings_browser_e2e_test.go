@@ -37,11 +37,12 @@ func TestSettingsBrowserNavigationGroupsConfigurationByDomain(t *testing.T) {
 		chromedp.EmulateViewport(1440, 1000),
 		chromedp.Navigate(server.URL()),
 		chromedp.WaitVisible(`[data-settings-open]`, chromedp.ByQuery),
-		chromedp.Poll(`Number(document.querySelector('[data-settings-open] .badge').textContent) > 0`, nil),
 		chromedp.Click(`[data-settings-open]`, chromedp.ByQuery),
 		chromedp.WaitVisible(`.settings-dialog`, chromedp.ByQuery),
 		chromedp.Poll(`document.querySelectorAll('[data-settings-tab]').length === 8`, nil),
 		chromedp.Poll(`document.querySelector('.settings-form').textContent.includes('Theme')`, nil),
+		chromedp.Poll(`Number(document.querySelector('[data-settings-open] .badge').textContent) > 0`, nil),
+		chromedp.Poll(`getComputedStyle(document.querySelector('.settings-setup-label')).display === 'none'`, nil),
 	); err != nil {
 		t.Fatalf("open settings: %v", err)
 	}

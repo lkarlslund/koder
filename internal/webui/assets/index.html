@@ -55,7 +55,7 @@
 		<button class="btn btn-sm" :class="browserVoice.active ? 'btn-info' : 'btn-outline-info'" type="button" x-show="voiceChatMode()" :title="browserVoice.active ? 'Open voice conversation' : 'Start voice conversation'" @click="openBrowserVoice()" style="display: none;"><i class="bi" :class="browserVoice.active ? 'bi-soundwave' : 'bi-mic-fill'"></i><span class="visually-hidden">Voice conversation</span></button>
         <button class="btn btn-sm settings-health-button" :class="settingsButtonClass()" :title="settingsButtonTitle()" @click="openSettingsDialog(settingsSuggestedTab())" data-settings-open>
           <i class="bi bi-gear"></i>
-          <span class="d-none d-lg-inline" x-show="settingsNeedsSetup()" style="display: none;">Set up</span>
+          <span class="settings-setup-label" x-show="settingsNeedsSetup()" style="display: none;">Set up</span>
           <span class="badge rounded-pill text-bg-danger" x-show="settingsIssueCount() > 0" x-text="settingsIssueCount()" style="display: none;"></span>
         </button>
       </div>
