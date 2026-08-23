@@ -1,183 +1,130 @@
 ---
 name: skill-creator
-description: Guide for creating effective koder skills. Use when the user wants to create a new skill (or update an existing skill) that extends koder's capabilities with specialized knowledge, workflows, or tool integrations. Triggers on requests like "create a skill", "make a skill", "build a skill", "new skill for", "skill to".
+description: Create or improve portable Agent Skills with focused instructions, reusable scripts, references, assets, metadata, validation, and forward tests. Use when asked to create, build, update, review, or repair a skill.
+license: Apache-2.0
+compatibility: Portable SKILL.md format; works with Koder and other Agent Skills-compatible hosts.
+metadata:
+  display-name: Skill Creator
+  short-description: Build and improve portable agent skills
+  brand-color: "#6D7CFF"
 ---
 
 # Skill Creator
 
-This skill provides guidance for creating effective koder skills.
+Create a small, portable folder that teaches an agent a repeatable capability. Treat the
+description as the routing rule and the Markdown body as instructions loaded only after
+activation.
 
-## About Skills
+## Choose the location
 
-Skills are modular, self-contained folders that extend koder's capabilities by providing
-specialized knowledge, workflows, and tools. Think of them as "onboarding guides" for specific
-domains or tasks.
+- Put a project skill in `<project>/.agents/skills/<skill-name>/`.
+- Put a portable shared skill in `~/.agents/skills/<skill-name>/`.
+- Use `~/.koder/skills/` only for Koder-managed built-ins.
+- A symlinked skill directory is acceptable. Keep the target available to every host that
+  should use it.
 
-### What Skills Provide
+Prefer `~/.agents/skills` when a user wants to share one library between compatible agents.
 
-1. Specialized workflows - Multi-step procedures for specific domains
-2. Tool integrations - Instructions for working with specific file formats or APIs
-3. Domain expertise - Company-specific knowledge, schemas, business logic
-4. Bundled resources - Scripts, references, and assets for complex and repetitive tasks
+## Use the portable structure
 
-## Skill File System
-
-Koder discovers skills from `.agents/skills` directories:
-
-- **Project skills**: `<project-root>/.agents/skills/` (and parent directories up to project root)
-- **User skills**: `~/.agents/skills/`
-
-Each skill is a directory containing a `SKILL.md` file with YAML frontmatter.
-
-### SKILL.md Format
-
-```yaml
----
-name: my-skill
-description: What the skill does and when to use it. Include specific triggers and scenarios.
----
-
-# My Skill
-
-## Instructions
-...
-```
-
-Only `name` and `description` are read from frontmatter.
-
-- **name**: lowercase, hyphen-separated, alphanumeric (e.g. `pdf-editor`, `brand-guidelines`)
-- **description**: primary triggering mechanism - describe what the skill does AND when to use it
-
-## Core Principles
-
-### Concise Is Key
-
-Only add context the model doesn't already have. Challenge each piece: "Does the model really need this?"
-Prefer concise examples over verbose explanations.
-
-### Set Appropriate Degrees of Freedom
-
-Match specificity to the task's fragility:
-- **High freedom** (text instructions): multiple approaches valid, context-dependent
-- **Medium freedom** (pseudocode/parameterized scripts): preferred pattern exists, some variation OK
-- **Low freedom** (specific scripts): fragile operations, consistency critical
-
-### Anatomy of a Skill
-
-```
+```text
 skill-name/
-├── SKILL.md (required)
-│   ├── YAML frontmatter: name, description
-│   └── Markdown instructions (body)
-├── scripts/ (optional) - Executable code (Python/Bash/etc.)
-├── references/ (optional) - Docs loaded into context as needed
-└── assets/ (optional) - Files used in output (templates, icons, etc.)
+├── SKILL.md                 # required
+├── scripts/                 # optional executable helpers
+├── references/              # optional material loaded on demand
+└── assets/                  # optional templates and UI artwork
+    └── logo.png             # optional PNG/JPEG/WebP/GIF logo
 ```
 
-### Progressive Disclosure
+Do not add README, changelog, installation guide, or quick-reference files unless the
+workflow truly needs them. Put agent-facing material in `SKILL.md` or `references/`.
 
-Keep SKILL.md under 500 lines. Split content when approaching this limit:
-- Keep core workflow in SKILL.md
-- Move variant-specific details to `references/` files
-- Reference them from SKILL.md with clear guidance on when to read
+## Write portable frontmatter
 
-### What Not to Include
-
-Do NOT create: README.md, INSTALLATION_GUIDE.md, QUICK_REFERENCE.md, CHANGELOG.md, or similar auxiliary files. The skill should only contain what an AI agent needs to do the job.
-
-## Skill Creation Process
-
-Follow these steps in order:
-
-### Step 1: Understand the Skill with Concrete Examples
-
-Skip only when the skill's usage is already clear.
-
-Ask focused questions (don't overwhelm):
-- What functionality should this skill support?
-- Can you give examples of how it would be used?
-- What would a user say that should trigger this skill?
-
-### Step 2: Plan Reusable Skill Contents
-
-For each concrete example, identify:
-- **Scripts**: code that would be rewritten repeatedly → `scripts/`
-- **References**: schemas, docs, specs the model needs → `references/`
-- **Assets**: templates, boilerplate, icons for output → `assets/`
-
-### Step 3: Create the Skill Directory
-
-Ask where to create the skill. Default to `~/.agents/skills/`.
-
-Create the directory and SKILL.md:
-
-```bash
-mkdir -p ~/.agents/skills/my-skill
-```
-
-Write a SKILL.md with frontmatter:
+Use real YAML. The directory and `name` must match exactly. Keep the name to lowercase
+letters, digits, and single hyphens, with at most 64 characters.
 
 ```yaml
 ---
 name: my-skill
-description: Clear description of what this skill does and when to use it.
+description: Do a specific job. Use when the user asks for these concrete tasks or supplies these artifacts.
+license: Apache-2.0
+compatibility: Optional runtime or tool requirements in at most 500 characters.
+metadata:
+  display-name: My Skill
+  short-description: Optional compact catalog label
+  logo: assets/logo.png
+  brand-color: "#3366FF"
 ---
-
-# My Skill
-
-## Instructions
-...
 ```
 
-### Step 4: Edit the Skill
+`name` and `description` are required portable fields. `license`, `compatibility`, and the
+string-valued `metadata` map are optional. Koder's presentation keys are deliberately
+host-neutral hints; hosts that do not recognize them ignore them.
 
-Remember: the skill is being created for another koder instance to use.
+For a logo:
 
-#### Start with Reusable Skill Contents
+- Prefer a compact square PNG or WebP with a transparent background.
+- Keep it inside the skill directory and reference it with a relative path.
+- Use PNG, JPEG, WebP, or GIF. Do not use SVG because hosts may render untrusted active
+  content differently.
+- If metadata omits `logo`, Koder automatically looks for `assets/logo.*` and
+  `assets/icon.*` in the supported formats.
 
-Implement `scripts/`, `references/`, and `assets/` first. Test scripts by actually running them.
+## Design the skill
 
-#### Write SKILL.md
+1. Gather two or three concrete user requests that should activate it.
+2. Identify stable steps, fragile steps, reusable code, required references, and outputs.
+3. Put deterministic or error-prone work in tested scripts.
+4. Put large schemas, policies, and variants in `references/` and say exactly when to read
+   each one.
+5. Put templates and output resources in `assets/`.
+6. Write the shortest instructions that reliably cover the examples.
 
-**Writing Guidelines:** Always use imperative/infinitive form.
+Match freedom to risk:
 
-**Frontmatter:**
-- `name`: hyphen-case, short, describes the action
-- `description`: include what the skill does AND specific triggers/scenarios
-  - All "when to use" info goes here - not in the body
+- Use plain instructions when several approaches are valid.
+- Use pseudocode or parameterized helpers when one pattern is preferred.
+- Use exact, tested scripts for fragile or repetitive transformations.
 
-**Body:**
-- Write instructions for using the skill and its bundled resources
-- Structure based on skill type (workflow, task-based, reference, or capabilities)
+Keep `SKILL.md` under roughly 500 lines. Use imperative language. Do not repeat generic
+knowledge the model already has. Put all activation cues in `description`; the body is not
+visible until the skill has been selected.
 
-### Step 5: Validate the Skill
+## Make resource use explicit
+
+Tell the agent which relative files to read or run and under what condition. Resolve paths
+relative to the skill directory. Avoid absolute machine-specific paths and undocumented
+environment dependencies.
+
+Koder grants a loaded skill's directory read-only access to the chat sandbox. If a helper
+must write output, direct it to the project or a temporary working directory, never back
+into the installed skill.
+
+## Validate and verify
+
+Run both commands from the intended environment:
 
 ```bash
-koder skill validate <path/to/skill-folder>
+koder skill validate /path/to/skill-name
+koder skill verify skill-name --workdir /path/to/project
 ```
 
-Fix any reported issues and re-run.
+Validation checks YAML, portable field limits, directory/name agreement, presentation
+metadata, and logo safety. `koder skill list --workdir /path/to/project` also shows invalid,
+disabled, and shadowed entries plus every searched root.
 
-### Step 6: Verify the Skill is Discoverable
+Test every bundled script directly. Then forward-test the skill in a fresh conversation
+using a realistic request. Test implicit activation from the description and explicit
+activation with `$skill-name`. Pass raw artifacts to the test, not conclusions or hints.
 
-```bash
-koder skill verify my-skill
-```
+## Improve an existing skill
 
-This confirms koder can discover the skill by name and that its SKILL.md is valid.
+1. Read the complete `SKILL.md` and only the resources it routes to.
+2. Reproduce the failure or ambiguity with a concrete request.
+3. Fix the smallest underlying instruction, script, reference, or metadata issue.
+4. Remove stale duplication and machine-specific assumptions.
+5. Re-run validation, helper tests, discovery verification, and a fresh forward test.
 
-### Step 7: Iterate and Forward-Test
-
-1. Use the skill on real tasks
-2. Notice struggles or inefficiencies
-3. Identify how SKILL.md or bundled resources should be updated
-4. Implement changes and test again
-
-#### Forward-Testing
-
-To forward-test, launch subagents with minimal context:
-- Prompt should look like: `Use $skill-name at /path/to/skill to solve problem`
-- NOT: `Review the skill at /path; pretend a user asks you to...`
-- Use fresh threads for independent passes
-- Pass raw artifacts, not conclusions
-- Clean up subagent artifacts between iterations
+Preserve portable fields and behavior unless the user explicitly wants a host-specific
+extension. Never silently move, rename, enable, or disable other skills.

@@ -1,23 +1,17 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/skills"
 )
-
-const maxSkillNameLen = 64
-const maxDescriptionLen = 1024
 
 func newSkillCommand(root *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
@@ -72,60 +66,6 @@ func newSkillVerifyCommand(root *rootOptions) *cobra.Command {
 	return verifyCmd
 }
 
-// discoveryPath holds one directory koder searches for skills.
-type discoveryPath struct {
-	path  string
-	scope skills.Scope
-}
-
-// collectDiscoveryPaths returns the directories koder would search
-// for skills, matching the logic in skills.Discover.
-func collectDiscoveryPaths(workdir string, opts skills.DiscoverOptions) []discoveryPath {
-	projectRoot := agents.NormalizeProjectRoot(workdir)
-	workdir = cleanPathAbs(workdir)
-	projectRoot = cleanPathAbs(projectRoot)
-
-	var out []discoveryPath
-	current := workdir
-	for {
-		out = append(out, discoveryPath{
-			path:  filepath.Join(current, ".agents", "skills"),
-			scope: skills.ScopeProject,
-		})
-		if current == projectRoot {
-			break
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			break
-		}
-		current = parent
-	}
-
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		out = append(out, discoveryPath{
-			path:  filepath.Join(home, ".agents", "skills"),
-			scope: skills.ScopeUser,
-		})
-		out = append(out, discoveryPath{
-			path:  filepath.Join(home, ".koder", "skills"),
-			scope: skills.ScopeUser,
-		})
-	}
-	for _, root := range opts.UserRoots {
-		root = strings.TrimSpace(root)
-		if root == "" {
-			continue
-		}
-		out = append(out, discoveryPath{
-			path:  root,
-			scope: skills.ScopeUser,
-		})
-	}
-
-	return out
-}
-
 // newSkillListCommand returns `koder skill list`.
 func newSkillListCommand(root *rootOptions) *cobra.Command {
 	var workdir string
@@ -146,19 +86,17 @@ func newSkillListCommand(root *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			items := skills.DiscoverWithOptions(dir, opts)
-			paths := collectDiscoveryPaths(dir, opts)
+			catalog := skills.InspectWithOptions(dir, opts)
 			var output strings.Builder
 
-			if len(items) == 0 {
+			if len(catalog.Items) == 0 {
 				output.WriteString("No skills found.\n\nSearched:\n")
-				for _, p := range paths {
-					exists := dirExists(p.path)
+				for _, root := range catalog.Roots {
 					status := "not found"
-					if exists {
+					if root.Exists {
 						status = "exists (no skills)"
 					}
-					_, _ = fmt.Fprintf(&output, "  [%s] %s (%s)\n", p.scope, p.path, status)
+					_, _ = fmt.Fprintf(&output, "  [%s] %s (%s)\n", root.Scope, root.Path, status)
 				}
 				output.WriteString("\nTo create a skill, place a directory with SKILL.md under one of the paths above.\n")
 				output.WriteString("User skills go in ~/.agents/skills/<name>/SKILL.md\n")
@@ -166,22 +104,30 @@ func newSkillListCommand(root *rootOptions) *cobra.Command {
 				return err
 			}
 
-			// Print found skills grouped by path
-			for _, s := range items {
-				scope := string(s.Scope)
-				_, _ = fmt.Fprintf(&output, "[%s] %s\n       %s\n       %s\n", scope, s.Name, s.Description, s.Directory)
+			for _, skill := range catalog.Items {
+				status := "active"
+				switch {
+				case !skill.Valid:
+					status = "invalid: " + skill.Error
+				case !skill.Enabled:
+					status = "disabled"
+				case !skill.Effective:
+					status = "shadowed by " + skill.ShadowedBy
+				}
+				_, _ = fmt.Fprintf(&output, "[%s] %s (%s)\n       %s\n       %s\n", skill.Scope, skill.Name, status, skill.Description, skill.Directory)
+				for _, warning := range skill.Warnings {
+					_, _ = fmt.Fprintf(&output, "       warning: %s\n", warning)
+				}
 			}
 
-			// Also show paths that were searched but contributed nothing
 			usedPaths := make(map[string]bool)
-			for _, s := range items {
-				usedPaths[filepath.Dir(filepath.Dir(s.Path))] = true
+			for _, skill := range catalog.Items {
+				usedPaths[skill.Root] = true
 			}
-			for _, p := range paths {
-				if !usedPaths[p.path] {
-					exists := dirExists(p.path)
-					if !exists {
-						_, _ = fmt.Fprintf(&output, "\nSkipped: %s (not found)\n", p.path)
+			for _, root := range catalog.Roots {
+				if !usedPaths[root.Path] {
+					if !root.Exists {
+						_, _ = fmt.Fprintf(&output, "\nSkipped: %s (not found)\n", root.Path)
 					}
 				}
 			}
@@ -203,135 +149,34 @@ func skillDiscoverOptions(root *rootOptions) (skills.DiscoverOptions, error) {
 		return skills.DiscoverOptions{}, err
 	}
 	return skills.DiscoverOptions{
-		UserRoots: []string{filepath.Join(cfg.ManagedAssetsDir(), "skills")},
+		ManagedRoots:    []string{filepath.Join(cfg.ManagedAssetsDir(), "skills")},
+		DisabledPaths:   cfg.Skills.Disabled,
+		CatalogMaxChars: cfg.Skills.CatalogMaxChars,
 	}, nil
 }
 
 // validateSkill validates a SKILL.md at the given path.
 // The path can be a SKILL.md file or a skill directory containing SKILL.md.
 func validateSkill(path string) error {
-	abs, err := filepath.Abs(path)
+	skill, err := skills.InspectFile(path)
 	if err != nil {
-		return fmt.Errorf("resolve path: %w", err)
+		return fmt.Errorf("invalid skill: %w", err)
 	}
-
-	info, err := os.Stat(abs)
-	if err != nil {
-		return err
+	fmt.Fprintf(os.Stderr, "OK: %s\n", skill.Path)
+	fmt.Fprintf(os.Stderr, "  name:        %s\n", skill.Name)
+	fmt.Fprintf(os.Stderr, "  display:     %s\n", skill.Presentation.DisplayName)
+	fmt.Fprintf(os.Stderr, "  description: %s\n", skill.Description)
+	if skill.License != "" {
+		fmt.Fprintf(os.Stderr, "  license:     %s\n", skill.License)
 	}
-
-	if info.IsDir() {
-		abs = filepath.Join(abs, "SKILL.md")
+	if skill.Compatibility != "" {
+		fmt.Fprintf(os.Stderr, "  compatibility: %s\n", skill.Compatibility)
 	}
-
-	if !strings.HasSuffix(strings.ToLower(abs), ".md") {
-		return fmt.Errorf("path must be a SKILL.md file or a skill directory: %s", abs)
+	if skill.Presentation.LogoPath != "" {
+		fmt.Fprintf(os.Stderr, "  logo:        %s\n", skill.Presentation.LogoPath)
 	}
-
-	body, err := os.ReadFile(abs)
-	if err != nil {
-		return fmt.Errorf("read file: %w", err)
+	for _, warning := range skill.Warnings {
+		fmt.Fprintf(os.Stderr, "  warning:     %s\n", warning)
 	}
-
-	var issues []string
-	name, description := parseSkillFrontmatter(string(body))
-
-	// Check frontmatter exists
-	scanner := bufio.NewScanner(strings.NewReader(string(body)))
-	if !scanner.Scan() || strings.TrimSpace(scanner.Text()) != "---" {
-		return fmt.Errorf("invalid SKILL.md: missing YAML frontmatter (file must start with ---)")
-	}
-
-	// Validate name
-	if strings.TrimSpace(name) == "" {
-		issues = append(issues, "missing 'name' in frontmatter")
-	} else {
-		name = strings.TrimSpace(name)
-		if !regexp.MustCompile(`^[a-z0-9-]+$`).MatchString(name) {
-			issues = append(issues, fmt.Sprintf("name %q should be hyphen-case (lowercase letters, digits, and hyphens only)", name))
-		} else if strings.HasPrefix(name, "-") || strings.HasSuffix(name, "-") {
-			issues = append(issues, fmt.Sprintf("name %q cannot start or end with a hyphen", name))
-		} else if strings.Contains(name, "--") {
-			issues = append(issues, fmt.Sprintf("name %q cannot contain consecutive hyphens", name))
-		} else if len(name) > maxSkillNameLen {
-			issues = append(issues, fmt.Sprintf("name is too long (%d characters); maximum is %d", len(name), maxSkillNameLen))
-		}
-	}
-
-	// Validate description
-	if strings.TrimSpace(description) == "" {
-		issues = append(issues, "missing 'description' in frontmatter")
-	} else {
-		desc := strings.TrimSpace(description)
-		if strings.ContainsAny(desc, "<>") {
-			issues = append(issues, "description cannot contain angle brackets (< or >)")
-		}
-		if len(desc) > maxDescriptionLen {
-			issues = append(issues, fmt.Sprintf("description is too long (%d characters); maximum is %d", len(desc), maxDescriptionLen))
-		}
-	}
-
-	if len(issues) > 0 {
-		fmt.Fprintf(os.Stderr, "skill validation failed for %s:\n", abs)
-		for _, issue := range issues {
-			fmt.Fprintf(os.Stderr, "  - %s\n", issue)
-		}
-		return fmt.Errorf("validation failed with %d issue(s)", len(issues))
-	}
-
-	fmt.Fprintf(os.Stderr, "OK: %s\n", abs)
-	fmt.Fprintf(os.Stderr, "  name:        %s\n", strings.TrimSpace(name))
-	fmt.Fprintf(os.Stderr, "  description: %s\n", strings.TrimSpace(description))
 	return nil
-}
-
-// parseSkillFrontmatter mirrors the logic in internal/skills/skills.go
-func parseSkillFrontmatter(body string) (string, string) {
-	scanner := bufio.NewScanner(strings.NewReader(body))
-	if !scanner.Scan() || strings.TrimSpace(scanner.Text()) != "---" {
-		return "", ""
-	}
-	var name, description string
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "---" {
-			break
-		}
-		key, value, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(strings.ToLower(key))
-		value = strings.TrimSpace(value)
-		value = strings.Trim(value, `"'`)
-		value = strings.TrimSpace(value)
-		switch key {
-		case "name":
-			name = value
-		case "description":
-			description = value
-		}
-	}
-	return name, description
-}
-
-// dirExists reports whether the path is an existing directory.
-func dirExists(p string) bool {
-	info, err := os.Stat(p)
-	if err != nil {
-		return false
-	}
-	return info.IsDir()
-}
-
-// cleanPathAbs returns the absolute clean path or the original on error.
-func cleanPathAbs(p string) string {
-	if strings.TrimSpace(p) == "" {
-		return ""
-	}
-	abs, err := filepath.Abs(p)
-	if err != nil {
-		return filepath.Clean(p)
-	}
-	return filepath.Clean(abs)
 }
