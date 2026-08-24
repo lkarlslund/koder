@@ -1698,8 +1698,8 @@
           }
           delete delta.context_window; delete delta.ContextWindow;
           delete delta.model_info; delete delta.ModelInfo;
-          const scroll = this.transcriptScrollState();
           const seq = ++this.scrollRestoreSeq;
+          const scroll = this.transcriptScrollState();
           this.state = {...this.state, ...delta};
           this.applyTheme();
           this.error = this.state.error || '';
@@ -1816,8 +1816,8 @@
           const id = String(delta.chat_id || delta.ChatID || delta.chat?.id || delta.chat?.ID || '').trim();
           if (!id) return;
           const active = id === this.activeChatID();
-          const scroll = active ? this.transcriptScrollState() : null;
           const seq = active ? ++this.scrollRestoreSeq : this.scrollRestoreSeq;
+          const scroll = active ? this.transcriptScrollState() : null;
           const snapshots = {...(this.state.snapshots || this.state.Snapshots || {})};
           const current = snapshots[id] || snapshots[String(id)] || {};
           const next = {...current};
@@ -2227,7 +2227,13 @@
           const el = this.transcriptElement();
           if (!el) return {el: null, top: 0, nearBottom: true, stickToBottom: true};
           const nearBottom = this.transcriptNearBottom(el);
-          return {el, top: el.scrollTop, nearBottom, stickToBottom: !!this.transcriptStickToBottom};
+          return {
+            ...this.captureTranscriptScrollAnchor(),
+            el,
+            top: el.scrollTop,
+            nearBottom,
+            stickToBottom: !!this.transcriptStickToBottom,
+          };
         },
         afterTranscriptDOMUpdate(fn) {
           this.transcriptDOMUpdateCallbacks.push(fn);
@@ -2284,13 +2290,14 @@
         },
         restoreTranscriptScrollAnchor(anchor) {
           const el = this.transcriptElement();
-          if (!el || !anchor || anchor.stickToBottom || anchor.seq !== this.scrollRestoreSeq || this.transcriptStickToBottom) return;
+          if (!el || !anchor || anchor.stickToBottom || anchor.seq !== this.scrollRestoreSeq || this.transcriptStickToBottom) return false;
           const escapedID = window.CSS?.escape ? CSS.escape(anchor.itemID) : String(anchor.itemID || '').replace(/["\\]/g, '\\$&');
           const row = escapedID ? el.querySelector('.transcript-turn[data-timeline-item-id="' + escapedID + '"]') : null;
-          if (!row) return;
+          if (!row) return false;
           const offset = row.getBoundingClientRect().top - el.getBoundingClientRect().top;
           const delta = offset - Number(anchor.offset || 0);
           if (Math.abs(delta) >= 1) this.restoreTranscriptTop(el.scrollTop + delta);
+          return true;
         },
         lastTranscriptItemElement() {
           const root = this.transcriptElement();
@@ -2370,11 +2377,12 @@
             this.scrollTranscriptToBottom();
             return;
           }
+          if (this.restoreTranscriptScrollAnchor(scroll)) return;
           this.restoreTranscriptTop(scroll.top);
         },
         applyState(s, options = {}) {
-          const scroll = this.transcriptScrollState();
           const seq = ++this.scrollRestoreSeq;
+          const scroll = this.transcriptScrollState();
           const incomingSessionID = String(s?.session?.id || s?.session?.ID || s?.Session?.id || s?.Session?.ID || '').trim();
           const currentSessionID = String(this.state?.session?.id || this.state?.session?.ID || '').trim();
           if (incomingSessionID !== currentSessionID) this.clearTimelineCaches();

@@ -2253,6 +2253,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `transcriptBottomScrollPending`) ||
 		!strings.Contains(fullPage, `timelineIndexAtOffset`) ||
 		!strings.Contains(fullPage, `el.scrollTop + el.clientHeight`) ||
+		!strings.Contains(fullPage, `if (this.restoreTranscriptScrollAnchor(scroll)) return`) ||
 		!strings.Contains(fullPage, `scrollTranscriptToBottom()`) ||
 		!strings.Contains(fullPage, `getBoundingClientRect()`) ||
 		!strings.Contains(fullPage, `timeline-spacer`) {

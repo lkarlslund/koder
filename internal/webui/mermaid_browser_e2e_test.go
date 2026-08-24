@@ -10,8 +10,9 @@ import (
 
 func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 	var scrollAnchorResult struct {
-		ItemID string  `json:"itemID"`
-		Top    float64 `json:"top"`
+		ItemID      string  `json:"itemID"`
+		Top         float64 `json:"top"`
+		FallbackTop float64 `json:"fallbackTop"`
 	}
 	chromium := knowledgeBrowserChromium(t)
 	ctrl := newTestController(t)
@@ -111,13 +112,19 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 			}
 			transcript.scrollTop = 90;
 			app.transcriptStickToBottom = false;
-			const anchor = app.captureTranscriptScrollAnchor();
+			const anchor = app.transcriptScrollState();
+			const anchoredItemID = anchor.itemID;
 			const first = transcript.querySelector('[data-timeline-item-id="anchor-0"]');
 			first.style.height = '320px';
-			app.restoreTranscriptScrollAnchor(anchor);
+			app.restoreTranscriptScroll(anchor);
+			const anchoredTop = transcript.scrollTop;
+			anchor.itemID = 'missing-anchor';
+			anchor.top = 75;
+			app.restoreTranscriptScroll(anchor);
 			const result = {
-				itemID: anchor.itemID,
-				top: transcript.scrollTop,
+				itemID: anchoredItemID,
+				top: anchoredTop,
+				fallbackTop: transcript.scrollTop,
 			};
 			app.transcriptElement = originalTranscriptElement;
 			transcript.remove();
@@ -128,7 +135,7 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 	); err != nil {
 		t.Fatalf("enhance replacement Markdown media: %v", err)
 	}
-	if scrollAnchorResult.ItemID != "anchor-1" || scrollAnchorResult.Top != 290 {
-		t.Fatalf("restore transcript anchor = %+v, want item anchor-1 at scroll top 290", scrollAnchorResult)
+	if scrollAnchorResult.ItemID != "anchor-1" || scrollAnchorResult.Top != 290 || scrollAnchorResult.FallbackTop != 75 {
+		t.Fatalf("restore transcript position = %+v, want anchored top 290 and fallback top 75", scrollAnchorResult)
 	}
 }
