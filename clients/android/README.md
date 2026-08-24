@@ -145,6 +145,13 @@ The persistent user concept is a conversation, not a phone call. Returning to
 the home screen pauses the live voice connection without ending or deleting its
 conversation. Speech and typed input share the same server path.
 
+The active voice screen has a camera action at the lower right, while the
+transcript composer has a `+` action. Either can take a new photo or choose one
+from the phone. Koder normalizes and uploads the image as a pending attachment:
+the next spoken or typed question consumes it as one model turn, while **Send
+photo now** sends an image-only turn. A pending preview can be removed before
+it is sent.
+
 Settings also contains the phone's speech-language preference. Leave it on
 Automatic for unrestricted detection, choose one language for the strongest
 hint, or choose several languages you actually speak to bias detection away

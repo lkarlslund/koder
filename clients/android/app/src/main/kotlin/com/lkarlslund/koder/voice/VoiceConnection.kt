@@ -34,6 +34,7 @@ class VoiceConnection(
 		override val id: String,
 		val text: String,
 		val sessionId: String,
+		val attachments: List<VoiceAttachmentDraft>,
 	) : PendingTurn(id)
 
 	private class PendingAudio(
@@ -46,6 +47,7 @@ class VoiceConnection(
 		var bufferedPCMBytes = 0
 		var committed = false
 		var sessionId = ""
+		var attachments: List<VoiceAttachmentDraft> = emptyList()
 	}
 
     interface Listener {
@@ -219,12 +221,12 @@ class VoiceConnection(
 		if (!current.send(VoiceProtocol.ping())) pendingPingAtNanos = null
 	}
 
-    fun sendUtterance(text: String, sessionId: String = ""): String {
+    fun sendUtterance(text: String, sessionId: String = "", attachments: List<VoiceAttachmentDraft> = emptyList()): String {
         val id = UUID.randomUUID().toString()
 		synchronized(this) {
 			check(desired) { "Voice conversation is not active" }
-			pendingTurn = PendingText(id, text, sessionId)
-			socket?.send(VoiceProtocol.utterance(id, text, sessionId))
+			pendingTurn = PendingText(id, text, sessionId, attachments.toList())
+			socket?.send(VoiceProtocol.utterance(id, text, sessionId, attachments))
 		}
         return id
     }
@@ -274,13 +276,14 @@ class VoiceConnection(
 		}
 	}
 
-	fun commitAudio(utteranceId: String, sessionId: String = "") {
+	fun commitAudio(utteranceId: String, sessionId: String = "", attachments: List<VoiceAttachmentDraft> = emptyList()) {
 		synchronized(this) {
 			val pending = pendingTurn as? PendingAudio
 			check(pending?.id == utteranceId) { "Audio utterance is not active" }
 			pending.committed = true
 			pending.sessionId = sessionId
-			socket?.send(VoiceProtocol.audioCommit(utteranceId, sessionId))
+			pending.attachments = attachments.toList()
+			socket?.send(VoiceProtocol.audioCommit(utteranceId, sessionId, attachments))
 		}
 	}
 
@@ -322,11 +325,11 @@ class VoiceConnection(
 		val pending = pendingTurn ?: return
 		replayedSocketAttempt = expectedSocketAttempt
 		when (pending) {
-			is PendingText -> webSocket.send(VoiceProtocol.utterance(pending.id, pending.text, pending.sessionId))
+			is PendingText -> webSocket.send(VoiceProtocol.utterance(pending.id, pending.text, pending.sessionId, pending.attachments))
 			is PendingAudio -> {
 				webSocket.send(VoiceProtocol.audioStart(pending.id, pending.format, pending.languages))
 				pending.frames.forEach(webSocket::send)
-				if (pending.committed) webSocket.send(VoiceProtocol.audioCommit(pending.id, pending.sessionId))
+				if (pending.committed) webSocket.send(VoiceProtocol.audioCommit(pending.id, pending.sessionId, pending.attachments))
 			}
 		}
 	}

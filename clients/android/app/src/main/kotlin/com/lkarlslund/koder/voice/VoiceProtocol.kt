@@ -97,6 +97,34 @@ data class VoicePart(
 	val renderKey: String get() = metadata["render_key"].orEmpty().ifBlank { id }
 }
 
+data class VoiceAttachmentDraft(
+	val id: String,
+	val name: String,
+	val mime: String,
+	val path: String,
+	val size: Long,
+	val source: String = "phone_image",
+) {
+	fun toJSON(): JSONObject = JSONObject()
+		.put("id", id)
+		.put("name", name)
+		.put("mime", mime)
+		.put("path", path)
+		.put("size", size)
+		.put("source", source)
+
+	companion object {
+		fun fromJSON(root: JSONObject): VoiceAttachmentDraft = VoiceAttachmentDraft(
+			id = root.getString("id"),
+			name = root.getString("name"),
+			mime = root.getString("mime"),
+			path = root.getString("path"),
+			size = root.getLong("size"),
+			source = root.optString("source", "phone_image"),
+		)
+	}
+}
+
 enum class ConversationSurface { ACTIVE, PRESENTATION, TRANSCRIPT }
 
 fun conversationSurface(transcriptShown: Boolean, presentationShown: Boolean): ConversationSurface = when {
@@ -387,12 +415,13 @@ object VoiceProtocol {
 		.put("limit", limit)
 		.toString()
 
-    fun utterance(id: String, text: String, sessionId: String = ""): String = JSONObject()
+    fun utterance(id: String, text: String, sessionId: String = "", attachments: List<VoiceAttachmentDraft> = emptyList()): String = JSONObject()
         .put("type", "utterance")
         .put("protocol", VOICE_PROTOCOL)
         .put("utterance_id", id)
         .put("text", text)
         .apply { if (sessionId.isNotBlank()) put("session_id", sessionId) }
+		.apply { if (attachments.isNotEmpty()) put("attachments", JSONArray(attachments.map(VoiceAttachmentDraft::toJSON))) }
         .toString()
 
     fun audioStart(id: String, format: VoiceAudioFormat, languages: Collection<String> = emptyList()): String = JSONObject()
@@ -403,11 +432,12 @@ object VoiceProtocol {
 		.apply { if (languages.isNotEmpty()) put("languages", JSONArray(languages.sorted())) }
         .toString()
 
-    fun audioCommit(id: String, sessionId: String = ""): String = JSONObject()
+    fun audioCommit(id: String, sessionId: String = "", attachments: List<VoiceAttachmentDraft> = emptyList()): String = JSONObject()
         .put("type", "audio_commit")
         .put("protocol", VOICE_PROTOCOL)
         .put("utterance_id", id)
         .apply { if (sessionId.isNotBlank()) put("session_id", sessionId) }
+		.apply { if (attachments.isNotEmpty()) put("attachments", JSONArray(attachments.map(VoiceAttachmentDraft::toJSON))) }
         .toString()
 
     fun audioCancel(id: String): String = JSONObject()

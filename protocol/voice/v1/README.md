@@ -120,8 +120,9 @@ Examples:
 {"type":"select_voice_session","protocol":"voice.v1","voice_session_id":"voice-id"}
 {"type":"create_voice_session","protocol":"voice.v1","title":"Phone work"}
 {"type":"utterance","protocol":"voice.v1","utterance_id":"uuid","text":"Check my email"}
+{"type":"utterance","protocol":"voice.v1","utterance_id":"photo-uuid","text":"What model is this?","attachments":[{"id":"draft-id","name":"phone-photo.jpg","mime":"image/jpeg","path":"/managed/draft/path","size":12345,"source":"phone_image"}]}
 {"type":"audio_start","protocol":"voice.v1","utterance_id":"uuid","audio_format":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"languages":["da","en"]}
-{"type":"audio_commit","protocol":"voice.v1","utterance_id":"uuid"}
+{"type":"audio_commit","protocol":"voice.v1","utterance_id":"uuid","attachments":[{"id":"draft-id","name":"phone-photo.jpg","mime":"image/jpeg","path":"/managed/draft/path","size":12345,"source":"phone_image"}]}
 {"type":"history","protocol":"voice.v1","before_id":"oldest-visible-message-id","limit":5}
 {"type":"search_history","protocol":"voice.v1","query":"laptop BIOS","limit":20}
 ```
@@ -165,6 +166,12 @@ used first. Organization changes do not change `updated_at`; it remains the
 conversation's actual last-activity time.
 
 Native clients manage the normal hierarchy through authenticated REST calls:
+
+- `POST /voice/v1/attachments/images` accepts one authenticated multipart
+  `image` field up to 25 MiB and returns a managed attachment draft. The client
+  includes that draft in the next `utterance` or `audio_commit`; reconnect
+  replay must preserve it. A text utterance may be empty when it carries an
+  attachment, allowing an image-only turn.
 
 - `PATCH /voice/v1/sessions/{session_id}` renames or archives/restores a session.
 - `DELETE /voice/v1/sessions/{session_id}` permanently deletes an idle session.

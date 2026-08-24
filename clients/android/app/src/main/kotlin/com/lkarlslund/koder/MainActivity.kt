@@ -12,6 +12,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.ImageDecoder
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -39,6 +40,7 @@ import android.widget.ArrayAdapter
 import android.widget.AdapterView
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.ImageButton
 import android.widget.LinearLayout
@@ -59,6 +61,7 @@ import androidx.core.content.FileProvider
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
@@ -97,6 +100,7 @@ import com.lkarlslund.koder.voice.VoiceChatBackendOption
 import com.lkarlslund.koder.voice.VoiceTranscriptEntry
 import com.lkarlslund.koder.voice.VoiceAudioEndpointType
 import com.lkarlslund.koder.voice.VoiceAudioFormat
+import com.lkarlslund.koder.voice.VoiceAttachmentDraft
 import com.lkarlslund.koder.voice.VoiceResponsePacing
 import com.lkarlslund.koder.voice.VoiceProtocol
 import com.lkarlslund.koder.voice.VoiceResultNotifier
@@ -121,6 +125,7 @@ import com.lkarlslund.koder.voice.voiceOrbMode
 import com.lkarlslund.koder.voice.voiceOrbDescription
 import com.lkarlslund.koder.voice.voiceOrbSizeDp
 import java.io.File
+import java.io.ByteArrayOutputStream
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
@@ -129,12 +134,23 @@ import java.util.Locale
 import kotlin.math.sin
 import org.json.JSONTokener
 import kotlin.math.abs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @SuppressLint("SetTextI18n")
 class MainActivity : ComponentActivity(), CallController.Listener {
 	private enum class Screen { SETUP, SETTINGS, PERMISSIONS, READINESS, LOADING, HOME, SESSION, CHAT }
 	private enum class ConversationFilter { ACTIVE, ARCHIVED }
 	private data class PresentedImage(val bytes: ByteArray, val bitmap: Bitmap, val name: String, val mimeType: String, val title: String, val alt: String)
+	private data class PendingPhonePhoto(
+		val bytes: ByteArray,
+		val bitmap: Bitmap,
+		val name: String,
+		val draft: VoiceAttachmentDraft? = null,
+		val uploading: Boolean = true,
+		val error: String = "",
+	)
 
     private lateinit var controller: CallController
     private lateinit var secureSettings: SecureSettings
@@ -188,6 +204,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var speechAutomaticCheck: CheckBox? = null
 	private val phoneActionGroups = mutableMapOf<String, RadioGroup>()
 	private var composerView: View? = null
+	private var voicePhotoControls: LinearLayout? = null
+	private var composerPhotoPreview: LinearLayout? = null
+	private var pendingPhonePhoto: PendingPhonePhoto? = null
+	private var pendingCameraPhotoUri: Uri? = null
 	private var transcriptButton: ImageButton? = null
 	private var muteButton: ImageButton? = null
 	private var latestCallSnapshot = CallController.Snapshot()
@@ -250,6 +270,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		runCatching { contentResolver.openOutputStream(uri)?.use { it.write(image.bytes) } ?: error("Could not open destination") }
 			.onSuccess { Toast.makeText(this, "Saved ${image.name}", Toast.LENGTH_SHORT).show() }
 			.onFailure { Toast.makeText(this, it.message ?: "Could not save image", Toast.LENGTH_LONG).show() }
+	}
+	private val cameraPhotoLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { captured ->
+		val uri = pendingCameraPhotoUri
+		pendingCameraPhotoUri = null
+		if (captured && uri != null) preparePhonePhoto(uri)
+	}
+	private val galleryPhotoLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+		if (uri != null) preparePhonePhoto(uri)
 	}
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -415,7 +443,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		if (snapshot.stage == CallController.Stage.WORKING) delegatedWorkPending = true
 		if (snapshot.stage == CallController.Stage.RECORDING) delegatedWorkPending = false
 		runOnUiThread {
+			val attachmentWasPending = latestCallSnapshot.pendingAttachmentName.isNotBlank()
 			latestCallSnapshot = snapshot
+			if (attachmentWasPending && snapshot.pendingAttachmentName.isBlank() && pendingPhonePhoto?.draft != null) {
+				clearPendingPhonePhoto(removeFromController = false)
+			}
 			val recoveryErrorKey = snapshot.turnErrorId.ifBlank { snapshot.detail }
 			if (snapshot.errorCode == "model_unavailable" && recoveryErrorKey != lastRecoveryError) {
 				lastRecoveryError = recoveryErrorKey
@@ -2254,9 +2286,149 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		})
 	}
 
+	private fun showPhotoMenu(anchor: View) {
+		PopupMenu(this, anchor).apply {
+			menu.add("Take photo").setOnMenuItemClickListener { launchPhoneCamera(); true }
+			menu.add("Choose photo").setOnMenuItemClickListener { galleryPhotoLauncher.launch("image/*"); true }
+			if (pendingPhonePhoto != null) menu.add("Remove photo").setOnMenuItemClickListener { clearPendingPhonePhoto(); true }
+			show()
+		}
+	}
+
+	private fun launchPhoneCamera() {
+		runCatching {
+			val directory = File(cacheDir, "phone-captures").apply { mkdirs() }
+			val file = File.createTempFile("koder-photo-", ".jpg", directory)
+			FileProvider.getUriForFile(this, "$packageName.presentations", file).also {
+				pendingCameraPhotoUri = it
+				cameraPhotoLauncher.launch(it)
+			}
+		}.onFailure {
+			pendingCameraPhotoUri = null
+			Toast.makeText(this, it.message ?: "Could not open camera", Toast.LENGTH_LONG).show()
+		}
+	}
+
+	private fun preparePhonePhoto(uri: Uri) {
+		lifecycleScope.launch {
+			val prepared = runCatching {
+				withContext(Dispatchers.IO) {
+					val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(contentResolver, uri)) { decoder, info, _ ->
+						decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+						val width = info.size.width.coerceAtLeast(1)
+						val height = info.size.height.coerceAtLeast(1)
+						val largest = maxOf(width, height)
+						if (largest > 2048) {
+							val scale = 2048f / largest
+							decoder.setTargetSize((width * scale).toInt().coerceAtLeast(1), (height * scale).toInt().coerceAtLeast(1))
+						}
+					}
+					val output = ByteArrayOutputStream()
+					check(bitmap.compress(Bitmap.CompressFormat.JPEG, 88, output)) { "Could not encode photo" }
+					PendingPhonePhoto(
+						bytes = output.toByteArray(),
+						bitmap = bitmap,
+						name = "phone-photo-${System.currentTimeMillis()}.jpg",
+					)
+				}
+			}
+			prepared.onSuccess { photo ->
+				clearPendingPhonePhoto()
+				pendingPhonePhoto = photo
+				renderPendingPhotoControls()
+				uploadPendingPhonePhoto()
+			}.onFailure {
+				Toast.makeText(this@MainActivity, it.message ?: "Could not read photo", Toast.LENGTH_LONG).show()
+			}
+		}
+	}
+
+	private fun uploadPendingPhonePhoto() {
+		val photo = pendingPhonePhoto ?: return
+		pendingPhonePhoto = photo.copy(uploading = true, error = "")
+		renderPendingPhotoControls()
+		sessionClient.uploadImage(settings.server, settings.token, photo.bytes, photo.name, "image/jpeg") { result ->
+			runOnUiThread {
+				val current = pendingPhonePhoto
+				if (current == null || current.name != photo.name) return@runOnUiThread
+				result.fold(onSuccess = { draft ->
+					pendingPhonePhoto = current.copy(draft = draft, uploading = false, error = "")
+					controller.setPendingAttachment(draft)
+					renderPendingPhotoControls()
+				}, onFailure = { failure ->
+					pendingPhonePhoto = current.copy(uploading = false, error = failure.message ?: "Upload failed")
+					controller.removePendingAttachment()
+					renderPendingPhotoControls()
+					Toast.makeText(this, failure.message ?: "Could not upload photo", Toast.LENGTH_LONG).show()
+				})
+			}
+		}
+	}
+
+	private fun sendPendingPhonePhoto() {
+		val photo = pendingPhonePhoto ?: return
+		when {
+			photo.uploading -> Toast.makeText(this, "Photo is still uploading", Toast.LENGTH_SHORT).show()
+			photo.draft == null -> uploadPendingPhonePhoto()
+			else -> controller.submit("")
+		}
+	}
+
+	private fun clearPendingPhonePhoto(removeFromController: Boolean = true) {
+		val photo = pendingPhonePhoto
+		pendingPhonePhoto = null
+		if (removeFromController) controller.removePendingAttachment()
+		photo?.bitmap?.recycle()
+		renderPendingPhotoControls()
+	}
+
+	private fun renderPendingPhotoControls() {
+		fun render(target: LinearLayout?, includeCamera: Boolean) {
+			target ?: return
+			target.removeAllViews()
+			val photo = pendingPhonePhoto
+			target.gravity = Gravity.CENTER_VERTICAL or (if (includeCamera) Gravity.END else Gravity.START)
+			target.background = if (photo != null) cardBackground() else null
+			target.elevation = if (photo != null) dp(2).toFloat() else 0f
+			if (photo != null) {
+				target.addView(ImageView(this).apply {
+					setImageBitmap(photo.bitmap)
+					scaleType = ImageView.ScaleType.CENTER_CROP
+					contentDescription = "Pending photo"
+				}, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(6) })
+				val label = when {
+					photo.uploading -> "Uploading photo…"
+					photo.error.isNotBlank() -> "Upload failed · tap send to retry"
+					else -> "Photo ready"
+				}
+				target.addView(helper(label).apply { maxLines = 2 }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+				target.addView(iconActionButton(R.drawable.ic_voice_send, "Send photo now", ACTION_GREEN).apply {
+					isEnabled = !photo.uploading
+					setOnClickListener { sendPendingPhonePhoto() }
+				}, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(4) })
+				target.addView(Button(this).apply {
+					text = "×"
+					textSize = 22f
+					isAllCaps = false
+					contentDescription = "Remove pending photo"
+					setOnClickListener { clearPendingPhonePhoto() }
+				}, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(4) })
+			}
+			if (includeCamera) {
+				target.addView(iconActionButton(R.drawable.ic_voice_camera, "Take or attach photo", ACTION_BLUE).apply {
+					setOnClickListener { showPhotoMenu(this) }
+				}, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = if (photo == null) 0 else dp(6) })
+			}
+			target.visibility = if (includeCamera || photo != null) View.VISIBLE else View.GONE
+		}
+		render(voicePhotoControls, includeCamera = true)
+		render(composerPhotoPreview, includeCamera = false)
+	}
+
     private fun openChat(session: VoiceSession, startConnection: Boolean = true, initialDetail: String = "Connecting…") {
         screen = Screen.CHAT
         clearCallViews()
+		clearPendingPhonePhoto()
         pendingSession = session
 		secureSettings.markVoiceSessionRead(session.id, session.resultCount)
 		transcriptShown = false
@@ -2342,21 +2514,34 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}
 		root.addView(modeActions, matchWrap())
 
-		activePanel = LinearLayout(this).apply {
-			orientation = LinearLayout.VERTICAL
-			gravity = Gravity.CENTER
-			voiceOrb = VoiceStateOrbView(this@MainActivity).apply {
-				mode = voiceOrbMode(CallController.Stage.CONNECTING)
-				contentDescription = orbToggleDescription(CallController.Stage.CONNECTING)
-				isClickable = true
-				isFocusable = true
-				setOnClickListener { toggleOrbListening() }
-			}.also { addView(it, centeredSquare(voiceOrbSizeDp(resources.configuration.fontScale), bottom = 22)) }
-			voiceOrbDetail = body(initialDetail).apply {
+		activePanel = FrameLayout(this).apply {
+			addView(LinearLayout(this@MainActivity).apply {
+				orientation = LinearLayout.VERTICAL
 				gravity = Gravity.CENTER
-				textSize = 17f
-				accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-			}.also { addView(it, matchWrap()) }
+				voiceOrb = VoiceStateOrbView(this@MainActivity).apply {
+					mode = voiceOrbMode(CallController.Stage.CONNECTING)
+					contentDescription = orbToggleDescription(CallController.Stage.CONNECTING)
+					isClickable = true
+					isFocusable = true
+					setOnClickListener { toggleOrbListening() }
+				}.also { addView(it, centeredSquare(voiceOrbSizeDp(resources.configuration.fontScale), bottom = 22)) }
+				voiceOrbDetail = body(initialDetail).apply {
+					gravity = Gravity.CENTER
+					textSize = 17f
+					accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+				}.also { addView(it, matchWrap()) }
+			}, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+			voicePhotoControls = LinearLayout(this@MainActivity).apply {
+				orientation = LinearLayout.HORIZONTAL
+				gravity = Gravity.CENTER_VERTICAL or Gravity.END
+				setPadding(dp(8), dp(6), dp(8), dp(6))
+			}.also {
+				addView(it, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END).apply {
+					marginStart = dp(4)
+					marginEnd = dp(4)
+					bottomMargin = dp(4)
+				})
+			}
 		}
 		root.addView(activePanel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
@@ -2420,12 +2605,23 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		})
 
         val composer = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(5), dp(5), dp(5))
-            background = cardBackground()
-            elevation = dp(2).toFloat()
+			orientation = LinearLayout.VERTICAL
+			setPadding(dp(8), dp(5), dp(5), dp(5))
+			background = cardBackground()
+			elevation = dp(2).toFloat()
         }
+		composerPhotoPreview = LinearLayout(this).apply {
+			orientation = LinearLayout.HORIZONTAL
+			gravity = Gravity.CENTER_VERTICAL
+			visibility = View.GONE
+		}.also { composer.addView(it, matchWrap()) }
+		val composerRow = LinearLayout(this).apply {
+			orientation = LinearLayout.HORIZONTAL
+			gravity = Gravity.CENTER_VERTICAL
+		}
+		composerRow.addView(iconActionButton(R.drawable.ic_voice_add, "Attach photo", ACTION_BLUE).apply {
+			setOnClickListener { showPhotoMenu(this) }
+		}, LinearLayout.LayoutParams(dp(48), dp(48)))
         typedMessage = EditText(this).apply {
             hint = "Message Koder"
 			contentDescription = "Text message to Koder"
@@ -2434,8 +2630,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             background = null
             setPadding(dp(10), 0, dp(8), 0)
         }
-        composer.addView(typedMessage, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        composer.addView(ImageButton(this).apply {
+        composerRow.addView(typedMessage, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        composerRow.addView(ImageButton(this).apply {
             setImageResource(R.drawable.ic_voice_send)
             contentDescription = "Send message"
             imageTintList = ColorStateList.valueOf(themeColor(android.R.attr.colorAccent))
@@ -2447,14 +2643,19 @@ class MainActivity : ComponentActivity(), CallController.Listener {
             ViewCompat.setTooltipText(this, "Send message")
             setOnClickListener {
                 val message = typedMessage?.text?.toString().orEmpty()
-                if (message.isNotBlank()) {
+				val photo = pendingPhonePhoto
+				if (photo?.uploading == true) {
+					Toast.makeText(this@MainActivity, "Photo is still uploading", Toast.LENGTH_SHORT).show()
+				} else if (message.isNotBlank() || photo?.draft != null) {
                     controller.submit(message)
                     typedMessage?.text?.clear()
                 }
             }
         }, LinearLayout.LayoutParams(dp(48), dp(48)))
+		composer.addView(composerRow, matchWrap())
 		composerView = composer
         root.addView(composer, matchWrap())
+		renderPendingPhotoControls()
         showContent(root)
 		updateConversationStatus(CallController.Stage.CONNECTING, initialDetail)
 		updateConversationMode(CallController.Stage.CONNECTING)
@@ -3352,6 +3553,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		speechAutomaticCheck = null
 		phoneActionGroups.clear()
 		composerView = null
+		voicePhotoControls = null
+		composerPhotoPreview = null
+		pendingPhonePhoto?.bitmap?.recycle()
+		pendingPhonePhoto = null
+		pendingCameraPhotoUri = null
 		transcriptButton = null
 		muteButton = null
 		conversationListeningActive = false

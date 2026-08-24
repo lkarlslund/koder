@@ -14,6 +14,50 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class VoiceSessionClientInstrumentedTest {
     @Test
+    fun uploadsPhotoAsAuthenticatedMultipartAttachment() {
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse.Builder()
+                .code(201)
+                .body(
+                    """{"id":"draft-1","name":"camera.jpg","mime":"image/jpeg","path":"/drafts/draft-1.jpg","size":9,"source":"phone_image"}""",
+                )
+                .build(),
+        )
+        server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+        try {
+            VoiceSessionClient().use { client ->
+                val uploaded = CountDownLatch(1)
+                var uploadResult: Result<VoiceAttachmentDraft>? = null
+                client.uploadImage(
+                    server.url("/").toString(),
+                    "secret",
+                    "jpeg-data".toByteArray(),
+                    "camera.jpg",
+                    "image/jpeg",
+                ) {
+                    uploadResult = it
+                    uploaded.countDown()
+                }
+
+                assertTrue(uploaded.await(5, TimeUnit.SECONDS))
+                assertEquals("draft-1", uploadResult?.getOrThrow()?.id)
+                val request = server.takeRequest(5, TimeUnit.SECONDS)
+                assertEquals("POST", request?.method)
+                assertEquals("/voice/v1/attachments/images", request?.target)
+                assertEquals("Bearer secret", request?.headers?.get("Authorization"))
+                assertTrue(request?.headers?.get("Content-Type").orEmpty().startsWith("multipart/form-data; boundary="))
+                val body = request?.body?.utf8().orEmpty()
+                assertTrue(body.contains("name=\"image\""))
+                assertTrue(body.contains("filename=\"camera.jpg\""))
+                assertTrue(body.contains("jpeg-data"))
+            }
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
     fun listsAndCreatesSessionsOverAuthenticatedHttp() {
         val server = MockWebServer()
         server.enqueue(MockResponse.Builder().body("""{"protocol":"voice.v1","voice_sessions":[{"id":"voice-1","title":"Personal"}]}""").build())

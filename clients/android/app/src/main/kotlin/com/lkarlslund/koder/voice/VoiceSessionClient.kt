@@ -4,6 +4,7 @@ import com.lkarlslund.koder.phone.PhoneIdentity
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -14,6 +15,40 @@ class VoiceSessionClient(
     private val client: OkHttpClient = OkHttpClient(),
 	private val identity: PhoneIdentity? = null,
 ) : AutoCloseable {
+	fun uploadImage(server: String, token: String, bytes: ByteArray, name: String, mimeType: String, callback: (Result<VoiceAttachmentDraft>) -> Unit) {
+		if (bytes.isEmpty()) {
+			callback(Result.failure(IllegalArgumentException("Image is empty")))
+			return
+		}
+		val request = try {
+			val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+				.addFormDataPart("image", name, bytes.toRequestBody(mimeType.toMediaType()))
+				.build()
+			Request.Builder().also { builder -> identity?.applyTo(builder) }
+				.url(VoiceProtocol.resourceUrl(server, "/voice/v1/attachments/images"))
+				.apply { if (token.isNotBlank()) header("Authorization", "Bearer ${token.trim()}") }
+				.post(body)
+				.build()
+		} catch (error: Exception) {
+			callback(Result.failure(error))
+			return
+		}
+		client.newCall(request).enqueue(object : Callback {
+			override fun onFailure(call: Call, e: IOException) = callback(Result.failure(e))
+
+			override fun onResponse(call: Call, response: Response) {
+				response.use {
+					val payload = it.body.string()
+					if (!it.isSuccessful) {
+						callback(Result.failure(IOException(payload.trim().ifBlank { "Image upload returned HTTP ${it.code}" })))
+						return
+					}
+					callback(runCatching { VoiceAttachmentDraft.fromJSON(org.json.JSONObject(payload)) })
+				}
+			}
+		})
+	}
+
     fun list(server: String, token: String, callback: (Result<VoiceHome>) -> Unit) {
         request(server, token, "/voice/v1/sessions", null, VoiceProtocol::parseHome, callback)
     }

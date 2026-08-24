@@ -500,7 +500,9 @@ class MainActivityInstrumentedTest {
 				val labels = waitForText(scenario, "Trip planning")
 				assertTrue(labels.contains("Trip planning"))
 				assertTrue(createBody.contains("\"title\":\"\""))
+				onView(withContentDescription("Take or attach photo")).check(matches(isDisplayed()))
 				onView(withContentDescription("Show transcript")).perform(click())
+				onView(withContentDescription("Attach photo")).check(matches(isDisplayed()))
 				onView(withContentDescription("Send message")).check(matches(isDisplayed()))
 					scenario.onActivity { activity ->
 						val button = activity.findViewById<View>(android.R.id.content).findByDescription("Send message") as ImageButton

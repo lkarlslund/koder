@@ -46,6 +46,7 @@ class CallController(
 		val audioEndpoints: List<VoiceAudioEndpoint> = emptyList(),
 		val phoneToolsConnected: Boolean = false,
 		val turnErrorId: String = "",
+		val pendingAttachmentName: String = "",
     )
 
     interface Listener {
@@ -176,8 +177,9 @@ class CallController(
 		private var speechLanguages: Set<String> = emptySet()
 		@Volatile private var microphoneMuted = false
 		@Volatile private var interruptedPlayback = false
-		@Volatile private var pausedByUser = false
-		@Volatile private var telecomHeld = false
+	@Volatile private var pausedByUser = false
+	@Volatile private var telecomHeld = false
+	@Volatile private var pendingAttachment: VoiceAttachmentDraft? = null
 
     fun start(
 		server: String,
@@ -209,6 +211,7 @@ class CallController(
 		interruptedPlayback = false
 		pausedByUser = false
 		telecomHeld = false
+		pendingAttachment = null
 		connectionSound.stop()
 		val startThreshold = vadSensitivityPercent.coerceIn(35, 75) / 100f
 		listeningEndpointConfig = EndpointConfig(
@@ -234,17 +237,36 @@ class CallController(
         }
     }
 
-	    fun submit(text: String) {
+	fun setPendingAttachment(attachment: VoiceAttachmentDraft?) {
+		pendingAttachment = attachment
+		snapshot = snapshot.copy(pendingAttachmentName = attachment?.name.orEmpty())
+		publish()
+	}
+
+	fun removePendingAttachment() = setPendingAttachment(null)
+
+	fun submit(text: String) {
         val normalized = text.trim()
-        if (!running || normalized.isEmpty()) return
+		val attachment = pendingAttachment
+		if (!running || (normalized.isEmpty() && attachment == null)) return
 		stopMicrophone()
-        listener.onUserMessage(normalized)
+		listener.onUserMessage(normalized.ifBlank { "Photo" })
         update(Stage.PROCESSING, processingStatusText(), "")
         try {
-            connection.sendUtterance(normalized)
+			connection.sendUtterance(normalized, attachments = listOfNotNull(attachment))
+			clearPendingAttachment(attachment)
         } catch (error: Exception) {
             update(Stage.ERROR, error.message ?: "Could not send request")
 	    }
+	}
+
+	private fun clearPendingAttachment(sent: VoiceAttachmentDraft?) {
+		if (sent == null || pendingAttachment?.id != sent.id) return
+		pendingAttachment = null
+		onMain {
+			snapshot = snapshot.copy(pendingAttachmentName = "")
+			publish()
+		}
 	}
 
 	fun setMicrophoneMuted(muted: Boolean) {
@@ -659,7 +681,9 @@ class CallController(
 						utteranceId = ""
 						stopMicrophone()
 						configureEndpointForOutput(false)
-						connection.commitAudio(completedId)
+						val attachment = pendingAttachment
+						connection.commitAudio(completedId, attachments = listOfNotNull(attachment))
+						clearPendingAttachment(attachment)
 						if (!serverReady) connectionSound.disconnected()
 						interruptedPlayback = false
 						onMain {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/agent"
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/browserapi"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
@@ -3118,7 +3120,15 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	var working voice.Session
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	message, err := ctrl.RunVoiceChatTurn(ctx, string(target.ID), voiceChat.ID, "Does the laptop fix still work?", voice.TurnOptions{ResponsePacing: voice.ResponsePacingDetailed}, func(session voice.Session) error {
+	photoBytes, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	photo, err := ctrl.ImportImageAttachment(photoBytes, "laptop.png", "image/png", attachment.SourcePhoneImage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := ctrl.RunVoiceChatTurnWithAttachments(ctx, string(target.ID), voiceChat.ID, "Does the laptop fix still work?", []attachment.Draft{photo}, voice.TurnOptions{ResponsePacing: voice.ResponsePacingDetailed}, func(session voice.Session) error {
 		working = session
 		return nil
 	})
@@ -3169,7 +3179,7 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	for _, item := range timeline {
 		if user, ok := item.Content.(domain.UserMessage); ok {
 			userTurns++
-			if user.Text != "Does the laptop fix still work?" || user.Source != "voice" {
+			if user.Text != "Does the laptop fix still work?" || user.Source != "voice" || len(user.Attachments) != 1 || user.Attachments[0].Name != "laptop.png" {
 				t.Fatalf("voice user turn = %#v", user)
 			}
 		}
@@ -3192,6 +3202,9 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	}
 	if !strings.Contains(joinedRequests, "Response pacing for this call is detailed") {
 		t.Fatalf("voice pacing instruction was not offered transiently: %s", joinedRequests)
+	}
+	if !strings.Contains(joinedRequests, `"type":"image_url"`) {
+		t.Fatalf("voice photo was not sent to the model: %s", joinedRequests)
 	}
 	if strings.Contains(chatrole.SpecFor(chatrole.Voice).SystemPrompt, "exact session_id") {
 		t.Fatalf("voice prompt contains tool mechanics: %s", chatrole.SpecFor(chatrole.Voice).SystemPrompt)

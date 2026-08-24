@@ -159,6 +159,27 @@ class VoiceProtocolTest {
         assertEquals("session-fixture-1", json.getString("session_id"))
     }
 
+	@Test
+	fun typedAndSpokenTurnsCarryUploadedPhotoDrafts() {
+		val photo = VoiceAttachmentDraft(
+			id = "photo-1",
+			name = "camera.jpg",
+			mime = "image/jpeg",
+			path = "/drafts/photo-1.jpg",
+			size = 1234,
+		)
+		val typed = JSONObject(VoiceProtocol.utterance("typed-1", "What is this?", attachments = listOf(photo)))
+		assertEquals("What is this?", typed.getString("text"))
+		assertEquals("photo-1", typed.getJSONArray("attachments").getJSONObject(0).getString("id"))
+
+		val imageOnly = JSONObject(VoiceProtocol.utterance("typed-2", "", attachments = listOf(photo)))
+		assertEquals("", imageOnly.getString("text"))
+		assertEquals("image/jpeg", imageOnly.getJSONArray("attachments").getJSONObject(0).getString("mime"))
+
+		val spoken = JSONObject(VoiceProtocol.audioCommit("audio-1", attachments = listOf(photo)))
+		assertEquals("photo-1", spoken.getJSONArray("attachments").getJSONObject(0).getString("id"))
+	}
+
     @Test
     fun decodesAndSelectsDurableVoiceChatsSeparatelyFromTargets() {
         val frame = VoiceProtocol.parse(

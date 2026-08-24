@@ -3,6 +3,9 @@
     <cache-path
         name="voice_presentations"
         path="voice-presentations/" />
+	<cache-path
+		name="phone_captures"
+		path="phone-captures/" />
     <files-path
         name="app_updates"
         path="updates/" />
