@@ -2256,11 +2256,41 @@
           if (this.transcriptEnhancementFrame) return;
           this.transcriptEnhancementFrame = requestAnimationFrame(() => {
             this.transcriptEnhancementFrame = 0;
+            const anchor = this.captureTranscriptScrollAnchor();
             Promise.resolve(this.enhanceTranscript()).then(() => {
               this.measureRenderedTimelineItems();
               this.observeLastTranscriptItem();
+              this.afterTranscriptDOMUpdate(() => this.restoreTranscriptScrollAnchor(anchor));
             });
           });
+        },
+        captureTranscriptScrollAnchor() {
+          const el = this.transcriptElement();
+          const anchor = {
+            seq: this.scrollRestoreSeq,
+            stickToBottom: !!this.transcriptStickToBottom,
+            itemID: '',
+            offset: 0,
+          };
+          if (!el || anchor.stickToBottom) return anchor;
+          const viewportTop = el.getBoundingClientRect().top;
+          const rows = Array.from(el.querySelectorAll('.transcript-turn[data-timeline-item-id]'));
+          const row = rows.find(candidate => candidate.getBoundingClientRect().top >= viewportTop) ||
+            rows.find(candidate => candidate.getBoundingClientRect().bottom > viewportTop);
+          if (!row) return anchor;
+          anchor.itemID = String(row.dataset.timelineItemId || '').trim();
+          anchor.offset = row.getBoundingClientRect().top - viewportTop;
+          return anchor;
+        },
+        restoreTranscriptScrollAnchor(anchor) {
+          const el = this.transcriptElement();
+          if (!el || !anchor || anchor.stickToBottom || anchor.seq !== this.scrollRestoreSeq || this.transcriptStickToBottom) return;
+          const escapedID = window.CSS?.escape ? CSS.escape(anchor.itemID) : String(anchor.itemID || '').replace(/["\\]/g, '\\$&');
+          const row = escapedID ? el.querySelector('.transcript-turn[data-timeline-item-id="' + escapedID + '"]') : null;
+          if (!row) return;
+          const offset = row.getBoundingClientRect().top - el.getBoundingClientRect().top;
+          const delta = offset - Number(anchor.offset || 0);
+          if (Math.abs(delta) >= 1) this.restoreTranscriptTop(el.scrollTop + delta);
         },
         lastTranscriptItemElement() {
           const root = this.transcriptElement();

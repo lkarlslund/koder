@@ -9,6 +9,10 @@ import (
 )
 
 func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
+	var scrollAnchorResult struct {
+		ItemID string  `json:"itemID"`
+		Top    float64 `json:"top"`
+	}
 	chromium := knowledgeBrowserChromium(t)
 	ctrl := newTestController(t)
 	serverCtx, stopServer := context.WithCancel(context.Background())
@@ -90,9 +94,41 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 				diagram?.dataset.mermaidState === 'done' &&
 					diagram.textContent.includes('graph TD; C-->D');
 		})()`, nil),
-		chromedp.Evaluate(`document.querySelector('#mermaid-observer-test').insertAdjacentHTML('beforeend', '<div class="markdown-body"><img alt="preview" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></div>')`, nil),
-		chromedp.Poll(`document.querySelector('#mermaid-observer-test img')?.closest('.markdown-media-preview')?.querySelector('.media-expand-button') !== null`, nil),
+		chromedp.Evaluate(`(() => {
+			const app = document.documentElement._x_dataStack[0];
+			const originalTranscriptElement = app.transcriptElement;
+			const transcript = document.createElement('div');
+			transcript.style.cssText = 'position:fixed;top:0;left:0;width:400px;height:180px;overflow:auto';
+			document.body.append(transcript);
+			app.transcriptElement = () => transcript;
+			for (let index = 0; index < 4; index++) {
+				const row = document.createElement('section');
+				row.className = 'transcript-turn';
+				row.dataset.timelineItemId = 'anchor-' + index;
+				row.style.cssText = 'display:block;height:120px;min-height:120px';
+				row.textContent = 'row ' + index;
+				transcript.append(row);
+			}
+			transcript.scrollTop = 90;
+			app.transcriptStickToBottom = false;
+			const anchor = app.captureTranscriptScrollAnchor();
+			const first = transcript.querySelector('[data-timeline-item-id="anchor-0"]');
+			first.style.height = '320px';
+			app.restoreTranscriptScrollAnchor(anchor);
+			const result = {
+				itemID: anchor.itemID,
+				top: transcript.scrollTop,
+			};
+			app.transcriptElement = originalTranscriptElement;
+			transcript.remove();
+			return result;
+		})()`, &scrollAnchorResult),
+		chromedp.Evaluate(`document.querySelector('.transcript').insertAdjacentHTML('beforeend', '<div id="media-observer-test" class="markdown-body"><img alt="preview" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></div>')`, nil),
+		chromedp.Poll(`document.querySelector('#media-observer-test img')?.closest('.markdown-media-preview')?.querySelector('.media-expand-button') !== null`, nil),
 	); err != nil {
 		t.Fatalf("enhance replacement Markdown media: %v", err)
+	}
+	if scrollAnchorResult.ItemID != "anchor-1" || scrollAnchorResult.Top != 290 {
+		t.Fatalf("restore transcript anchor = %+v, want item anchor-1 at scroll top 290", scrollAnchorResult)
 	}
 }

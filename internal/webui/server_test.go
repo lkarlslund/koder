@@ -2372,6 +2372,8 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `if (this.transcriptDOMUpdateScheduled) return;`) ||
 		!strings.Contains(fullPage, `const callbacks = this.transcriptDOMUpdateCallbacks.splice(0);`) ||
 		!strings.Contains(fullPage, `scheduleTranscriptEnhancement`) ||
+		!strings.Contains(fullPage, `captureTranscriptScrollAnchor`) ||
+		!strings.Contains(fullPage, `restoreTranscriptScrollAnchor`) ||
 		!strings.Contains(fullPage, `return renderMermaidDiagrams(root, {configure: configureMermaid}).then`) {
 		t.Fatalf("expected transcript updates to batch media enhancement independently from scroll restoration")
 	}
