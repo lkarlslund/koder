@@ -845,6 +845,59 @@ func TestConcurrentToolResultsPersistCompleteAssistantItem(t *testing.T) {
 	}
 }
 
+func TestHydrationRepairsPersistedRunningToolCalls(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	item, err := appendAssistantToolCalls(ctx, st, chatRecord.ID, []domain.ToolCall{
+		{
+			ToolCallID: "completed-call",
+			Tool:       domain.ToolKindFileRead,
+			Status:     domain.ToolStatusDone,
+			Result:     &domain.ToolResult{Status: domain.ToolResultStatusOK, Text: "complete"},
+		},
+		{
+			ToolCallID: "stale-running-call",
+			Tool:       domain.ToolKindFileRead,
+			Status:     domain.ToolStatusRunning,
+			StartedAt:  time.Now().UTC().Add(-time.Minute),
+		},
+	}, "", domain.Usage{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runtime, err := LoadMetadata(ctx, session, chatRecord, Deps{Store: st}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(runtime.Close)
+	if err := runtime.EnsureTimeline(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	persisted, err := timelineForChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedIndex := slices.IndexFunc(persisted, func(candidate domain.TimelineItem) bool { return candidate.ID == item.ID })
+	if storedIndex < 0 {
+		t.Fatalf("timeline item %s not found", item.ID)
+	}
+	assistant, ok := persisted[storedIndex].Content.(domain.AssistantMessage)
+	if !ok || len(assistant.Tools) != 2 {
+		t.Fatalf("persisted assistant = %#v", persisted[storedIndex].Content)
+	}
+	if assistant.Tools[0].Status != domain.ToolStatusDone || assistant.Tools[0].Result == nil {
+		t.Fatalf("completed sibling changed during repair: %#v", assistant.Tools[0])
+	}
+	stale := assistant.Tools[1]
+	if stale.Status != domain.ToolStatusErrored || stale.Error == nil || stale.Error.Code != domain.NoticeReasonProcessRestart || stale.CompletedAt.IsZero() {
+		t.Fatalf("stale running call was not repaired: %#v", stale)
+	}
+}
+
 func TestLoadRepairsImageRequirementForExistingChat(t *testing.T) {
 	ctx := context.Background()
 	st := openTestStore(t)

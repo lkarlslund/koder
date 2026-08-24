@@ -496,6 +496,61 @@ func timelineForChat(ctx context.Context, st *store.Store, chatID id.ID) ([]doma
 	return items, nil
 }
 
+const interruptedRunningToolMessage = "Tool execution failed because koder restarted while the tool was running."
+
+// repairRunningToolCallsOnHydration terminalizes tool calls that were persisted
+// as running by an earlier process. A newly hydrated runtime cannot own work
+// started by that process, and leaving those records running makes historical
+// transcript cards appear active indefinitely.
+func repairRunningToolCallsOnHydration(ctx context.Context, st *store.Store, chatID id.ID) (int, error) {
+	items, err := timelineForChat(ctx, st, chatID)
+	if err != nil {
+		return 0, err
+	}
+	now := time.Now().UTC()
+	repaired := 0
+	for _, item := range items {
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		changed := false
+		for index := range assistant.Tools {
+			call := &assistant.Tools[index]
+			if call.Status != domain.ToolStatusRunning {
+				continue
+			}
+			switch {
+			case call.Result != nil && call.Result.Status == domain.ToolResultStatusDenied:
+				call.Status = domain.ToolStatusDenied
+			case call.Result != nil:
+				call.Status = domain.ToolStatusDone
+			case call.Error != nil:
+				call.Status = domain.ToolStatusErrored
+			default:
+				call.Status = domain.ToolStatusErrored
+				call.Error = &domain.ToolError{Message: interruptedRunningToolMessage, Code: domain.NoticeReasonProcessRestart}
+			}
+			call.Approval = nil
+			call.ApprovalID = ""
+			if call.CompletedAt.IsZero() {
+				call.CompletedAt = now
+			}
+			changed = true
+			repaired++
+		}
+		if !changed {
+			continue
+		}
+		item.Content = assistant
+		item.UpdatedAt = now
+		if err := putTimelineItem(ctx, st, item); err != nil {
+			return repaired, err
+		}
+	}
+	return repaired, nil
+}
+
 type TimelinePage struct {
 	Items     []domain.TimelineItem
 	HasMore   bool

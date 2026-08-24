@@ -392,6 +392,9 @@ func load(ctx context.Context, session domain.Session, chatRecord domain.Chat, d
 	timelineHasOlder := !loadTimeline
 	var approvals []Approval
 	if loadTimeline {
+		if _, err := repairRunningToolCallsOnHydration(ctx, deps.Store, chatRecord.ID); err != nil {
+			return nil, err
+		}
 		var err error
 		timeline, _, timelineHasOlder, err = timelineWorkingSetForChat(ctx, deps.Store, chatRecord.ID)
 		if err != nil {
@@ -1502,6 +1505,9 @@ func (r *Chat) EnsureTimeline(ctx context.Context) error {
 	}
 	if st == nil {
 		return fmt.Errorf("store is required")
+	}
+	if _, err := repairRunningToolCallsOnHydration(ctx, st, chatRecord.ID); err != nil {
+		return r.markPersistError(err)
 	}
 	timeline, _, timelineHasOlder, err := timelineWorkingSetForChat(ctx, st, chatRecord.ID)
 	if err != nil {
