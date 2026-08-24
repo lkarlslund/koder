@@ -568,7 +568,7 @@ func (s *Server) handleClipboardImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mimeType := strings.TrimSpace(header.Header.Get("Content-Type"))
-	draft, err := s.controller.ImportClipboardImage(data, header.Filename, mimeType)
+	draft, err := s.controller.ImportImageAttachment(data, header.Filename, mimeType, attachment.SourceClipboardImage)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
 		return

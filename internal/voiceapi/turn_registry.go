@@ -6,12 +6,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"sync"
 
 	"github.com/coder/websocket"
 
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/voice"
 )
@@ -149,16 +151,25 @@ type turnRegistry struct {
 
 func newTurnRegistry() *turnRegistry { return &turnRegistry{active: make(map[string]*cachedTurn)} }
 
-func textTurnFingerprint(text string) string {
-	digest := sha256.Sum256([]byte("text\x00" + text))
-	return hex.EncodeToString(digest[:])
+func textTurnFingerprint(text string, attachments ...attachment.Draft) string {
+	hash := sha256.New()
+	_, _ = fmt.Fprintf(hash, "text\x00%s\x00", text)
+	appendAttachmentFingerprint(hash, attachments)
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
-func audioTurnFingerprint(audio *incomingAudio) string {
+func audioTurnFingerprint(audio *incomingAudio, attachments ...attachment.Draft) string {
 	hash := sha256.New()
 	_, _ = fmt.Fprintf(hash, "audio\x00%s\x00%d\x00%d\x00%s\x00", audio.format.Encoding, audio.format.SampleRate, audio.format.Channels, strings.Join(audio.languages, ","))
 	_, _ = hash.Write(audio.pcm)
+	appendAttachmentFingerprint(hash, attachments)
 	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func appendAttachmentFingerprint(hash io.Writer, attachments []attachment.Draft) {
+	for _, draft := range attachments {
+		_, _ = fmt.Fprintf(hash, "\x00%s\x00%s\x00%s\x00%d", draft.ID, draft.Name, draft.MIME, draft.Size)
+	}
 }
 
 func (r *turnRegistry) start(callID, utteranceID, fingerprint, voiceSessionID, sessionID, chatID string, run func(*cachedTurn)) (*cachedTurn, bool, error) {
@@ -194,13 +205,13 @@ func (r *turnRegistry) start(callID, utteranceID, fingerprint, voiceSessionID, s
 	return turn, true, nil
 }
 
-func (h *Handler) runTextTurn(turn *cachedTurn, text string, pacing voice.ResponsePacing, outputTransport voice.AudioFormat) {
+func (h *Handler) runTextTurn(turn *cachedTurn, text string, attachments []attachment.Draft, pacing voice.ResponsePacing, outputTransport voice.AudioFormat) {
 	ctx, cancel := context.WithTimeout(context.Background(), delegationTimeout)
 	defer cancel()
-	h.runVoiceTurn(ctx, turn, text, pacing, outputTransport)
+	h.runVoiceTurn(ctx, turn, text, attachments, pacing, outputTransport)
 }
 
-func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text string, pacing voice.ResponsePacing, outputTransport voice.AudioFormat) {
+func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text string, attachments []attachment.Draft, pacing voice.ResponsePacing, outputTransport voice.AudioFormat) {
 	ctx = phonedevice.WithCallID(ctx, turn.callID)
 	turn.appendState("processing", nil)
 	onWorking := func(session voice.Session) error {
@@ -224,9 +235,23 @@ func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text strin
 			turn.finish(errors.New("session chat backend is unavailable"))
 			return
 		}
-		message, err = backend.RunVoiceChatTurn(ctx, turn.sessionID, turn.chatID, text, voice.TurnOptions{ResponsePacing: pacing, OnRender: onRender}, onWorking)
+		if len(attachments) == 0 {
+			message, err = backend.RunVoiceChatTurn(ctx, turn.sessionID, turn.chatID, text, voice.TurnOptions{ResponsePacing: pacing, OnRender: onRender}, onWorking)
+		} else if attachmentBackend, supported := h.Backend.(attachmentTurnBackend); supported {
+			message, err = attachmentBackend.RunVoiceChatTurnWithAttachments(ctx, turn.sessionID, turn.chatID, text, attachments, voice.TurnOptions{ResponsePacing: pacing, OnRender: onRender}, onWorking)
+		} else {
+			turn.finish(errors.New("voice attachments are unavailable"))
+			return
+		}
 	} else {
-		message, err = h.Backend.RunVoiceTurn(ctx, turn.voiceSessionID, text, voice.TurnOptions{ResponsePacing: pacing, OnRender: onRender}, onWorking)
+		if len(attachments) == 0 {
+			message, err = h.Backend.RunVoiceTurn(ctx, turn.voiceSessionID, text, voice.TurnOptions{ResponsePacing: pacing, OnRender: onRender}, onWorking)
+		} else if attachmentBackend, supported := h.Backend.(attachmentTurnBackend); supported {
+			message, err = attachmentBackend.RunVoiceTurnWithAttachments(ctx, turn.voiceSessionID, text, attachments, voice.TurnOptions{ResponsePacing: pacing, OnRender: onRender}, onWorking)
+		} else {
+			turn.finish(errors.New("voice attachments are unavailable"))
+			return
+		}
 	}
 	if err != nil {
 		slog.Error("voice turn failed",
@@ -250,7 +275,7 @@ func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text strin
 	turn.finish(nil)
 }
 
-func (h *Handler) runAudioTurn(turn *cachedTurn, audio *incomingAudio, pacing voice.ResponsePacing, outputTransport voice.AudioFormat) {
+func (h *Handler) runAudioTurn(turn *cachedTurn, audio *incomingAudio, attachments []attachment.Draft, pacing voice.ResponsePacing, outputTransport voice.AudioFormat) {
 	ctx, cancel := context.WithTimeout(context.Background(), delegationTimeout)
 	defer cancel()
 	turn.appendState("transcribing", nil)
@@ -260,7 +285,7 @@ func (h *Handler) runAudioTurn(turn *cachedTurn, audio *incomingAudio, pacing vo
 		return
 	}
 	turn.setTranscript(transcript)
-	h.runVoiceTurn(ctx, turn, transcript, pacing, outputTransport)
+	h.runVoiceTurn(ctx, turn, transcript, attachments, pacing, outputTransport)
 }
 
 func (h *Handler) cacheSpeech(ctx context.Context, turn *cachedTurn, text string, outputTransport voice.AudioFormat) error {

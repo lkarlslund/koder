@@ -1360,14 +1360,9 @@ func (c *Controller) SendPromptWithKindSelection(ctx context.Context, selection 
 
 func (c *Controller) enqueuePrompt(rt *chat.Chat, text string, kind chat.QueueKind, drafts []attachment.Draft) error {
 	text = strings.TrimSpace(text)
-	validated := make([]attachment.Draft, 0, len(drafts))
-	manager := attachment.NewManager(c.cfg.StateDir())
-	for _, draft := range drafts {
-		next, err := manager.ValidateDraft(draft)
-		if err != nil {
-			return err
-		}
-		validated = append(validated, next)
+	validated, err := c.validateAttachmentDrafts(drafts)
+	if err != nil {
+		return err
 	}
 	if text == "" && len(validated) == 0 {
 		return fmt.Errorf("prompt is empty")
@@ -1378,6 +1373,19 @@ func (c *Controller) enqueuePrompt(rt *chat.Chat, text string, kind chat.QueueKi
 	source := domain.UserMessageSourceUser
 	rt.Enqueue(chat.QueueItem{Kind: kind, Source: source, Text: text, Attachments: validated})
 	return nil
+}
+
+func (c *Controller) validateAttachmentDrafts(drafts []attachment.Draft) ([]attachment.Draft, error) {
+	validated := make([]attachment.Draft, 0, len(drafts))
+	manager := attachment.NewManager(c.cfg.StateDir())
+	for _, draft := range drafts {
+		next, err := manager.ValidateDraft(draft)
+		if err != nil {
+			return nil, err
+		}
+		validated = append(validated, next)
+	}
+	return validated, nil
 }
 
 // ReorderQueueForSelection reorders the selected chat queued inputs by ID.
@@ -1465,9 +1473,9 @@ func abortAndSendRuntimeQueueItemNow(rt *chat.Chat, id id.ID) error {
 	return nil
 }
 
-// ImportClipboardImage stores a pasted image as a draft attachment for the web composer.
-func (c *Controller) ImportClipboardImage(data []byte, name string, mimeType string) (attachment.Draft, error) {
-	return attachment.NewManager(c.cfg.StateDir()).ImportClipboardImageData(data, name, mimeType)
+// ImportImageAttachment stores an uploaded image as a draft for a later chat turn.
+func (c *Controller) ImportImageAttachment(data []byte, name, mimeType, source string) (attachment.Draft, error) {
+	return attachment.NewManager(c.cfg.StateDir()).ImportImageData(data, name, mimeType, source)
 }
 
 func (c *Controller) SessionAttachmentPath(sessionID id.ID, attachmentID string) (string, error) {

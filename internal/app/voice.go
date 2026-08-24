@@ -801,19 +801,33 @@ func transcriptPageStart(entries []voice.TranscriptEntry, turns int) int {
 // RunVoiceTurn executes an utterance through the durable voice chat's normal
 // model loop, history, role prompt, and profile-scoped tools.
 func (c *Controller) RunVoiceTurn(ctx context.Context, voiceSessionID, text string, options voice.TurnOptions, onWorking func(voice.Session) error) (voice.Message, error) {
-	return c.runVoiceChatTurn(ctx, strings.TrimSpace(voiceSessionID), "", text, options, onWorking)
+	return c.runVoiceChatTurn(ctx, strings.TrimSpace(voiceSessionID), "", text, nil, options, onWorking)
+}
+
+// RunVoiceTurnWithAttachments executes a legacy voice-chat turn with uploaded images.
+func (c *Controller) RunVoiceTurnWithAttachments(ctx context.Context, voiceSessionID, text string, drafts []attachment.Draft, options voice.TurnOptions, onWorking func(voice.Session) error) (voice.Message, error) {
+	return c.runVoiceChatTurn(ctx, strings.TrimSpace(voiceSessionID), "", text, drafts, options, onWorking)
 }
 
 // RunVoiceChatTurn executes an utterance in a selected voice chat inside its
 // owning session.
 func (c *Controller) RunVoiceChatTurn(ctx context.Context, sessionID, chatID, text string, options voice.TurnOptions, onWorking func(voice.Session) error) (voice.Message, error) {
-	return c.runVoiceChatTurn(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(chatID), text, options, onWorking)
+	return c.runVoiceChatTurn(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(chatID), text, nil, options, onWorking)
 }
 
-func (c *Controller) runVoiceChatTurn(ctx context.Context, sessionID, chatID, text string, options voice.TurnOptions, onWorking func(voice.Session) error) (voice.Message, error) {
+// RunVoiceChatTurnWithAttachments executes a selected voice-chat turn with uploaded images.
+func (c *Controller) RunVoiceChatTurnWithAttachments(ctx context.Context, sessionID, chatID, text string, drafts []attachment.Draft, options voice.TurnOptions, onWorking func(voice.Session) error) (voice.Message, error) {
+	return c.runVoiceChatTurn(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(chatID), text, drafts, options, onWorking)
+}
+
+func (c *Controller) runVoiceChatTurn(ctx context.Context, sessionID, chatID, text string, drafts []attachment.Draft, options voice.TurnOptions, onWorking func(voice.Session) error) (voice.Message, error) {
 	text = strings.TrimSpace(text)
-	if text == "" {
-		return voice.Message{}, fmt.Errorf("voice transcript is required")
+	validated, err := c.validateAttachmentDrafts(drafts)
+	if err != nil {
+		return voice.Message{}, err
+	}
+	if text == "" && len(validated) == 0 {
+		return voice.Message{}, fmt.Errorf("voice prompt is empty")
 	}
 	pacing, err := voice.ParseResponsePacing(string(options.ResponsePacing))
 	if err != nil {
@@ -842,9 +856,10 @@ func (c *Controller) runVoiceChatTurn(ctx context.Context, sessionID, chatID, te
 	updates, unsubscribe := runtime.Subscribe()
 	defer unsubscribe()
 	runtime.Enqueue(chat.QueueItem{
-		Kind:   chat.QueueKindUser,
-		Source: domain.UserMessageSourceVoice,
-		Text:   text,
+		Kind:        chat.QueueKindUser,
+		Source:      domain.UserMessageSourceVoice,
+		Text:        text,
+		Attachments: validated,
 		EphemeralInstructions: []provider.InstructionBlock{{
 			Kind: provider.InstructionKindRuntime,
 			Text: pacing.Instruction(),

@@ -1,11 +1,13 @@
 package voiceapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -20,6 +22,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/lkarlslund/koder/internal/androidupdate"
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/deviceauth"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/phonedevice"
@@ -60,6 +63,20 @@ type handoffBackend struct {
 	continueAudio   chan struct{}
 }
 
+type imageAttachmentFakeBackend struct {
+	*fakeBackend
+	draft  attachment.Draft
+	source string
+}
+
+func (f *imageAttachmentFakeBackend) ImportImageAttachment(data []byte, name, mimeType, source string) (attachment.Draft, error) {
+	f.source = source
+	f.draft = attachment.Draft{Metadata: attachment.Metadata{
+		ID: "phone-image", Name: name, MIME: mimeType, Path: "/drafts/phone-image.jpg", Size: int64(len(data)), Source: source,
+	}}
+	return f.draft, nil
+}
+
 func (b *handoffBackend) RunVoiceTurn(_ context.Context, _ string, _ string, _ voice.TurnOptions, _ func(voice.Session) error) (voice.Message, error) {
 	b.turnCalls.Add(1)
 	return voice.Message{SpokenText: "The handoff worked.", TranscriptID: "answer-1"}, nil
@@ -76,6 +93,47 @@ func (b *handoffBackend) StreamVoiceSpeech(ctx context.Context, _ string, consum
 	case <-b.continueAudio:
 	}
 	return consume([]byte{2, 0})
+}
+
+func TestPhoneImageUploadRequiresAuthAndReturnsDraft(t *testing.T) {
+	backend := &imageAttachmentFakeBackend{fakeBackend: &fakeBackend{}}
+	server := httptest.NewServer(NewHandler(backend, "secret"))
+	t.Cleanup(server.Close)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("image", "camera.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("jpeg-data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/voice/v1/attachments/images", &body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("upload status = %s: %s", resp.Status, payload)
+	}
+	var draft attachment.Draft
+	if err := json.NewDecoder(resp.Body).Decode(&draft); err != nil {
+		t.Fatal(err)
+	}
+	if draft.ID != "phone-image" || draft.Name != "camera.jpg" || draft.Size != 9 || backend.source != attachment.SourcePhoneImage {
+		t.Fatalf("uploaded draft = %#v source=%q", draft, backend.source)
+	}
 }
 
 func (f *fakeBackend) SearchVoiceSessionHistory(_ context.Context, _ string, query string, _ int) ([]voice.TranscriptSearchResult, error) {
@@ -308,7 +366,7 @@ func TestRunVoiceTurnKeepsGenericToolWorkTargetless(t *testing.T) {
 	backend := &fakeBackend{genericWorking: true}
 	handler := NewHandler(backend, "")
 	turn := newCachedTurn("call-1", "utterance-1", textTurnFingerprint("check it"), "voice-1")
-	handler.runVoiceTurn(t.Context(), turn, "check it", voice.ResponsePacingNormal, backend.VoiceAudioConfig().Output)
+	handler.runVoiceTurn(t.Context(), turn, "check it", nil, voice.ResponsePacingNormal, backend.VoiceAudioConfig().Output)
 
 	var working *serverFrame
 	for _, event := range turn.snapshot().events {

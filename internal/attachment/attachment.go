@@ -17,6 +17,7 @@ import (
 
 const (
 	SourceClipboardImage = "clipboard_image"
+	SourcePhoneImage     = "phone_image"
 	SourceFileImport     = "file_import"
 	SourceBrowser        = "browser"
 )
@@ -130,12 +131,17 @@ func (m *Manager) DeleteSessionData(sessionID id.ID) error {
 }
 
 func (m *Manager) ImportClipboardImage(png []byte) (Draft, error) {
-	return m.ImportClipboardImageData(png, "clipboard.png", "image/png")
+	return m.ImportImageData(png, "clipboard.png", "image/png", SourceClipboardImage)
 }
 
 func (m *Manager) ImportClipboardImageData(data []byte, name string, mimeType string) (Draft, error) {
+	return m.ImportImageData(data, name, mimeType, SourceClipboardImage)
+}
+
+// ImportImageData stores an image as a draft that can be adopted by a chat turn.
+func (m *Manager) ImportImageData(data []byte, name, mimeType, source string) (Draft, error) {
 	if len(data) == 0 {
-		return Draft{}, fmt.Errorf("clipboard image is empty")
+		return Draft{}, fmt.Errorf("image is empty")
 	}
 	mimeType = strings.TrimSpace(mimeType)
 	if mimeType == "" {
@@ -145,7 +151,7 @@ func (m *Manager) ImportClipboardImageData(data []byte, name string, mimeType st
 		mimeType = http.DetectContentType(data)
 	}
 	if ClassifyMIME(mimeType) != KindImage {
-		return Draft{}, fmt.Errorf("clipboard item is not an image")
+		return Draft{}, fmt.Errorf("attachment is not an image")
 	}
 	id, err := newID()
 	if err != nil {
@@ -169,7 +175,7 @@ func (m *Manager) ImportClipboardImageData(data []byte, name string, mimeType st
 		MIME:   mimeType,
 		Path:   dst,
 		Size:   int64(len(data)),
-		Source: SourceClipboardImage,
+		Source: strings.TrimSpace(source),
 	}}, nil
 }
 

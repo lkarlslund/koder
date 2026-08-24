@@ -24,6 +24,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/lkarlslund/koder/internal/androidupdate"
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/deviceauth"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
@@ -35,6 +36,7 @@ import (
 const protocolVersion = "voice.v1"
 const readLimit = 256 * 1024
 const sessionRequestLimit = 4 * 1024
+const imageUploadLimit = 25 << 20
 const delegationTimeout = 30 * time.Minute
 
 type backend interface {
@@ -42,6 +44,15 @@ type backend interface {
 	voice.SpeechBackend
 	voice.VoiceSessionBackend
 	voice.ArtifactBackend
+}
+
+type imageAttachmentBackend interface {
+	ImportImageAttachment(data []byte, name, mimeType, source string) (attachment.Draft, error)
+}
+
+type attachmentTurnBackend interface {
+	RunVoiceTurnWithAttachments(context.Context, string, string, []attachment.Draft, voice.TurnOptions, func(voice.Session) error) (voice.Message, error)
+	RunVoiceChatTurnWithAttachments(context.Context, string, string, string, []attachment.Draft, voice.TurnOptions, func(voice.Session) error) (voice.Message, error)
 }
 
 type androidUpdateSource interface {
@@ -134,6 +145,7 @@ type clientFrame struct {
 	MilestoneKey      string                          `json:"milestone_key,omitempty"`
 	TaskRef           string                          `json:"task_ref,omitempty"`
 	ToolStates        domain.ToolStates               `json:"tool_states,omitempty"`
+	Attachments       []attachment.Draft              `json:"attachments,omitempty"`
 }
 
 type serverFrame struct {
@@ -330,6 +342,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/voice/v1/device" {
 		h.servePhoneDevice(w, r)
+		return
+	}
+	if r.URL.Path == "/voice/v1/attachments/images" {
+		h.serveImageAttachment(w, r)
 		return
 	}
 	if r.URL.Path == "/voice/v1/readiness" {
@@ -649,8 +665,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			turn, _, startErr := h.startTurn(callID, completed.utteranceID, audioTurnFingerprint(completed), state, func(turn *cachedTurn) {
-				h.runAudioTurn(turn, completed, responsePacing, selectedOutputFormat(connectionAudioConfig))
+			turn, _, startErr := h.startTurn(callID, completed.utteranceID, audioTurnFingerprint(completed, frame.Attachments...), state, func(turn *cachedTurn) {
+				h.runAudioTurn(turn, completed, frame.Attachments, responsePacing, selectedOutputFormat(connectionAudioConfig))
 			})
 			if startErr != nil {
 				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, connectionAudioConfig, h.Updates, completed.utteranceID, "", voice.Message{}, startErr); err != nil {
@@ -666,8 +682,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		case "utterance":
 			utteranceID := strings.TrimSpace(frame.UtteranceID)
-			if utteranceID == "" || strings.TrimSpace(frame.Text) == "" {
-				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, connectionAudioConfig, h.Updates, utteranceID, "", voice.Message{}, errors.New("utterance requires an id and text")); err != nil {
+			if utteranceID == "" || (strings.TrimSpace(frame.Text) == "" && len(frame.Attachments) == 0) {
+				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, connectionAudioConfig, h.Updates, utteranceID, "", voice.Message{}, errors.New("utterance requires an id and text or an attachment")); err != nil {
 					return
 				}
 				continue
@@ -679,8 +695,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			turn, _, startErr := h.startTurn(callID, utteranceID, textTurnFingerprint(frame.Text), state, func(turn *cachedTurn) {
-				h.runTextTurn(turn, frame.Text, responsePacing, selectedOutputFormat(connectionAudioConfig))
+			turn, _, startErr := h.startTurn(callID, utteranceID, textTurnFingerprint(frame.Text, frame.Attachments...), state, func(turn *cachedTurn) {
+				h.runTextTurn(turn, frame.Text, frame.Attachments, responsePacing, selectedOutputFormat(connectionAudioConfig))
 			})
 			if startErr != nil {
 				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, connectionAudioConfig, h.Updates, utteranceID, frame.Text, voice.Message{}, startErr); err != nil {
@@ -700,6 +716,47 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func (h *Handler) serveImageAttachment(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	backend, ok := h.Backend.(imageAttachmentBackend)
+	if !ok {
+		http.Error(w, "image attachments are unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, imageUploadLimit+(1<<20))
+	if err := r.ParseMultipartForm(imageUploadLimit); err != nil {
+		http.Error(w, "parse image upload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	file, header, err := r.FormFile("image")
+	if err != nil {
+		http.Error(w, "image is required", http.StatusBadRequest)
+		return
+	}
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(io.LimitReader(file, imageUploadLimit+1))
+	if err != nil {
+		http.Error(w, "read image upload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(data) > imageUploadLimit {
+		http.Error(w, "image exceeds 25 MiB", http.StatusRequestEntityTooLarge)
+		return
+	}
+	draft, err := backend.ImportImageAttachment(data, header.Filename, header.Header.Get("Content-Type"), attachment.SourcePhoneImage)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(draft)
 }
 
 func (h *Handler) serveServerInfo(w http.ResponseWriter, r *http.Request) {
