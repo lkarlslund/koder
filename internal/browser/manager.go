@@ -46,6 +46,8 @@ const (
 	maxBinarySize       = 25 * 1024 * 1024
 	gracefulStopTimeout = 3 * time.Second
 	tabListTimeout      = 2 * time.Second
+	browserWindowWidth  = 1440
+	browserWindowHeight = 1000
 )
 
 type ownedTab struct {
@@ -197,6 +199,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath(executable),
 		chromedp.UserDataDir("/tmp/koder/profile"),
+		chromedp.WindowSize(browserWindowWidth, browserWindowHeight),
 		chromedp.Flag("headless", !m.cfg.Headed),
 		chromedp.Flag("no-first-run", true),
 		chromedp.Flag("no-default-browser-check", true),

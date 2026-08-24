@@ -109,6 +109,20 @@ func TestChromiumIntegration(t *testing.T) {
 	if err != nil || visibility != `"visible"` {
 		t.Fatalf("new tab is not active: %s, %v", visibility, err)
 	}
+	windowSize, err := m.Evaluate(t.Context(), chat, `({width: window.outerWidth, height: window.outerHeight})`)
+	if err != nil {
+		t.Fatalf("read browser window size: %v", err)
+	}
+	var gotWindowSize struct {
+		Width  int `json:"width"`
+		Height int `json:"height"`
+	}
+	if err := json.Unmarshal([]byte(windowSize), &gotWindowSize); err != nil {
+		t.Fatalf("decode browser window size: %v", err)
+	}
+	if gotWindowSize.Width != browserWindowWidth || gotWindowSize.Height != browserWindowHeight {
+		t.Fatalf("browser window = %dx%d, want %dx%d", gotWindowSize.Width, gotWindowSize.Height, browserWindowWidth, browserWindowHeight)
+	}
 	snapshot, err := m.Snapshot(t.Context(), chat, "Run", 4, 32*1024)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
@@ -342,6 +356,13 @@ func TestChromiumIntegration(t *testing.T) {
 	shot, err := m.Screenshot(t.Context(), chat, browserapi.Locator{}, false, "png", 90)
 	if err != nil || len(shot.Data) < 100 || shot.MIME != "image/png" || !bytes.HasPrefix(shot.Data, []byte("\x89PNG\r\n\x1a\n")) {
 		t.Fatalf("unexpected screenshot: %d bytes %s, %v", len(shot.Data), shot.MIME, err)
+	}
+	shotImage, err := png.Decode(bytes.NewReader(shot.Data))
+	if err != nil {
+		t.Fatalf("decode screenshot: %v", err)
+	}
+	if got := shotImage.Bounds().Size(); got.X != browserWindowWidth || got.Y < browserWindowHeight*4/5 {
+		t.Fatalf("screenshot viewport = %dx%d, want width %d and height at least %d", got.X, got.Y, browserWindowWidth, browserWindowHeight*4/5)
 	}
 	jpegShot, err := m.Screenshot(t.Context(), chat, browserapi.Locator{}, false, "jpeg", 80)
 	if err != nil || len(jpegShot.Data) < 100 || jpegShot.MIME != "image/jpeg" || !bytes.HasPrefix(jpegShot.Data, []byte("\xff\xd8\xff")) {
