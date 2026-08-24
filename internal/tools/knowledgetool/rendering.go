@@ -26,6 +26,10 @@ func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, str
 
 func knowledgeActionTitle(action string) string {
 	switch strings.TrimSpace(action) {
+	case "recall":
+		return "Recall knowledge"
+	case "remember":
+		return "Remember knowledge"
 	case "search":
 		return "Search knowledge"
 	case "get":
@@ -84,12 +88,21 @@ func knowledgeActionTitle(action string) string {
 func knowledgeResultSummary(req tools.Request, stored any) string {
 	action := strings.TrimSpace(req.Args["action"])
 	switch action {
-	case "search":
+	case "recall", "search":
 		value, ok := decodeKnowledgeResult[knowledgeService.LexicalSearchResult](stored)
 		if !ok {
 			break
 		}
 		return countSummary("Found", len(value.Matches), "knowledge result")
+	case "remember":
+		value, ok := decodeKnowledgeResult[rememberResult](stored)
+		if !ok {
+			break
+		}
+		if value.Duplicate {
+			return titledSummary("Already remembered", value.Entry.Title)
+		}
+		return titledSummary("Remembered", value.Entry.Title)
 	case "get", "chunk_get":
 		value, ok := decodeKnowledgeResult[recordResult](stored)
 		if !ok {

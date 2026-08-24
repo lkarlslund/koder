@@ -3,48 +3,17 @@
   "tool": "knowledge",
   "cases": [
     {
-      "name": "search with native JSON scalars",
-      "call_id": "knowledge-interop-search",
+      "name": "recall durable memory",
+      "call_id": "knowledge-interop-recall",
       "arguments": {
-        "action": "search",
-        "query": "linux partition tools",
-        "limit": 5,
-        "include_invalid": false,
-        "expand_graph": true
+        "action": "recall",
+        "query": "linux partition tools"
       },
       "normalized": {
-        "action": "search",
-        "query": "linux partition tools",
-        "limit": "5",
-        "include_invalid": "false",
-        "expand_graph": "true"
+        "action": "recall",
+        "query": "linux partition tools"
       },
       "result_array": "matches",
-      "result_count": 0
-    },
-    {
-      "name": "list chunks with native JSON arrays",
-      "call_id": "knowledge-interop-chunks",
-      "arguments": {
-        "action": "chunk_list",
-        "kinds": [
-          "reference"
-        ],
-        "states": [
-          "active"
-        ],
-        "descending": true,
-        "limit": 10
-      },
-      "normalized": {
-        "action": "chunk_list",
-        "kinds": "[\"reference\"]",
-        "states": "[\"active\"]",
-        "sort": "updated_at",
-        "descending": "true",
-        "limit": "10"
-      },
-      "result_array": "chunks",
       "result_count": 0
     }
   ]

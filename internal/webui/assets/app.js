@@ -822,6 +822,7 @@
     }
     function knowledgeActionLabel(action) {
       const labels = {
+        recall: 'Recall knowledge', remember: 'Remember knowledge',
         search: 'Search knowledge', get: 'Get knowledge', neighbors: 'Explore knowledge links',
         chunk_list: 'List knowledge chunks', chunk_get: 'Get knowledge chunk', chunk_create: 'Create knowledge chunk',
         chunk_update: 'Update knowledge chunk', chunk_archive: 'Archive knowledge chunk', chunk_restore: 'Restore knowledge chunk', chunk_delete: 'Delete knowledge chunk',
@@ -854,7 +855,7 @@
       const add = (kind, id, title, detail = '') => {
         if (id) values.push({kind: String(kind || ''), id: String(id), title: String(title || ''), detail: String(detail || '')});
       };
-      if (action === 'search') {
+      if (action === 'search' || action === 'recall') {
         const matches = firstValue(data, ['matches', 'Matches']);
         (Array.isArray(matches) ? matches : []).forEach(match => {
           const document = firstValue(match, ['document', 'Document']) || {};
@@ -890,7 +891,7 @@
       const objects = knowledgeResultObjects(action, data, args);
       const visible = objects.slice(0, 6);
       const query = firstValue(args, ['query']);
-      const explorerHref = knowledgeExplorerHref('', '', action === 'search' ? query : '');
+      const explorerHref = knowledgeExplorerHref('', '', (action === 'search' || action === 'recall') ? query : '');
       const rows = visible.map(item => knowledgeObjectRow(item.kind, item.id, item.title, item.detail)).join('');
       const omitted = objects.length > visible.length ? '<div class="tool-result-omitted">' + escapeHTML(String(objects.length - visible.length) + ' more results') + '</div>' : '';
       const empty = !rows ? '<div class="tool-result-body text-secondary">' + escapeHTML(fallbackText || 'No matching knowledge objects') + '</div>' : '';

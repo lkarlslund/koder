@@ -314,14 +314,15 @@
         <div class="knowledge-editor-fields">
           <label class="is-wide"><span>Title</span><input name="title" maxlength="240" required></label>
           <label class="is-wide"><span>Description</span><textarea name="description" maxlength="8000" rows="4"></textarea></label>
-          <label><span>Type</span><select name="kind" required><option value="reference">Reference</option><option value="personal">Personal</option><option value="project">Project</option><option value="environment">Environment</option></select></label>
-          <label><span>Visibility</span><select name="visibility" required><option value="private">Private</option><option value="installation">Installation</option><option value="shared">Shared</option><option value="public">Public</option></select></label>
-          <label><span>Scope</span><select name="scope_kind" required><option value="global">Global</option><option value="personal">Personal</option><option value="project">Project</option><option value="session">Session</option><option value="environment">Environment</option></select></label>
-          <label><span>Scope selector</span><input name="scope_selector" maxlength="240" placeholder="Required except for global"></label>
-          <label class="is-wide"><span>Tags</span><input name="tags" maxlength="1000" placeholder="Comma-separated"></label>
           <details class="is-wide">
-            <summary>Advanced metadata</summary>
+            <summary>Advanced settings</summary>
             <div class="knowledge-editor-fields">
+              <p class="knowledge-dialog-explanation is-wide">New chunks default to private, general knowledge. Change these only when the knowledge has a specific audience or context.</p>
+              <label><span>Type</span><select name="kind" required><option value="reference">Reference</option><option value="personal">Personal</option><option value="project">Project</option><option value="environment">Environment</option></select></label>
+              <label><span>Visibility</span><select name="visibility" required><option value="private">Private</option><option value="installation">Installation</option><option value="shared">Shared</option><option value="public">Public</option></select></label>
+              <label><span>Scope</span><select name="scope_kind" required><option value="global">Global</option><option value="personal">Personal</option><option value="project">Project</option><option value="session">Session</option><option value="environment">Environment</option></select></label>
+              <label><span>Scope selector</span><input name="scope_selector" maxlength="240" placeholder="Required except for global"></label>
+              <label class="is-wide"><span>Tags</span><input name="tags" maxlength="1000" placeholder="Comma-separated"></label>
               <label class="is-wide"><span>Aliases</span><input name="aliases" maxlength="2000" placeholder="Comma-separated"></label>
               <label><span>Language</span><input name="language" maxlength="35" placeholder="en"></label>
               <label><span>Locale</span><input name="locale" maxlength="35" placeholder="en-DK"></label>
@@ -335,9 +336,9 @@
               <label><span>License</span><input name="license" maxlength="240"></label>
               <label><span>Minimum Koder version</span><input name="min_koder_version" maxlength="80"></label>
               <label class="is-wide"><span>Source policy</span><textarea name="source_policy" maxlength="4000" rows="3"></textarea></label>
+              <label class="knowledge-review-checkbox is-wide"><input name="review_approved" type="checkbox"><span>I reviewed any sensitive content before saving.</span></label>
             </div>
           </details>
-          <label class="knowledge-review-checkbox is-wide"><input name="review_approved" type="checkbox"><span>I reviewed any sensitive content before saving.</span></label>
         </div>
         <section class="knowledge-editor-conflict" data-knowledge-chunk-conflict role="alert" hidden>
           <header><i class="bi bi-intersect" aria-hidden="true"></i><div><strong>This chunk changed while you were editing</strong><span data-knowledge-chunk-conflict-revision></span></div></header>
@@ -358,19 +359,20 @@
         </header>
         <div class="knowledge-editor-fields">
           <label class="is-wide"><span>Chunk</span><input name="chunk_id" readonly required></label>
-          <section class="knowledge-personal-editor-note is-wide" data-knowledge-personal-editor-note hidden><i class="bi bi-person-lock" aria-hidden="true"></i><div><strong>About me is private personal knowledge</strong><span>Its scope stays locked to you. Say whether you told Koder, Koder observed it through an authorized tool, or it is an unconfirmed inference.</span></div></section>
+          <section class="knowledge-personal-editor-note is-wide" data-knowledge-personal-editor-note hidden><i class="bi bi-person-lock" aria-hidden="true"></i><div><strong>About me is private personal knowledge</strong><span>Its scope stays locked to you. Directly stated information is the default; other origins are available under Advanced settings.</span></div></section>
           <label class="is-wide"><span>Title</span><input name="title" maxlength="240" required></label>
-          <label><span>Type</span><select name="kind" required><option value="fact">Fact</option><option value="procedure">Procedure</option><option value="concept">Concept</option><option value="warning">Warning</option><option value="preference">Preference</option><option value="decision">Decision</option><option value="reference">Reference</option></select></label>
-          <label><span>Confidence</span><input name="confidence" type="number" min="0" max="1" step="0.01" placeholder="0–1"></label>
           <label class="is-wide"><span>Summary</span><textarea name="summary" maxlength="4000" rows="2"></textarea></label>
           <label class="is-wide"><span>Body (Markdown)</span><textarea name="body" maxlength="64000" rows="9"></textarea></label>
-          <label><span>Scope</span><select name="scope_kind" required><option value="global">Global</option><option value="personal">Personal</option><option value="project">Project</option><option value="session">Session</option><option value="environment">Environment</option></select></label>
-          <label><span>Scope selector</span><input name="scope_selector" maxlength="240" placeholder="Required except for global"></label>
-          <label class="is-wide" data-knowledge-personal-origin-field hidden><span>How Koder learned this</span><select name="personal_origin"><option value="explicit">You told Koder directly</option><option value="observed">Observed through an authorized tool</option><option value="inferred">Inferred — keep unconfirmed</option></select><small data-knowledge-personal-origin-help></small></label>
-          <label class="is-wide"><span>Tags</span><input name="tags" maxlength="1000" placeholder="Comma-separated"></label>
           <details class="is-wide">
-            <summary>Applicability and lifecycle</summary>
+            <summary>Advanced settings</summary>
             <div class="knowledge-editor-fields">
+              <p class="knowledge-dialog-explanation is-wide">Entries inherit a safe scope from their chunk and default to a fact. Change these only when needed.</p>
+              <label><span>Type</span><select name="kind" required><option value="fact">Fact</option><option value="procedure">Procedure</option><option value="concept">Concept</option><option value="warning">Warning</option><option value="preference">Preference</option><option value="decision">Decision</option><option value="reference">Reference</option></select></label>
+              <label><span>Confidence</span><input name="confidence" type="number" min="0" max="1" step="0.01" placeholder="0–1"></label>
+              <label><span>Scope</span><select name="scope_kind" required><option value="global">Global</option><option value="personal">Personal</option><option value="project">Project</option><option value="session">Session</option><option value="environment">Environment</option></select></label>
+              <label><span>Scope selector</span><input name="scope_selector" maxlength="240" placeholder="Required except for global"></label>
+              <label class="is-wide" data-knowledge-personal-origin-field hidden><span>How Koder learned this</span><select name="personal_origin"><option value="explicit">You told Koder directly</option><option value="observed">Observed through an authorized tool</option><option value="inferred">Inferred — keep unconfirmed</option></select><small data-knowledge-personal-origin-help></small></label>
+              <label class="is-wide"><span>Tags</span><input name="tags" maxlength="1000" placeholder="Comma-separated"></label>
               <label class="is-wide"><span>Aliases</span><input name="aliases" maxlength="2000" placeholder="Comma-separated"></label>
               <label class="is-wide"><span>Operating systems</span><input name="operating_systems" maxlength="2000" placeholder="Linux, Android"></label>
               <label class="is-wide"><span>Architectures</span><input name="architectures" maxlength="1000" placeholder="amd64, arm64"></label>
@@ -383,9 +385,9 @@
               <label><span>Observed at</span><input name="observed_at" type="datetime-local"></label>
               <label><span>Review after</span><input name="review_after" type="datetime-local"></label>
               <label class="is-wide"><span>Evidence IDs</span><input name="evidence_ids" maxlength="4000" placeholder="Comma-separated IDs"></label>
+              <label class="knowledge-review-checkbox is-wide"><input name="review_approved" type="checkbox"><span>I reviewed any sensitive content before saving.</span></label>
             </div>
           </details>
-          <label class="knowledge-review-checkbox is-wide"><input name="review_approved" type="checkbox"><span>I reviewed any sensitive content before saving.</span></label>
         </div>
         <section class="knowledge-editor-conflict" data-knowledge-entry-conflict role="alert" hidden>
           <header><i class="bi bi-intersect" aria-hidden="true"></i><div><strong>This entry changed while you were editing</strong><span data-knowledge-entry-conflict-revision></span></div></header>

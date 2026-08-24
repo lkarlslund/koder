@@ -161,3 +161,24 @@ func TestModelExtractorAllowsValidatedEmptyCandidateSet(t *testing.T) {
 		t.Fatalf("Extract(empty) = %#v, %v stored=%d", result, err, stored)
 	}
 }
+
+func TestDecodeCandidateDraftsAcceptsCommonModelWrappers(t *testing.T) {
+	t.Parallel()
+	raw := string(validDraftResponse())
+	for _, test := range []struct {
+		name string
+		raw  string
+	}{
+		{name: "direct", raw: raw},
+		{name: "markdown fence", raw: "```json\n" + raw + "\n```"},
+		{name: "thinking block", raw: "<think>I should preserve only the established result.</think>\n" + raw},
+		{name: "brief prose", raw: "Here is the structured response:\n" + raw},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			drafts, err := decodeCandidateDrafts([]byte(test.raw))
+			if err != nil || len(drafts) != 1 || drafts[0].Entry.Title == "" {
+				t.Fatalf("decodeCandidateDrafts() = %#v, %v", drafts, err)
+			}
+		})
+	}
+}

@@ -43,7 +43,7 @@ func TestKnowledgeToolRegisteredAsSingleBuiltin(t *testing.T) {
 	}
 }
 
-func TestKnowledgeToolDefinitionRequiresServiceAndOffersReadActions(t *testing.T) {
+func TestKnowledgeToolDefinitionRequiresServiceAndOffersSimpleMemoryActions(t *testing.T) {
 	if _, enabled := tools.DefinitionFor(tools.Knowledge, tools.Runtime{}); enabled {
 		t.Fatal("knowledge must not be offered without its runtime service")
 	}
@@ -59,12 +59,12 @@ func TestKnowledgeToolDefinitionRequiresServiceAndOffersReadActions(t *testing.T
 	if err := json.Unmarshal(definition.Function.Parameters, &schema); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(schema.Properties["action"].Enum, ","); got != "search,get,neighbors,chunk_list,chunk_get,chunk_create,chunk_update,chunk_archive,chunk_restore,chunk_delete,entry_create,entry_update,entry_supersede,entry_archive,entry_restore,entry_delete,link,unlink,verify,history" {
+	if got := strings.Join(schema.Properties["action"].Enum, ","); got != "recall,remember" {
 		t.Fatalf("knowledge actions = %q", got)
 	}
 	for _, guidance := range []string{
-		"Durable learning:", "Contradictions and corrections:", "Verification:",
-		"High-risk knowledge:", "Personal knowledge:", "Secrets: never persist",
+		"Recall before repeating research", "Remember only an established reusable result",
+		"Never persist passwords",
 	} {
 		if !strings.Contains(definition.Function.Description, guidance) {
 			t.Fatalf("Knowledge definition is missing %q guidance: %s", guidance, definition.Function.Description)
@@ -79,6 +79,78 @@ func TestKnowledgeToolRequiresRuntimeService(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "knowledge service is not configured") {
 		t.Fatalf("Call() error = %v, want missing service", err)
+	}
+}
+
+func TestKnowledgeRememberAndRecallInferProjectDefaults(t *testing.T) {
+	service := newService(t)
+	runtime := runtimeFor(service)
+	runtime.Workdir = "/work/koder"
+
+	stored, err := call(context.Background(), runtime, map[string]string{
+		"action": "remember", "content": "Use sfdisk when fdisk is unavailable in this project.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	remembered, ok := stored.Stored.(rememberResult)
+	if !ok || !remembered.Created || remembered.Entry.Title == "" {
+		t.Fatalf("remember result = %#v", stored.Stored)
+	}
+	if remembered.Entry.Kind != knowledge.EntryKindFact || remembered.Entry.Scope != (knowledge.Scope{Kind: knowledge.ScopeKindProject, Selector: "/work/koder"}) {
+		t.Fatalf("inferred entry metadata = %#v", remembered.Entry)
+	}
+
+	recalled, err := call(context.Background(), runtime, map[string]string{"action": "recall", "query": "sfdisk"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches, ok := recalled.Stored.(knowledgeService.LexicalSearchResult)
+	if !ok || len(matches.Matches) != 1 || matches.Matches[0].EntryID != remembered.Entry.ID {
+		t.Fatalf("recall result = %#v", recalled.Stored)
+	}
+
+	again, err := call(context.Background(), runtime, map[string]string{
+		"action": "remember", "content": "Use sfdisk when fdisk is unavailable in this project.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate := again.Stored.(rememberResult)
+	if !duplicate.Duplicate || duplicate.Created || duplicate.Entry.ID != remembered.Entry.ID {
+		t.Fatalf("duplicate remember result = %#v", duplicate)
+	}
+}
+
+func TestKnowledgeRememberPersonalUsesPrivatePersonalChunk(t *testing.T) {
+	service := newService(t)
+	runtime := runtimeFor(service)
+	runtime.Workdir = "/work/koder"
+
+	stored, err := call(context.Background(), runtime, map[string]string{
+		"action": "remember", "content": "The user prefers concise status updates.", "personal": "true",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	remembered := stored.Stored.(rememberResult)
+	if remembered.Entry.ChunkID != knowledgeService.PersonalMeChunkID ||
+		remembered.Entry.Scope != (knowledge.Scope{Kind: knowledge.ScopeKindPersonal, Selector: "me"}) ||
+		remembered.Entry.PersonalOrigin != knowledge.PersonalOriginExplicit {
+		t.Fatalf("personal memory = %#v", remembered.Entry)
+	}
+}
+
+func TestKnowledgeMemoryNormalizationRequiresOnlyCommonFields(t *testing.T) {
+	remember, err := normalizeRememberArgs(map[string]string{"action": "remember", "content": "  durable result  "})
+	if err != nil || remember["content"] != "durable result" || len(remember) != 2 {
+		t.Fatalf("normalize remember = %#v, %v", remember, err)
+	}
+	if _, err := normalizeRecallArgs(map[string]string{"action": "recall"}); err == nil {
+		t.Fatal("recall accepted an empty query")
+	}
+	if _, err := normalizeRememberArgs(map[string]string{"action": "remember", "content": "x", "personal": "sometimes"}); err == nil {
+		t.Fatal("remember accepted an invalid personal flag")
 	}
 }
 
@@ -104,8 +176,8 @@ func TestKnowledgePackageToolActionsRequirePersistentWorkspaceAndRoundTrip(t *te
 	runtime.Workdir = workdir
 
 	definition, enabled := tools.DefinitionFor(tools.Knowledge, runtime)
-	if !enabled || !strings.Contains(string(definition.Function.Parameters), `"package_preview"`) || !strings.Contains(definition.Function.Description, "Packages:") {
-		t.Fatalf("persistent Knowledge definition lacks package actions: enabled=%v definition=%#v", enabled, definition)
+	if !enabled || strings.Contains(string(definition.Function.Parameters), `"package_preview"`) {
+		t.Fatalf("persistent Knowledge definition should keep package management internal: enabled=%v definition=%#v", enabled, definition)
 	}
 	previewResult, err := call(context.Background(), runtime, map[string]string{"action": "package_preview", "path": "incoming.kknowledge"})
 	if err != nil {
@@ -189,7 +261,7 @@ func TestKnowledgeToolDefinitionFiltersActionsAndScopesFromPolicy(t *testing.T) 
 				t.Fatalf("policy actor = %#v, want chat", actor)
 			}
 			return knowledgeService.ToolOffer{
-				Actions: []string{"get", "history"}, ScopeKinds: []knowledge.ScopeKind{knowledge.ScopeKindProject},
+				Actions: []string{"search"}, ScopeKinds: []knowledge.ScopeKind{knowledge.ScopeKindProject},
 			}, nil
 		}),
 	})
@@ -206,30 +278,25 @@ func TestKnowledgeToolDefinitionFiltersActionsAndScopesFromPolicy(t *testing.T) 
 	}
 	properties := schema["properties"].(map[string]any)
 	actions := properties["action"].(map[string]any)["enum"].([]any)
-	if got := strings.Join(anyStrings(actions), ","); got != "get,history" {
+	if got := strings.Join(anyStrings(actions), ","); got != "recall" {
 		t.Fatalf("filtered actions = %q", got)
 	}
-	scopeKinds := properties["scope_kinds"].(map[string]any)["items"].(map[string]any)["enum"].([]any)
-	chunkScopeKinds := properties["chunk"].(map[string]any)["properties"].(map[string]any)["scope"].(map[string]any)["properties"].(map[string]any)["kind"].(map[string]any)["enum"].([]any)
-	entryScopeKinds := properties["entry"].(map[string]any)["properties"].(map[string]any)["scope"].(map[string]any)["properties"].(map[string]any)["kind"].(map[string]any)["enum"].([]any)
-	for name, values := range map[string][]any{"scope filter": scopeKinds, "chunk scope": chunkScopeKinds, "entry scope": entryScopeKinds} {
-		if got := strings.Join(anyStrings(values), ","); got != "project" {
-			t.Fatalf("%s enum = %q", name, got)
-		}
+	if _, exposed := properties["scope"]; exposed {
+		t.Fatal("model-facing memory schema exposed storage scope metadata")
 	}
-	if !strings.Contains(definition.Function.Description, "actions: get, history") || !strings.Contains(definition.Function.Description, "scopes: project") {
+	if !strings.Contains(definition.Function.Description, "actions: recall") || !strings.Contains(definition.Function.Description, "scopes: project") {
 		t.Fatalf("runtime policy description = %q", definition.Function.Description)
 	}
-	if !strings.Contains(definition.Function.Description, "Retrieval:") || !strings.Contains(definition.Function.Description, "Secrets: never persist") {
+	if !strings.Contains(definition.Function.Description, "Recall before repeating research") {
 		t.Fatalf("read-only guidance = %q", definition.Function.Description)
 	}
-	for _, withheld := range []string{"Durable learning:", "High-risk knowledge:", "Personal knowledge:"} {
+	for _, withheld := range []string{"Remember only", "Never persist passwords"} {
 		if strings.Contains(definition.Function.Description, withheld) {
 			t.Fatalf("read-only offer included write guidance %q: %s", withheld, definition.Function.Description)
 		}
 	}
 
-	_, err = call(context.Background(), runtimeFor(service), map[string]string{"action": "search", "query": "linux"})
+	_, err = call(context.Background(), runtimeFor(service), map[string]string{"action": "remember", "content": "Use Linux."})
 	var forbidden *knowledgeService.ServiceError
 	if !errors.As(err, &forbidden) || forbidden.Code != knowledgeService.ErrorCodeForbidden {
 		t.Fatalf("withheld action error = %T %v", err, err)

@@ -36,101 +36,11 @@ const (
 	parameters = `{
   "type":"object",
   "properties":{
-    "action":{"type":"string","enum":["search","get","neighbors","chunk_list","chunk_get","chunk_create","chunk_update","chunk_archive","chunk_restore","chunk_delete","entry_create","entry_update","entry_supersede","entry_archive","entry_restore","entry_delete","link","unlink","verify","history","package_preview","package_stage","package_activate","package_discard","package_export"]},
-    "query":{"type":"string","description":"Natural-language terms to find in durable knowledge"},
-    "object_kind":{"type":"string","enum":["chunk","entry","link"],"description":"Kind of object addressed by id"},
-    "id":{"type":"string","description":"Knowledge UUID returned by a prior action"},
-	"path":{"type":"string","description":"Workspace package path to read for preview/stage or create for export"},
-	"stage_id":{"type":"string","description":"Actor-owned package stage ID returned by package_stage"},
-	"conflict_policy":{"type":"string","enum":["replace","merge","keep_both"],"description":"Explicit package-wide resolution when preview reports conflicts"},
-    "chunk_id":{"type":"string","description":"Owning chunk UUID for a new entry"},
-    "replacement_entry_id":{"type":"string","description":"Existing active entry that replaces the superseded entry"},
-    "chunk_ids":{"type":"array","maxItems":25,"items":{"type":"string"},"description":"Optional chunks to search"},
-    "include_invalid":{"type":"boolean","description":"Include entries outside their validity window"},
-    "include_superseded":{"type":"boolean","description":"Include superseded claims"},
-    "expand_graph":{"type":"boolean","description":"Expand search by one bounded relationship hop"},
-    "direction":{"type":"string","enum":["incoming","outgoing","both"],"description":"Neighbor direction; defaults to both"},
-    "link_kinds":{"type":"array","maxItems":10,"items":{"type":"string","enum":["related_to","part_of","requires","alternative_to","applies_to","supersedes","contradicts","caused_by","supported_by","derived_from"]}},
-    "kinds":{"type":"array","maxItems":5,"items":{"type":"string","enum":["reference","personal","project","environment"]}},
-    "states":{"type":"array","maxItems":3,"items":{"type":"string","enum":["draft","active","archived"]}},
-    "scope_kinds":{"type":"array","maxItems":5,"items":{"type":"string","enum":["global","personal","project","session","environment"]}},
-    "tags":{"type":"array","maxItems":25,"items":{"type":"string"}},
-    "locale":{"type":"string"},
-    "sort":{"type":"string","enum":["title","created_at","updated_at","last_used_at"]},
-    "descending":{"type":"boolean"},
-    "limit":{"type":"integer","minimum":1,"maximum":200},
-    "cursor":{"type":"string","description":"Opaque continuation cursor from the previous matching action"},
-    "expected_revision":{"type":"integer","minimum":1,"description":"Current revision number from get/list"},
-    "reason":{"type":"string","description":"Why this revision or lifecycle change is being made"},
-	"review_approved":{"type":"boolean","description":"Explicitly approve a classifier review outcome after inspecting it"},
-	"include_personal":{"type":"boolean","description":"Include private personal knowledge in package export; set true only after the user explicitly requests that export in the current conversation"},
-    "confirmed":{"type":"boolean","description":"Required true for permanent deletion"},
-    "cascade":{"type":"boolean","description":"Permanently delete dependent entries, links, and owned evidence atomically"},
-    "chunk":{
-      "type":"object",
-      "properties":{
-        "title":{"type":"string"},"description":{"type":"string"},
-        "aliases":{"type":"array","maxItems":100,"items":{"type":"string"}},
-        "tags":{"type":"array","maxItems":100,"items":{"type":"string"}},
-        "kind":{"type":"string","enum":["reference","personal","project","environment"]},
-        "scope":{"type":"object","properties":{"kind":{"type":"string","enum":["global","personal","project","session","environment"]},"selector":{"type":"string"}},"required":["kind"],"additionalProperties":false},
-        "visibility":{"type":"string","enum":["private","installation","shared","public"]},
-        "shared_with":{"type":"array","maxItems":100,"items":{"type":"object","properties":{"kind":{"type":"string"},"id":{"type":"string"}},"required":["kind","id"],"additionalProperties":false}},
-        "language":{"type":"string"},"locale":{"type":"string"},"domain":{"type":"string"},
-        "risk":{"type":"array","maxItems":6,"items":{"type":"string","enum":["personal_sensitive","medical","legal","financial","physical_safety","security_sensitive"]}},
-        "publisher":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"}},"additionalProperties":false},
-        "license":{"type":"string"},"source_policy":{"type":"string"},
-        "dependency_ids":{"type":"array","maxItems":100,"items":{"type":"string"}},
-        "min_koder_version":{"type":"string"},"review_after":{"type":"string","format":"date-time"}
-      },
-      "additionalProperties":false
-    },
-    "entry":{
-      "type":"object",
-      "properties":{
-        "kind":{"type":"string","enum":["fact","procedure","concept","warning","preference","decision","reference"]},
-        "title":{"type":"string"},"summary":{"type":"string"},"body":{"type":"string"},
-        "aliases":{"type":"array","maxItems":100,"items":{"type":"string"}},
-        "tags":{"type":"array","maxItems":100,"items":{"type":"string"}},
-        "scope":{"type":"object","properties":{"kind":{"type":"string","enum":["global","personal","project","session","environment"]},"selector":{"type":"string"}},"required":["kind"],"additionalProperties":false},
-        "applicability":{"type":"object","properties":{
-          "operating_systems":{"type":"array","maxItems":50,"items":{"type":"string"}},
-          "architectures":{"type":"array","maxItems":50,"items":{"type":"string"}},
-          "software":{"type":"array","maxItems":50,"items":{"type":"object","properties":{"name":{"type":"string"},"version_range":{"type":"string"}},"required":["name"],"additionalProperties":false}},
-          "locales":{"type":"array","maxItems":50,"items":{"type":"string"}},
-          "conditions":{"type":"array","maxItems":100,"items":{"type":"string"}}
-        },"additionalProperties":false},
-        "risk":{"type":"array","maxItems":6,"items":{"type":"string","enum":["personal_sensitive","medical","legal","financial","physical_safety","security_sensitive"]}},
-        "confidence":{"type":"number","minimum":0,"maximum":1},
-        "valid_from":{"type":"string","format":"date-time"},"valid_until":{"type":"string","format":"date-time"},
-        "observed_at":{"type":"string","format":"date-time"},"review_after":{"type":"string","format":"date-time"},
-        "evidence_ids":{"type":"array","maxItems":100,"items":{"type":"string"}},
-        "personal_origin":{"type":"string","enum":["explicit","observed","inferred"]}
-      },
-      "additionalProperties":false
-    },
-    "verification":{
-      "type":"object",
-      "properties":{
-        "status":{"type":"string","enum":["unverified","partially_verified","verified","disputed"]},
-        "method":{"type":"string"},
-        "evidence_ids":{"type":"array","maxItems":100,"items":{"type":"string"}}
-      },
-      "required":["status"],
-      "additionalProperties":false
-    },
-    "relationship":{
-      "type":"object",
-      "properties":{
-        "source":{"type":"object","properties":{"kind":{"type":"string","enum":["chunk","entry"]},"id":{"type":"string"}},"required":["kind","id"],"additionalProperties":false},
-        "target":{"type":"object","properties":{"kind":{"type":"string","enum":["chunk","entry"]},"id":{"type":"string"}},"required":["kind","id"],"additionalProperties":false},
-        "kind":{"type":"string","enum":["related_to","part_of","requires","alternative_to","applies_to","supersedes","contradicts","caused_by","supported_by","derived_from"]},
-        "label":{"type":"string"},"notes":{"type":"string"},
-        "evidence_ids":{"type":"array","maxItems":100,"items":{"type":"string"}}
-      },
-      "required":["source","target","kind"],
-      "additionalProperties":false
-    }
+    "action":{"type":"string","enum":["recall","remember"]},
+    "query":{"type":"string","description":"Natural-language terms to recall from durable memory"},
+    "title":{"type":"string","description":"Short title for one durable memory"},
+    "content":{"type":"string","description":"Concise, self-contained fact, preference, decision, warning, or procedure to remember"},
+    "personal":{"type":"boolean","description":"Set true only when the memory is about the user, such as their stated preference"}
   },
   "required":["action"],
   "additionalProperties":false
@@ -149,8 +59,8 @@ func RuntimeService(service *knowledgeService.Service) map[string]any {
 func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Knowledge",
-		Description: "Search, inspect, and maintain Koder's durable, linked knowledge.",
-		Usage:       "Choose only fields used by the selected action. Search returns compact summaries and IDs; use get for the full current body, neighbors for linked context, and history for compact revision summaries. Mutations require the current expected_revision where shown. Archive and unlink are reversible. Permanent deletion requires archive plus confirmed=true; chunk cascade deletion may remove dependent graph data.",
+		Description: "Recall or save Koder's durable memory across chats.",
+		Usage:       "Use recall with a query when prior durable memory may help. Use remember with content for one established reusable conclusion or an explicit request to remember; title is optional. Set personal=true only for a direct fact or preference about the user. Koder infers all storage metadata. Never store routine progress, guesses, transcript copies, passwords, tokens, keys, cookies, recovery codes, or other credentials.",
 		Parameters:  parameters,
 		ExposeToLLM: true,
 	})
@@ -173,8 +83,12 @@ func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSp
 			return tools.ToolSpec{}, false
 		}
 	}
-	offer, err := service.FilterToolOffer(ctx, candidateToolOffer(runtime))
-	if err != nil || len(offer.Actions) == 0 || len(offer.ScopeKinds) == 0 {
+	underlying, err := service.FilterToolOffer(ctx, candidateToolOffer(runtime))
+	if err != nil || len(underlying.ScopeKinds) == 0 {
+		return tools.ToolSpec{}, false
+	}
+	offer := modelToolOffer(underlying)
+	if len(offer.Actions) == 0 {
 		return tools.ToolSpec{}, false
 	}
 	spec.Parameters, err = filterToolSchema(spec.Parameters, offer)
@@ -194,6 +108,13 @@ func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSp
 func (tool) Preview(req tools.Request) string {
 	action := strings.TrimSpace(req.Args["action"])
 	switch action {
+	case "recall":
+		return "Recall knowledge about " + strings.TrimSpace(req.Args["query"])
+	case "remember":
+		if title := strings.TrimSpace(req.Args["title"]); title != "" {
+			return "Remember " + title
+		}
+		return "Remember durable knowledge"
 	case "search":
 		return "Search knowledge for " + strings.TrimSpace(req.Args["query"])
 	case "get", "neighbors":
@@ -236,6 +157,10 @@ func (tool) Preview(req tools.Request) string {
 
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	switch action := strings.TrimSpace(args["action"]); action {
+	case "recall":
+		return normalizeRecallArgs(args)
+	case "remember":
+		return normalizeRememberArgs(args)
 	case "search":
 		return normalizeSearchArgs(args)
 	case "get":
@@ -303,14 +228,36 @@ func (tool) Call(ctx context.Context, options tools.Options) (tools.Result, erro
 	if err != nil {
 		return tools.Result{}, knowledgeService.ClassifyError(err)
 	}
-	if len(offer.ScopeKinds) == 0 || !slices.Contains(offer.Actions, options.Request.Args["action"]) {
-		return tools.Result{}, knowledgeService.ClassifyError(fmt.Errorf("%w: action %s", knowledgeService.ErrToolOfferDenied, options.Request.Args["action"]))
+	requestedAction := options.Request.Args["action"]
+	policyAction := requestedAction
+	switch requestedAction {
+	case "recall":
+		policyAction = "search"
+	case "remember":
+		policyAction = "entry_create"
 	}
-	if err := authorizeToolScopes(ctx, service, offer, options.Request.Args); err != nil {
-		return tools.Result{}, knowledgeService.ClassifyError(err)
+	if len(offer.ScopeKinds) == 0 || !slices.Contains(offer.Actions, policyAction) {
+		return tools.Result{}, knowledgeService.ClassifyError(fmt.Errorf("%w: action %s", knowledgeService.ErrToolOfferDenied, requestedAction))
+	}
+	if requestedAction == "remember" {
+		scope, scopeErr := memoryScope(options.Runtime, options.Request.Args)
+		if scopeErr != nil {
+			return tools.Result{}, scopeErr
+		}
+		if err := requireAllowedScope(offer, scope); err != nil {
+			return tools.Result{}, knowledgeService.ClassifyError(err)
+		}
+	} else if requestedAction != "recall" {
+		if err := authorizeToolScopes(ctx, service, offer, options.Request.Args); err != nil {
+			return tools.Result{}, knowledgeService.ClassifyError(err)
+		}
 	}
 	var value any
-	switch options.Request.Args["action"] {
+	switch requestedAction {
+	case "recall":
+		value, err = callRecall(ctx, service, offer, options.Runtime, options.Request.Args["query"])
+	case "remember":
+		value, err = callRemember(ctx, service, options.Runtime, options.Request.Args)
 	case "search":
 		value, err = callSearch(ctx, service, offer, options.Request.Args)
 	case "get":
@@ -357,7 +304,7 @@ func (tool) Call(ctx context.Context, options tools.Options) (tools.Result, erro
 	case "package_export":
 		value, err = callPackageExport(ctx, service, options.Runtime, options.Request.Args)
 	default:
-		err = fmt.Errorf("unsupported knowledge action %q", options.Request.Args["action"])
+		err = fmt.Errorf("unsupported knowledge action %q", requestedAction)
 	}
 	if err != nil {
 		return tools.Result{}, knowledgeService.ClassifyError(err)
@@ -375,6 +322,17 @@ func candidateToolOffer(runtime tools.Runtime) knowledgeService.ToolOffer {
 		actions = append(actions, packageActions...)
 	}
 	return knowledgeService.ToolOffer{Actions: actions, ScopeKinds: slices.Clone(supportedScopeKinds)}
+}
+
+func modelToolOffer(underlying knowledgeService.ToolOffer) knowledgeService.ToolOffer {
+	offer := knowledgeService.ToolOffer{ScopeKinds: slices.Clone(underlying.ScopeKinds)}
+	if slices.Contains(underlying.Actions, "search") {
+		offer.Actions = append(offer.Actions, "recall")
+	}
+	if slices.Contains(underlying.Actions, "entry_create") {
+		offer.Actions = append(offer.Actions, "remember")
+	}
+	return offer
 }
 
 func scopeKindStrings(values []knowledge.ScopeKind) []string {
@@ -399,35 +357,6 @@ func filterToolSchema(raw string, offer knowledgeService.ToolOffer) (string, err
 		return "", err
 	}
 	action["enum"] = slices.Clone(offer.Actions)
-	scopeNames := scopeKindStrings(offer.ScopeKinds)
-	if scopeKinds, ok := properties["scope_kinds"].(map[string]any); ok {
-		if items, ok := scopeKinds["items"].(map[string]any); ok {
-			items["enum"] = slices.Clone(scopeNames)
-		}
-	}
-	for _, objectName := range []string{"chunk", "entry"} {
-		object, err := schemaObject(properties, objectName)
-		if err != nil {
-			return "", err
-		}
-		objectProperties, err := schemaObject(object, "properties")
-		if err != nil {
-			return "", err
-		}
-		scope, err := schemaObject(objectProperties, "scope")
-		if err != nil {
-			return "", err
-		}
-		scopeProperties, err := schemaObject(scope, "properties")
-		if err != nil {
-			return "", err
-		}
-		kind, err := schemaObject(scopeProperties, "kind")
-		if err != nil {
-			return "", err
-		}
-		kind["enum"] = slices.Clone(scopeNames)
-	}
 	encoded, err := json.Marshal(schema)
 	if err != nil {
 		return "", fmt.Errorf("encode knowledge tool schema: %w", err)

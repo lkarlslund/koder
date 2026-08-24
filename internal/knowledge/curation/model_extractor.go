@@ -186,19 +186,76 @@ func decodeCandidateDrafts(raw []byte) ([]CandidateDraft, error) {
 	if len(raw) == 0 || len(raw) > maxDraftResponseBytes {
 		return nil, fmt.Errorf("%w: candidate response must contain 1 to %d bytes", knowledge.ErrInvalidRecord, maxDraftResponseBytes)
 	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	var response modelDraftResponse
-	if err := decoder.Decode(&response); err != nil {
-		return nil, fmt.Errorf("%w: decode candidate response: %v", knowledge.ErrInvalidRecord, err)
+	responses := make([]modelDraftResponse, 0, 1)
+	for _, object := range candidateJSONObjects(raw) {
+		response, err := decodeCandidateResponse(object)
+		if err == nil {
+			responses = append(responses, response)
+		}
 	}
-	if err := ensureJSONEOF(decoder); err != nil {
-		return nil, err
+	if len(responses) != 1 {
+		return nil, fmt.Errorf("%w: candidate response must contain exactly one valid response object", knowledge.ErrInvalidRecord)
 	}
+	response := responses[0]
 	if len(response.Candidates) > maxDraftCandidates {
 		return nil, fmt.Errorf("%w: candidate response exceeds %d candidates", knowledge.ErrInvalidRecord, maxDraftCandidates)
 	}
 	return response.Candidates, nil
+}
+
+func decodeCandidateResponse(raw []byte) (modelDraftResponse, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var response modelDraftResponse
+	if err := decoder.Decode(&response); err != nil {
+		return modelDraftResponse{}, err
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		return modelDraftResponse{}, err
+	}
+	return response, nil
+}
+
+// candidateJSONObjects finds balanced JSON objects even when a model wraps its
+// structured answer in prose, a Markdown fence, or a provider thinking block.
+func candidateJSONObjects(raw []byte) [][]byte {
+	objects := make([][]byte, 0, 1)
+	start := -1
+	depth := 0
+	inString := false
+	escaped := false
+	for index, current := range raw {
+		if start < 0 {
+			if current == '{' {
+				start, depth = index, 1
+			}
+			continue
+		}
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case current == '\\':
+				escaped = true
+			case current == '"':
+				inString = false
+			}
+			continue
+		}
+		switch current {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				objects = append(objects, raw[start:index+1])
+				start = -1
+			}
+		}
+	}
+	return objects
 }
 
 func ensureJSONEOF(decoder *json.Decoder) error {
