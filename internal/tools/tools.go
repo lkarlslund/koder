@@ -333,18 +333,44 @@ func checkToolEnabled(runtime Runtime, kind ID) error {
 }
 
 func checkSessionToolAllowed(runtime Runtime, kind ID) error {
-	if runtime.SessionKind != domain.SessionKindQuick || !isMilestoneOrTaskTool(kind) {
+	if runtime.SessionKind == domain.SessionKindQuick && isMilestoneOrTaskTool(kind) {
+		return DeniedError{Tool: kind, Reason: "milestone and task tools are not available in quick chats"}
+	}
+	if runtime.ChatRole != chatrole.Execution {
 		return nil
 	}
-	return DeniedError{Tool: kind, Reason: "milestone and task tools are not available in quick chats"}
+	if strings.TrimSpace(runtime.AssignedTaskRef) != "" {
+		if isMilestoneTool(kind) {
+			return DeniedError{Tool: kind, Reason: "milestone tools are not available to a task-assigned execution chat"}
+		}
+		return nil
+	}
+	if AssignedMilestoneKey(runtime) != "" {
+		return nil
+	}
+	if isMilestoneOrTaskTool(kind) {
+		return DeniedError{Tool: kind, Reason: "milestone and task tools require an assigned execution chat"}
+	}
+	return nil
 }
 
 func isMilestoneOrTaskTool(kind ID) bool {
+	return isMilestoneTool(kind) || isTaskTool(kind)
+}
+
+func isMilestoneTool(kind ID) bool {
 	switch kind {
-	case Task,
-		Milestones, MilestoneList, MilestoneAdd, MilestoneUpdate, MilestoneDepend,
-		MilestoneArchive, MilestoneDelete, MilestonePlan, MilestoneWrite,
-		Tasks, TaskList, TaskAddItems, TaskUpdateItem, TaskFetchNext,
+	case Milestones, MilestoneList, MilestoneAdd, MilestoneUpdate, MilestoneDepend,
+		MilestoneArchive, MilestoneDelete, MilestonePlan, MilestoneWrite:
+		return true
+	default:
+		return false
+	}
+}
+
+func isTaskTool(kind ID) bool {
+	switch kind {
+	case Task, Tasks, TaskList, TaskAddItems, TaskUpdateItem, TaskFetchNext,
 		TaskArchive, TaskDelete, TasksAdd, TasksUpdate:
 		return true
 	default:

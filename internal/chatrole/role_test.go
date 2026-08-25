@@ -3,6 +3,8 @@ package chatrole
 import (
 	"strings"
 	"testing"
+
+	"github.com/lkarlslund/koder/internal/domain"
 )
 
 type testTool string
@@ -71,6 +73,27 @@ func TestRoleAllowsTool(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := AllowsTool(tt.role, tt.tool); got != tt.want {
 				t.Fatalf("AllowsTool(%q, %q) = %v, want %v", tt.role, tt.tool, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExecutionPromptMatchesAssignment(t *testing.T) {
+	tests := []struct {
+		name    string
+		chat    domain.Chat
+		want    string
+		without string
+	}{
+		{name: "unassigned", chat: domain.Chat{WorkflowRole: Execution}, want: "requested work directly", without: "You have been assigned"},
+		{name: "milestone", chat: domain.Chat{WorkflowRole: Execution, ActiveMilestoneKey: "M002"}, want: "assigned milestone M002", without: "assigned task"},
+		{name: "task", chat: domain.Chat{WorkflowRole: Execution, ActiveMilestoneKey: "M002", AssignedTaskRef: "M002T003"}, want: "assigned task M002T003", without: "assigned milestone"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prompt := SystemPromptForChat(tt.chat)
+			if !strings.Contains(prompt, tt.want) || strings.Contains(prompt, tt.without) {
+				t.Fatalf("prompt = %q, want %q and no %q", prompt, tt.want, tt.without)
 			}
 		})
 	}

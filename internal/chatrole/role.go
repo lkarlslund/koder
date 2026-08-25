@@ -114,10 +114,7 @@ Return only the compacted summary requested by the compaction prompt.`),
 			DisplayName: "Execute",
 			SystemPrompt: strings.TrimSpace(`This chat is an execution worker.
 
-Focus only on the assigned milestone and task list.
-- Implement the work using available coding tools.
-- Keep task status updated as you progress.
-			- Do not rewrite unrelated milestones or task lists.`),
+Complete the user's requested work directly using the available tools.`),
 			DenyTools: toolSet(
 				"request_user_input",
 				"chats",
@@ -173,6 +170,28 @@ func CheckToolAllowed(role Role, kind fmt.Stringer) error {
 // SystemPrompt returns the role-specific instruction text.
 func SystemPrompt(role Role) string {
 	return SpecFor(role).SystemPrompt
+}
+
+// SystemPromptForChat adds only the planning instructions associated with an
+// execution chat's durable assignment. Task assignments take precedence
+// because they also carry the key of their owning milestone.
+func SystemPromptForChat(chat domain.Chat) string {
+	role := chat.EffectiveWorkflowRole()
+	base := SystemPrompt(role)
+	if role != Execution {
+		return base
+	}
+	if task := strings.TrimSpace(chat.AssignedTaskRef); task != "" {
+		return strings.TrimSpace(fmt.Sprintf("%s\n\nYou have been assigned task %s. Use the tasks tool to get instructions and update progress.", base, task))
+	}
+	milestone := strings.TrimSpace(chat.ActiveMilestoneKey)
+	if milestone == "" {
+		milestone = strings.TrimSpace(chat.AssignedTaskBucketKey)
+	}
+	if milestone != "" {
+		return strings.TrimSpace(fmt.Sprintf("%s\n\nYou have been assigned milestone %s. Use the milestones and tasks tools to get instructions and update progress.", base, milestone))
+	}
+	return base
 }
 
 // DisplayName returns a short UI label for role.

@@ -387,7 +387,7 @@ func (r *Runtime) baseInstructionsForChat(session domain.Session, chat domain.Ch
 		Kind: provider.InstructionKindEnvironment,
 		Text: r.sessionEnvironmentPrompt(session),
 	}}
-	if roleText := strings.TrimSpace(chatrole.SystemPrompt(chat.EffectiveWorkflowRole())); roleText != "" {
+	if roleText := strings.TrimSpace(chatrole.SystemPromptForChat(chat)); roleText != "" {
 		instructions = append(instructions, provider.InstructionBlock{
 			Kind: provider.InstructionKindProjectInstructions,
 			Text: roleText,

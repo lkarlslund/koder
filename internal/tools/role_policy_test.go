@@ -22,19 +22,59 @@ func TestDefinitionsHideRoleForbiddenTools(t *testing.T) {
 			t.Fatalf("execution definitions exposed forbidden tool %q", name)
 		}
 	}
-	for _, name := range []string{domain.ToolKindFileRead.String(), domain.ToolKindFileGrep.String(), domain.ToolKindFileEdit.String(), domain.ToolKindMilestones.String()} {
+	for _, name := range []string{domain.ToolKindFileRead.String(), domain.ToolKindFileGrep.String(), domain.ToolKindFileEdit.String()} {
 		if !names[name] {
 			t.Fatalf("execution definitions did not expose allowed tool %q", name)
 		}
 	}
-	for _, def := range defs {
-		if def.Function.Name != domain.ToolKindMilestones.String() {
-			continue
+	for _, name := range []string{domain.ToolKindMilestones.String(), domain.ToolKindTasks.String()} {
+		if names[name] {
+			t.Fatalf("unassigned execution definitions exposed planning tool %q", name)
 		}
-		params := string(def.Function.Parameters)
-		if strings.Contains(params, `"create"`) || !strings.Contains(params, `"update"`) {
-			t.Fatalf("execution milestone actions were not role filtered: %s", params)
-		}
+	}
+}
+
+func TestExecutionDefinitionsMatchAssignment(t *testing.T) {
+	tests := []struct {
+		name           string
+		runtime        tools.Runtime
+		wantMilestones bool
+		wantTasks      bool
+	}{
+		{name: "unassigned", runtime: tools.Runtime{ChatRole: chatrole.Execution}},
+		{name: "milestone", runtime: tools.Runtime{ChatRole: chatrole.Execution, ActiveMilestoneKey: "M001"}, wantMilestones: true, wantTasks: true},
+		{name: "task", runtime: tools.Runtime{ChatRole: chatrole.Execution, ActiveMilestoneKey: "M001", AssignedTaskRef: "M001T001"}, wantTasks: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			names := map[string]bool{}
+			for _, def := range tools.Definitions(tt.runtime) {
+				names[def.Function.Name] = true
+			}
+			if names[domain.ToolKindMilestones.String()] != tt.wantMilestones || names[domain.ToolKindTasks.String()] != tt.wantTasks {
+				t.Fatalf("milestones=%v tasks=%v, want milestones=%v tasks=%v", names[domain.ToolKindMilestones.String()], names[domain.ToolKindTasks.String()], tt.wantMilestones, tt.wantTasks)
+			}
+		})
+	}
+}
+
+func TestExecutionCallsEnforceAssignmentPlanningTools(t *testing.T) {
+	tests := []struct {
+		name    string
+		runtime tools.Runtime
+		tool    tools.ID
+	}{
+		{name: "unassigned milestone", runtime: tools.Runtime{ChatRole: chatrole.Execution}, tool: tools.Milestones},
+		{name: "unassigned task", runtime: tools.Runtime{ChatRole: chatrole.Execution}, tool: tools.Tasks},
+		{name: "task assignment milestone", runtime: tools.Runtime{ChatRole: chatrole.Execution, ActiveMilestoneKey: "M001", AssignedTaskRef: "M001T001"}, tool: tools.Milestones},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tools.Call(context.Background(), tools.Options{Runtime: tt.runtime, Request: tools.Request{Tool: tt.tool, Args: map[string]string{"action": "list"}}})
+			if err == nil || !tools.IsDenied(err) {
+				t.Fatalf("expected assignment denial, got %T %[1]v", err)
+			}
+		})
 	}
 }
 

@@ -148,7 +148,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		Access:   settingsStore.Access,
 	}), st, func(_ domain.Session, chatRecord domain.Chat) string {
 		parts := []string{
-			strings.TrimSpace(chatrole.SystemPrompt(chatRecord.EffectiveWorkflowRole())),
+			strings.TrimSpace(chatrole.SystemPromptForChat(chatRecord)),
 			strings.TrimSpace(chatinteraction.SystemPrompt(chatRecord.EffectiveInteractionMode())),
 		}
 		return strings.TrimSpace(strings.Join(parts, "\n\n"))
@@ -1275,7 +1275,7 @@ func (e *Engine) baseInstructionsForChat(session domain.Session, chat domain.Cha
 		Kind: provider.InstructionKindEnvironment,
 		Text: environmentPrompt,
 	}}
-	if roleText := strings.TrimSpace(chatrole.SystemPrompt(chat.EffectiveWorkflowRole())); roleText != "" {
+	if roleText := strings.TrimSpace(chatrole.SystemPromptForChat(chat)); roleText != "" {
 		instructions = append(instructions, provider.InstructionBlock{
 			Kind: provider.InstructionKindProjectInstructions,
 			Text: roleText,
