@@ -20,7 +20,10 @@ const (
 	ContinuationPauseReasonEmptyResponse ContinuationPauseReason = "empty_provider_response"
 )
 
-const RepeatedToolLoopThreshold = 3
+const (
+	RepeatedToolLoopThreshold     = 3
+	RepeatedToolRecoveryThreshold = 5
+)
 
 type ToolLoopAction uint8
 
@@ -41,8 +44,10 @@ type ContinuationPause struct {
 }
 
 type ToolLoopTracker struct {
-	lastCall    toolLoopComparableCall
-	repeatCount int
+	lastCall      toolLoopComparableCall
+	repeatCount   int
+	recoveryTool  domain.ToolKind
+	recoveryCount int
 }
 
 type toolLoopComparableCall struct {
@@ -53,40 +58,75 @@ type toolLoopComparableCall struct {
 func (t *ToolLoopTracker) Reset() {
 	t.lastCall = toolLoopComparableCall{}
 	t.repeatCount = 0
+	t.recoveryTool = ""
+	t.recoveryCount = 0
 }
 
 func (t *ToolLoopTracker) TrackCalls(calls []tools.Request) (ToolLoopAction, ContinuationPause) {
-	if len(calls) != 1 {
+	comparable := make([]tools.Request, 0, len(calls))
+	for _, call := range calls {
+		if _, ok := comparableToolLoopCall(call); ok {
+			comparable = append(comparable, call)
+		}
+	}
+	if len(comparable) == 0 {
+		return ToolLoopAllow, ContinuationPause{}
+	}
+	if len(comparable) != 1 {
 		t.Reset()
 		return ToolLoopAllow, ContinuationPause{}
 	}
-	call, ok := comparableToolLoopCall(calls[0])
-	if !ok {
-		t.Reset()
-		return ToolLoopAllow, ContinuationPause{}
-	}
-	return t.trackComparable(call, calls[0].Tool.DisplayName(), calls[0].ArgumentsJSON())
+	call, _ := comparableToolLoopCall(comparable[0])
+	return t.trackComparable(call, comparable[0].Tool.DisplayName(), comparable[0].ArgumentsJSON())
 }
 
 func (t *ToolLoopTracker) TrackToolCalls(calls []domain.ToolCall) (ToolLoopAction, ContinuationPause) {
-	if len(calls) != 1 {
+	comparable := make([]domain.ToolCall, 0, len(calls))
+	for _, call := range calls {
+		if _, ok := comparableStoredToolCall(call); ok {
+			comparable = append(comparable, call)
+		}
+	}
+	if len(comparable) == 0 {
+		return ToolLoopAllow, ContinuationPause{}
+	}
+	if len(comparable) != 1 {
 		t.Reset()
 		return ToolLoopAllow, ContinuationPause{}
 	}
-	call, ok := comparableStoredToolCall(calls[0])
-	if !ok {
-		t.Reset()
-		return ToolLoopAllow, ContinuationPause{}
-	}
-	return t.trackComparable(call, calls[0].Tool.DisplayName(), storedToolCallArgumentsJSON(calls[0]))
+	call, _ := comparableStoredToolCall(comparable[0])
+	return t.trackComparable(call, comparable[0].Tool.DisplayName(), storedToolCallArgumentsJSON(comparable[0]))
 }
 
 func (t *ToolLoopTracker) trackComparable(call toolLoopComparableCall, toolName, args string) (ToolLoopAction, ContinuationPause) {
 	if reflect.DeepEqual(call, t.lastCall) {
 		t.repeatCount++
 	} else {
+		if t.recoveryTool != "" {
+			if call.Tool == t.recoveryTool {
+				t.recoveryCount++
+			} else {
+				t.recoveryTool = ""
+				t.recoveryCount = 0
+			}
+		}
 		t.lastCall = call
 		t.repeatCount = 1
+	}
+	if t.recoveryTool != "" && t.recoveryCount >= RepeatedToolRecoveryThreshold {
+		return ToolLoopStop, ContinuationPause{
+			Reason:   ContinuationPauseReasonRepeatedTool,
+			Tool:     call.Tool,
+			Count:    t.recoveryCount,
+			Args:     args,
+			Subtitle: fmt.Sprintf("Repeated non-progress %s calls", toolName),
+			Body: fmt.Sprintf(
+				"Stopped continuation after %d more %s calls with changing input following a denied identical call. The changes did not break the repeated-tool pattern.\n\nLatest input: %s",
+				t.recoveryCount,
+				toolName,
+				args,
+			),
+		}
 	}
 	if t.repeatCount < RepeatedToolLoopThreshold {
 		return ToolLoopAllow, ContinuationPause{}
@@ -104,7 +144,9 @@ func (t *ToolLoopTracker) trackComparable(call toolLoopComparableCall, toolName,
 			args,
 		),
 	}
-	if t.repeatCount == RepeatedToolLoopThreshold {
+	if t.repeatCount == RepeatedToolLoopThreshold && t.recoveryTool == "" {
+		t.recoveryTool = call.Tool
+		t.recoveryCount = 0
 		return ToolLoopDeny, pause
 	}
 	return ToolLoopStop, pause
@@ -131,28 +173,37 @@ func RepeatedToolDeniedMessage(pause ContinuationPause) string {
 }
 
 func comparableToolLoopCall(req tools.Request) (toolLoopComparableCall, bool) {
-	if isExecWait(req.Tool, req.Args) &&
-		strings.TrimSpace(req.Args["chars"]) == "" &&
-		strings.TrimSpace(req.Args["close_stdin"]) == "" &&
-		strings.TrimSpace(req.Args["process_id"]) != "" {
+	if isExecSessionControl(req.Tool, req.Args) {
 		return toolLoopComparableCall{}, false
 	}
 	return toolLoopComparableCall{Tool: req.Tool, Args: cloneToolLoopArgs(req.Args)}, true
 }
 
 func comparableStoredToolCall(call domain.ToolCall) (toolLoopComparableCall, bool) {
-	if isExecWait(call.Tool, call.Args) &&
-		strings.TrimSpace(call.Args["chars"]) == "" &&
-		strings.TrimSpace(call.Args["close_stdin"]) == "" &&
-		strings.TrimSpace(call.Args["process_id"]) != "" {
+	if isExecSessionControl(call.Tool, call.Args) {
 		return toolLoopComparableCall{}, false
 	}
 	return toolLoopComparableCall{Tool: call.Tool, Args: cloneToolLoopArgs(call.Args)}, true
 }
 
-func isExecWait(tool domain.ToolKind, args map[string]string) bool {
-	return tool == domain.ToolKindExecWriteStdin ||
-		(tool == domain.ToolKindExecSession && strings.TrimSpace(args["action"]) == "wait")
+func isExecSessionControl(tool domain.ToolKind, args map[string]string) bool {
+	if strings.TrimSpace(args["process_id"]) == "" {
+		return false
+	}
+	if tool == domain.ToolKindExecWriteStdin {
+		return strings.TrimSpace(args["chars"]) == "" && strings.TrimSpace(args["close_stdin"]) == ""
+	}
+	if tool != domain.ToolKindExecSession {
+		return false
+	}
+	switch strings.TrimSpace(args["action"]) {
+	case "wait":
+		return strings.TrimSpace(args["chars"]) == "" && strings.TrimSpace(args["close_stdin"]) == ""
+	case "status", "terminate":
+		return true
+	default:
+		return false
+	}
 }
 
 func storedToolCallArgumentsJSON(call domain.ToolCall) string {

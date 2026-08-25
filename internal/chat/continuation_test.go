@@ -1,6 +1,8 @@
 package chat
 
 import (
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -64,6 +66,86 @@ func TestToolLoopTrackerDeniesIdenticalFullArgs(t *testing.T) {
 	action, pause := tracker.TrackCalls([]tools.Request{call})
 	if action != ToolLoopDeny {
 		t.Fatalf("threshold action = %v, pause = %#v", action, pause)
+	}
+}
+
+func TestToolLoopTrackerStopsSameToolVariationsAfterDenial(t *testing.T) {
+	var tracker ToolLoopTracker
+	repeated := tools.Request{
+		Tool: domain.ToolKindExecCommand,
+		Args: map[string]string{"cmd": "base64 photo.jpg"},
+	}
+	for idx := 1; idx <= RepeatedToolLoopThreshold; idx++ {
+		action, pause := tracker.TrackCalls([]tools.Request{repeated})
+		want := ToolLoopAllow
+		if idx == RepeatedToolLoopThreshold {
+			want = ToolLoopDeny
+		}
+		if action != want {
+			t.Fatalf("identical call %d action = %v, want %v; pause = %#v", idx, action, want, pause)
+		}
+	}
+
+	for idx := 1; idx <= RepeatedToolRecoveryThreshold; idx++ {
+		call := tools.Request{
+			Tool: domain.ToolKindExecCommand,
+			Args: map[string]string{"cmd": "echo attempt " + strconv.Itoa(idx)},
+		}
+		action, pause := tracker.TrackCalls([]tools.Request{call})
+		want := ToolLoopAllow
+		if idx == RepeatedToolRecoveryThreshold {
+			want = ToolLoopStop
+		}
+		if action != want {
+			t.Fatalf("recovery call %d action = %v, want %v; pause = %#v", idx, action, want, pause)
+		}
+		if action == ToolLoopStop && !strings.Contains(pause.Body, "changing input") {
+			t.Fatalf("recovery pause body = %q", pause.Body)
+		}
+	}
+}
+
+func TestToolLoopTrackerIgnoresProcessControlBesideRecoveryCall(t *testing.T) {
+	var tracker ToolLoopTracker
+	repeated := tools.Request{Tool: domain.ToolKindExecCommand, Args: map[string]string{"cmd": "base64 photo.jpg"}}
+	for idx := 0; idx < RepeatedToolLoopThreshold; idx++ {
+		tracker.TrackCalls([]tools.Request{repeated})
+	}
+
+	for idx := 1; idx <= RepeatedToolRecoveryThreshold; idx++ {
+		action, pause := tracker.TrackCalls([]tools.Request{
+			{
+				Tool: domain.ToolKindExecSession,
+				Args: map[string]string{"action": "terminate", "process_id": "exec_1"},
+			},
+			{
+				Tool: domain.ToolKindExecCommand,
+				Args: map[string]string{"cmd": "echo attempt " + strconv.Itoa(idx)},
+			},
+		})
+		want := ToolLoopAllow
+		if idx == RepeatedToolRecoveryThreshold {
+			want = ToolLoopStop
+		}
+		if action != want {
+			t.Fatalf("recovery batch %d action = %v, want %v; pause = %#v", idx, action, want, pause)
+		}
+	}
+}
+
+func TestToolLoopTrackerDifferentToolEndsRecovery(t *testing.T) {
+	var tracker ToolLoopTracker
+	repeated := tools.Request{Tool: domain.ToolKindExecCommand, Args: map[string]string{"cmd": "base64 photo.jpg"}}
+	for idx := 0; idx < RepeatedToolLoopThreshold; idx++ {
+		tracker.TrackCalls([]tools.Request{repeated})
+	}
+
+	action, pause := tracker.TrackCalls([]tools.Request{{
+		Tool: domain.ToolKindMCP,
+		Args: map[string]string{"server": "exchange", "tool": "exchange_contacts", "arguments_raw": `{"action":"set_photo"}`},
+	}})
+	if action != ToolLoopAllow || tracker.recoveryTool != "" {
+		t.Fatalf("different tool action = %v, pause = %#v, recovery = %q", action, pause, tracker.recoveryTool)
 	}
 }
 
