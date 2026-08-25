@@ -46,6 +46,44 @@ type ollamaShowResponse struct {
 	ModelInfo    map[string]any `json:"model_info"`
 }
 
+type endpointSupport uint8
+
+const (
+	endpointUnknown endpointSupport = iota
+	endpointSupported
+	endpointUnsupported
+)
+
+var errEndpointUnsupported = errors.New("metadata endpoint is unsupported by this provider connection")
+
+func (c *Client) endpointMayBeSupported(key string) bool {
+	c.probeMu.Lock()
+	defer c.probeMu.Unlock()
+	return c.probes[key] != endpointUnsupported
+}
+
+func (c *Client) rememberEndpointSupport(key string, support endpointSupport) {
+	c.probeMu.Lock()
+	defer c.probeMu.Unlock()
+	if c.probes == nil {
+		c.probes = make(map[string]endpointSupport)
+	}
+	c.probes[key] = support
+}
+
+func endpointUnsupportedByResponse(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	switch apiErr.StatusCode {
+	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
+		return true
+	default:
+		return false
+	}
+}
+
 // DetectModelMetadata discovers operational metadata using compatible and
 // backend-native read-only APIs. A loaded runtime context wins over a model's
 // advertised maximum because it is the usable limit for request budgeting.
@@ -218,6 +256,10 @@ func (c *Client) ollamaModelMetadata(ctx context.Context, modelID string) (domai
 }
 
 func (c *Client) decodeJSONAt(ctx context.Context, method, endpoint string, body io.Reader, dst any, operation string) error {
+	probeKey := method + " " + endpoint
+	if !c.endpointMayBeSupported(probeKey) {
+		return errEndpointUnsupported
+	}
 	req, err := c.newRequestAt(ctx, method, endpoint, "", body)
 	if err != nil {
 		return err
@@ -232,11 +274,16 @@ func (c *Client) decodeJSONAt(ctx context.Context, method, endpoint string, body
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		return &APIError{Operation: operation, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(raw))}
+		err := &APIError{Operation: operation, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(raw))}
+		if endpointUnsupportedByResponse(err) {
+			c.rememberEndpointSupport(probeKey, endpointUnsupported)
+		}
+		return err
 	}
 	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
 		return fmt.Errorf("decode %s: %w", operation, err)
 	}
+	c.rememberEndpointSupport(probeKey, endpointSupported)
 	return nil
 }
 
@@ -291,6 +338,9 @@ func numericInt(value any) (int, bool) {
 }
 
 func isOptionalMetadataProbeError(err error) bool {
+	if errors.Is(err, errEndpointUnsupported) {
+		return true
+	}
 	if isOptionalContextWindowProbeError(err) {
 		return true
 	}

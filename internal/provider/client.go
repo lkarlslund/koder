@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/config"
@@ -417,6 +418,8 @@ type Client struct {
 	provider string
 	recorder *debugsrv.Recorder
 	health   *HealthTracker
+	probeMu  sync.Mutex
+	probes   map[string]endpointSupport
 }
 
 type ChatResponse struct {
@@ -710,7 +713,17 @@ func (c *Client) Props(ctx context.Context, modelID string) (props propsResponse
 	if trimmed := strings.TrimSpace(modelID); trimmed != "" {
 		path += "?model=" + url.QueryEscape(trimmed)
 	}
-	return c.propsRequest(ctx, c.llamaURL, path)
+	probeKey := http.MethodGet + " " + strings.TrimRight(c.llamaURL, "/") + "/props"
+	if !c.endpointMayBeSupported(probeKey) {
+		return propsResponse{}, errEndpointUnsupported
+	}
+	props, err = c.propsRequest(ctx, c.llamaURL, path)
+	if err == nil {
+		c.rememberEndpointSupport(probeKey, endpointSupported)
+	} else if endpointUnsupportedByResponse(err) {
+		c.rememberEndpointSupport(probeKey, endpointUnsupported)
+	}
+	return props, err
 }
 
 func DetectContextWindow(ctx context.Context, providerID string, cfg config.Provider, modelID string, recorder *debugsrv.Recorder) (int, error) {
@@ -742,6 +755,9 @@ func llamaServerBaseURL(baseURL string) string {
 }
 
 func isOptionalContextWindowProbeError(err error) bool {
+	if errors.Is(err, errEndpointUnsupported) {
+		return true
+	}
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode == http.StatusNotFound || apiErr.StatusCode == http.StatusMethodNotAllowed

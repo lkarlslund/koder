@@ -4,12 +4,69 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 )
+
+func TestMetadataProbeRemembersUnsupportedEndpointsPerClient(t *testing.T) {
+	var mu sync.Mutex
+	requests := map[string]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests[r.Method+" "+r.URL.Path]++
+		mu.Unlock()
+		if r.URL.Path == "/v1/models" {
+			_, _ = w.Write([]byte(`{"data":[{"id":"model-a"}]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	newClient := func() *Client {
+		client, err := New("local", config.Provider{Kind: ProviderKindCompatible, BaseURL: server.URL + "/v1", Timeout: time.Second}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return client
+	}
+	client := newClient()
+	for range 2 {
+		if _, err := client.DetectModelMetadata(context.Background(), "model-a"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mu.Lock()
+	firstRequests := make(map[string]int, len(requests))
+	for key, count := range requests {
+		firstRequests[key] = count
+	}
+	mu.Unlock()
+	for _, key := range []string{"GET /api/v1/models", "GET /props", "GET /api/v0/models", "POST /api/show"} {
+		if firstRequests[key] != 1 {
+			t.Fatalf("%s called %d times on one client, want 1", key, firstRequests[key])
+		}
+	}
+	if firstRequests["GET /v1/models"] != 2 {
+		t.Fatalf("required model list called %d times, want 2", firstRequests["GET /v1/models"])
+	}
+
+	if _, err := newClient().DetectModelMetadata(context.Background(), "model-a"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, key := range []string{"GET /api/v1/models", "GET /props", "GET /api/v0/models", "POST /api/show"} {
+		if requests[key] != 2 {
+			t.Fatalf("%s called %d times after reconnect, want 2", key, requests[key])
+		}
+	}
+}
 
 func TestListModelsParsesCompatibleMetadataSuperset(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
