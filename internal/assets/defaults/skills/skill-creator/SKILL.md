@@ -1,8 +1,12 @@
 ---
 name: skill-creator
-description: Create or improve portable Agent Skills with focused instructions, reusable scripts, references, assets, metadata, validation, and forward tests. Use when asked to create, build, update, review, or repair a skill.
+description: >-
+  Create or update a reusable Agent Skill when asked to build, refine, review,
+  or repair a SKILL.md workflow, improve automatic triggering, or add supporting
+  scripts, references, assets, metadata, and validation. Use for new and existing
+  skills. Do not use for ordinary project instructions that belong in AGENTS.md
+  or for executing a one-off task that does not need a reusable workflow.
 license: Apache-2.0
-compatibility: Portable SKILL.md format; works with Koder and other Agent Skills-compatible hosts.
 metadata:
   display-name: Skill Creator
   short-description: Build and improve portable agent skills
@@ -11,45 +15,74 @@ metadata:
 
 # Skill Creator
 
-Create a small, portable folder that teaches an agent a repeatable capability. Treat the
-description as the routing rule and the Markdown body as instructions loaded only after
-activation.
+Create skills that give an agent useful, non-obvious guidance without constraining
+unrelated work. Treat the frontmatter description as the discovery rule and the body
+as instructions loaded only after activation.
+
+## Core principles
+
+**Assume the agent is capable.** Include only guidance that changes decisions or makes
+fragile work more reliable. Remove generic advice, repeated rules, speculative edge
+cases, and examples that do not clarify behavior.
+
+**Preserve intent and scope.** A skill supports the user's task; it does not replace
+their chosen product, expand permissions, authorize external mutations, or silently
+change invocation policy. Do not turn one observed failure into a universal rule.
+
+**Match specificity to risk.** Allow judgment when several approaches are valid. Use
+exact sequences and deterministic scripts only where deviation creates a concrete
+correctness, safety, or reliability problem.
+
+**Keep discovery cheap and precise.** Describe the actual capability and when it
+applies. Add a boundary only when it prevents likely misrouting. Avoid keyword dumps,
+generic catchalls, and trigger terms broad enough to attract unrelated requests.
+
+**Disclose detail progressively.** Keep shared purpose, routing, and essential
+constraints in `SKILL.md`. Put substantial schemas, modes, examples, and procedures in
+focused references that are loaded only when relevant.
 
 ## Choose the location
 
-- Put a project skill in `<project>/.agents/skills/<skill-name>/`.
-- Put a portable shared skill in `~/.agents/skills/<skill-name>/`.
-- Use `~/.koder/skills/` only for Koder-managed built-ins.
-- A symlinked skill directory is acceptable. Keep the target available to every host that
-  should use it.
+- Project skill: `<project>/.agents/skills/<skill-name>/`
+- Shared skill: `~/.agents/skills/<skill-name>/`
+- Koder-managed built-in: `~/.koder/skills/<skill-name>/`
 
-Prefer `~/.agents/skills` when a user wants to share one library between compatible agents.
+Prefer `~/.agents/skills` when the user wants one library shared by compatible hosts.
+Respect a user-specified location. Do not move or rename an existing skill unless asked.
 
-## Use the portable structure
+## Use the smallest useful structure
 
 ```text
 skill-name/
-├── SKILL.md                 # required
-├── scripts/                 # optional executable helpers
-├── references/              # optional material loaded on demand
-└── assets/                  # optional templates and UI artwork
-    └── logo.png             # optional PNG/JPEG/WebP/GIF logo
+|-- SKILL.md                 required
+|-- scripts/                 optional deterministic helpers
+|-- references/              optional instructions loaded on demand
+`-- assets/                  optional files used in generated output
 ```
 
-Do not add README, changelog, installation guide, or quick-reference files unless the
-workflow truly needs them. Put agent-facing material in `SKILL.md` or `references/`.
+Create optional directories only when they provide a concrete benefit. Do not add a
+README, changelog, installation guide, duplicated quick reference, or placeholders
+unless the workflow genuinely needs them.
+
+Use scripts for repeated transformations, reliable API operations, and other work that
+would otherwise be reimplemented. Test every bundled script. Use references for large
+schemas, policies, provider-specific procedures, and detailed examples. State exactly
+when each reference should be read. Use assets for templates and output resources, not
+for hidden instructions.
+
+Resolve every relative resource path from the skill directory. Avoid absolute
+machine-specific paths and undocumented environment dependencies. Write generated
+output to the project or a temporary directory, never back into an installed skill.
 
 ## Write portable frontmatter
 
-Use real YAML. The directory and `name` must match exactly. Keep the name to lowercase
-letters, digits, and single hyphens, with at most 64 characters.
+For a skill intended to work in both Koder and Codex, default to the common fields:
 
 ```yaml
 ---
 name: my-skill
-description: Do a specific job. Use when the user asks for these concrete tasks or supplies these artifacts.
+description: Do a specific job when the user asks for these concrete tasks or supplies these artifacts.
 license: Apache-2.0
-compatibility: Optional runtime or tool requirements in at most 500 characters.
 metadata:
   display-name: My Skill
   short-description: Optional compact catalog label
@@ -58,73 +91,85 @@ metadata:
 ---
 ```
 
-`name` and `description` are required portable fields. `license`, `compatibility`, and the
-string-valued `metadata` map are optional. Koder's presentation keys are deliberately
-host-neutral hints; hosts that do not recognize them ignore them.
+Only `name` and `description` are required. The directory and `name` must match. Use
+lowercase letters, digits, and single hyphens, with at most 64 characters.
 
-For a logo:
+`license` and string-valued `metadata` are optional and accepted by Koder and Codex.
+Koder uses `display-name`, `short-description`, `logo`, and `brand-color` only for UI
+presentation; they do not affect model routing. Omit unused metadata. Do not add
+`compatibility`: Codex rejects that top-level field.
 
-- Prefer a compact square PNG or WebP with a transparent background.
-- Keep it inside the skill directory and reference it with a relative path.
-- Use PNG, JPEG, WebP, or GIF. Do not use SVG because hosts may render untrusted active
-  content differently.
-- If metadata omits `logo`, Koder automatically looks for `assets/logo.*` and
-  `assets/icon.*` in the supported formats.
+Add host-specific fields or files only when the user targets that host and the feature
+is needed. Do not claim portability until every requested target host validates the
+skill. Preserve existing host-specific invocation policy unless the user asks to change
+it.
 
-## Design the skill
+For Koder logos, use a compact square PNG, JPEG, WebP, or GIF inside the skill
+directory; SVG is not supported. If `metadata.logo` is absent, Koder looks for
+`assets/logo.*` and `assets/icon.*`.
 
-1. Gather two or three concrete user requests that should activate it.
-2. Identify stable steps, fragile steps, reusable code, required references, and outputs.
-3. Put deterministic or error-prone work in tested scripts.
-4. Put large schemas, policies, and variants in `references/` and say exactly when to read
-   each one.
-5. Put templates and output resources in `assets/`.
-6. Write the shortest instructions that reliably cover the examples.
+## Design discovery before instructions
 
-Match freedom to risk:
+Before writing a new or substantially revised skill, identify:
 
-- Use plain instructions when several approaches are valid.
-- Use pseudocode or parameterized helpers when one pattern is preferred.
-- Use exact, tested scripts for fragile or repetitive transformations.
+- two or three realistic requests that should activate it;
+- one explicit `$skill-name` request;
+- two near-miss requests that should not activate it;
+- the stable outcome, fragile steps, required inputs, and meaningful boundaries.
 
-Keep `SKILL.md` under roughly 500 lines. Use imperative language. Do not repeat generic
-knowledge the model already has. Put all activation cues in `description`; the body is not
-visible until the skill has been selected.
+Write a concise, discriminating description from those cases. Put all activation cues
+there because the body is unavailable until selection. Then write the shortest body
+that reliably produces the intended outcome. A large line count is not a target.
 
-## Make resource use explicit
+For multiple substantial modes, put only their selection criteria in `SKILL.md` and
+route to separate references. Do not build a router for a simple, self-contained skill.
 
-Tell the agent which relative files to read or run and under what condition. Resolve paths
-relative to the skill directory. Avoid absolute machine-specific paths and undocumented
-environment dependencies.
+## Create or update
 
-Koder grants a loaded skill's directory read-only access to the chat sandbox. If a helper
-must write output, direct it to the project or a temporary working directory, never back
-into the installed skill.
+For a new skill:
 
-## Validate and verify
+1. Establish its intended requests, exclusions, target hosts, and location.
+2. Create only the resources justified by the workflow.
+3. Write discovery metadata first, then the shared instructions.
+4. Test scripts and validate resources before behavioral testing.
 
-Run both commands from the intended environment:
+For an existing skill:
+
+1. Read its complete `SKILL.md` and only the resources it routes to.
+2. Reproduce the reported ambiguity or failure with a concrete request when practical.
+3. Preserve working behavior, user choices, unrelated metadata, and invocation policy.
+4. Fix the smallest underlying instruction, script, reference, or metadata issue.
+5. Remove stale duplication and machine-specific assumptions exposed by the change.
+
+Ask a clarifying question only when a missing choice materially changes the result and
+cannot be discovered safely. Otherwise make a bounded, explicit assumption and proceed.
+
+## Validate and forward-test
+
+For Koder, run:
 
 ```bash
 koder skill validate /path/to/skill-name
 koder skill verify skill-name --workdir /path/to/project
+koder skill list --workdir /path/to/project
 ```
 
-Validation checks YAML, portable field limits, directory/name agreement, presentation
-metadata, and logo safety. `koder skill list --workdir /path/to/project` also shows invalid,
-disabled, and shadowed entries plus every searched root.
+`validate` checks Koder's schema and resource metadata. `verify` checks discovery and
+then performs the same schema validation; it is not a behavioral test. `list` exposes
+invalid, disabled, and shadowed skills and every searched root.
 
-Test every bundled script directly. Then forward-test the skill in a fresh conversation
-using a realistic request. Test implicit activation from the description and explicit
-activation with `$skill-name`. Pass raw artifacts to the test, not conclusions or hints.
+Also run each requested target host's validator when available. Validation does not
+prove that instructions make good decisions, so inspect the description for false
+positives and confirm that every routed resource exists. Avoid tests that merely match
+chosen wording rather than observable behavior.
 
-## Improve an existing skill
+Forward-test a meaningful change in a fresh conversation when practical:
 
-1. Read the complete `SKILL.md` and only the resources it routes to.
-2. Reproduce the failure or ambiguity with a concrete request.
-3. Fix the smallest underlying instruction, script, reference, or metadata issue.
-4. Remove stale duplication and machine-specific assumptions.
-5. Re-run validation, helper tests, discovery verification, and a fresh forward test.
+- test implicit activation with a realistic positive request;
+- test explicit activation with `$skill-name`;
+- test at least one near miss that should not activate;
+- provide raw inputs or artifacts, not the intended conclusion;
+- verify the resulting decisions and artifacts, then make only evidence-backed fixes.
 
-Preserve portable fields and behavior unless the user explicitly wants a host-specific
-extension. Never silently move, rename, enable, or disable other skills.
+Do not claim cross-host compatibility, successful activation, or behavioral correctness
+from schema validation alone.

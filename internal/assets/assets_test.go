@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestSyncInstallsUpdatesAndSkipsUserModifiedAssets(t *testing.T) {
@@ -148,6 +150,43 @@ func TestUserDefaultsIncludesSkillCreator(t *testing.T) {
 	}
 	if !foundSkill || !foundPrompt || !foundCompactionPrompt {
 		t.Fatalf("expected embedded skill creator and prompt defaults, got %#v", items)
+	}
+}
+
+func TestEmbeddedSkillCreatorUsesPortableFrontmatter(t *testing.T) {
+	items, err := UserDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var content []byte
+	for _, item := range items {
+		if item.Target == "skills/skill-creator/SKILL.md" {
+			content = item.Content
+			break
+		}
+	}
+	if len(content) == 0 {
+		t.Fatal("embedded skill creator is missing")
+	}
+	parts := strings.SplitN(strings.ReplaceAll(string(content), "\r\n", "\n"), "---", 3)
+	if len(parts) != 3 || strings.TrimSpace(parts[0]) != "" {
+		t.Fatal("embedded skill creator has malformed frontmatter")
+	}
+	var frontmatter map[string]any
+	if err := yaml.Unmarshal([]byte(parts[1]), &frontmatter); err != nil {
+		t.Fatalf("parse embedded skill creator frontmatter: %v", err)
+	}
+	allowed := map[string]bool{
+		"allowed-tools": true,
+		"description":   true,
+		"license":       true,
+		"metadata":      true,
+		"name":          true,
+	}
+	for key := range frontmatter {
+		if !allowed[key] {
+			t.Errorf("embedded skill creator frontmatter field %q is not portable to Codex", key)
+		}
 	}
 }
 
