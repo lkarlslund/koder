@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"unicode"
@@ -270,6 +271,23 @@ type SkillStoredResult struct {
 	Path      string `json:"path"`
 	Content   string `json:"content,omitempty"`
 	Truncated bool   `json:"truncated,omitempty"`
+}
+
+// ModelText adds runtime location context that a portable SKILL.md cannot know
+// ahead of time. This lets the model use bundled scripts and references directly
+// instead of searching the filesystem to rediscover the loaded skill directory.
+func (result SkillStoredResult) ModelText() string {
+	content := strings.TrimSpace(result.Content)
+	path := strings.TrimSpace(result.Path)
+	if path == "" {
+		return content
+	}
+	root := filepath.Dir(path)
+	context := fmt.Sprintf("<skill_context>\nskill_file: %s\nresource_root: %s\nResolve relative paths such as scripts/... and references/... against this exact resource_root; do not search the filesystem for them.\n</skill_context>", path, root)
+	if content == "" {
+		return context
+	}
+	return context + "\n\n" + content
 }
 
 type WebFetchStoredResult struct {
@@ -998,7 +1016,7 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		})
 	case Skill:
 		return decodeAndFormat[SkillStoredResult](env.Payload, func(result SkillStoredResult) string {
-			return strings.TrimSpace(result.Content)
+			return result.ModelText()
 		})
 	case WebFetch:
 		return decodeAndFormat[WebFetchStoredResult](env.Payload, func(result WebFetchStoredResult) string {

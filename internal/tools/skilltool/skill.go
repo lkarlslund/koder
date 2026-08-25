@@ -48,19 +48,20 @@ func (tool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
 	if err != nil {
 		return tools.Result{}, err
 	}
+	stored := tools.SkillStoredResult{
+		Name:      skill.Name,
+		Path:      skill.Path,
+		Content:   string(body),
+		Truncated: false,
+	}
 	return tools.Result{
-		Output: string(body),
+		Output: stored.ModelText(),
 		Meta: map[string]string{
 			"name":          skill.Name,
 			"path":          skill.Path,
 			"resource_root": skill.Directory,
 		},
-		Stored: tools.SkillStoredResult{
-			Name:      skill.Name,
-			Path:      skill.Path,
-			Content:   string(body),
-			Truncated: false,
-		},
+		Stored: stored,
 	}, nil
 }
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
