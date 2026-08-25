@@ -1,7 +1,11 @@
 package modelruntime
 
 import (
+	"bytes"
 	"context"
+	"image"
+	"image/color"
+	"image/png"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +16,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/tools"
 )
 
 func TestBuildConversationAddsEphemeralInstructionsOnlyToRequest(t *testing.T) {
@@ -38,6 +43,34 @@ func TestBuildConversationAddsEphemeralInstructionsOnlyToRequest(t *testing.T) {
 	}
 	if messages[len(messages)-1].Role != provider.RoleUser || messages[len(messages)-1].Content != "What happened?" {
 		t.Fatalf("durable timeline changed: %#v", messages)
+	}
+}
+
+func TestTimelineToolResultMessageIncludesMCPImage(t *testing.T) {
+	runtime := New(Config{Config: testConfig(t)})
+	var encoded bytes.Buffer
+	photo := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	photo.Set(0, 0, color.NRGBA{B: 0xff, A: 0xff})
+	if err := png.Encode(&encoded, photo); err != nil {
+		t.Fatal(err)
+	}
+	msg, ok := runtime.timelineToolResultMessage(domain.Chat{ProviderID: "openai", ModelID: "gpt-5.4"}, domain.ToolCall{
+		Tool:       domain.ToolKindMCP,
+		ToolCallID: "call_photo",
+		Status:     domain.ToolStatusDone,
+		Result: &domain.ToolResult{
+			Status: domain.ToolResultStatusOK,
+			Text:   "Contact photo (image/png).",
+			Data: tools.MCPStoredResult{Content: []tools.MCPStoredContentItem{{
+				Type: "image", MIMEType: "image/png", Data: encoded.Bytes(), Size: int64(encoded.Len()),
+			}}},
+		},
+	})
+	if !ok || msg.Role != provider.RoleTool || msg.ToolCallID != "call_photo" || len(msg.ContentParts) != 2 {
+		t.Fatalf("MCP image message = %#v, %v", msg, ok)
+	}
+	if msg.ContentParts[0].Type != "text" || msg.ContentParts[1].Type != "image_url" || len(msg.ContentParts[1].Data) == 0 {
+		t.Fatalf("MCP image content parts = %#v", msg.ContentParts)
 	}
 }
 

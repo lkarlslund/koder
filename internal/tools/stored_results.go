@@ -771,6 +771,25 @@ func ViewImageStoredResultForPart(part domain.Part) (ViewImageStoredResult, bool
 	return result, true
 }
 
+// MCPImageStoredResultForPart returns the first complete image emitted by a
+// successful MCP tool call. Binary output remains out of model-visible text.
+func MCPImageStoredResultForPart(part domain.Part) ([]byte, string, bool) {
+	env, ok := storedResultFromPart(part)
+	if !ok || env.PartKind != domain.PartKindToolOutput || env.Tool != MCP || env.Status != StoredResultStatusOK {
+		return nil, "", false
+	}
+	var result MCPStoredResult
+	if err := json.Unmarshal(env.Payload, &result); err != nil || result.IsError {
+		return nil, "", false
+	}
+	for _, item := range result.Content {
+		if item.Type == "image" && !item.Truncated && len(item.Data) > 0 {
+			return item.Data, strings.TrimSpace(item.MIMEType), true
+		}
+	}
+	return nil, "", false
+}
+
 func BrowserStoredResultForPart(part domain.Part) (BrowserStoredResult, bool) {
 	env, ok := storedResultFromPart(part)
 	if !ok || env.Status != StoredResultStatusOK {

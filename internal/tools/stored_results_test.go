@@ -134,6 +134,38 @@ func TestCompactModelTextForPartOmitsViewImageBytes(t *testing.T) {
 	}
 }
 
+func TestMCPImageStoredResultForPartReturnsCompleteImage(t *testing.T) {
+	part := toolOutputPart(domain.ToolKindMCP, tools.StoredResultStatusOK, "[image content]", tools.MCPStoredResult{
+		ToolName: "get_photo",
+		Content: []tools.MCPStoredContentItem{
+			{Type: "text", Text: "contact photo"},
+			{Type: "image", MIMEType: "image/jpeg", Data: []byte("jpeg-data"), Size: 9},
+		},
+	})
+	data, mimeType, ok := tools.MCPImageStoredResultForPart(part)
+	if !ok || string(data) != "jpeg-data" || mimeType != "image/jpeg" {
+		t.Fatalf("MCPImageStoredResultForPart() = %q, %q, %v", data, mimeType, ok)
+	}
+}
+
+func TestMCPImageStoredResultForPartRejectsTruncatedOrFailedContent(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		status tools.StoredResultStatus
+		result tools.MCPStoredResult
+	}{
+		{name: "truncated", status: tools.StoredResultStatusOK, result: tools.MCPStoredResult{Content: []tools.MCPStoredContentItem{{Type: "image", Data: []byte("partial"), Truncated: true}}}},
+		{name: "tool error", status: tools.StoredResultStatusOK, result: tools.MCPStoredResult{IsError: true, Content: []tools.MCPStoredContentItem{{Type: "image", Data: []byte("data")}}}},
+		{name: "failed envelope", status: tools.StoredResultStatusError, result: tools.MCPStoredResult{Content: []tools.MCPStoredContentItem{{Type: "image", Data: []byte("data")}}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, _, ok := tools.MCPImageStoredResultForPart(toolOutputPart(domain.ToolKindMCP, tt.status, "", tt.result)); ok {
+				t.Fatal("unexpected MCP image")
+			}
+		})
+	}
+}
+
 func TestCompactModelTextForPartOmitsShowMediaBytes(t *testing.T) {
 	text, ok := tools.CompactModelTextForPart(toolOutputPart(domain.ToolKindShowMedia, tools.StoredResultStatusOK, "Showed video", tools.ShowMediaStoredResult{
 		Path:      "demo.mp4",

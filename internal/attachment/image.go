@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	_ "image/gif"
+	_ "image/jpeg"
 	"image/png"
 	"os"
 	"strconv"
@@ -22,6 +24,12 @@ func LoadImage(path string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	return PrepareImage(data)
+}
+
+// PrepareImage validates image bytes and normalizes formats that providers do
+// not accept directly. Its MIME result is derived from content, not metadata.
+func PrepareImage(data []byte) ([]byte, string, error) {
 	if len(data) == 0 {
 		return nil, "", fmt.Errorf("image is empty")
 	}
@@ -35,6 +43,12 @@ func LoadImage(path string) ([]byte, string, error) {
 	}
 	if ClassifyMIME(mimeType) != KindImage {
 		return nil, "", fmt.Errorf("unsupported image type %q", mimeType)
+	}
+	switch mimeType {
+	case "image/jpeg", "image/png", "image/gif":
+		if _, _, err := image.Decode(bytes.NewReader(data)); err != nil {
+			return nil, "", fmt.Errorf("decode %s: %w", mimeType, err)
+		}
 	}
 	return data, mimeType, nil
 }

@@ -1453,6 +1453,16 @@ func (e *Engine) resolveReference(session domain.Session, meta reference.Metadat
 }
 
 func (e *Engine) toolImageMessage(chat domain.Chat, part domain.Part, toolCallID string, body string) (provider.Message, bool) {
+	if data, _, ok := tools.MCPImageStoredResultForPart(part); ok {
+		if !e.chatSupportsImageAttachments(chat) {
+			return provider.Message{}, false
+		}
+		data, mimeType, err := attachment.PrepareImage(data)
+		if err != nil {
+			return provider.Message{}, false
+		}
+		return toolMessageWithImage(toolCallID, body, mimeType, data), true
+	}
 	stored, ok := tools.ViewImageStoredResultForPart(part)
 	sourcePath, mimeType := strings.TrimSpace(stored.SourcePath), strings.TrimSpace(stored.MIMEType)
 	if !ok {
@@ -1472,16 +1482,16 @@ func (e *Engine) toolImageMessage(chat domain.Chat, part domain.Part, toolCallID
 	if err != nil || len(data) == 0 {
 		return provider.Message{}, false
 	}
+	return toolMessageWithImage(toolCallID, body, mimeType, data), true
+}
+
+func toolMessageWithImage(toolCallID, body, mimeType string, data []byte) provider.Message {
 	contentParts := make([]provider.ContentPart, 0, 2)
 	if strings.TrimSpace(body) != "" {
 		contentParts = append(contentParts, provider.TextPart(body))
 	}
 	contentParts = append(contentParts, provider.ImagePart(mimeType, data))
-	return provider.Message{
-		Role:         provider.RoleTool,
-		ContentParts: contentParts,
-		ToolCallID:   toolCallID,
-	}, true
+	return provider.Message{Role: provider.RoleTool, ContentParts: contentParts, ToolCallID: toolCallID}
 }
 
 func formatThinkingBlock(reasoning string) string {

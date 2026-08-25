@@ -1,10 +1,14 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1696,9 +1700,7 @@ func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
 	chat := defaultChatForSession(t, st, session.ID)
 
 	imagePath := filepath.Join(workdir, "screen.png")
-	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\nfake"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeAgentTestPNG(t, imagePath)
 	appendUserTimelineItemWithAttachments(t, st, chat.ID, "old screenshot", []domain.Attachment{{
 		Name: "screen.png",
 		MIME: "image/png",
@@ -2039,9 +2041,7 @@ func TestBuildConversationIncludesViewImageToolContentParts(t *testing.T) {
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 	imagePath := filepath.Join(workdir, "screen.png")
-	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\nfake"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeAgentTestPNG(t, imagePath)
 	toolReq := tools.Request{Tool: domain.ToolKindViewImage, ToolCallID: "call_image", Args: map[string]string{"path": "screen.png"}}
 	appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
 	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "Viewed image screen.png", tools.ViewImageStoredResult{
@@ -2073,6 +2073,63 @@ func TestBuildConversationIncludesViewImageToolContentParts(t *testing.T) {
 	}
 	if len(msg.ContentParts[1].Data) == 0 {
 		t.Fatalf("expected image bytes in content part, got %#v", msg.ContentParts[1])
+	}
+}
+
+func TestBuildConversationIncludesMCPImageContent(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	engine := New(cfg, st, nil)
+	session, err := modeltest.CreateSession(context.Background(), st, "test", "openai", "gpt-5.4", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	photoPath := filepath.Join(t.TempDir(), "contact.png")
+	writeAgentTestPNG(t, photoPath)
+	photo, err := os.ReadFile(photoPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolReq := tools.Request{Tool: domain.ToolKindMCP, ToolCallID: "call_photo", Args: map[string]string{"server": "exchange", "tool": "exchange_contacts"}}
+	appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
+	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "Contact photo (image/png).", tools.MCPStoredResult{
+		ServerID: "exchange",
+		ToolName: "exchange_contacts",
+		Content: []tools.MCPStoredContentItem{
+			{Type: "text", Text: "Contact photo (image/png)."},
+			{Type: "image", MIMEType: "image/png", Data: photo, Size: int64(len(photo))},
+		},
+	})
+
+	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := conversation[len(conversation)-1]
+	if msg.Role != provider.RoleTool || msg.ToolCallID != "call_photo" || len(msg.ContentParts) != 2 {
+		t.Fatalf("MCP photo tool message = %#v", msg)
+	}
+	if msg.ContentParts[0].Type != "text" || msg.ContentParts[1].Type != "image_url" || len(msg.ContentParts[1].Data) == 0 {
+		t.Fatalf("MCP photo content parts = %#v", msg.ContentParts)
+	}
+}
+
+func writeAgentTestPNG(t *testing.T, path string) {
+	t.Helper()
+	photo := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	photo.Set(0, 0, color.NRGBA{R: 0xff, G: 0x80, A: 0xff})
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, photo); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, encoded.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 

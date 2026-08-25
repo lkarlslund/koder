@@ -2,6 +2,9 @@ package viewimagetool
 
 import (
 	"context"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,9 +26,7 @@ func TestNormalizeArgsValidatesInputs(t *testing.T) {
 func TestExecuteAcceptsImageAndStoresSourcePath(t *testing.T) {
 	workspace := t.TempDir()
 	target := filepath.Join(workspace, "screen.png")
-	if err := os.WriteFile(target, []byte("\x89PNG\r\n\x1a\nfake"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestPNG(t, target)
 
 	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
 		Args: map[string]string{"path": "screen.png", "detail": "original"},
@@ -73,9 +74,7 @@ func TestExecuteReadsImageFromSessionTmp(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := filepath.Join(runtime.SessionTmpDir(), "screen.png")
-	if err := os.WriteFile(target, []byte("\x89PNG\r\n\x1a\nfake"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeTestPNG(t, target)
 
 	result, err := tool{}.Call(t.Context(), tools.Options{
 		Runtime: runtime,
@@ -90,6 +89,23 @@ func TestExecuteReadsImageFromSessionTmp(t *testing.T) {
 	stored, ok := result.Stored.(tools.ViewImageStoredResult)
 	if !ok || stored.SourcePath != target {
 		t.Fatalf("stored image = %#v, want source %q", result.Stored, target)
+	}
+}
+
+func writeTestPNG(t *testing.T, path string) {
+	t.Helper()
+	photo := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	photo.Set(0, 0, color.NRGBA{R: 0xff, G: 0x80, A: 0xff})
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(file, photo); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
