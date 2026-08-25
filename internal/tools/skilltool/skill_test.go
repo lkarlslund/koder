@@ -66,7 +66,7 @@ func TestCallIncludesExactSkillResourceRoot(t *testing.T) {
 	if !strings.Contains(result.Output, "resource_root: "+skillDir) {
 		t.Fatalf("missing exact resource root in %q", result.Output)
 	}
-	if !strings.Contains(result.Output, "do not search the filesystem") {
+	if !strings.Contains(result.Output, "Relative paths such as scripts/... and references/... resolve from resource_root.") {
 		t.Fatalf("missing path resolution guidance in %q", result.Output)
 	}
 	stored, ok := result.Stored.(tools.SkillStoredResult)

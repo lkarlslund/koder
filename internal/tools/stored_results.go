@@ -283,7 +283,7 @@ func (result SkillStoredResult) ModelText() string {
 		return content
 	}
 	root := filepath.Dir(path)
-	context := fmt.Sprintf("<skill_context>\nskill_file: %s\nresource_root: %s\nResolve relative paths such as scripts/... and references/... against this exact resource_root; do not search the filesystem for them.\n</skill_context>", path, root)
+	context := fmt.Sprintf("<skill_context>\nskill_file: %s\nresource_root: %s\nRelative paths such as scripts/... and references/... resolve from resource_root.\n</skill_context>", path, root)
 	if content == "" {
 		return context
 	}
