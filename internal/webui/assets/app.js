@@ -1084,6 +1084,7 @@
       if (kind === 'view_image') {
         return renderImagePreviewBlock('Viewed image', data, toolResultText(tool), true);
       }
+	  if (kind === 'view_pdf') return renderImagePreviewBlock('Viewed PDF page', data, toolResultText(tool), true);
 	  if (kind === 'show_media' || kind === 'show_image') return renderShowMediaBlock(data, toolResultText(tool));
 	  if (kind === 'offer_file') return renderOfferFileBlock(data, toolResultText(tool));
 	  if (kind === 'present' && toolAction(tool) === 'media') return renderShowMediaBlock(data, toolResultText(tool));
@@ -3791,6 +3792,7 @@
           if (kind === 'webfetch') return 'bi-globe';
 		  if (kind === 'show_media') return 'bi-play-btn';
 		  if (kind === 'view_image' || kind === 'show_image') return 'bi-image';
+		  if (kind === 'view_pdf') return 'bi-file-earmark-pdf';
 		  if (kind === 'offer_file') return 'bi-file-earmark-arrow-down';
 		  if (kind === 'present') return 'bi-display';
 		  if (String(kind || '').startsWith('browser_')) return 'bi-window';

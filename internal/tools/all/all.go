@@ -25,6 +25,7 @@ import (
 	_ "github.com/lkarlslund/koder/internal/tools/taskstool"
 	_ "github.com/lkarlslund/koder/internal/tools/tasktool"
 	_ "github.com/lkarlslund/koder/internal/tools/viewimagetool"
+	_ "github.com/lkarlslund/koder/internal/tools/viewpdftool"
 	_ "github.com/lkarlslund/koder/internal/tools/webfetchtool"
 	_ "github.com/lkarlslund/koder/internal/tools/websearchtool"
 	_ "github.com/lkarlslund/koder/internal/tools/writetool"

@@ -2182,11 +2182,12 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `function renderImagePreviewBlock`) ||
 		!strings.Contains(fullPage, `if (kind === 'view_image')`) ||
+		!strings.Contains(fullPage, `if (kind === 'view_pdf')`) ||
 		!strings.Contains(fullPage, `data-lightbox-src`) ||
 		!strings.Contains(fullPage, `handleMediaPreviewClick`) ||
 		!strings.Contains(fullPage, `image-lightbox`) ||
 		!strings.Contains(fullPage, `.tool-image-thumb`) {
-		t.Fatalf("expected view_image results to render clickable image thumbnails with a lightbox")
+		t.Fatalf("expected visual inspection results to render clickable image thumbnails with a lightbox")
 	}
 	if !strings.Contains(fullPage, `execProcesses()`) ||
 		!strings.Contains(fullPage, `allExecProcesses()`) ||

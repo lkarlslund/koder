@@ -2194,7 +2194,7 @@ func toolDefaultGroup(kind tools.ID) (string, string) {
 		return "milestone", "Milestone"
 	case tools.TaskList, tools.TaskAddItems, tools.TaskUpdateItem, tools.TaskFetchNext, tools.TaskArchive, tools.TaskDelete, tools.TasksAdd, tools.TasksUpdate:
 		return "task", "Task"
-	case tools.ViewImage, tools.ShowImage, tools.ShowMedia, tools.Present:
+	case tools.ViewImage, tools.ViewPDF, tools.ShowImage, tools.ShowMedia, tools.Present:
 		return "image", "Image"
 	case tools.BrowserStatus, tools.BrowserTabs, tools.BrowserNavigation, tools.BrowserPage, tools.BrowserInteract, tools.BrowserCapture, tools.BrowserConsole, tools.BrowserEvaluate, tools.BrowserNetwork, tools.BrowserDownloads:
 		return "browser", "Browser"

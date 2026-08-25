@@ -319,6 +319,8 @@ type ViewImageStoredResult struct {
 	MIMEType   string `json:"mime_type"`
 	Detail     string `json:"detail,omitempty"`
 	Summary    string `json:"summary,omitempty"`
+	Page       int    `json:"page,omitempty"`
+	PageCount  int    `json:"page_count,omitempty"`
 }
 
 type ShowMediaStoredResult struct {
@@ -523,7 +525,7 @@ func compactStoredResultForPart(env storedResultEnvelope, diff string, limits Co
 		return decodeAndFormat[ExecStoredResult](env.Payload, func(result ExecStoredResult) string {
 			return compactExecStoredResult(result, limits)
 		})
-	case ViewImage:
+	case ViewImage, ViewPDF:
 		return decodeAndFormat[ViewImageStoredResult](env.Payload, compactViewImageStoredResult)
 	case ShowImage, ShowMedia:
 		return decodeAndFormat[ShowMediaStoredResult](env.Payload, compactShowMediaStoredResult)
@@ -779,7 +781,7 @@ func DisplayTextForStored(tool ID, payload any) string {
 
 func ViewImageStoredResultForPart(part domain.Part) (ViewImageStoredResult, bool) {
 	env, ok := storedResultFromPart(part)
-	if !ok || env.PartKind != domain.PartKindToolOutput || env.Tool != ViewImage {
+	if !ok || env.PartKind != domain.PartKindToolOutput || (env.Tool != ViewImage && env.Tool != ViewPDF) {
 		return ViewImageStoredResult{}, false
 	}
 	var result ViewImageStoredResult
@@ -1024,7 +1026,7 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		})
 	case WebSearch:
 		return decodeAndFormat[WebSearchStoredResult](env.Payload, formatWebSearchStoredResult)
-	case ViewImage:
+	case ViewImage, ViewPDF:
 		return decodeAndFormat[ViewImageStoredResult](env.Payload, formatViewImageStoredResult)
 	case ShowImage, ShowMedia:
 		return decodeAndFormat[ShowMediaStoredResult](env.Payload, formatShowMediaStoredResult)

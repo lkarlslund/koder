@@ -7,6 +7,7 @@ type ID = domain.ToolKind
 const (
 	FileRead            ID = domain.ToolKindFileRead
 	ViewImage           ID = domain.ToolKindViewImage
+	ViewPDF             ID = domain.ToolKindViewPDF
 	ShowImage           ID = domain.ToolKindShowImage
 	ShowMedia           ID = domain.ToolKindShowMedia
 	OfferFile           ID = domain.ToolKindOfferFile

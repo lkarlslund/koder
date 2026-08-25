@@ -43,6 +43,7 @@ type ToolKind string
 const (
 	ToolKindFileRead            ToolKind = "file_read"
 	ToolKindViewImage           ToolKind = "view_image"
+	ToolKindViewPDF             ToolKind = "view_pdf"
 	ToolKindShowImage           ToolKind = "show_image"
 	ToolKindShowMedia           ToolKind = "show_media"
 	ToolKindOfferFile           ToolKind = "offer_file"
@@ -171,6 +172,7 @@ type ToolStates map[ToolKind]bool
 var builtinToolKinds = []ToolKind{
 	ToolKindFileRead,
 	ToolKindViewImage,
+	ToolKindViewPDF,
 	ToolKindShowMedia,
 	ToolKindOfferFile,
 	ToolKindFileGlob,

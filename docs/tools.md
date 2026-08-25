@@ -47,10 +47,14 @@ Some operations intentionally remain first-class tools:
 - `file_glob`, `file_grep`, and `code_search` represent meaningfully different
   search strategies.
 - `web_fetch` and `web_search` distinguish retrieval from discovery.
-- `view_image` puts an image into model context, while `present` is explicitly
+- `view_image` puts an image into model context, `view_pdf` renders one requested
+  PDF page into bounded image context, while `present` is explicitly
   user-facing.
 - `chat_status` describes the current chat and is independent of chat lifecycle
   state.
+
+`view_pdf` is advertised only when Poppler's `pdfinfo` and `pdftoppm` commands
+are installed. On Debian-derived systems they are provided by `poppler-utils`.
 
 ## Exposure
 

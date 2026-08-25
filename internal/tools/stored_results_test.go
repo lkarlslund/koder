@@ -134,6 +134,21 @@ func TestCompactModelTextForPartOmitsViewImageBytes(t *testing.T) {
 	}
 }
 
+func TestViewImageStoredResultForPartAcceptsRenderedPDFPage(t *testing.T) {
+	part := toolOutputPart(domain.ToolKindViewPDF, tools.StoredResultStatusOK, "Viewed PDF", tools.ViewImageStoredResult{
+		Path:       "report.pdf",
+		SourcePath: "/tmp/report-page-2.png",
+		MIMEType:   "image/png",
+		Page:       2,
+		PageCount:  7,
+		Summary:    "Viewed PDF report.pdf page 2 of 7",
+	})
+	result, ok := tools.ViewImageStoredResultForPart(part)
+	if !ok || result.Page != 2 || result.PageCount != 7 {
+		t.Fatalf("ViewImageStoredResultForPart() = %#v, %v", result, ok)
+	}
+}
+
 func TestMCPImageStoredResultForPartReturnsCompleteImage(t *testing.T) {
 	part := toolOutputPart(domain.ToolKindMCP, tools.StoredResultStatusOK, "[image content]", tools.MCPStoredResult{
 		ToolName: "get_photo",

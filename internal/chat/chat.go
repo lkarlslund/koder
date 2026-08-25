@@ -3820,14 +3820,14 @@ func userMessageRequiresImages(user domain.UserMessage) bool {
 }
 
 func toolCallRequiresImages(call domain.ToolCall) bool {
-	if call.Tool != domain.ToolKindViewImage || call.Result == nil || call.Result.Status != domain.ToolResultStatusOK {
+	if (call.Tool != domain.ToolKindViewImage && call.Tool != domain.ToolKindViewPDF) || call.Result == nil || call.Result.Status != domain.ToolResultStatusOK {
 		return false
 	}
 	return toolResultRequiresImages(call.Tool, call.ToolCallID, call.Args, *call.Result)
 }
 
 func toolExecutionRequiresImages(execution domain.ToolExecution) bool {
-	isImageTool := execution.Tool == domain.ToolKindViewImage || execution.Tool == domain.ToolKindBrowserScreenshot || execution.Tool == domain.ToolKindBrowserImage ||
+	isImageTool := execution.Tool == domain.ToolKindViewImage || execution.Tool == domain.ToolKindViewPDF || execution.Tool == domain.ToolKindBrowserScreenshot || execution.Tool == domain.ToolKindBrowserImage ||
 		(execution.Tool == domain.ToolKindBrowserCapture && (execution.Args["action"] == "screenshot" || execution.Args["action"] == "image"))
 	if !isImageTool || execution.Result == nil || execution.Result.Status != domain.ToolResultStatusOK {
 		return false
