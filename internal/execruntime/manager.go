@@ -31,6 +31,7 @@ const (
 	defaultPreviewBytes  = 16 * 1024
 	defaultSubscriberCap = 32
 	defaultStdinWait     = 250 * time.Millisecond
+	startupOutputSettle  = 250 * time.Millisecond
 	postExitDrainGrace   = 50 * time.Millisecond
 	maxStdinWait         = 5 * time.Minute
 	envSessionRoot       = "KODER_SESSION_ROOT"
@@ -322,7 +323,7 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 		go m.enforceTimeout(p, req.Timeout)
 	}
 	if wait := normalizeWait(req.YieldTime); wait > 0 {
-		if err := p.waitForOutput(ctx, wait); err != nil {
+		if err := p.waitForStartup(ctx, wait); err != nil {
 			return Snapshot{}, err
 		}
 	}
@@ -680,6 +681,51 @@ func (p *process) waitForOutput(ctx context.Context, wait time.Duration) error {
 			return ctx.Err()
 		case <-p.done:
 			return nil
+		case <-time.After(tick):
+		}
+	}
+}
+
+func (p *process) waitForStartup(ctx context.Context, wait time.Duration) error {
+	if wait <= 0 {
+		return nil
+	}
+	deadline := time.Now().Add(wait)
+	lastOutputBytes := 0
+	lastOutputAt := time.Time{}
+	for {
+		p.mu.RLock()
+		outputBytes := p.outputBytes
+		exited := p.state != StateRunning
+		p.mu.RUnlock()
+		now := time.Now()
+		if outputBytes != lastOutputBytes {
+			lastOutputBytes = outputBytes
+			lastOutputAt = now
+		}
+		if exited {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(postExitDrainGrace):
+			}
+			return nil
+		}
+		if !lastOutputAt.IsZero() && now.Sub(lastOutputAt) >= startupOutputSettle {
+			return nil
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil
+		}
+		tick := min(25*time.Millisecond, remaining)
+		if !lastOutputAt.IsZero() {
+			tick = min(tick, time.Until(lastOutputAt.Add(startupOutputSettle)))
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-p.done:
 		case <-time.After(tick):
 		}
 	}

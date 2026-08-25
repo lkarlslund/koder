@@ -17,7 +17,7 @@ import (
 func TestCommandSpecGuidesMinimalExecutableCommand(t *testing.T) {
 	spec := tools.Info(domain.ToolKindExecCommand)
 	text := strings.Join([]string{spec.Description, spec.Usage, spec.Parameters}, "\n")
-	for _, want := range []string{"executable-only", "do not include reasoning", "explanatory comments", "comment"} {
+	for _, want := range []string{"executable-only", "do not include reasoning", "explanatory comments", "comment", "output-settle", "Defaults to 10000"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected exec_command spec to contain %q, got:\n%s", want, text)
 		}
@@ -89,6 +89,9 @@ func TestCommandExecuteDefaultsToSessionProjectRoot(t *testing.T) {
 	}
 	if control.start.Workdir != root {
 		t.Fatalf("expected session project root workdir %q, got %q", root, control.start.Workdir)
+	}
+	if control.start.YieldTime != 10*time.Second {
+		t.Fatalf("expected 10s default startup wait, got %s", control.start.YieldTime)
 	}
 	if result.Meta["workdir"] != "." {
 		t.Fatalf("expected relative workdir metadata '.', got %#v", result.Meta)

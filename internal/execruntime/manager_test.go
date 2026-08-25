@@ -91,6 +91,43 @@ func TestManagerStartStatusAndWriteStdin(t *testing.T) {
 	}
 }
 
+func TestManagerStartCollectsOutputUntilItSettles(t *testing.T) {
+	mgr := NewManager()
+	snap, err := mgr.Start(context.Background(), StartRequest{
+		SessionID: "session-1",
+		ChatID:    "chat-2",
+		Command:   "printf first; sleep 0.1; printf second",
+		Workdir:   t.TempDir(),
+		YieldTime: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if snap.State != StateCompleted {
+		t.Fatalf("state = %q, want completed", snap.State)
+	}
+	if snap.Output != "firstsecond" {
+		t.Fatalf("output = %q, want complete settled burst", snap.Output)
+	}
+}
+
+func TestManagerStartWaitsForQuietCommandCompletion(t *testing.T) {
+	mgr := NewManager()
+	snap, err := mgr.Start(context.Background(), StartRequest{
+		SessionID: "session-1",
+		ChatID:    "chat-2",
+		Command:   "sleep 0.35; printf done; sleep 0.1",
+		Workdir:   t.TempDir(),
+		YieldTime: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if snap.State != StateCompleted || snap.Output != "done" {
+		t.Fatalf("snapshot = %#v, want completed quiet command with output", snap)
+	}
+}
+
 func TestManagerTerminateStopsDescendants(t *testing.T) {
 	workdir := t.TempDir()
 	mgr := NewManager()
