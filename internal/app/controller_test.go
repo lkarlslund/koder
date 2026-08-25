@@ -865,7 +865,7 @@ func TestControllerSelectedStateIncludesStartedChat(t *testing.T) {
 
 func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/slots" || r.URL.Path == "/props" {
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/api/v1/models" || r.URL.Path == "/api/v0/models" {
 			http.NotFound(w, r)
 			return
 		}
@@ -1010,7 +1010,7 @@ func TestMissingCustomModelBackingIsVisibleButNeverSelectable(t *testing.T) {
 
 func TestControllerSetDefaultAndDeleteCustomModelConfig(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/slots" || r.URL.Path == "/props" {
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/api/v1/models" || r.URL.Path == "/api/v0/models" {
 			http.NotFound(w, r)
 			return
 		}
@@ -1179,7 +1179,7 @@ func TestControllerSaveModelConfigRemovesLegacyFieldsShadowedByOverlayOptions(t 
 
 func TestControllerDeleteModelConfigRejectsNonCustomModel(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/slots" || r.URL.Path == "/props" {
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/api/v1/models" || r.URL.Path == "/api/v0/models" {
 			http.NotFound(w, r)
 			return
 		}
@@ -1216,7 +1216,7 @@ func TestControllerModelOptionsSignalsTTSOnlyModel(t *testing.T) {
 			_, _ = w.Write([]byte{0, 1, 2, 3})
 		case "/v1/chat/completions":
 			http.NotFound(w, r)
-		case "/slots", "/props":
+		case "/slots", "/props", "/api/v1/models", "/api/v0/models":
 			http.NotFound(w, r)
 		default:
 			t.Fatalf("unexpected path %q", r.URL.Path)
@@ -1255,7 +1255,7 @@ func TestControllerModelOptionsSignalsTTSOnlyModel(t *testing.T) {
 
 func TestControllerModelOptionsDoesNotInventMissingCurrentProvider(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/slots" || r.URL.Path == "/props" {
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/api/v1/models" || r.URL.Path == "/api/v0/models" {
 			http.NotFound(w, r)
 			return
 		}
@@ -1611,7 +1611,7 @@ func TestControllerResetPromptRestoresEmbeddedDefault(t *testing.T) {
 func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/slots", "/props":
+		case "/slots", "/props", "/api/v1/models", "/api/v0/models":
 			http.NotFound(w, r)
 		case "/models", "/v1/models":
 			_, _ = fmt.Fprint(w, `{"data":[{"id":"base-model"}]}`)
@@ -1663,7 +1663,7 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 
 func TestControllerSetModelRejectsModelOutsideCatalog(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/slots" || r.URL.Path == "/props" {
+		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/api/v1/models" || r.URL.Path == "/api/v0/models" {
 			http.NotFound(w, r)
 			return
 		}
@@ -1735,6 +1735,8 @@ func TestControllerSetModelRefreshesDetectedContextWindow(t *testing.T) {
 			_, _ = w.Write([]byte(`{"data":[{"id":"live-model"}]}`))
 		case "/api/v1/models":
 			http.NotFound(w, r)
+		case "/api/v0/models":
+			http.NotFound(w, r)
 		case "/slots":
 			http.NotFound(w, r)
 		case "/props":
@@ -1775,7 +1777,7 @@ func TestControllerSetModelRefreshesDetectedContextWindow(t *testing.T) {
 func TestControllerStartDetectsActiveModelContextWindow(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/slots", "/props", "/api/v1/models":
+		case "/slots", "/props", "/api/v1/models", "/api/v0/models":
 			http.NotFound(w, r)
 		case "/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"model","status":{"args":["llama-server","--ctx-size","262144"]}}]}`))
@@ -1811,6 +1813,8 @@ func TestControllerStartWarmsDefaultModelContextWindow(t *testing.T) {
 		case "/v1/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"live-model"}]}`))
 		case "/api/v1/models":
+			http.NotFound(w, r)
+		case "/api/v0/models":
 			http.NotFound(w, r)
 		case "/slots":
 			http.NotFound(w, r)

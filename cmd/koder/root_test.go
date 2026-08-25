@@ -328,6 +328,8 @@ func TestDoctorCommandResolvesConfiguredModelAlias(t *testing.T) {
 			_, _ = fmt.Fprint(w, `{"status":"ok"}`)
 		case "/v1/models":
 			_, _ = fmt.Fprint(w, `{"data":[{"id":"real-model"}]}`)
+		case "/api/v1/models", "/api/v0/models":
+			http.NotFound(w, r)
 		default:
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}

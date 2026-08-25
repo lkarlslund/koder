@@ -315,18 +315,21 @@ func (r ChatRequest) MarshalJSON() ([]byte, error) {
 }
 
 type modelResponseItem struct {
-	ID                  string   `json:"id"`
-	OwnedBy             string   `json:"owned_by"`
-	Family              string   `json:"family"`
-	Task                string   `json:"task"`
-	ContextLength       int      `json:"context_length"`
-	ContextWindow       int      `json:"context_window"`
-	MaxContextLength    int      `json:"max_context_length"`
-	MaxModelLen         int      `json:"max_model_len"`
-	MaxCompletionTokens int      `json:"max_completion_tokens"`
-	Capabilities        []string `json:"capabilities"`
-	SupportedParameters []string `json:"supported_parameters"`
-	Architecture        struct {
+	ID                     string   `json:"id"`
+	OwnedBy                string   `json:"owned_by"`
+	Type                   string   `json:"type"`
+	Family                 string   `json:"family"`
+	Task                   string   `json:"task"`
+	ContextLength          int      `json:"context_length"`
+	ContextWindow          int      `json:"context_window"`
+	MaxContextLength       int      `json:"max_context_length"`
+	MaxModelLen            int      `json:"max_model_len"`
+	MaxCompletionTokens    int      `json:"max_completion_tokens"`
+	Capabilities           []string `json:"capabilities"`
+	SupportedParameters    []string `json:"supported_parameters"`
+	ReasoningEfforts       []string `json:"reasoning_efforts"`
+	DefaultReasoningEffort string   `json:"default_reasoning_effort"`
+	Architecture           struct {
 		InputModalities  []string `json:"input_modalities"`
 		OutputModalities []string `json:"output_modalities"`
 	} `json:"architecture"`
@@ -349,6 +352,11 @@ type propsResponse struct {
 	DefaultGenerationSettings struct {
 		NCtx int `json:"n_ctx"`
 	} `json:"default_generation_settings"`
+	NCtx       int `json:"n_ctx"`
+	Modalities struct {
+		Vision *bool `json:"vision"`
+	} `json:"modalities"`
+	ChatTemplateToolUse json.RawMessage `json:"chat_template_tool_use"`
 }
 
 type chatChunk struct {
@@ -508,6 +516,7 @@ func (c *Client) ListModels(ctx context.Context) (models []domain.Model, err err
 	for _, item := range items {
 		models = append(models, modelFromResponseItem(item))
 	}
+	c.enrichModelCatalog(ctx, models)
 	return models, nil
 }
 
@@ -617,17 +626,29 @@ func applyListedCapabilities(model *domain.Model, item modelResponseItem) {
 	// commonly add architecture metadata; that must not turn the permissive
 	// unknown-capability fallback into an explicit "not chat capable" result.
 	model.SupportsChat = true
-	switch strings.ToLower(strings.TrimSpace(item.Task)) {
+	switch firstNonEmptyLower(item.Task, item.Type) {
 	case "asr", "stt", "speech-to-text", "transcription":
 		model.SupportsChat = false
+		model.ChatKnown = true
 		model.SupportsSTT = true
 		model.CapabilitiesKnown = true
 		model.CapabilitySource = "openai-models-task"
 	case "tts", "text-to-speech", "speech-synthesis":
 		model.SupportsChat = false
+		model.ChatKnown = true
 		model.SupportsTTS = true
 		model.CapabilitiesKnown = true
 		model.CapabilitySource = "openai-models-task"
+	case "embedding", "embeddings", "rerank", "reranker":
+		model.SupportsChat = false
+		model.ChatKnown = true
+		model.CapabilitiesKnown = true
+		model.CapabilitySource = "openai-models-task"
+	}
+	model.ReasoningEfforts = normalizedStrings(item.ReasoningEfforts)
+	model.DefaultReasoningEffort = strings.ToLower(strings.TrimSpace(item.DefaultReasoningEffort))
+	if len(model.ReasoningEfforts) > 0 || model.DefaultReasoningEffort != "" {
+		model.SupportsReasoning = true
 	}
 	for _, modality := range item.Architecture.InputModalities {
 		model.ImagesKnown = true
@@ -659,6 +680,15 @@ func applyListedCapabilities(model *domain.Model, item modelResponseItem) {
 			model.CapabilitySource = "openai-models"
 		}
 	}
+}
+
+func firstNonEmptyLower(values ...string) string {
+	for _, value := range values {
+		if value = strings.ToLower(strings.TrimSpace(value)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func firstPositive(values ...int) int {

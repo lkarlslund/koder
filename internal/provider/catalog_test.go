@@ -64,7 +64,8 @@ func TestProbeReturnsSortedModels(t *testing.T) {
 			return
 		}
 		if r.URL.Path != "/v1/models" {
-			t.Fatalf("unexpected path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
 		}
 		_, _ = w.Write([]byte(`{"data":[{"id":"z-model","owned_by":"test"},{"id":"a-model","owned_by":"test"}]}`))
 	}))
@@ -138,7 +139,7 @@ func TestProbeDetectsPromptProgressSupport(t *testing.T) {
 			w.Header().Set("Content-Type", "text/event-stream")
 			_, _ = w.Write([]byte("data: {\"prompt_progress\":{\"total\":10,\"processed\":5,\"cache\":2,\"time_ms\":3}}\n\n"))
 			_, _ = w.Write([]byte("data: [DONE]\n\n"))
-		case "/slots", "/props":
+		case "/slots", "/props", "/api/v1/models", "/api/v0/models":
 			http.NotFound(w, r)
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)

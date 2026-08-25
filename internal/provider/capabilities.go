@@ -31,6 +31,7 @@ type capabilityEntry struct {
 	MaxOutputTokens   int       `json:"max_output_tokens,omitempty"`
 	MetadataSource    string    `json:"metadata_source,omitempty"`
 	SupportsChat      bool      `json:"supports_chat"`
+	ChatKnown         bool      `json:"chat_known,omitempty"`
 	SupportsSTT       bool      `json:"supports_stt"`
 	SupportsTTS       bool      `json:"supports_tts"`
 	SupportsImages    bool      `json:"supports_images"`
@@ -78,12 +79,14 @@ func (s *CapabilityStore) EnrichModel(providerID string, cfg config.Provider, mo
 	}
 	key := capabilityKey(providerID, cfg.BaseURL, model.ID)
 	current := inferCapabilities(providerID, cfg, model)
-	// An explicit task from the provider's live model listing is newer and more
-	// authoritative than a previously probed or heuristic cache entry.
-	if current.CapabilitiesKnown && strings.TrimSpace(current.CapabilitySource) == "openai-models-task" {
-		cache.Entries[key] = capabilityEntryFromModel(providerID, cfg, current)
-		if err := s.save(cache); err != nil {
-			return domain.Model{}, err
+	// Live provider metadata is newer than the probe cache. Persist explicit
+	// speech roles because they are stable; keep runtime/native facts in memory.
+	if current.CapabilitiesKnown && strings.TrimSpace(current.CapabilitySource) != "" && strings.TrimSpace(current.CapabilitySource) != "heuristic" {
+		if strings.TrimSpace(current.CapabilitySource) == "openai-models-task" {
+			cache.Entries[key] = capabilityEntryFromModel(providerID, cfg, current)
+			if err := s.save(cache); err != nil {
+				return domain.Model{}, err
+			}
 		}
 		return current, nil
 	}
@@ -106,6 +109,7 @@ func (s *CapabilityStore) EnrichModel(providerID string, cfg config.Provider, mo
 					BaseURL:           strings.TrimSpace(cfg.BaseURL),
 					ModelID:           model.ID,
 					SupportsChat:      supportsChat,
+					ChatKnown:         true,
 					SupportsSTT:       current.SupportsSTT,
 					SupportsTTS:       true,
 					SupportsImages:    current.SupportsImages,
@@ -171,6 +175,7 @@ func (s *CapabilityStore) supportsImageAttachment(providerID string, cfg config.
 				BaseURL:           strings.TrimSpace(cfg.BaseURL),
 				ModelID:           modelID,
 				SupportsChat:      current.SupportsChat,
+				ChatKnown:         current.ChatKnown,
 				SupportsSTT:       current.SupportsSTT,
 				SupportsTTS:       current.SupportsTTS,
 				SupportsImages:    supported,
@@ -247,7 +252,8 @@ func applyEntry(model domain.Model, entry capabilityEntry) domain.Model {
 		model.MetadataSource = entry.MetadataSource
 	}
 	model.SupportsChat = entry.SupportsChat
-	if !entry.SupportsChat && !entry.SupportsSTT && !entry.SupportsTTS {
+	model.ChatKnown = entry.ChatKnown
+	if !entry.ChatKnown && !entry.SupportsChat && !entry.SupportsSTT && !entry.SupportsTTS {
 		model.SupportsChat = true
 	}
 	model.SupportsSTT = entry.SupportsSTT
@@ -274,6 +280,7 @@ func capabilityEntryFromModel(providerID string, cfg config.Provider, model doma
 		MaxOutputTokens:   model.MaxOutputTokens,
 		MetadataSource:    model.MetadataSource,
 		SupportsChat:      model.SupportsChat,
+		ChatKnown:         model.ChatKnown,
 		SupportsSTT:       model.SupportsSTT,
 		SupportsTTS:       model.SupportsTTS,
 		SupportsImages:    model.SupportsImages,

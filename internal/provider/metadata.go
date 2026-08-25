@@ -16,28 +16,36 @@ import (
 )
 
 type nativeV1ModelsResponse struct {
-	Models []struct {
-		Key              string `json:"key"`
-		MaxContextLength int    `json:"max_context_length"`
-		LoadedInstances  []struct {
-			ID     string `json:"id"`
-			Config struct {
-				ContextLength int `json:"context_length"`
-			} `json:"config"`
-		} `json:"loaded_instances"`
-		Capabilities struct {
-			Vision            bool            `json:"vision"`
-			TrainedForToolUse bool            `json:"trained_for_tool_use"`
-			Reasoning         json.RawMessage `json:"reasoning"`
-		} `json:"capabilities"`
-	} `json:"models"`
+	Models []nativeV1Model `json:"models"`
+}
+
+type nativeV1Model struct {
+	Key              string `json:"key"`
+	Type             string `json:"type"`
+	Publisher        string `json:"publisher"`
+	MaxContextLength int    `json:"max_context_length"`
+	LoadedInstances  []struct {
+		ID     string `json:"id"`
+		Config struct {
+			ContextLength int `json:"context_length"`
+		} `json:"config"`
+	} `json:"loaded_instances"`
+	Capabilities struct {
+		Vision            *bool           `json:"vision"`
+		TrainedForToolUse *bool           `json:"trained_for_tool_use"`
+		Reasoning         json.RawMessage `json:"reasoning"`
+	} `json:"capabilities"`
 }
 
 type nativeV0ModelsResponse struct {
-	Data []struct {
-		ID               string `json:"id"`
-		MaxContextLength int    `json:"max_context_length"`
-	} `json:"data"`
+	Data []nativeV0Model `json:"data"`
+}
+
+type nativeV0Model struct {
+	ID               string `json:"id"`
+	Type             string `json:"type"`
+	Publisher        string `json:"publisher"`
+	MaxContextLength int    `json:"max_context_length"`
 }
 
 type ollamaShowResponse struct {
@@ -114,7 +122,7 @@ func (c *Client) DetectModelMetadata(ctx context.Context, modelID string) (domai
 		if detected.MetadataSource == "native-v1-loaded-instance" && model.ContextWindow > 0 {
 			return model, nil
 		}
-		nativeV1Context = detected.ContextWindow
+		nativeV1Context = firstPositive(detected.ContextWindow, detected.MaxContextWindow)
 		model.ContextWindow = listedContext
 	}
 
@@ -123,10 +131,11 @@ func (c *Client) DetectModelMetadata(ctx context.Context, modelID string) (domai
 	// only ask /props when the model is loaded or no router status is available.
 	if runtimeStatus != "unloaded" {
 		props, propsErr := c.Props(ctx, modelID)
-		if propsErr == nil && props.DefaultGenerationSettings.NCtx > 0 {
-			model.ContextWindow = props.DefaultGenerationSettings.NCtx
-			model.MetadataSource = "llama.cpp-props"
-			return model, nil
+		if propsErr == nil {
+			mergeDetectedModel(&model, modelFromProps(modelID, props))
+			if model.ContextWindow > 0 {
+				return model, nil
+			}
 		}
 		if propsErr != nil && !isOptionalContextWindowProbeError(propsErr) {
 			return domain.Model{}, propsErr
@@ -172,30 +181,122 @@ func (c *Client) DetectModelMetadata(ctx context.Context, modelID string) (domai
 	return model, nil
 }
 
+func modelFromProps(modelID string, props propsResponse) domain.Model {
+	model := domain.Model{ID: modelID, CapabilitySource: "llama.cpp-props"}
+	model.ContextWindow = firstPositive(props.NCtx, props.DefaultGenerationSettings.NCtx)
+	if model.ContextWindow > 0 {
+		model.MetadataSource = "llama.cpp-props"
+	}
+	if props.Modalities.Vision != nil {
+		model.SupportsImages = *props.Modalities.Vision
+		model.ImagesKnown = true
+		model.CapabilitiesKnown = true
+	}
+	if props.ChatTemplateToolUse != nil {
+		var template string
+		model.SupportsTools = json.Unmarshal(props.ChatTemplateToolUse, &template) == nil && strings.TrimSpace(template) != ""
+		model.ToolsKnown = true
+		model.CapabilitiesKnown = true
+	}
+	return model
+}
+
+func (c *Client) enrichModelCatalog(ctx context.Context, models []domain.Model) {
+	if !catalogNeedsEnrichment(models) {
+		return
+	}
+	var v1 nativeV1ModelsResponse
+	if err := c.decodeJSONAt(ctx, http.MethodGet, c.serverRootPath("/api/v1/models"), nil, &v1, "get native v1 models"); err == nil {
+		for idx := range models {
+			if item, ok := nativeV1ModelByID(v1.Models, models[idx].ID); ok {
+				mergeDetectedModel(&models[idx], modelFromNativeV1(item, models[idx].ID))
+			}
+		}
+		return
+	}
+	var v0 nativeV0ModelsResponse
+	if err := c.decodeJSONAt(ctx, http.MethodGet, c.serverRootPath("/api/v0/models"), nil, &v0, "get compatible v0 models"); err != nil {
+		return
+	}
+	for idx := range models {
+		if item, ok := nativeV0ModelByID(v0.Data, models[idx].ID); ok {
+			mergeDetectedModel(&models[idx], modelFromNativeV0(item, models[idx].ID))
+		}
+	}
+}
+
+func catalogNeedsEnrichment(models []domain.Model) bool {
+	for _, model := range models {
+		if model.ContextWindow <= 0 || strings.TrimSpace(model.OwnedBy) == "" || !model.CapabilitiesKnown || (model.SupportsReasoning && len(model.ReasoningEfforts) == 0) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Client) nativeV1ModelMetadata(ctx context.Context, modelID string) (domain.Model, error) {
 	var payload nativeV1ModelsResponse
 	if err := c.decodeJSONAt(ctx, http.MethodGet, c.serverRootPath("/api/v1/models"), nil, &payload, "get native v1 models"); err != nil {
 		return domain.Model{}, err
 	}
-	for _, item := range payload.Models {
-		matched := strings.TrimSpace(item.Key) == modelID
-		for _, instance := range item.LoadedInstances {
-			if strings.TrimSpace(instance.ID) == modelID {
-				matched = true
-				if instance.Config.ContextLength > 0 {
-					return domain.Model{ID: modelID, ContextWindow: instance.Config.ContextLength, MaxContextWindow: item.MaxContextLength, MetadataSource: "native-v1-loaded-instance", SupportsImages: item.Capabilities.Vision, ImagesKnown: true, SupportsTools: item.Capabilities.TrainedForToolUse, ToolsKnown: true, SupportsReasoning: len(item.Capabilities.Reasoning) > 0 && string(item.Capabilities.Reasoning) != "null", CapabilitiesKnown: true, CapabilitySource: "native-v1-models"}, nil
-				}
-			}
-		}
-		if matched && len(item.LoadedInstances) == 1 && item.LoadedInstances[0].Config.ContextLength > 0 {
-			instance := item.LoadedInstances[0]
-			return domain.Model{ID: modelID, ContextWindow: instance.Config.ContextLength, MaxContextWindow: item.MaxContextLength, MetadataSource: "native-v1-loaded-instance", SupportsImages: item.Capabilities.Vision, ImagesKnown: true, SupportsTools: item.Capabilities.TrainedForToolUse, ToolsKnown: true, SupportsReasoning: len(item.Capabilities.Reasoning) > 0 && string(item.Capabilities.Reasoning) != "null", CapabilitiesKnown: true, CapabilitySource: "native-v1-models"}, nil
-		}
-		if matched {
-			return domain.Model{ID: modelID, ContextWindow: item.MaxContextLength, MaxContextWindow: item.MaxContextLength, MetadataSource: "native-v1-models", SupportsImages: item.Capabilities.Vision, ImagesKnown: true, SupportsTools: item.Capabilities.TrainedForToolUse, ToolsKnown: true, SupportsReasoning: len(item.Capabilities.Reasoning) > 0 && string(item.Capabilities.Reasoning) != "null", CapabilitiesKnown: true, CapabilitySource: "native-v1-models"}, nil
-		}
+	if item, ok := nativeV1ModelByID(payload.Models, modelID); ok {
+		return modelFromNativeV1(item, modelID), nil
 	}
 	return domain.Model{ID: modelID}, nil
+}
+
+func nativeV1ModelByID(items []nativeV1Model, modelID string) (nativeV1Model, bool) {
+	modelID = strings.TrimSpace(modelID)
+	for _, item := range items {
+		if strings.TrimSpace(item.Key) == modelID {
+			return item, true
+		}
+		for _, instance := range item.LoadedInstances {
+			if strings.TrimSpace(instance.ID) == modelID {
+				return item, true
+			}
+		}
+	}
+	return nativeV1Model{}, false
+}
+
+func modelFromNativeV1(item nativeV1Model, modelID string) domain.Model {
+	model := domain.Model{
+		ID: modelID, OwnedBy: strings.TrimSpace(item.Publisher),
+		MaxContextWindow: item.MaxContextLength,
+		MetadataSource:   "native-v1-models", CapabilitySource: "native-v1-models",
+	}
+	if modelType := strings.ToLower(strings.TrimSpace(item.Type)); modelType != "" {
+		model.ChatKnown = true
+		model.SupportsChat = modelType == "llm" || modelType == "chat" || modelType == "vlm"
+		model.CapabilitiesKnown = true
+	}
+	if item.Capabilities.Vision != nil {
+		model.SupportsImages = *item.Capabilities.Vision
+		model.ImagesKnown = true
+		model.CapabilitiesKnown = true
+	}
+	if item.Capabilities.TrainedForToolUse != nil {
+		model.SupportsTools = *item.Capabilities.TrainedForToolUse
+		model.ToolsKnown = true
+		model.CapabilitiesKnown = true
+	}
+	model.SupportsReasoning, model.ReasoningEfforts, model.DefaultReasoningEffort = reasoningMetadata(item.Capabilities.Reasoning)
+	if len(item.Capabilities.Reasoning) > 0 {
+		model.CapabilitiesKnown = true
+	}
+	for _, instance := range item.LoadedInstances {
+		if strings.TrimSpace(instance.ID) == strings.TrimSpace(modelID) && instance.Config.ContextLength > 0 {
+			model.ContextWindow = instance.Config.ContextLength
+			model.MetadataSource = "native-v1-loaded-instance"
+			return model
+		}
+	}
+	if strings.TrimSpace(item.Key) == strings.TrimSpace(modelID) && len(item.LoadedInstances) == 1 && item.LoadedInstances[0].Config.ContextLength > 0 {
+		model.ContextWindow = item.LoadedInstances[0].Config.ContextLength
+		model.MetadataSource = "native-v1-loaded-instance"
+	}
+	return model
 }
 
 func (c *Client) nativeV0ModelMetadata(ctx context.Context, modelID string) (domain.Model, error) {
@@ -203,12 +304,33 @@ func (c *Client) nativeV0ModelMetadata(ctx context.Context, modelID string) (dom
 	if err := c.decodeJSONAt(ctx, http.MethodGet, c.serverRootPath("/api/v0/models"), nil, &payload, "get compatible v0 models"); err != nil {
 		return domain.Model{}, err
 	}
-	for _, item := range payload.Data {
-		if strings.TrimSpace(item.ID) == modelID && item.MaxContextLength > 0 {
-			return domain.Model{ID: modelID, ContextWindow: item.MaxContextLength, MaxContextWindow: item.MaxContextLength, MetadataSource: "compatible-v0-models"}, nil
-		}
+	if item, ok := nativeV0ModelByID(payload.Data, modelID); ok {
+		return modelFromNativeV0(item, modelID), nil
 	}
 	return domain.Model{ID: modelID}, nil
+}
+
+func nativeV0ModelByID(items []nativeV0Model, modelID string) (nativeV0Model, bool) {
+	for _, item := range items {
+		if strings.TrimSpace(item.ID) == strings.TrimSpace(modelID) {
+			return item, true
+		}
+	}
+	return nativeV0Model{}, false
+}
+
+func modelFromNativeV0(item nativeV0Model, modelID string) domain.Model {
+	model := domain.Model{
+		ID: modelID, OwnedBy: strings.TrimSpace(item.Publisher),
+		ContextWindow: item.MaxContextLength, MaxContextWindow: item.MaxContextLength,
+		MetadataSource: "compatible-v0-models", CapabilitySource: "compatible-v0-models",
+	}
+	if modelType := strings.ToLower(strings.TrimSpace(item.Type)); modelType != "" {
+		model.ChatKnown = true
+		model.SupportsChat = modelType == "llm" || modelType == "chat" || modelType == "vlm"
+		model.CapabilitiesKnown = true
+	}
+	return model
 }
 
 func (c *Client) ollamaModelMetadata(ctx context.Context, modelID string) (domain.Model, error) {
@@ -240,10 +362,19 @@ func (c *Client) ollamaModelMetadata(ctx context.Context, modelID string) (domai
 	}
 	for _, capability := range payload.Capabilities {
 		switch strings.ToLower(strings.TrimSpace(capability)) {
+		case "completion", "chat":
+			model.SupportsChat = true
+			model.ChatKnown = true
+		case "embedding", "embeddings":
+			if !model.SupportsChat {
+				model.ChatKnown = true
+			}
 		case "vision":
 			model.SupportsImages = true
 		case "tools", "tool_use":
 			model.SupportsTools = true
+		case "thinking", "reasoning":
+			model.SupportsReasoning = true
 		}
 	}
 	if len(payload.Capabilities) > 0 {
@@ -300,11 +431,17 @@ func (c *Client) serverRootPath(path string) string {
 }
 
 func mergeDetectedModel(dst *domain.Model, src domain.Model) {
+	if strings.TrimSpace(src.OwnedBy) != "" {
+		dst.OwnedBy = strings.TrimSpace(src.OwnedBy)
+	}
 	if src.ContextWindow > 0 {
 		dst.ContextWindow = src.ContextWindow
 	}
 	if src.MaxContextWindow > 0 {
 		dst.MaxContextWindow = src.MaxContextWindow
+		if dst.ContextWindow <= 0 {
+			dst.ContextWindow = src.MaxContextWindow
+		}
 	}
 	if src.MaxOutputTokens > 0 {
 		dst.MaxOutputTokens = src.MaxOutputTokens
@@ -312,17 +449,68 @@ func mergeDetectedModel(dst *domain.Model, src domain.Model) {
 	if src.MetadataSource != "" {
 		dst.MetadataSource = src.MetadataSource
 	}
-	dst.SupportsImages = dst.SupportsImages || src.SupportsImages
-	dst.ImagesKnown = dst.ImagesKnown || src.ImagesKnown
+	if src.ChatKnown {
+		dst.SupportsChat = src.SupportsChat
+		dst.ChatKnown = true
+	}
+	if src.ImagesKnown {
+		dst.SupportsImages = src.SupportsImages
+		dst.ImagesKnown = true
+	}
 	dst.SupportsPDFs = dst.SupportsPDFs || src.SupportsPDFs
-	dst.SupportsTools = dst.SupportsTools || src.SupportsTools
-	dst.ToolsKnown = dst.ToolsKnown || src.ToolsKnown
+	if src.ToolsKnown {
+		dst.SupportsTools = src.SupportsTools
+		dst.ToolsKnown = true
+	}
 	dst.SupportsJSON = dst.SupportsJSON || src.SupportsJSON
 	dst.SupportsReasoning = dst.SupportsReasoning || src.SupportsReasoning
+	if len(src.ReasoningEfforts) > 0 {
+		dst.ReasoningEfforts = append([]string(nil), src.ReasoningEfforts...)
+	}
+	if strings.TrimSpace(src.DefaultReasoningEffort) != "" {
+		dst.DefaultReasoningEffort = src.DefaultReasoningEffort
+	}
 	if src.CapabilitiesKnown {
 		dst.CapabilitiesKnown = true
 		dst.CapabilitySource = src.CapabilitySource
 	}
+}
+
+func reasoningMetadata(raw json.RawMessage) (bool, []string, string) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || bytes.Equal(trimmed, []byte("false")) {
+		return false, nil, ""
+	}
+	if bytes.Equal(trimmed, []byte("true")) {
+		return true, nil, ""
+	}
+	var detail struct {
+		AllowedOptions []string `json:"allowed_options"`
+		Default        string   `json:"default"`
+		DefaultOption  string   `json:"default_option"`
+		DefaultEffort  string   `json:"default_effort"`
+	}
+	if json.Unmarshal(trimmed, &detail) != nil {
+		return true, nil, ""
+	}
+	return true, normalizedStrings(detail.AllowedOptions), firstNonEmptyLower(detail.Default, detail.DefaultOption, detail.DefaultEffort)
+}
+
+func normalizedStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func numericInt(value any) (int, bool) {

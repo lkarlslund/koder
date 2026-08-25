@@ -122,33 +122,35 @@ type ChatSidebarStatus struct {
 
 // ModelOption is a selectable provider/model pair exposed to web clients.
 type ModelOption struct {
-	ProviderID        string        `json:"provider_id"`
-	ProviderLabel     string        `json:"provider_label"`
-	ModelID           string        `json:"model_id"`
-	SourceProviderID  string        `json:"source_provider_id,omitempty"`
-	SourceModelID     string        `json:"source_model_id,omitempty"`
-	OwnedBy           string        `json:"owned_by,omitempty"`
-	ContextWindow     int           `json:"context_window,omitempty"`
-	MaxContextWindow  int           `json:"max_context_window,omitempty"`
-	MaxOutputTokens   int           `json:"max_output_tokens,omitempty"`
-	MetadataSource    string        `json:"metadata_source,omitempty"`
-	SupportsChat      bool          `json:"supports_chat"`
-	SupportsSTT       bool          `json:"supports_stt"`
-	SupportsTTS       bool          `json:"supports_tts"`
-	SupportsTools     bool          `json:"supports_tools"`
-	SupportsImages    bool          `json:"supports_images"`
-	SupportsPDFs      bool          `json:"supports_pdfs"`
-	SupportsJSON      bool          `json:"supports_json"`
-	SupportsReasoning bool          `json:"supports_reasoning"`
-	CapabilitiesKnown bool          `json:"capabilities_known"`
-	CapabilitySource  string        `json:"capability_source,omitempty"`
-	Detected          bool          `json:"detected"`
-	Custom            bool          `json:"custom"`
-	BackingDetected   bool          `json:"backing_detected"`
-	Editable          bool          `json:"editable"`
-	Current           bool          `json:"current"`
-	Default           bool          `json:"default"`
-	Health            RuntimeHealth `json:"health"`
+	ProviderID             string        `json:"provider_id"`
+	ProviderLabel          string        `json:"provider_label"`
+	ModelID                string        `json:"model_id"`
+	SourceProviderID       string        `json:"source_provider_id,omitempty"`
+	SourceModelID          string        `json:"source_model_id,omitempty"`
+	OwnedBy                string        `json:"owned_by,omitempty"`
+	ContextWindow          int           `json:"context_window,omitempty"`
+	MaxContextWindow       int           `json:"max_context_window,omitempty"`
+	MaxOutputTokens        int           `json:"max_output_tokens,omitempty"`
+	MetadataSource         string        `json:"metadata_source,omitempty"`
+	SupportsChat           bool          `json:"supports_chat"`
+	SupportsSTT            bool          `json:"supports_stt"`
+	SupportsTTS            bool          `json:"supports_tts"`
+	SupportsTools          bool          `json:"supports_tools"`
+	SupportsImages         bool          `json:"supports_images"`
+	SupportsPDFs           bool          `json:"supports_pdfs"`
+	SupportsJSON           bool          `json:"supports_json"`
+	SupportsReasoning      bool          `json:"supports_reasoning"`
+	ReasoningEfforts       []string      `json:"reasoning_efforts,omitempty"`
+	DefaultReasoningEffort string        `json:"default_reasoning_effort,omitempty"`
+	CapabilitiesKnown      bool          `json:"capabilities_known"`
+	CapabilitySource       string        `json:"capability_source,omitempty"`
+	Detected               bool          `json:"detected"`
+	Custom                 bool          `json:"custom"`
+	BackingDetected        bool          `json:"backing_detected"`
+	Editable               bool          `json:"editable"`
+	Current                bool          `json:"current"`
+	Default                bool          `json:"default"`
+	Health                 RuntimeHealth `json:"health"`
 }
 
 // RuntimeHealth is provider-owned ephemeral process state.
@@ -694,9 +696,16 @@ func (c *Controller) ChatBackends(ctx context.Context) []ChatBackendState {
 			koder.Detail = "Model discovery: " + err.Error()
 		} else {
 			for _, model := range selectableChatModelOptions(models) {
+				inputModalities := []string{"text"}
+				if model.SupportsImages {
+					inputModalities = append(inputModalities, "image")
+				}
 				koder.Models = append(koder.Models, ChatBackendModelOption{
 					ProviderID: model.ProviderID, ID: model.ModelID,
 					Name: model.ProviderLabel + " / " + model.ModelID, Default: model.Default,
+					DefaultReasoningEffort: model.DefaultReasoningEffort,
+					ReasoningEfforts:       append([]string(nil), model.ReasoningEfforts...),
+					InputModalities:        inputModalities,
 				})
 			}
 			slices.SortStableFunc(koder.Models, func(a, b ChatBackendModelOption) int {

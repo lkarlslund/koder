@@ -811,24 +811,27 @@ type Part struct {
 }
 
 type Model struct {
-	ID                string
-	OwnedBy           string
-	ContextWindow     int
-	MaxContextWindow  int
-	MaxOutputTokens   int
-	MetadataSource    string
-	SupportsChat      bool
-	SupportsSTT       bool
-	SupportsTTS       bool
-	SupportsImages    bool
-	ImagesKnown       bool
-	SupportsPDFs      bool
-	SupportsTools     bool
-	ToolsKnown        bool
-	SupportsJSON      bool
-	SupportsReasoning bool
-	CapabilitySource  string
-	CapabilitiesKnown bool
+	ID                     string
+	OwnedBy                string
+	ContextWindow          int
+	MaxContextWindow       int
+	MaxOutputTokens        int
+	MetadataSource         string
+	SupportsChat           bool
+	ChatKnown              bool
+	SupportsSTT            bool
+	SupportsTTS            bool
+	SupportsImages         bool
+	ImagesKnown            bool
+	SupportsPDFs           bool
+	SupportsTools          bool
+	ToolsKnown             bool
+	SupportsJSON           bool
+	SupportsReasoning      bool
+	ReasoningEfforts       []string
+	DefaultReasoningEffort string
+	CapabilitySource       string
+	CapabilitiesKnown      bool
 }
 
 type Usage struct {
