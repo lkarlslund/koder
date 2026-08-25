@@ -947,7 +947,7 @@ func TestValidateChatModelAvailableReturnsRecoverableErrorForRemovedModel(t *tes
 func TestMissingCustomModelBackingIsVisibleButNeverSelectable(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/slots", "/props":
+		case "/slots", "/props", "/api/v1/models", "/api/v0/models", "/api/show":
 			http.NotFound(w, r)
 		case "/models", "/v1/models":
 			_, _ = fmt.Fprint(w, `{"data":[{"id":"live-model"}]}`)
@@ -1692,7 +1692,7 @@ func TestControllerSetModelRejectsModelOutsideCatalog(t *testing.T) {
 func TestControllerSetModelRejectsImageDependentChatOnTextModel(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/slots", "/props":
+		case "/slots", "/props", "/api/v1/models", "/api/v0/models", "/api/show":
 			http.NotFound(w, r)
 		case "/models", "/v1/models":
 			_, _ = fmt.Fprint(w, `{"data":[{"id":"text-model"}]}`)
@@ -1733,6 +1733,8 @@ func TestControllerSetModelRefreshesDetectedContextWindow(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"live-model"}]}`))
+		case "/api/v1/models":
+			http.NotFound(w, r)
 		case "/slots":
 			http.NotFound(w, r)
 		case "/props":
@@ -1773,7 +1775,7 @@ func TestControllerSetModelRefreshesDetectedContextWindow(t *testing.T) {
 func TestControllerStartDetectsActiveModelContextWindow(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/slots", "/props":
+		case "/slots", "/props", "/api/v1/models":
 			http.NotFound(w, r)
 		case "/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"model","status":{"args":["llama-server","--ctx-size","262144"]}}]}`))
@@ -1808,6 +1810,8 @@ func TestControllerStartWarmsDefaultModelContextWindow(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"live-model"}]}`))
+		case "/api/v1/models":
+			http.NotFound(w, r)
 		case "/slots":
 			http.NotFound(w, r)
 		case "/props":

@@ -92,21 +92,6 @@ func (s *CapabilityStore) EnrichModel(providerID string, cfg config.Provider, mo
 			return applyEntry(current, entry), nil
 		}
 	}
-	if !model.CapabilitiesKnown && (looksLikeLMStudio(strings.ToLower(strings.Join([]string{providerID, cfg.TemplateID, cfg.Name, cfg.BaseURL}, " "))) || looksLikeOllama(providerID, cfg.BaseURL)) {
-		if client, clientErr := New(providerID, cfg, nil); clientErr == nil {
-			if detected, detectErr := client.DetectModelMetadata(context.Background(), model.ID); detectErr == nil {
-				mergeDetectedModel(&current, detected)
-				if current.CapabilitiesKnown {
-					entry := capabilityEntryFromModel(providerID, cfg, current)
-					cache.Entries[key] = entry
-					if err := s.save(cache); err != nil {
-						return domain.Model{}, err
-					}
-					return current, nil
-				}
-			}
-		}
-	}
 	if shouldProbeTTS(providerID, cfg, model.ID) {
 		client, err := New(providerID, cfg, nil)
 		if err == nil && client != nil {

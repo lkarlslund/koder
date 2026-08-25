@@ -15,7 +15,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 )
 
-type lmStudioModelsResponse struct {
+type nativeV1ModelsResponse struct {
 	Models []struct {
 		Key              string `json:"key"`
 		MaxContextLength int    `json:"max_context_length"`
@@ -33,6 +33,13 @@ type lmStudioModelsResponse struct {
 	} `json:"models"`
 }
 
+type nativeV0ModelsResponse struct {
+	Data []struct {
+		ID               string `json:"id"`
+		MaxContextLength int    `json:"max_context_length"`
+	} `json:"data"`
+}
+
 type ollamaShowResponse struct {
 	Parameters   string         `json:"parameters"`
 	Capabilities []string       `json:"capabilities"`
@@ -46,12 +53,31 @@ func (c *Client) DetectModelMetadata(ctx context.Context, modelID string) (domai
 	modelID = strings.TrimSpace(modelID)
 	model := domain.Model{ID: modelID}
 	runtimeStatus := ""
+	listedContext := 0
+	listedMetadataSource := ""
+	statusContext := 0
 	items, listErr := c.listModelItems(ctx)
 	if listErr == nil {
 		if item, ok := modelResponseItemByID(items, modelID); ok {
 			model = modelFromResponseItem(item)
+			listedContext = model.ContextWindow
+			listedMetadataSource = model.MetadataSource
+			statusContext = contextWindowFromModelStatus(item.Status.Args, item.Status.Preset)
 			runtimeStatus = strings.ToLower(strings.TrimSpace(item.Status.Value))
 		}
+	}
+	// Prefer native v1 loaded-instance metadata over advertised maxima. This is
+	// a read-only endpoint and reports the context actually allocated to a
+	// loaded model. Probe it opportunistically: compatible servers that do not
+	// implement it are expected to reject it.
+	nativeV1Context := 0
+	if detected, err := c.nativeV1ModelMetadata(ctx, modelID); err == nil {
+		mergeDetectedModel(&model, detected)
+		if detected.MetadataSource == "native-v1-loaded-instance" && model.ContextWindow > 0 {
+			return model, nil
+		}
+		nativeV1Context = detected.ContextWindow
+		model.ContextWindow = listedContext
 	}
 
 	// llama.cpp's router loads an unloaded model to serve /props. Its /models
@@ -69,29 +95,37 @@ func (c *Client) DetectModelMetadata(ctx context.Context, modelID string) (domai
 		}
 	}
 
-	if model.ContextWindow > 0 {
+	if statusContext > 0 {
+		model.ContextWindow = statusContext
+		model.MetadataSource = listedMetadataSource
+		return model, nil
+	}
+	if nativeV1Context > 0 {
+		model.ContextWindow = nativeV1Context
+		return model, nil
+	}
+	if listedContext > 0 {
+		model.ContextWindow = listedContext
+		model.MetadataSource = listedMetadataSource
 		return model, nil
 	}
 
-	if looksLikeLMStudio(c.backend) {
-		if detected, err := c.lmStudioModelMetadata(ctx, modelID); err == nil {
-			mergeDetectedModel(&model, detected)
-			if model.ContextWindow > 0 {
-				return model, nil
-			}
-		} else if !isOptionalMetadataProbeError(err) {
-			return domain.Model{}, err
+	// Older compatible servers may expose a richer v0 model catalog. It only
+	// reports a model maximum, so consult it after effective-runtime probes.
+	if detected, err := c.nativeV0ModelMetadata(ctx, modelID); err == nil {
+		mergeDetectedModel(&model, detected)
+		if model.ContextWindow > 0 {
+			return model, nil
 		}
 	}
 
-	if looksLikeOllama(c.provider, c.baseURL) {
-		if detected, err := c.ollamaModelMetadata(ctx, modelID); err == nil {
-			mergeDetectedModel(&model, detected)
-			if model.ContextWindow > 0 {
-				return model, nil
-			}
-		} else if !isOptionalMetadataProbeError(err) {
-			return domain.Model{}, err
+	// Ollama's show operation is read-only despite using POST. Keep it last so
+	// generic GET metadata endpoints win and unrelated compatible servers see
+	// the fewest unnecessary requests.
+	if detected, err := c.ollamaModelMetadata(ctx, modelID); err == nil {
+		mergeDetectedModel(&model, detected)
+		if model.ContextWindow > 0 {
+			return model, nil
 		}
 	}
 	if listErr != nil && !isOptionalMetadataProbeError(listErr) {
@@ -100,9 +134,9 @@ func (c *Client) DetectModelMetadata(ctx context.Context, modelID string) (domai
 	return model, nil
 }
 
-func (c *Client) lmStudioModelMetadata(ctx context.Context, modelID string) (domain.Model, error) {
-	var payload lmStudioModelsResponse
-	if err := c.decodeJSONAt(ctx, http.MethodGet, c.serverRootPath("/api/v1/models"), nil, &payload, "get LM Studio models"); err != nil {
+func (c *Client) nativeV1ModelMetadata(ctx context.Context, modelID string) (domain.Model, error) {
+	var payload nativeV1ModelsResponse
+	if err := c.decodeJSONAt(ctx, http.MethodGet, c.serverRootPath("/api/v1/models"), nil, &payload, "get native v1 models"); err != nil {
 		return domain.Model{}, err
 	}
 	for _, item := range payload.Models {
@@ -111,12 +145,29 @@ func (c *Client) lmStudioModelMetadata(ctx context.Context, modelID string) (dom
 			if strings.TrimSpace(instance.ID) == modelID {
 				matched = true
 				if instance.Config.ContextLength > 0 {
-					return domain.Model{ID: modelID, ContextWindow: instance.Config.ContextLength, MaxContextWindow: item.MaxContextLength, MetadataSource: "lmstudio-loaded-instance", SupportsImages: item.Capabilities.Vision, ImagesKnown: true, SupportsTools: item.Capabilities.TrainedForToolUse, ToolsKnown: true, SupportsReasoning: len(item.Capabilities.Reasoning) > 0 && string(item.Capabilities.Reasoning) != "null", CapabilitiesKnown: true, CapabilitySource: "lmstudio-models"}, nil
+					return domain.Model{ID: modelID, ContextWindow: instance.Config.ContextLength, MaxContextWindow: item.MaxContextLength, MetadataSource: "native-v1-loaded-instance", SupportsImages: item.Capabilities.Vision, ImagesKnown: true, SupportsTools: item.Capabilities.TrainedForToolUse, ToolsKnown: true, SupportsReasoning: len(item.Capabilities.Reasoning) > 0 && string(item.Capabilities.Reasoning) != "null", CapabilitiesKnown: true, CapabilitySource: "native-v1-models"}, nil
 				}
 			}
 		}
+		if matched && len(item.LoadedInstances) == 1 && item.LoadedInstances[0].Config.ContextLength > 0 {
+			instance := item.LoadedInstances[0]
+			return domain.Model{ID: modelID, ContextWindow: instance.Config.ContextLength, MaxContextWindow: item.MaxContextLength, MetadataSource: "native-v1-loaded-instance", SupportsImages: item.Capabilities.Vision, ImagesKnown: true, SupportsTools: item.Capabilities.TrainedForToolUse, ToolsKnown: true, SupportsReasoning: len(item.Capabilities.Reasoning) > 0 && string(item.Capabilities.Reasoning) != "null", CapabilitiesKnown: true, CapabilitySource: "native-v1-models"}, nil
+		}
 		if matched {
-			return domain.Model{ID: modelID, ContextWindow: item.MaxContextLength, MaxContextWindow: item.MaxContextLength, MetadataSource: "lmstudio-models", SupportsImages: item.Capabilities.Vision, ImagesKnown: true, SupportsTools: item.Capabilities.TrainedForToolUse, ToolsKnown: true, SupportsReasoning: len(item.Capabilities.Reasoning) > 0 && string(item.Capabilities.Reasoning) != "null", CapabilitiesKnown: true, CapabilitySource: "lmstudio-models"}, nil
+			return domain.Model{ID: modelID, ContextWindow: item.MaxContextLength, MaxContextWindow: item.MaxContextLength, MetadataSource: "native-v1-models", SupportsImages: item.Capabilities.Vision, ImagesKnown: true, SupportsTools: item.Capabilities.TrainedForToolUse, ToolsKnown: true, SupportsReasoning: len(item.Capabilities.Reasoning) > 0 && string(item.Capabilities.Reasoning) != "null", CapabilitiesKnown: true, CapabilitySource: "native-v1-models"}, nil
+		}
+	}
+	return domain.Model{ID: modelID}, nil
+}
+
+func (c *Client) nativeV0ModelMetadata(ctx context.Context, modelID string) (domain.Model, error) {
+	var payload nativeV0ModelsResponse
+	if err := c.decodeJSONAt(ctx, http.MethodGet, c.serverRootPath("/api/v0/models"), nil, &payload, "get compatible v0 models"); err != nil {
+		return domain.Model{}, err
+	}
+	for _, item := range payload.Data {
+		if strings.TrimSpace(item.ID) == modelID && item.MaxContextLength > 0 {
+			return domain.Model{ID: modelID, ContextWindow: item.MaxContextLength, MaxContextWindow: item.MaxContextLength, MetadataSource: "compatible-v0-models"}, nil
 		}
 	}
 	return domain.Model{ID: modelID}, nil
@@ -237,16 +288,6 @@ func numericInt(value any) (int, bool) {
 	default:
 		return 0, false
 	}
-}
-
-func looksLikeOllama(providerID, baseURL string) bool {
-	haystack := strings.ToLower(providerID + " " + baseURL)
-	return strings.Contains(haystack, "ollama") || strings.Contains(haystack, ":11434")
-}
-
-func looksLikeLMStudio(hint string) bool {
-	hint = strings.ToLower(hint)
-	return strings.Contains(hint, "lm studio") || strings.Contains(hint, "lmstudio") || strings.Contains(hint, ":1234")
 }
 
 func isOptionalMetadataProbeError(err error) bool {

@@ -415,7 +415,6 @@ type Client struct {
 	apiKey   string
 	headers  map[string]string
 	provider string
-	backend  string
 	recorder *debugsrv.Recorder
 	health   *HealthTracker
 }
@@ -465,7 +464,6 @@ func New(id string, cfg config.Provider, recorder *debugsrv.Recorder, healthTrac
 		apiKey:   cfg.APIKey,
 		headers:  cfg.Headers,
 		provider: id,
-		backend:  strings.ToLower(strings.Join([]string{id, cfg.TemplateID, cfg.Name, cfg.BaseURL}, " ")),
 		recorder: recorder,
 		health:   health,
 	}, nil

@@ -55,7 +55,7 @@ func TestDetectModelMetadataUsesLMStudioLoadedContext(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := New("lmstudio", config.Provider{Kind: ProviderKindCompatible, BaseURL: server.URL + "/v1", Timeout: time.Second}, nil)
+	client, err := New("local", config.Provider{Kind: ProviderKindCompatible, BaseURL: server.URL + "/v1", Timeout: time.Second}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,11 +63,65 @@ func TestDetectModelMetadataUsesLMStudioLoadedContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if model.ContextWindow != 32768 || model.MaxContextWindow != 131072 || model.MetadataSource != "lmstudio-loaded-instance" {
+	if model.ContextWindow != 32768 || model.MaxContextWindow != 131072 || model.MetadataSource != "native-v1-loaded-instance" {
 		t.Fatalf("unexpected LM Studio metadata: %#v", model)
 	}
 	if !model.SupportsImages || !model.SupportsTools || !model.SupportsReasoning || !model.CapabilitiesKnown {
 		t.Fatalf("unexpected LM Studio capabilities: %#v", model)
+	}
+}
+
+func TestDetectModelMetadataUsesSingleLoadedInstanceForModelKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"publisher/model","max_context_length":131072}]}`))
+		case "/api/v1/models":
+			_, _ = w.Write([]byte(`{"models":[{"key":"publisher/model","max_context_length":131072,"loaded_instances":[{"id":"custom-instance","config":{"context_length":49152}}]}]}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := New("local", config.Provider{Kind: ProviderKindCompatible, BaseURL: server.URL + "/v1", Timeout: time.Second}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := client.DetectModelMetadata(context.Background(), "publisher/model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model.ContextWindow != 49152 || model.MaxContextWindow != 131072 || model.MetadataSource != "native-v1-loaded-instance" {
+		t.Fatalf("unexpected native v1 metadata: %#v", model)
+	}
+}
+
+func TestDetectModelMetadataUsesNativeV0Maximum(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"model-a"}]}`))
+		case "/api/v1/models", "/props":
+			http.NotFound(w, r)
+		case "/api/v0/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","max_context_length":98304}]}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := New("local", config.Provider{Kind: ProviderKindCompatible, BaseURL: server.URL + "/v1", Timeout: time.Second}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := client.DetectModelMetadata(context.Background(), "model-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model.ContextWindow != 98304 || model.MaxContextWindow != 98304 || model.MetadataSource != "compatible-v0-models" {
+		t.Fatalf("unexpected native v0 metadata: %#v", model)
 	}
 }
 
@@ -76,7 +130,7 @@ func TestDetectModelMetadataUsesOllamaShow(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"gemma3"}]}`))
-		case "/props", "/api/v1/models":
+		case "/props", "/api/v1/models", "/api/v0/models":
 			http.NotFound(w, r)
 		case "/api/show":
 			_, _ = w.Write([]byte(`{"parameters":"temperature 0.7\nnum_ctx 8192","capabilities":["completion","vision","tools"],"model_info":{"gemma3.context_length":131072}}`))
@@ -86,7 +140,7 @@ func TestDetectModelMetadataUsesOllamaShow(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := New("ollama", config.Provider{Kind: ProviderKindCompatible, BaseURL: server.URL + "/v1", Timeout: time.Second}, nil)
+	client, err := New("local", config.Provider{Kind: ProviderKindCompatible, BaseURL: server.URL + "/v1", Timeout: time.Second}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

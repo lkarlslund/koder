@@ -294,6 +294,8 @@ func TestDetectContextWindowUsesCompatibleLocalProps(t *testing.T) {
 		switch r.URL.Path {
 		case "/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","max_model_len":16384}]}`))
+		case "/api/v1/models":
+			http.NotFound(w, r)
 		case "/props":
 			if got := r.URL.Query().Get("model"); got != "model-a" {
 				t.Fatalf("unexpected model query: %q", got)
@@ -323,6 +325,8 @@ func TestDetectContextWindowUsesCompatibleModelStatusArgs(t *testing.T) {
 		switch r.URL.Path {
 		case "/props":
 			http.NotFound(w, r)
+		case "/api/v1/models":
+			_, _ = w.Write([]byte(`{"models":[{"key":"model-a","max_context_length":524288,"loaded_instances":[]}]}`))
 		case "/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","status":{"args":["llama-server","--ctx-size","262144"]}}]}`))
 		default:
@@ -350,6 +354,8 @@ func TestDetectContextWindowDoesNotLoadUnloadedRouterModel(t *testing.T) {
 		switch r.URL.Path {
 		case "/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","status":{"value":"unloaded","args":["llama-server","--ctx-size","262144"]}}]}`))
+		case "/api/v1/models":
+			_, _ = w.Write([]byte(`{"models":[{"key":"model-a","max_context_length":262144,"loaded_instances":[]}]}`))
 		case "/props":
 			propsCalls++
 			http.Error(w, "must not load model", http.StatusInternalServerError)
@@ -374,6 +380,8 @@ func TestDetectContextWindowUsesCompatibleModelStatusPreset(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/props":
+			http.NotFound(w, r)
+		case "/api/v1/models":
 			http.NotFound(w, r)
 		case "/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","status":{"preset":"ctx-size = 131072\n"}}]}`))
@@ -401,6 +409,8 @@ func TestDetectContextWindowUsesNativePropsFromConfiguredV1Base(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","max_model_len":65536}]}`))
+		case "/api/v1/models":
+			http.NotFound(w, r)
 		case "/props":
 			if got := r.URL.Query().Get("model"); got != "model-a" {
 				t.Fatalf("unexpected model query: %q", got)
@@ -430,6 +440,8 @@ func TestDetectContextWindowPrefersEffectivePropsOverModelArgs(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","status":{"args":["llama-server","--ctx-size","131072"]}}]}`))
+		case "/api/v1/models":
+			_, _ = w.Write([]byte(`{"models":[{"key":"model-a","max_context_length":262144,"loaded_instances":[]}]}`))
 		case "/props":
 			if got := r.URL.Query().Get("model"); got != "model-a" {
 				t.Fatalf("unexpected model query: %q", got)
@@ -459,6 +471,8 @@ func TestDetectContextWindowFallsBackToPropsWhenModelListLacksContext(t *testing
 		switch r.URL.Path {
 		case "/v1/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"model-a"}]}`))
+		case "/api/v1/models":
+			http.NotFound(w, r)
 		case "/props":
 			if got := r.URL.Query().Get("model"); got != "model-a" {
 				t.Fatalf("unexpected model query: %q", got)
@@ -1792,6 +1806,8 @@ func TestCapabilityStoreDetectsTTSOnlyModel(t *testing.T) {
 	var chatCalls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/v1/models", "/api/v1/models", "/props", "/api/v0/models", "/api/show":
+			http.NotFound(w, r)
 		case "/v1/audio/speech":
 			speechCalls++
 			w.Header().Set("Content-Type", "audio/pcm")
