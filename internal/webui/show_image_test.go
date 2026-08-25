@@ -3,6 +3,9 @@ package webui
 import (
 	"bytes"
 	"context"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"net/http"
 	"net/url"
@@ -20,7 +23,17 @@ func TestShowImageEndpointServesLocalImage(t *testing.T) {
 		t.Fatalf("start server: %v", err)
 	}
 	path := filepath.Join(t.TempDir(), "screen.png")
-	if err := os.WriteFile(path, []byte("\x89PNG\r\n\x1a\nfake"), 0o644); err != nil {
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	photo := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	photo.Set(0, 0, color.NRGBA{R: 0xff, G: 0x80, A: 0xff})
+	if err := png.Encode(file, photo); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
 

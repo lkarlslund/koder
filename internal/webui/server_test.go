@@ -2234,35 +2234,30 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `const timelinePageSize = 10`) ||
 		!strings.Contains(fullPage, `const timelineMemoryWindowSize = 30`) ||
 		!strings.Contains(fullPage, `const timelineCachedChatLimit = 12`) ||
-		!strings.Contains(fullPage, `const transcriptTailWindowSize = 20`) ||
-		!strings.Contains(fullPage, `const transcriptWindowOverscan = 5`) ||
 		!strings.Contains(fullPage, `loadNewerTimeline()`) ||
-		!strings.Contains(fullPage, `timelineTopSpacerHeight()`) ||
-		!strings.Contains(fullPage, `timelineBottomSpacerHeight()`) ||
 		!strings.Contains(fullPage, `const timelineStore = new Map()`) ||
 		!strings.Contains(fullPage, `cacheStateTimelines`) ||
 		!strings.Contains(fullPage, `stripSnapshotTimeline`) ||
 		!strings.Contains(fullPage, `const timelineMarkdownCache = new Map()`) ||
 		!strings.Contains(fullPage, `timelineMarkdownHTML(item`) ||
 		!strings.Contains(fullPage, `renderTimelineMarkdownElement($el, item`) ||
-		!strings.Contains(fullPage, `measureRenderedTimelineItems`) ||
-		!strings.Contains(fullPage, `timelineItemHeights`) ||
-		!strings.Contains(fullPage, `recalculateTimelineRenderWindow`) ||
-		!strings.Contains(fullPage, `scheduleTimelineRenderWindowRecalculation`) ||
-		!strings.Contains(fullPage, `timelineRenderWindowPending`) ||
 		!strings.Contains(fullPage, `transcriptBottomScrollPending`) ||
-		!strings.Contains(fullPage, `timelineIndexAtOffset`) ||
-		!strings.Contains(fullPage, `el.scrollTop + el.clientHeight`) ||
 		!strings.Contains(fullPage, `if (this.restoreTranscriptScrollAnchor(scroll)) return`) ||
 		!strings.Contains(fullPage, `scrollTranscriptToBottom()`) ||
 		!strings.Contains(fullPage, `getBoundingClientRect()`) ||
-		!strings.Contains(fullPage, `timeline-spacer`) {
-		t.Fatalf("expected browser to track transcript render windows")
+		!strings.Contains(fullPage, `return this.timeline();`) ||
+		!strings.Contains(fullPage, `return {chatID, start: 0, end: length, overscan: 0}`) {
+		t.Fatalf("expected browser to render the bounded transcript without virtual spacer jumps")
 	}
-	if strings.Contains(fullPage, `timelineAverageItemHeight`) ||
-		!strings.Contains(fullPage, `return measured > 0 ? measured : estimatedTimelineItemHeight`) ||
+	if strings.Contains(fullPage, `timelineAverageItemHeight`) || strings.Contains(fullPage, `timelineItemHeights`) ||
+		strings.Contains(fullPage, `measureRenderedTimelineItems`) || strings.Contains(fullPage, `timeline-spacer`) ||
+		strings.Contains(fullPage, `transcriptTailWindowSize`) || strings.Contains(fullPage, `recalculateTimelineRenderWindow`) ||
 		!strings.Contains(fullPage, `overflow-anchor: none`) {
-		t.Fatalf("expected unmeasured transcript spacers and browser scroll anchoring to remain stable")
+		t.Fatalf("expected bounded transcript rendering and explicit scroll anchoring to remain stable")
+	}
+	if !strings.Contains(fullPage, `const preserveScrolledBackTail = active && !scroll.stickToBottom && !itemLoaded`) ||
+		!strings.Contains(fullPage, `&& !preserveScrolledBackTail`) {
+		t.Fatalf("expected unseen live items to remain outside a transcript the user scrolled back")
 	}
 	if !strings.Contains(fullPage, `rollback_chat`) ||
 		!strings.Contains(fullPage, `this.rpc('rollback_chat', {chat_id: chatID, anchor_item_id: itemID}).then(s =>`) ||
@@ -3106,7 +3101,7 @@ func TestWebSocketSetModelAcknowledgesAndUpdatesChat(t *testing.T) {
 		case "/v1/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"model"}]}`))
 		default:
-			t.Fatalf("unexpected provider path: %s", r.URL.Path)
+			http.NotFound(w, r)
 		}
 	}))
 	defer providerServer.Close()
@@ -3849,7 +3844,8 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 			return
 		}
 		if r.URL.Path != "/v1/models" {
-			t.Fatalf("unexpected provider path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
 		}
 		_, _ = w.Write([]byte(`{"data":[{"id":"detected-model"}]}`))
 	}))
@@ -3984,7 +3980,8 @@ func TestWebSocketTestProviderReturnsProbeResult(t *testing.T) {
 			return
 		}
 		if r.URL.Path != "/v1/models" {
-			t.Fatalf("unexpected provider path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
 		}
 		_, _ = w.Write([]byte(`{"data":[{"id":"alpha","context_length":131072,"architecture":{"input_modalities":["text","image"]},"supported_parameters":["tools","structured_outputs","reasoning"]},{"id":"beta"}]}`))
 	}))

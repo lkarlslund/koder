@@ -13,6 +13,7 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 		ItemID      string  `json:"itemID"`
 		Top         float64 `json:"top"`
 		FallbackTop float64 `json:"fallbackTop"`
+		BottomGap   float64 `json:"bottomGap"`
 	}
 	chromium := knowledgeBrowserChromium(t)
 	ctrl := newTestController(t)
@@ -43,16 +44,12 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 		chromedp.Evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, nil),
 		chromedp.Evaluate(`(() => {
 			const app = document.documentElement._x_dataStack[0];
-			window.__transcriptMeasurementCount = 0;
 			window.__transcriptCallbackCount = 0;
-			window.__originalMeasureRenderedTimelineItems = app.measureRenderedTimelineItems;
-			app.measureRenderedTimelineItems = () => { window.__transcriptMeasurementCount++; };
 			for (let index = 0; index < 3; index++) {
 				app.afterTranscriptDOMUpdate(() => { window.__transcriptCallbackCount++; });
 			}
 		})()`, nil),
-		chromedp.Poll(`window.__transcriptMeasurementCount === 1 && window.__transcriptCallbackCount === 3`, nil),
-		chromedp.Evaluate(`document.documentElement._x_dataStack[0].measureRenderedTimelineItems = window.__originalMeasureRenderedTimelineItems`, nil),
+		chromedp.Poll(`window.__transcriptCallbackCount === 3`, nil),
 		chromedp.Evaluate(`(() => {
 			const app = document.documentElement._x_dataStack[0];
 			let timeline = app.patchTimelineItemAppend([], 'chat-1', {item_id: 'item-1', seq: 2, text: 'hello'});
@@ -70,6 +67,24 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 			window.__timelineAppendResult?.content?.reasoning?.text === 'final thought' &&
 			window.__timelineStreamingOptions?.incremental === true &&
 			window.__timelineFinalOptions?.incremental === false`, nil),
+		chromedp.Evaluate(`(() => {
+			const app = document.documentElement._x_dataStack[0];
+			const chatID = 'freeze-chat';
+			app.state.active_chat_id = chatID;
+			app.state.ActiveChatID = chatID;
+			const existing = {id: 'freeze-existing', chat_id: chatID, kind: 'user', content: {text: 'reading this'}};
+			app.storeTimeline(chatID, [existing]);
+			const snapshot = {...app.activeSnapshot(), TimelineHasNewer: false, timeline_has_newer: false};
+			app.state.snapshots = {...(app.state.snapshots || {}), [chatID]: snapshot};
+			app.state.Snapshots = app.state.snapshots;
+			app.state.snapshot = snapshot;
+			app.state.Snapshot = snapshot;
+			app.transcriptStickToBottom = false;
+			app.applyChatDelta({chat_id: chatID, item: {id: 'freeze-new', chat_id: chatID, kind: 'assistant', content: {text: 'new tail'}}});
+			window.__scrolledBackTimelineFrozen = app.timeline().length === 1 &&
+				app.timeline()[0].id === 'freeze-existing' && app.timelineHasNewer();
+		})()`, nil),
+		chromedp.Poll(`window.__scrolledBackTimelineFrozen === true`, nil),
 		chromedp.Evaluate(`(() => {
 			window.__mermaidRenderCalls = [];
 			window.mermaid.render = (id, source) => {
@@ -121,10 +136,21 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 			anchor.itemID = 'missing-anchor';
 			anchor.top = 75;
 			app.restoreTranscriptScroll(anchor);
+			const fallbackTop = transcript.scrollTop;
+			app.transcriptStickToBottom = true;
+			transcript.scrollTop = transcript.scrollHeight;
+			const sticky = app.transcriptScrollState();
+			const tail = document.createElement('section');
+			tail.className = 'transcript-turn';
+			tail.dataset.timelineItemId = 'anchor-tail';
+			tail.style.cssText = 'display:block;height:120px;min-height:120px';
+			transcript.append(tail);
+			app.restoreTranscriptScroll(sticky);
 			const result = {
 				itemID: anchoredItemID,
 				top: anchoredTop,
-				fallbackTop: transcript.scrollTop,
+				fallbackTop,
+				bottomGap: app.transcriptBottomDistance(transcript),
 			};
 			app.transcriptElement = originalTranscriptElement;
 			transcript.remove();
@@ -135,7 +161,7 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 	); err != nil {
 		t.Fatalf("enhance replacement Markdown media: %v", err)
 	}
-	if scrollAnchorResult.ItemID != "anchor-1" || scrollAnchorResult.Top != 290 || scrollAnchorResult.FallbackTop != 75 {
-		t.Fatalf("restore transcript position = %+v, want anchored top 290 and fallback top 75", scrollAnchorResult)
+	if scrollAnchorResult.ItemID != "anchor-1" || scrollAnchorResult.Top != 290 || scrollAnchorResult.FallbackTop != 75 || scrollAnchorResult.BottomGap != 0 {
+		t.Fatalf("restore transcript position = %+v, want anchored top 290, fallback top 75, and sticky bottom gap 0", scrollAnchorResult)
 	}
 }

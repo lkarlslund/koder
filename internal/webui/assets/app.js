@@ -380,9 +380,6 @@
     const timelinePageSize = 10;
     const timelineMemoryWindowSize = 30;
     const timelineCachedChatLimit = 12;
-    const transcriptTailWindowSize = 20;
-    const transcriptWindowOverscan = 5;
-    const estimatedTimelineItemHeight = 160;
     const timelineStore = new Map();
     function renderMarkdown(text, options = {}) {
       const source = options.deferDiagrams ? deferStreamingDiagrams(text) : String(text || '');
@@ -1133,7 +1130,7 @@
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
 		chatCreator: {open: false, loading: false, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}},
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptBottomScrollPending: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptEnhancementObserver: null, transcriptEnhancementFrame: 0, transcriptDOMUpdateScheduled: false, transcriptDOMUpdateCallbacks: [], scrollRestoreSeq: 0, timelineRenderWindow: {chatID: '', start: 0, end: 0, overscan: 0}, timelineRenderWindowPending: false, timelineItemHeights: {}, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptBottomScrollPending: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptEnhancementObserver: null, transcriptEnhancementFrame: 0, transcriptDOMUpdateScheduled: false, transcriptDOMUpdateCallbacks: [], scrollRestoreSeq: 0, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
           this.syncBrowserTabActivity();
@@ -1849,7 +1846,8 @@
             const currentTimeline = this.timelineForChat(id, next);
             const itemID = delta.item ? this.timelineItemID(delta.item) : String(delta.item_append.item_id || '').trim();
             const itemLoaded = currentTimeline.some(item => this.timelineItemID(item) === itemID);
-            if ((!next.TimelineHasNewer && !next.timeline_has_newer) || itemLoaded) {
+            const preserveScrolledBackTail = active && !scroll.stickToBottom && !itemLoaded;
+            if (((!next.TimelineHasNewer && !next.timeline_has_newer) && !preserveScrolledBackTail) || itemLoaded) {
               const patched = delta.item
                 ? this.patchTimelineItem(currentTimeline, delta.item)
                 : this.patchTimelineItemAppend(currentTimeline, id, delta.item_append);
@@ -1981,7 +1979,6 @@
             this.scrollRestoreSeq++;
             this.updateTranscriptStickiness();
           }
-          this.scheduleTimelineRenderWindowRecalculation();
           const el = this.transcriptElement();
           if (!el) return;
           if (el.scrollTop <= 96) this.loadOlderTimeline();
@@ -2056,7 +2053,6 @@
           }
           this.setTranscriptStickToBottom(true);
           this.transcriptProgrammaticScroll = true;
-          this.recalculateTimelineRenderWindow();
           if (this.transcriptBottomScrollPending) return;
           this.transcriptBottomScrollPending = true;
           el.scrollTop = el.scrollHeight;
@@ -2109,12 +2105,10 @@
           if (!chatID || this.timelineLoading[chatID] || !this.timelineHasMore()) return;
           const before = this.timelineBefore();
           if (!before) return;
-          const el = this.transcriptElement();
-          const scrollHeight = el ? el.scrollHeight : 0;
-          const scrollTop = el ? el.scrollTop : 0;
+          const scroll = this.transcriptScrollState();
           this.timelineLoading = {...this.timelineLoading, [chatID]: true};
           this.rpc('load_timeline', {chat_id: chatID, before, limit: timelinePageSize})
-            .then(page => this.mergeTimelinePage(page, {prepend: true, scrollHeight, scrollTop}))
+            .then(page => this.mergeTimelinePage(page, {prepend: true, scroll}))
             .catch(err => this.showToast(err.message))
             .finally(() => {
               const next = {...this.timelineLoading};
@@ -2127,11 +2121,10 @@
           if (!chatID || this.timelineLoading[chatID] || !this.timelineHasNewer()) return;
           const after = this.timelineAfter();
           if (!after) return;
-          const el = this.transcriptElement();
-          const scrollTop = el ? el.scrollTop : 0;
+          const scroll = this.transcriptScrollState();
           this.timelineLoading = {...this.timelineLoading, [chatID]: true};
           this.rpc('load_timeline', {chat_id: chatID, after, limit: timelinePageSize})
-            .then(page => this.mergeTimelinePage(page, {append: true, scrollTop}))
+            .then(page => this.mergeTimelinePage(page, {append: true, scroll}))
             .catch(err => this.showToast(err.message))
             .finally(() => {
               const next = {...this.timelineLoading};
@@ -2161,14 +2154,11 @@
           const current = snapshots[chatID] || snapshots[String(chatID)] || {};
           const existing = this.timelineForChat(chatID, current);
           let timeline = [];
-          let addedHeight = 0;
-          let removedHeadHeight = 0;
+          let removedHead = false;
           if (options.replace) {
             timeline = items.slice();
           } else if (options.prepend) {
             const seen = new Set(items.map(item => this.timelineItemID(item)).filter(Boolean));
-            const added = items.filter(item => !existing.some(existingItem => this.timelineItemID(existingItem) === this.timelineItemID(item)));
-            addedHeight = this.timelineSpacerHeight(added);
             timeline = items.concat(existing.filter(item => !seen.has(this.timelineItemID(item))));
           } else if (options.append) {
             const seen = new Set(existing.map(item => this.timelineItemID(item)).filter(Boolean));
@@ -2182,7 +2172,7 @@
               timeline = timeline.slice(0, timelineMemoryWindowSize);
             } else {
               const removed = timeline.slice(0, timeline.length - timelineMemoryWindowSize);
-              removedHeadHeight = this.timelineSpacerHeight(removed);
+              removedHead = removed.length > 0;
               timeline = timeline.slice(-timelineMemoryWindowSize);
             }
           }
@@ -2190,7 +2180,7 @@
           const pageHasNewer = !!(page.has_newer || page.HasNewer);
           const currentHasMore = !!(current.TimelineHasMore || current.timeline_has_more);
           const currentHasNewer = !!(current.TimelineHasNewer || current.timeline_has_newer);
-          const hasMore = options.append ? (currentHasMore || pageHasMore || removedHeadHeight > 0) : pageHasMore;
+          const hasMore = options.append ? (currentHasMore || pageHasMore || removedHead) : pageHasMore;
           const hasNewer = options.prepend ? (currentHasNewer || pageHasNewer || existing.length + items.length > timeline.length) : pageHasNewer;
           const next = {
             ...current,
@@ -2220,8 +2210,7 @@
               }
               return;
             }
-            if (options.prepend) this.restoreTranscriptTop(Number(options.scrollTop || 0) + addedHeight);
-            if (options.append) this.restoreTranscriptTop(Math.max(0, Number(options.scrollTop || 0) - removedHeadHeight));
+            if (options.prepend || options.append) this.restoreTranscriptScroll(options.scroll);
           });
         },
         transcriptScrollState() {
@@ -2244,7 +2233,6 @@
             requestAnimationFrame(() => {
               const callbacks = this.transcriptDOMUpdateCallbacks.splice(0);
               this.transcriptDOMUpdateScheduled = false;
-              this.measureRenderedTimelineItems();
               this.observeLastTranscriptItem();
               callbacks.forEach(callback => callback());
             });
@@ -2265,7 +2253,6 @@
             this.transcriptEnhancementFrame = 0;
             const anchor = this.captureTranscriptScrollAnchor();
             Promise.resolve(this.enhanceTranscript()).then(() => {
-              this.measureRenderedTimelineItems();
               this.observeLastTranscriptItem();
               this.afterTranscriptDOMUpdate(() => this.restoreTranscriptScrollAnchor(anchor));
             });
@@ -2373,7 +2360,7 @@
         },
         restoreTranscriptScroll(scroll, options = {}) {
           const el = this.transcriptElement();
-          if (!el) return;
+          if (!el || !scroll || (scroll.seq !== undefined && scroll.seq !== this.scrollRestoreSeq)) return;
           if (options.scrollToBottom || scroll.stickToBottom) {
             this.scrollTranscriptToBottom();
             return;
@@ -2703,15 +2690,6 @@
           const retained = new Set(stored.map(item => this.timelineItemID(item)).filter(Boolean));
           const prior = timelineStore.get(id) || [];
           const removed = prior.concat(timeline).map(item => this.timelineItemID(item)).filter(itemID => itemID && !retained.has(itemID));
-          const heights = {...(this.timelineItemHeights || {})};
-          let changed = false;
-          for (const key of Object.keys(heights)) {
-            if (!key.startsWith(id + ':')) continue;
-            if (retained.has(key.slice(id.length + 1))) continue;
-            delete heights[key];
-            changed = true;
-          }
-          if (changed) this.timelineItemHeights = heights;
           if (removed.length > 0) {
             const reasoning = {...(this.reasoningViews || {})};
             removed.forEach(itemID => { delete reasoning[itemID]; });
@@ -2731,11 +2709,6 @@
           if (!id) return;
           const items = timelineStore.get(id) || [];
           timelineStore.delete(id);
-          const heights = {...(this.timelineItemHeights || {})};
-          for (const key of Object.keys(heights)) {
-            if (key.startsWith(id + ':')) delete heights[key];
-          }
-          this.timelineItemHeights = heights;
           if (items.length > 0) {
             const reasoning = {...(this.reasoningViews || {})};
             items.forEach(item => { delete reasoning[this.timelineItemID(item)]; });
@@ -2744,9 +2717,7 @@
         },
         clearTimelineCaches() {
           timelineStore.clear();
-          this.timelineItemHeights = {};
           this.reasoningViews = {};
-          this.timelineRenderWindow = {chatID: '', start: 0, end: 0, overscan: 0};
         },
         stripSnapshotTimeline(chatID, snapshot) {
           if (!snapshot || typeof snapshot !== 'object') return snapshot;
@@ -2786,132 +2757,12 @@
           return next;
         },
         renderedTimeline() {
-          const timeline = this.timeline();
-          const bounds = this.timelineRenderWindowBounds(timeline);
-          return timeline.slice(bounds.start, bounds.end);
+          return this.timeline();
         },
         timelineRenderWindowBounds(timeline = this.timeline()) {
           const chatID = String(this.activeChatID() || '');
           const length = Array.isArray(timeline) ? timeline.length : 0;
-          const current = this.timelineRenderWindow || {};
-          const fallback = () => {
-            if (!this.transcriptStickToBottom || length <= transcriptTailWindowSize) return {chatID, start: 0, end: length, overscan: 0};
-            const start = Math.max(0, length - transcriptTailWindowSize - transcriptWindowOverscan);
-            return {chatID, start, end: length, overscan: transcriptWindowOverscan};
-          };
-          if (current.chatID !== chatID || !length) return fallback();
-          const start = Math.max(0, Math.min(Number(current.start || 0), length));
-          const end = Math.max(start, Math.min(Number(current.end || length), length));
-          const overscan = Math.max(0, Number(current.overscan || 0));
-          if (end <= start && length > 0) return fallback();
-          if (this.transcriptStickToBottom && length > transcriptTailWindowSize && (end < length || end - start > transcriptTailWindowSize + transcriptWindowOverscan)) return fallback();
-          return {chatID, start, end, overscan};
-        },
-        setTimelineRenderWindow(start, end, overscan = 0) {
-          const timeline = this.timeline();
-          const length = timeline.length;
-          const next = {
-            chatID: String(this.activeChatID() || ''),
-            start: Math.max(0, Math.min(Number(start || 0), length)),
-            end: Math.max(0, Math.min(Number(end || 0), length)),
-            overscan: Math.max(0, Number(overscan || 0)),
-          };
-          if (next.end < next.start) next.end = next.start;
-          const current = this.timelineRenderWindow || {};
-          if (current.chatID === next.chatID && current.start === next.start && current.end === next.end && current.overscan === next.overscan) {
-            return this.timelineRenderWindowBounds(timeline);
-          }
-          this.timelineRenderWindow = next;
-          return this.timelineRenderWindowBounds(timeline);
-        },
-        timelineIndexAtOffset(timeline, offset) {
-          if (!Array.isArray(timeline) || timeline.length === 0) return 0;
-          const target = Math.max(0, Number(offset || 0));
-          let cursor = 0;
-          for (let idx = 0; idx < timeline.length; idx++) {
-            cursor += this.timelineItemHeight(timeline[idx]);
-            if (cursor >= target) return idx;
-          }
-          return Math.max(0, timeline.length - 1);
-        },
-        recalculateTimelineRenderWindow() {
-          const timeline = this.timeline();
-          const length = timeline.length;
-          const chatID = String(this.activeChatID() || '');
-          if (!chatID || length <= transcriptTailWindowSize) {
-            return this.setTimelineRenderWindow(0, length, 0);
-          }
-          const el = this.transcriptElement();
-          if (this.transcriptStickToBottom || !el) {
-            const start = Math.max(0, length - transcriptTailWindowSize - transcriptWindowOverscan);
-            return this.setTimelineRenderWindow(start, length, transcriptWindowOverscan);
-          }
-          const first = this.timelineIndexAtOffset(timeline, el.scrollTop);
-          const last = this.timelineIndexAtOffset(timeline, el.scrollTop + el.clientHeight);
-          const start = Math.max(0, first - transcriptWindowOverscan);
-          const end = Math.min(length, last + transcriptWindowOverscan + 1);
-          return this.setTimelineRenderWindow(start, Math.max(end, start + 1), transcriptWindowOverscan);
-        },
-        scheduleTimelineRenderWindowRecalculation() {
-          if (this.timelineRenderWindowPending) return;
-          this.timelineRenderWindowPending = true;
-          requestAnimationFrame(() => {
-            this.timelineRenderWindowPending = false;
-            this.recalculateTimelineRenderWindow();
-          });
-        },
-        resetTimelineRenderWindow() {
-          const timeline = this.timeline();
-          return this.setTimelineRenderWindow(0, timeline.length, 0);
-        },
-        timelineHeightKey(item) {
-          const itemID = this.timelineItemID(item);
-          if (!itemID) return '';
-          return String(this.activeChatID() || '') + ':' + itemID;
-        },
-        timelineItemHeight(item) {
-          const key = this.timelineHeightKey(item);
-          const measured = key ? Number(this.timelineItemHeights[key] || 0) : 0;
-          return measured > 0 ? measured : estimatedTimelineItemHeight;
-        },
-        timelineSpacerHeight(items) {
-          if (!Array.isArray(items) || items.length === 0) return 0;
-          let height = 0;
-          for (const item of items) height += this.timelineItemHeight(item);
-          return Math.round(height);
-        },
-        timelineTopSpacerHeight() {
-          const timeline = this.timeline();
-          const bounds = this.timelineRenderWindowBounds();
-          return this.timelineSpacerHeight(timeline.slice(0, bounds.start));
-        },
-        timelineBottomSpacerHeight() {
-          const timeline = this.timeline();
-          const bounds = this.timelineRenderWindowBounds(timeline);
-          return this.timelineSpacerHeight(timeline.slice(bounds.end));
-        },
-        measureRenderedTimelineItems(root = null) {
-          root = root || this.transcriptElement();
-          if (!root) return;
-          const chatID = String(this.activeChatID() || '');
-          if (!chatID) return;
-          const next = {...(this.timelineItemHeights || {})};
-          let changed = false;
-          root.querySelectorAll('.transcript-turn[data-timeline-item-id]').forEach(row => {
-            const itemID = String(row.dataset.timelineItemId || '').trim();
-            if (!itemID) return;
-            const rect = row.getBoundingClientRect();
-            const styles = window.getComputedStyle(row);
-            const marginTop = Number.parseFloat(styles.marginTop || '0') || 0;
-            const marginBottom = Number.parseFloat(styles.marginBottom || '0') || 0;
-            const height = Math.max(1, Math.ceil(rect.height + marginTop + marginBottom));
-            const key = chatID + ':' + itemID;
-            if (next[key] !== height) {
-              next[key] = height;
-              changed = true;
-            }
-          });
-          if (changed) this.timelineItemHeights = next;
+          return {chatID, start: 0, end: length, overscan: 0};
         },
         approvals() { const snapshot = this.activeSnapshot(); return snapshot.Approvals || snapshot.approvals || []; },
         allExecProcesses() {
