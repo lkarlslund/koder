@@ -1075,8 +1075,8 @@ func TestWebSocketStatusDeltaDoesNotSerializeTimeline(t *testing.T) {
 	}
 }
 
-func TestWebSocketPassesKnowledgeDeltaFromController(t *testing.T) {
-	original := app.Event{Seq: 13, Type: "knowledge_delta", Payload: map[string]any{
+func TestWebSocketPassesMemoryDeltaFromController(t *testing.T) {
+	original := app.Event{Seq: 13, Type: "memory_delta", Payload: map[string]any{
 		"stream_id": "stream-1", "sequence": uint64(4),
 	}}
 	event, ok := webEventFromControllerEvent(original)
@@ -1085,7 +1085,7 @@ func TestWebSocketPassesKnowledgeDeltaFromController(t *testing.T) {
 	}
 	payload, ok := event.Payload.(map[string]any)
 	if !ok || payload["stream_id"] != "stream-1" || payload["sequence"] != uint64(4) {
-		t.Fatalf("knowledge payload = %#v", event.Payload)
+		t.Fatalf("memory payload = %#v", event.Payload)
 	}
 }
 
@@ -2089,17 +2089,17 @@ func TestIndexServesHTML(t *testing.T) {
 			t.Fatalf("expected canonical action renderer %q", canonicalRenderer)
 		}
 	}
-	for _, knowledgeRenderer := range []string{
-		`case 'knowledge': return knowledgeActionLabel(toolAction(tool))`,
-		`if (kind === 'knowledge') return renderKnowledgeBlock`,
-		`function knowledgeExplorerHref(kind = '', id = '', query = '')`,
+	for _, memoryRenderer := range []string{
+		`case 'memory': return memoryActionLabel(toolAction(tool))`,
+		`if (kind === 'memory') return renderMemoryBlock`,
+		`function memoryExplorerHref(kind = '', id = '', query = '')`,
 		`params.set('object_kind', String(kind))`,
 		`params.set('return', location.pathname)`,
-		`class="tool-knowledge-row"`,
-		`.tool-knowledge-row:hover`,
+		`class="tool-memory-row"`,
+		`.tool-memory-row:hover`,
 	} {
-		if !strings.Contains(fullPage, knowledgeRenderer) {
-			t.Fatalf("expected knowledge result rendering fragment %q", knowledgeRenderer)
+		if !strings.Contains(fullPage, memoryRenderer) {
+			t.Fatalf("expected memory result rendering fragment %q", memoryRenderer)
 		}
 	}
 	if !strings.Contains(fullPage, `function chatSendMessage(args)`) ||
@@ -2318,10 +2318,10 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `websocket message failed`) {
 		t.Fatalf("expected websocket heartbeat/watchdog handling for stale live-update sockets")
 	}
-	if !strings.Contains(fullPage, `/assets/knowledge_live.js`) ||
-		!strings.Contains(fullPage, `observeKnowledgeCheckpoint`) ||
-		!strings.Contains(fullPage, `koder:knowledge-refetch`) {
-		t.Fatalf("expected knowledge live updates to detect gaps and request a snapshot refetch")
+	if !strings.Contains(fullPage, `/assets/memory_live.js`) ||
+		!strings.Contains(fullPage, `observeMemoryCheckpoint`) ||
+		!strings.Contains(fullPage, `koder:memory-refetch`) {
+		t.Fatalf("expected memory live updates to detect gaps and request a snapshot refetch")
 	}
 	if !strings.Contains(fullPage, `}, 500);`) || !strings.Contains(fullPage, `Math.min(2000`) || !strings.Contains(fullPage, `reconnectDelay: 150`) {
 		t.Fatalf("expected reconnect timing to back off without spamming")

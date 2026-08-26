@@ -238,15 +238,15 @@
     .tool-result-body-mono { font-family: var(--bs-font-monospace); }
     .tool-result-line { min-height: 1.35em; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
     .tool-result-omitted { color: var(--bs-secondary-color); font-style: italic; }
-    .tool-knowledge-result { display: grid; }
-    .tool-knowledge-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .55rem; align-items: center; padding: .45rem .55rem; border-bottom: 1px solid var(--bs-border-color); color: inherit; text-decoration: none; }
-    .tool-knowledge-row:hover, .tool-knowledge-row:focus-visible { background: var(--bs-tertiary-bg); color: var(--bs-link-color); }
-    .tool-knowledge-row-copy { min-width: 0; display: grid; }
-    .tool-knowledge-row-title, .tool-knowledge-row-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .tool-knowledge-row-title { font-size: .86rem; font-weight: 600; }
-    .tool-knowledge-row-detail { color: var(--bs-secondary-color); font-size: .78rem; }
-    .tool-knowledge-result > .tool-result-omitted { padding: .35rem .55rem; border-bottom: 1px solid var(--bs-border-color); font-size: .78rem; }
-    .tool-knowledge-open { display: inline-flex; justify-self: start; align-items: center; gap: .35rem; margin: .45rem .55rem; font-size: .8rem; text-decoration: none; }
+    .tool-memory-result { display: grid; }
+    .tool-memory-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .55rem; align-items: center; padding: .45rem .55rem; border-bottom: 1px solid var(--bs-border-color); color: inherit; text-decoration: none; }
+    .tool-memory-row:hover, .tool-memory-row:focus-visible { background: var(--bs-tertiary-bg); color: var(--bs-link-color); }
+    .tool-memory-row-copy { min-width: 0; display: grid; }
+    .tool-memory-row-title, .tool-memory-row-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tool-memory-row-title { font-size: .86rem; font-weight: 600; }
+    .tool-memory-row-detail { color: var(--bs-secondary-color); font-size: .78rem; }
+    .tool-memory-result > .tool-result-omitted { padding: .35rem .55rem; border-bottom: 1px solid var(--bs-border-color); font-size: .78rem; }
+    .tool-memory-open { display: inline-flex; justify-self: start; align-items: center; gap: .35rem; margin: .45rem .55rem; font-size: .8rem; text-decoration: none; }
     .tool-diff-markdown { margin: .75rem 0; }
     .tool-diff-line { display: grid; grid-template-columns: 3.25rem 3.25rem minmax(0, 1fr); gap: .35rem; padding: .05rem .45rem; font-family: var(--bs-font-monospace); font-size: .82rem; line-height: 1.35; overflow: hidden; white-space: pre; }
     .tool-diff-line-no { min-width: 0; color: var(--bs-secondary-color); text-align: right; user-select: none; }

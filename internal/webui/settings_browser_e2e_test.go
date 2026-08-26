@@ -11,10 +11,10 @@ import (
 )
 
 func TestSettingsBrowserNavigationGroupsConfigurationByDomain(t *testing.T) {
-	chromium := knowledgeBrowserChromium(t)
+	chromium := memoryBrowserChromium(t)
 	ctrl := newTestController(t)
 	serverCtx, stopServer := context.WithCancel(context.Background())
-	server := startKnowledgeBrowserTestServer(t, serverCtx, ctrl)
+	server := startMemoryBrowserTestServer(t, serverCtx, ctrl)
 	t.Cleanup(func() {
 		stopServer()
 		_ = server.server.Close()

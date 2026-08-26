@@ -19,8 +19,8 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
-	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
 	"github.com/lkarlslund/koder/internal/mcp"
+	memoryService "github.com/lkarlslund/koder/internal/memory/service"
 	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/phonedevice"
@@ -31,7 +31,7 @@ import (
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
-	"github.com/lkarlslund/koder/internal/tools/knowledgetool"
+	"github.com/lkarlslund/koder/internal/tools/memorytool"
 	"github.com/lkarlslund/koder/internal/tools/phonetool"
 	"github.com/lkarlslund/koder/internal/tools/sessiontool"
 )
@@ -51,8 +51,8 @@ type Runtime struct {
 	skillCatalogMax  int
 	voiceSessions    sessiontool.Control
 	phoneDevice      phonedevice.Control
-	knowledgeMu      sync.RWMutex
-	knowledge        *knowledgeService.Service
+	memoryMu         sync.RWMutex
+	memory           *memoryService.Service
 }
 
 type Config struct {
@@ -105,24 +105,24 @@ func (r *Runtime) SetVoiceSessionControl(control sessiontool.Control) {
 	}
 }
 
-// SetKnowledgeService changes the process-wide durable Knowledge capability.
+// SetMemoryService changes the process-wide durable Memory capability.
 // Nil removes the capability from subsequent tool runtime snapshots.
-func (r *Runtime) SetKnowledgeService(service *knowledgeService.Service) {
+func (r *Runtime) SetMemoryService(service *memoryService.Service) {
 	if r != nil {
-		r.knowledgeMu.Lock()
-		defer r.knowledgeMu.Unlock()
-		r.knowledge = service
+		r.memoryMu.Lock()
+		defer r.memoryMu.Unlock()
+		r.memory = service
 	}
 }
 
-// KnowledgeService returns the process-wide durable Knowledge capability.
-func (r *Runtime) KnowledgeService() *knowledgeService.Service {
+// MemoryService returns the process-wide durable Memory capability.
+func (r *Runtime) MemoryService() *memoryService.Service {
 	if r == nil {
 		return nil
 	}
-	r.knowledgeMu.RLock()
-	defer r.knowledgeMu.RUnlock()
-	return r.knowledge
+	r.memoryMu.RLock()
+	defer r.memoryMu.RUnlock()
+	return r.memory
 }
 
 func (r *Runtime) UpdateSettings(store *settings.Store) {
@@ -224,7 +224,7 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		}
 		runtime.Services[key] = service
 	}
-	for key, service := range knowledgetool.RuntimeService(r.KnowledgeService()) {
+	for key, service := range memorytool.RuntimeService(r.MemoryService()) {
 		if runtime.Services == nil {
 			runtime.Services = map[string]any{}
 		}

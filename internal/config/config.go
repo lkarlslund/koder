@@ -52,18 +52,18 @@ type Store struct {
 	Backend string `toml:"backend"`
 }
 
-// Knowledge controls the independent durable-knowledge subsystem. Enabled=false skips
+// Memory controls the independent durable-memory subsystem. Enabled=false skips
 // opening it. Required=true turns an open failure into a process startup failure instead
-// of degrading Koder without Knowledge.
-type Knowledge struct {
-	Enabled           bool                        `toml:"enabled"`
-	Required          bool                        `toml:"required"`
-	TrustedPublishers []KnowledgeTrustedPublisher `toml:"trusted_publishers"`
+// of degrading Koder without Memory.
+type Memory struct {
+	Enabled           bool                     `toml:"enabled"`
+	Required          bool                     `toml:"required"`
+	TrustedPublishers []MemoryTrustedPublisher `toml:"trusted_publishers"`
 }
 
-// KnowledgeTrustedPublisher binds one package publisher identity to explicitly
+// MemoryTrustedPublisher binds one package publisher identity to explicitly
 // configured Ed25519 public keys. It is trust metadata only, not authority.
-type KnowledgeTrustedPublisher struct {
+type MemoryTrustedPublisher struct {
 	ID   string            `toml:"id"`
 	Name string            `toml:"name"`
 	Keys map[string]string `toml:"keys"`
@@ -191,7 +191,7 @@ type Config struct {
 	Access           accesssettings.Settings `toml:"access"`
 	GlobalMounts     []accesssettings.Mount  `toml:"global_mounts"`
 	Store            Store                   `toml:"store"`
-	Knowledge        Knowledge               `toml:"knowledge"`
+	Memory           Memory                  `toml:"memory"`
 	UI               UI                      `toml:"ui"`
 	Voice            Voice                   `toml:"voice"`
 	Thinking         Thinking                `toml:"thinking"`
@@ -308,8 +308,8 @@ func LoadWithOptions(opts LoadOptions) (Config, error) {
 	if !strings.Contains(string(data), "[codex]") {
 		cfg.Codex = Default().Codex
 	}
-	if !strings.Contains(string(data), "[knowledge]") {
-		cfg.Knowledge = Default().Knowledge
+	if !strings.Contains(string(data), "[memory]") {
+		cfg.Memory = Default().Memory
 	}
 	cfg.configDir = paths.configDir
 	cfg.stateDir = paths.stateDir
@@ -373,7 +373,7 @@ func Default() Config {
 		Store: Store{
 			Backend: "pebble",
 		},
-		Knowledge: Knowledge{Enabled: true},
+		Memory: Memory{Enabled: true},
 		UI: UI{
 			Theme:        "dark",
 			AutoContinue: true,
@@ -466,8 +466,8 @@ func (c *Config) applyDefaults() {
 	if c.Store.Backend == "" {
 		c.Store.Backend = def.Store.Backend
 	}
-	if c.Knowledge.Required {
-		c.Knowledge.Enabled = true
+	if c.Memory.Required {
+		c.Memory.Enabled = true
 	}
 	if c.Permissions.Profiles == nil {
 		c.Permissions.Profiles = cloneProfiles(def.Permissions.Profiles)

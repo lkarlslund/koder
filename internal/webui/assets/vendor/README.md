@@ -9,8 +9,8 @@ Vendored browser assets for the web UI.
 - Bootstrap Icons 1.11.3 CSS and fonts: https://www.npmjs.com/package/bootstrap-icons, MIT license
 - Alpine.js 3.14.8: https://www.npmjs.com/package/alpinejs, MIT license
 
-The pinned knowledge-explorer packages and their integrity data are recorded in
-[`knowledge-graph.lock.md`](knowledge-graph.lock.md). Their browser bundles are
+The pinned memory-explorer packages and their integrity data are recorded in
+[`memory-graph.lock.md`](memory-graph.lock.md). Their browser bundles are
 served locally; no graph dependency may be loaded from a CDN.
 
 These files are served from /assets/vendor and included in the web UI asset hash.

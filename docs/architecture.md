@@ -8,7 +8,7 @@
 - `internal/provider`: OpenAI-compatible `/models` and `/chat/completions` client
 - `internal/tools`: typed local tool execution surface
 - `internal/agent`: prompt handling, tool approval flow, and event emission
-- `internal/knowledge`: canonical durable-knowledge domain, validation, normalization, and pre-write classification contracts
+- `internal/memory`: canonical durable-memory domain, validation, normalization, and pre-write classification contracts
 - `internal/app`: browser app controller for session, chat, settings, and workspace state
 - `internal/webui`: embedded browser UI and websocket RPC bridge
 

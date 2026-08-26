@@ -1,0 +1,197 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"time"
+
+	"github.com/lkarlslund/koder/internal/memory"
+	memoryStoreAPI "github.com/lkarlslund/koder/internal/memory/store"
+)
+
+var ErrEntryNotEditable = errors.New("memory entry is not editable in its lifecycle state")
+
+type EntryContent struct {
+	Kind           memory.EntryKind
+	Title          string
+	Summary        string
+	Body           string
+	Aliases        []string
+	Tags           []string
+	Scope          memory.Scope
+	Applicability  memory.Applicability
+	Risk           []memory.RiskClass
+	Confidence     float32
+	ValidFrom      time.Time
+	ValidUntil     time.Time
+	ObservedAt     time.Time
+	ReviewAfter    time.Time
+	EvidenceIDs    []memory.EvidenceID
+	PersonalOrigin memory.PersonalOrigin
+}
+
+type UpdateEntryRequest struct {
+	EntryID          memory.EntryID
+	ExpectedRevision uint64
+	Content          EntryContent
+	Reason           string
+	ReviewApproved   bool
+}
+
+type UpdateEntryResult struct {
+	Entry          memory.Entry
+	Classification memory.ClassificationResult
+	Updated        bool
+}
+
+func EntryContentFrom(value memory.Entry) EntryContent {
+	return EntryContent{
+		Kind: value.Kind, Title: value.Title, Summary: value.Summary, Body: value.Body,
+		Aliases: slices.Clone(value.Aliases), Tags: slices.Clone(value.Tags), Scope: value.Scope,
+		Applicability: cloneApplicability(value.Applicability), Risk: slices.Clone(value.Risk), Confidence: value.Confidence,
+		ValidFrom: value.ValidFrom, ValidUntil: value.ValidUntil, ObservedAt: value.ObservedAt, ReviewAfter: value.ReviewAfter,
+		EvidenceIDs: slices.Clone(value.EvidenceIDs), PersonalOrigin: value.PersonalOrigin,
+	}
+}
+
+func (s *Service) UpdateEntry(ctx context.Context, request UpdateEntryRequest) (UpdateEntryResult, error) {
+	if err := ctx.Err(); err != nil {
+		return UpdateEntryResult{}, err
+	}
+	if request.EntryID == "" || request.ExpectedRevision == 0 {
+		return UpdateEntryResult{}, fmt.Errorf("%w: entry ID and expected revision are required", memory.ErrInvalidRecord)
+	}
+	candidate := request.Content.entry()
+	classification, err := s.classifier.Classify(ctx, entryClassificationInput(candidate))
+	if err != nil {
+		return UpdateEntryResult{}, fmt.Errorf("classify entry update: %w", err)
+	}
+	if err := requireClassificationApproval(classification, request.ReviewApproved); err != nil {
+		return UpdateEntryResult{Classification: classification}, err
+	}
+	candidate, err = memory.NormalizeEntry(candidate)
+	if err != nil {
+		return UpdateEntryResult{}, err
+	}
+	actor, err := s.actor(ctx)
+	if err != nil {
+		return UpdateEntryResult{}, fmt.Errorf("resolve memory actor: %w", err)
+	}
+	if err := actor.Validate(); err != nil {
+		return UpdateEntryResult{}, err
+	}
+	result := UpdateEntryResult{Classification: classification}
+	err = s.store.Update(ctx, func(tx memoryStoreAPI.WriteTx) error {
+		current, err := tx.Entry(ctx, request.EntryID)
+		if err != nil {
+			return err
+		}
+		chunk, err := s.authorizeEntryChunk(ctx, tx, actor, ChunkPolicyEntryUpdate, current.ChunkID)
+		if err != nil {
+			return err
+		}
+		if current.Revision.Number != request.ExpectedRevision {
+			return fmt.Errorf("%w: entry %s expected revision %d, current revision %d", memoryStoreAPI.ErrConflict, request.EntryID, request.ExpectedRevision, current.Revision.Number)
+		}
+		if current.State != memory.EntryStateActive && current.State != memory.EntryStateDraft {
+			return fmt.Errorf("%w: entry %s is %q", ErrEntryNotEditable, current.ID, current.State)
+		}
+		if chunk.State == memory.ChunkStateArchived {
+			return fmt.Errorf("%w: restore chunk %s before editing entries", ErrParentChunkArchived, chunk.ID)
+		}
+		next := applyEntryContent(current, candidate)
+		if err := applyPersonalEntryUpdatePolicy(&next, current, chunk, classification); err != nil {
+			return err
+		}
+		if entryContentEqual(next, current) {
+			result.Entry = current
+			return nil
+		}
+		if err := validateEvidenceReferences(ctx, tx, next.EvidenceIDs, next.Verification.EvidenceIDs); err != nil {
+			return err
+		}
+		if err := validatePersonalEntryEvidence(ctx, tx, next); err != nil {
+			return err
+		}
+		now := s.now().UTC().Round(0)
+		if !now.After(current.UpdatedAt) {
+			now = current.UpdatedAt.Add(time.Nanosecond)
+		}
+		next.UpdatedAt = now
+		next.Revision = memory.Revision{
+			Number: current.Revision.Number + 1, ID: memory.RevisionID(s.newID()),
+			Actor: actor, Reason: request.Reason, CreatedAt: now,
+		}
+		if err := next.Validate(); err != nil {
+			return err
+		}
+		if err := tx.PutEntry(ctx, next, current.Revision.Number); err != nil {
+			return err
+		}
+		result.Entry = next
+		result.Updated = true
+		return nil
+	})
+	if err != nil {
+		return UpdateEntryResult{}, fmt.Errorf("update memory entry: %w", err)
+	}
+	if result.Updated {
+		s.publishMutation(ctx, entryMutation(MutationUpdated, result.Entry))
+	}
+	return result, nil
+}
+
+func (c EntryContent) entry() memory.Entry {
+	return memory.Entry{
+		Kind: c.Kind, Title: c.Title, Summary: c.Summary, Body: c.Body,
+		Aliases: c.Aliases, Tags: c.Tags, Scope: c.Scope, Applicability: c.Applicability,
+		Risk: c.Risk, Confidence: c.Confidence, ValidFrom: c.ValidFrom, ValidUntil: c.ValidUntil,
+		ObservedAt: c.ObservedAt, ReviewAfter: c.ReviewAfter, EvidenceIDs: c.EvidenceIDs, PersonalOrigin: c.PersonalOrigin,
+	}
+}
+
+func applyEntryContent(current, normalized memory.Entry) memory.Entry {
+	next := current
+	next.Kind = normalized.Kind
+	next.Title = normalized.Title
+	next.Summary = normalized.Summary
+	next.Body = normalized.Body
+	next.Aliases = normalized.Aliases
+	next.Tags = normalized.Tags
+	next.Scope = normalized.Scope
+	next.Applicability = normalized.Applicability
+	next.Risk = normalized.Risk
+	next.Confidence = normalized.Confidence
+	next.ValidFrom = normalized.ValidFrom
+	next.ValidUntil = normalized.ValidUntil
+	next.ObservedAt = normalized.ObservedAt
+	next.ReviewAfter = normalized.ReviewAfter
+	next.EvidenceIDs = normalized.EvidenceIDs
+	next.PersonalOrigin = normalized.PersonalOrigin
+	return next
+}
+
+func entryContentEqual(left, right memory.Entry) bool {
+	return left.Kind == right.Kind && left.Title == right.Title && left.Summary == right.Summary && left.Body == right.Body &&
+		slices.Equal(left.Aliases, right.Aliases) && slices.Equal(left.Tags, right.Tags) && left.Scope == right.Scope &&
+		applicabilityEqual(left.Applicability, right.Applicability) && slices.Equal(left.Risk, right.Risk) &&
+		left.Confidence == right.Confidence && left.ValidFrom.Equal(right.ValidFrom) && left.ValidUntil.Equal(right.ValidUntil) &&
+		left.ObservedAt.Equal(right.ObservedAt) && left.ReviewAfter.Equal(right.ReviewAfter) &&
+		slices.Equal(left.EvidenceIDs, right.EvidenceIDs) && left.PersonalOrigin == right.PersonalOrigin && left.State == right.State
+}
+
+func cloneApplicability(value memory.Applicability) memory.Applicability {
+	value.OperatingSystems = slices.Clone(value.OperatingSystems)
+	value.Architectures = slices.Clone(value.Architectures)
+	value.Software = slices.Clone(value.Software)
+	value.Locales = slices.Clone(value.Locales)
+	value.Conditions = slices.Clone(value.Conditions)
+	return value
+}
+
+func applicabilityEqual(left, right memory.Applicability) bool {
+	return slices.Equal(left.OperatingSystems, right.OperatingSystems) && slices.Equal(left.Architectures, right.Architectures) &&
+		slices.Equal(left.Software, right.Software) && slices.Equal(left.Locales, right.Locales) && slices.Equal(left.Conditions, right.Conditions)
+}

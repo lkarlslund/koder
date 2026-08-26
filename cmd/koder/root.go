@@ -47,7 +47,7 @@ func NewRootCommand() *cobra.Command {
 		RunE:          func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	bindRootFlags(cmd, &opts)
-	cmd.AddCommand(newServeCommand(&opts), newDoctorCommand(&opts), newVersionCommand(), newSessionCommand(&opts), newDebugCommand(), newSkillCommand(&opts), newExecCommand(&opts), newKnowledgeCommand(&opts))
+	cmd.AddCommand(newServeCommand(&opts), newDoctorCommand(&opts), newVersionCommand(), newSessionCommand(&opts), newDebugCommand(), newSkillCommand(&opts), newExecCommand(&opts), newMemoryCommand(&opts))
 	return cmd
 }
 
@@ -122,24 +122,24 @@ func runKoder(ctx context.Context, mode app.StartupMode, serveOpts serveConfig) 
 		return err
 	}
 	defer func() { _ = st.Close() }()
-	knowledge, err := openConfiguredDefaultKnowledgeStore(cfg.StateDir(), cfg.Knowledge)
+	memory, err := openConfiguredDefaultMemoryStore(cfg.StateDir(), cfg.Memory)
 	if err != nil {
 		return err
 	}
-	if knowledge.OpenError != nil {
-		slog.Warn("knowledge store unavailable; continuing without Knowledge", "error", knowledge.OpenError)
-	} else if !knowledge.Enabled {
-		slog.Info("knowledge store disabled")
+	if memory.OpenError != nil {
+		slog.Warn("memory store unavailable; continuing without Memory", "error", memory.OpenError)
+	} else if !memory.Enabled {
+		slog.Info("memory store disabled")
 	} else {
-		slog.Info("knowledge store opened")
+		slog.Info("memory store opened")
 	}
 	defer func() {
-		if err := knowledge.Close(); err != nil {
-			slog.Error("close knowledge store", "error", err)
+		if err := memory.Close(); err != nil {
+			slog.Error("close memory store", "error", err)
 		}
 	}()
 	recorder := debugsrv.NewRecorder()
-	recorder.UpdateSubsystemHealth("knowledge", knowledge.OperationalHealth(ctx))
+	recorder.UpdateSubsystemHealth("memory", memory.OperationalHealth(ctx))
 
 	mcpManager, err := mcp.NewManager(cfg.MCPServers)
 	if err != nil {
@@ -151,12 +151,12 @@ func runKoder(ctx context.Context, mode app.StartupMode, serveOpts serveConfig) 
 	}()
 
 	engine := agent.New(cfg, st, recorder, mcpManager)
-	engine.SetKnowledgeService(knowledge.Service)
-	if knowledge.Service != nil {
-		if err := engine.StartKnowledgeCuration(ctx, knowledge.Service); err != nil {
-			slog.Warn("knowledge curation unavailable; continuing without background learning", "error", err)
+	engine.SetMemoryService(memory.Service)
+	if memory.Service != nil {
+		if err := engine.StartMemoryCuration(ctx, memory.Service); err != nil {
+			slog.Warn("memory curation unavailable; continuing without background learning", "error", err)
 		} else {
-			defer engine.StopKnowledgeCuration()
+			defer engine.StopMemoryCuration()
 		}
 	}
 	return runWeb(ctx, cfg, engine, mode, recorder, serveOpts)

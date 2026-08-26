@@ -13,30 +13,30 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
-	"github.com/lkarlslund/koder/internal/knowledge"
-	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
-	"github.com/lkarlslund/koder/internal/knowledge/store/memory"
+	"github.com/lkarlslund/koder/internal/memory"
+	memoryService "github.com/lkarlslund/koder/internal/memory/service"
+	memoryBackend "github.com/lkarlslund/koder/internal/memory/store/memory"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
-	"github.com/lkarlslund/koder/internal/tools/knowledgetool"
+	"github.com/lkarlslund/koder/internal/tools/memorytool"
 )
 
-func TestCodexAdditionalToolsIncludeKnowledge(t *testing.T) {
-	if !slices.Contains(CodexAdditionalToolIDs(), tools.Knowledge) {
-		t.Fatal("Codex additional tools do not include Knowledge")
+func TestCodexAdditionalToolsIncludeMemory(t *testing.T) {
+	if !slices.Contains(CodexAdditionalToolIDs(), tools.Memory) {
+		t.Fatal("Codex additional tools do not include Memory")
 	}
 }
 
-func TestCodexKnowledgeDefinitionMatchesKoderRuntimeContract(t *testing.T) {
-	store := memory.New()
+func TestCodexMemoryDefinitionMatchesKoderRuntimeContract(t *testing.T) {
+	store := memoryBackend.New()
 	t.Cleanup(func() { _ = store.Close() })
-	service, err := knowledgeService.New(knowledgeService.Config{
+	service, err := memoryService.New(memoryService.Config{
 		Store: store,
-		Actor: knowledgeService.ContextActorSource(knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:test"}),
-		ToolPolicy: knowledgeService.ToolOfferPolicyFunc(func(context.Context, knowledge.Actor, knowledgeService.ToolOffer) (knowledgeService.ToolOffer, error) {
-			return knowledgeService.ToolOffer{
+		Actor: memoryService.ContextActorSource(memory.Actor{Kind: memory.ActorKindSystem, ID: "system:test"}),
+		ToolPolicy: memoryService.ToolOfferPolicyFunc(func(context.Context, memory.Actor, memoryService.ToolOffer) (memoryService.ToolOffer, error) {
+			return memoryService.ToolOffer{
 				Actions:    []string{"search", "get", "history"},
-				ScopeKinds: []knowledge.ScopeKind{knowledge.ScopeKindProject, knowledge.ScopeKindEnvironment},
+				ScopeKinds: []memory.ScopeKind{memory.ScopeKindProject, memory.ScopeKindEnvironment},
 			}, nil
 		}),
 	})
@@ -45,15 +45,15 @@ func TestCodexKnowledgeDefinitionMatchesKoderRuntimeContract(t *testing.T) {
 	}
 	runtime := tools.Runtime{
 		ChatID:   "01a01688-fc5d-7f7d-8bb8-de244977fee1",
-		Services: knowledgetool.RuntimeService(service),
+		Services: memorytool.RuntimeService(service),
 	}
-	koderDefinition, ok := tools.DefinitionFor(tools.Knowledge, runtime)
+	koderDefinition, ok := tools.DefinitionFor(tools.Memory, runtime)
 	if !ok {
-		t.Fatal("Koder Knowledge definition is unavailable")
+		t.Fatal("Koder Memory definition is unavailable")
 	}
-	codexDefinition, ok := codexAdditionalToolDefinition(tools.Knowledge, runtime)
+	codexDefinition, ok := codexAdditionalToolDefinition(tools.Memory, runtime)
 	if !ok {
-		t.Fatal("Codex Knowledge definition is unavailable")
+		t.Fatal("Codex Memory definition is unavailable")
 	}
 	if codexDefinition.Type != "function" || codexDefinition.Name != koderDefinition.Function.Name ||
 		codexDefinition.Description != koderDefinition.Function.Description ||
@@ -62,30 +62,30 @@ func TestCodexKnowledgeDefinitionMatchesKoderRuntimeContract(t *testing.T) {
 	}
 }
 
-func TestCodexKnowledgeDefinitionHonorsRuntimeAvailability(t *testing.T) {
-	if _, ok := codexAdditionalToolDefinition(tools.Knowledge, tools.Runtime{}); ok {
-		t.Fatal("Codex must not offer Knowledge without the runtime service")
+func TestCodexMemoryDefinitionHonorsRuntimeAvailability(t *testing.T) {
+	if _, ok := codexAdditionalToolDefinition(tools.Memory, tools.Runtime{}); ok {
+		t.Fatal("Codex must not offer Memory without the runtime service")
 	}
-	store := memory.New()
+	store := memoryBackend.New()
 	t.Cleanup(func() { _ = store.Close() })
-	service, err := knowledgeService.New(knowledgeService.Config{
+	service, err := memoryService.New(memoryService.Config{
 		Store: store,
-		Actor: knowledgeService.ContextActorSource(knowledge.Actor{Kind: knowledge.ActorKindSystem, ID: "system:test"}),
+		Actor: memoryService.ContextActorSource(memory.Actor{Kind: memory.ActorKindSystem, ID: "system:test"}),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	disabled := tools.Runtime{
-		Services:     knowledgetool.RuntimeService(service),
-		AllowedTools: map[tools.ID]bool{tools.Knowledge: false},
+		Services:     memorytool.RuntimeService(service),
+		AllowedTools: map[tools.ID]bool{tools.Memory: false},
 	}
-	if _, ok := codexAdditionalToolDefinition(tools.Knowledge, disabled); ok {
-		t.Fatal("Codex must not offer disabled Knowledge")
+	if _, ok := codexAdditionalToolDefinition(tools.Memory, disabled); ok {
+		t.Fatal("Codex must not offer disabled Memory")
 	}
 }
 
-func TestKoderAndCodexKnowledgeToolInteropFixtures(t *testing.T) {
-	fixturePath := filepath.Join("..", "..", "protocol", "knowledge", "v1", "testdata", "tool_interop.json")
+func TestKoderAndCodexMemoryToolInteropFixtures(t *testing.T) {
+	fixturePath := filepath.Join("..", "..", "protocol", "memory", "v1", "testdata", "tool_interop.json")
 	data, err := os.ReadFile(fixturePath)
 	if err != nil {
 		t.Fatal(err)
@@ -113,28 +113,28 @@ func TestKoderAndCodexKnowledgeToolInteropFixtures(t *testing.T) {
 	if !bytes.Equal(data, canonical.Bytes()) {
 		t.Fatal("tool interoperability fixture is not canonical pretty-printed JSON")
 	}
-	if fixture.SchemaVersion != 1 || fixture.Tool != tools.Knowledge.String() || len(fixture.Cases) == 0 {
+	if fixture.SchemaVersion != 1 || fixture.Tool != tools.Memory.String() || len(fixture.Cases) == 0 {
 		t.Fatalf("invalid interoperability fixture header: %#v", fixture)
 	}
 
-	store := memory.New()
+	store := memoryBackend.New()
 	t.Cleanup(func() { _ = store.Close() })
-	service, err := knowledgeService.New(knowledgeService.Config{
+	service, err := memoryService.New(memoryService.Config{
 		Store: store,
-		Actor: knowledgeService.ContextActorSource(knowledge.Actor{
-			Kind: knowledge.ActorKindSystem, ID: "system:interop",
+		Actor: memoryService.ContextActorSource(memory.Actor{
+			Kind: memory.ActorKindSystem, ID: "system:interop",
 		}),
 		Now: func() time.Time { return time.Date(2026, 8, 22, 20, 0, 0, 0, time.UTC) },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime := tools.Runtime{ChatID: "01a01688-fc5d-7f7d-8bb8-de244977fee1", Services: knowledgetool.RuntimeService(service)}
-	koderDefinition, ok := tools.DefinitionFor(tools.Knowledge, runtime)
+	runtime := tools.Runtime{ChatID: "01a01688-fc5d-7f7d-8bb8-de244977fee1", Services: memorytool.RuntimeService(service)}
+	koderDefinition, ok := tools.DefinitionFor(tools.Memory, runtime)
 	if !ok {
-		t.Fatal("Koder Knowledge definition is unavailable")
+		t.Fatal("Koder Memory definition is unavailable")
 	}
-	codexDefinition, ok := codexAdditionalToolDefinition(tools.Knowledge, runtime)
+	codexDefinition, ok := codexAdditionalToolDefinition(tools.Memory, runtime)
 	if !ok || codexDefinition.Name != koderDefinition.Function.Name || !bytes.Equal(codexDefinition.InputSchema, koderDefinition.Function.Parameters) {
 		t.Fatalf("Codex definition diverged from Koder: %#v", codexDefinition)
 	}
@@ -143,10 +143,10 @@ func TestKoderAndCodexKnowledgeToolInteropFixtures(t *testing.T) {
 		t.Fatal(err)
 	}
 	compiler := jsonschema.NewCompiler()
-	if err := compiler.AddResource("knowledge-tool.json", document); err != nil {
+	if err := compiler.AddResource("memory-tool.json", document); err != nil {
 		t.Fatal(err)
 	}
-	schema, err := compiler.Compile("knowledge-tool.json")
+	schema, err := compiler.Compile("memory-tool.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestKoderAndCodexKnowledgeToolInteropFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if request.Tool != tools.Knowledge || request.ToolCallID != test.CallID || !maps.Equal(request.Args, test.Normalized) {
+			if request.Tool != tools.Memory || request.ToolCallID != test.CallID || !maps.Equal(request.Args, test.Normalized) {
 				t.Fatalf("normalized request = %#v, want %#v", request, test.Normalized)
 			}
 			result, err := tools.Call(context.Background(), tools.Options{Runtime: runtime, Request: request})

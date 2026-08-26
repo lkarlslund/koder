@@ -30,9 +30,9 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
-	"github.com/lkarlslund/koder/internal/knowledge/curation"
-	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
 	"github.com/lkarlslund/koder/internal/mcp"
+	"github.com/lkarlslund/koder/internal/memory/curation"
+	memoryService "github.com/lkarlslund/koder/internal/memory/service"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/modelruntime"
 	"github.com/lkarlslund/koder/internal/offeredfile"
@@ -94,21 +94,21 @@ func (e *Engine) SetPhoneDeviceControl(control phonedevice.Control) {
 	}
 }
 
-// SetKnowledgeService exposes the optional process-wide Knowledge service to
-// chat tool runtimes. Passing nil keeps Knowledge unavailable without affecting
+// SetMemoryService exposes the optional process-wide Memory service to
+// chat tool runtimes. Passing nil keeps Memory unavailable without affecting
 // normal chat operation.
-func (e *Engine) SetKnowledgeService(service *knowledgeService.Service) {
+func (e *Engine) SetMemoryService(service *memoryService.Service) {
 	if e != nil && e.toolsRuntime != nil {
-		e.toolsRuntime.SetKnowledgeService(service)
+		e.toolsRuntime.SetMemoryService(service)
 	}
 }
 
-// KnowledgeService returns the optional process-wide Knowledge service.
-func (e *Engine) KnowledgeService() *knowledgeService.Service {
+// MemoryService returns the optional process-wide Memory service.
+func (e *Engine) MemoryService() *memoryService.Service {
 	if e == nil || e.toolsRuntime == nil {
 		return nil
 	}
-	return e.toolsRuntime.KnowledgeService()
+	return e.toolsRuntime.MemoryService()
 }
 
 const (

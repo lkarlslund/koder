@@ -1,0 +1,211 @@
+'use strict';
+
+const assert = require('assert');
+const browser = require('../assets/memory_browser.js');
+
+assert.deepStrictEqual([...browser.panes], ['sources', 'graph', 'inspector']);
+assert.strictEqual(browser.normalizePane(' SOURCES '), 'sources');
+assert.strictEqual(browser.normalizePane('missing'), 'graph');
+assert.strictEqual(browser.adjacentPane('graph', 1), 'inspector');
+assert.strictEqual(browser.adjacentPane('inspector', 1), 'sources');
+assert.strictEqual(browser.adjacentPane('sources', -1), 'inspector');
+assert.strictEqual(browser.safeReturnPath('/s/session-1/c/chat_2'), '/s/session-1/c/chat_2');
+assert.strictEqual(browser.safeReturnPath('/s/session-1'), '/s/session-1');
+assert.strictEqual(browser.safeReturnPath('//example.com'), '/');
+assert.strictEqual(browser.safeReturnPath('/s/../c/chat'), '/');
+assert.strictEqual(browser.returnPathFromSearch('?return=%2Fs%2Fsession-1%2Fc%2Fchat-2'), '/s/session-1/c/chat-2');
+assert.strictEqual(browser.returnPathFromSearch('?return=https%3A%2F%2Fexample.com'), '/');
+assert.deepStrictEqual(browser.chatSelectionFromSearch('?return=%2Fs%2Fsession-1%2Fc%2Fchat-2'), {
+  sessionID: 'session-1', chatID: 'chat-2', path: '/s/session-1/c/chat-2',
+});
+assert.strictEqual(browser.chatSelectionFromSearch('?return=%2Fs%2Fsession-1'), null);
+assert.strictEqual(browser.chatSelectionFromSearch('?return=https%3A%2F%2Fexample.com'), null);
+assert.deepStrictEqual([...browser.states], ['shell', 'loading', 'ready', 'empty', 'unavailable', 'truncated', 'stale', 'error']);
+assert.strictEqual(browser.normalizeState(' READY '), 'ready');
+assert.strictEqual(browser.normalizeState('unknown'), 'error');
+assert.strictEqual(browser.stateForError({code: 'unavailable'}), 'unavailable');
+assert.strictEqual(browser.stateForError({code: 'network'}), 'unavailable');
+assert.strictEqual(browser.stateForError({code: 'invalid_cursor'}), 'stale');
+assert.strictEqual(browser.stateForError({code: 'conflict'}), 'error');
+assert.strictEqual(browser.presentationForState('empty').title, 'No memory yet');
+assert.strictEqual(browser.presentationForState('error', 'Safe detail').detail, 'Safe detail');
+
+const urlState = browser.browserStateFromSearch('?return=%2Fs%2Fsession-1%2Fc%2Fchat-2&query=partition&kind=reference&scope_kind=project&state=archived&tag=linux&object_kind=entry&id=entry-7');
+assert.deepStrictEqual(urlState, {
+  query: 'partition', kind: 'reference', scopeKind: 'project', state: 'archived', tag: 'linux', objectKind: 'entry', id: 'entry-7',
+});
+assert.strictEqual(
+  browser.searchForBrowserState('?return=%2Fs%2Fsession-1%2Fc%2Fchat-2&unknown=kept', urlState),
+  '?return=%2Fs%2Fsession-1%2Fc%2Fchat-2&unknown=kept&query=partition&kind=reference&scope_kind=project&state=archived&tag=linux&object_kind=entry&id=entry-7'
+);
+assert.deepStrictEqual(browser.browserStateFromSearch('?kind=bad&scope_kind=bad&object_kind=entry&id=..%2Fsecret'), {
+  query: '', kind: '', scopeKind: '', state: '', tag: '', objectKind: '', id: '',
+});
+assert.strictEqual(browser.browserSearchHasState('?return=%2Fs%2Fsession-1'), false);
+assert.strictEqual(browser.browserSearchHasState('?return=%2Fs%2Fsession-1&kind='), true);
+assert.strictEqual(browser.browserSearchHasState('?object_kind=entry&id=entry-1'), true);
+assert.strictEqual(browser.browserStatesEqual(
+  {query: 'partition', scopeKind: 'project', objectKind: 'entry', id: 'entry-1'},
+  browser.browserStateFromSearch('?query=partition&scope_kind=project&object_kind=entry&id=entry-1'),
+), true);
+assert.strictEqual(browser.browserStatesEqual({query: 'partition'}, {query: 'different'}), false);
+const localPreferences = browser.normalizeLocalPreferences({
+  version: 99,
+  browser: {query: ' partition ', kind: 'reference', scopeKind: 'project', state: 'bad', objectKind: 'entry', id: 'entry-1'},
+  mobilePane: 'inspector',
+  graph: {
+    root: {kind: 'chunk', id: 'chunk-1'},
+    hiddenNodes: ['entry:entry-1', 'entry:entry-1', '../bad'],
+    hiddenEdges: ['link-1', '../bad'],
+    pinnedNodes: [{key: 'entry:entry-1', x: 1.5, y: -2}, {key: 'bad', x: 1, y: 2}, {key: 'entry:too-far', x: 2000000, y: 0}],
+    frontier: [{kind: 'entry', id: 'entry-1', direction: 'outgoing'}, {kind: 'entry', id: 'entry-1', direction: 'outgoing'}, {kind: 'link', id: 'link-1', direction: 'incoming'}],
+  },
+});
+assert.deepStrictEqual(localPreferences, {
+  version: 1,
+  savedViewID: '',
+  browser: {query: 'partition', kind: 'reference', scopeKind: 'project', state: '', tag: '', objectKind: 'entry', id: 'entry-1'},
+  mobilePane: 'inspector',
+  graph: {
+    root: {kind: 'chunk', id: 'chunk-1'}, presentation: 'canvas', hiddenNodes: ['entry:entry-1'], hiddenEdges: ['link-1'],
+    pinnedNodes: [{key: 'entry:entry-1', x: 1.5, y: -2}],
+    frontier: [{kind: 'entry', id: 'entry-1', direction: 'outgoing'}],
+  },
+});
+const serverViewState = browser.graphViewStateFromPreferences(localPreferences);
+assert.deepStrictEqual(serverViewState.browser, {
+  query: 'partition', kind: 'reference', scope_kind: 'project', state: '', tag: '', object_kind: 'entry', id: 'entry-1',
+});
+assert.deepStrictEqual(serverViewState.root, {kind: 'chunk', id: 'chunk-1'});
+assert.strictEqual(serverViewState.presentation, 'canvas');
+assert.strictEqual(serverViewState.layout, 'force_atlas2');
+const restoredNamedView = browser.preferencesFromGraphViewState(serverViewState, 'view-1');
+assert.strictEqual(restoredNamedView.savedViewID, 'view-1');
+assert.deepStrictEqual(restoredNamedView.graph, localPreferences.graph);
+assert.deepStrictEqual(restoredNamedView.browser, localPreferences.browser);
+const preferenceValues = new Map();
+const preferenceStorage = {
+  getItem: key => preferenceValues.get(key) || null,
+  setItem: (key, value) => preferenceValues.set(key, value),
+  removeItem: key => preferenceValues.delete(key),
+};
+assert.strictEqual(browser.loadLocalPreferences(preferenceStorage), null);
+assert.deepStrictEqual(browser.saveLocalPreferences(preferenceStorage, localPreferences), localPreferences);
+assert.deepStrictEqual(browser.loadLocalPreferences(preferenceStorage), localPreferences);
+assert.strictEqual(preferenceValues.has(browser.localPreferencesKey), true);
+assert.strictEqual(browser.clearLocalPreferences(preferenceStorage), true);
+assert.strictEqual(browser.loadLocalPreferences(preferenceStorage), null);
+preferenceValues.set(browser.localPreferencesKey, '{broken');
+assert.strictEqual(browser.loadLocalPreferences(preferenceStorage), null);
+preferenceValues.set(browser.localPreferencesKey, JSON.stringify({version: 2}));
+assert.strictEqual(browser.loadLocalPreferences(preferenceStorage), null);
+assert.doesNotThrow(() => browser.saveLocalPreferences({setItem() { throw new Error('quota'); }}, localPreferences));
+assert.strictEqual(browser.displayLabel('partially_verified'), 'Partially verified');
+assert.strictEqual(browser.plainTextLabel('**Safe** [label](https://example.com) <script>bad</script>'), 'Safe label bad');
+assert.strictEqual(browser.plainTextLabel('abcdefghijklmnopqrstuvwxyz', 8), 'abcdefg…');
+assert.deepStrictEqual(browser.graphSnapshotRequest('entry', 'entry-7'), {
+  root: {kind: 'entry', id: 'entry-7'}, max_depth: 2, max_nodes: 200, max_edges: 400, time_limit_ms: 2500,
+});
+assert.strictEqual(browser.graphSnapshotRequest('link', 'link-1'), null);
+assert.strictEqual(browser.graphSnapshotRequest('entry', '../secret'), null);
+assert.deepStrictEqual(browser.graphExpansionRequest('entry', 'entry-7', 'incoming'), {
+  root: {kind: 'entry', id: 'entry-7'}, direction: 'incoming', max_depth: 1, max_nodes: 100, max_edges: 200, time_limit_ms: 2000,
+});
+assert.strictEqual(browser.graphExpansionRequest('entry', 'entry-7', 'both'), null);
+assert.deepStrictEqual(browser.graphObjectForSelection({kind: 'node', key: 'entry:entry-7'}), {kind: 'entry', id: 'entry-7'});
+assert.deepStrictEqual(browser.graphObjectForSelection({kind: 'chunk', id: 'chunk-7'}), {kind: 'chunk', id: 'chunk-7'});
+assert.strictEqual(browser.graphObjectForSelection({kind: 'edge', key: 'link-7'}), null);
+assert.strictEqual(browser.graphKeyboardAction({key: 'h'}), 'hide');
+assert.strictEqual(browser.graphKeyboardAction({key: 'Delete'}), 'hide');
+assert.strictEqual(browser.graphKeyboardAction({key: 'z', ctrlKey: true}), 'undo');
+assert.strictEqual(browser.graphKeyboardAction({key: 'h', ctrlKey: true}), '');
+assert.deepStrictEqual(browser.applicabilityRows({operating_systems: ['Linux'], software: [{name: 'Go', version_range: '>=1.24'}]}), [
+  {label: 'Systems', value: 'Linux'}, {label: 'Software', value: 'Go >=1.24'},
+]);
+assert.deepStrictEqual(browser.inspectorWarnings('entry', {
+  state: 'superseded', superseded_by_id: 'entry-8', valid_until: '2025-01-01T00:00:00Z', review_after: '2025-02-01T00:00:00Z',
+  verification: {status: 'disputed'},
+}, [{link: {kind: 'contradicts'}}], new Date('2026-01-01T00:00:00Z')).map(item => item.level), ['danger', 'danger', 'warning', 'danger', 'danger']);
+assert.strictEqual(browser.safeExternalURL('https://example.com/source'), 'https://example.com/source');
+assert.strictEqual(browser.safeExternalURL('javascript:alert(1)'), '');
+assert.deepStrictEqual(browser.commaValues('linux, go, linux'), ['linux', 'go']);
+assert.deepStrictEqual(browser.chunkContentFromValues({
+  title: 'Disk tools', kind: 'reference', visibility: 'installation', scope_kind: 'global', tags: 'linux, disk',
+  software: '', shared_with: '', review_after: '2026-09-01T10:00', publisher_name: 'Koder',
+}), {
+  title: 'Disk tools', kind: 'reference', visibility: 'installation', scope: {kind: 'global'}, tags: ['linux', 'disk'],
+  publisher: {id: '', name: 'Koder'}, review_after: new Date('2026-09-01T10:00').toISOString(),
+});
+assert.throws(() => browser.chunkContentFromValues({title: 'Scoped', kind: 'project', visibility: 'private', scope_kind: 'project'}), /selector/);
+assert.strictEqual(browser.chunkEditorValues({scope: {kind: 'personal', selector: 'me'}, tags: ['one', 'two']}).tags, 'one, two');
+assert.deepStrictEqual(browser.entryContentFromValues({
+  title: 'Use sfdisk', kind: 'procedure', scope_kind: 'project', scope_selector: 'koder', confidence: '0.8',
+  operating_systems: 'Linux', software: 'sfdisk|>=2.39, util-linux', evidence_ids: 'evidence-1', valid_from: '2026-01-01T10:00',
+}), {
+  title: 'Use sfdisk', kind: 'procedure', scope: {kind: 'project', selector: 'koder'}, confidence: 0.8,
+  applicability: {operating_systems: ['Linux'], software: [{name: 'sfdisk', version_range: '>=2.39'}, {name: 'util-linux'}]},
+  evidence_ids: ['evidence-1'], valid_from: new Date('2026-01-01T10:00').toISOString(),
+});
+assert.throws(() => browser.entryContentFromValues({title: 'Bad', kind: 'fact', scope_kind: 'global', confidence: '2'}), /confidence/);
+assert.throws(() => browser.entryContentFromValues({title: 'Bad', kind: 'fact', scope_kind: 'global', valid_from: '2026-02-01T00:00', valid_until: '2026-01-01T00:00'}), /later/);
+assert.strictEqual(browser.entryEditorValues({chunk_id: 'chunk-1', applicability: {software: [{name: 'Go', version_range: '>=1.24'}]}}).software, 'Go|>=1.24');
+assert.strictEqual(browser.entryEditorValues({}, {id: 'personal', scope: {kind: 'personal', selector: 'me'}}).personal_origin, 'explicit');
+assert.deepStrictEqual(browser.personalEditorMode({}, {scope: {kind: 'personal', selector: 'me'}}), {personal: true, locked: true});
+assert.deepStrictEqual(browser.personalEditorMode({scope: {kind: 'personal', selector: 'family'}}, {}), {personal: true, locked: false});
+assert.deepStrictEqual(browser.personalEditorMode({scope: {kind: 'global'}}, {}), {personal: false, locked: false});
+assert.deepStrictEqual(browser.editorConflict(
+  {title: 'Old title', description: 'Old description', tags: 'one', review_approved: false},
+  {title: 'My title', description: 'Old description', tags: 'one', review_approved: true},
+  {title: 'Server title', description: 'Server description', tags: 'one', review_approved: false},
+), {
+  serverFields: ['description', 'title'], draftFields: ['title'], overlappingFields: ['title'],
+  merged: {title: 'My title', description: 'Server description', tags: 'one', review_approved: false},
+});
+const historyRevisions = [
+  {kind: 'entry', entry: {id: 'entry-1', chunk_id: 'chunk-1', kind: 'fact', title: 'New title', summary: 'New summary', scope: {kind: 'global'}, state: 'active', evidence_ids: ['evidence-1'], revision: {number: 2, id: 'revision-2', reason: 'Correct wording', actor: {kind: 'user', id: 'me'}, created_at: '2026-01-02T10:00:00Z'}}},
+  {kind: 'entry', entry: {id: 'entry-1', chunk_id: 'chunk-1', kind: 'fact', title: 'Old title', summary: 'Old summary', scope: {kind: 'global'}, state: 'active', evidence_ids: ['evidence-1'], revision: {number: 1, id: 'revision-1', actor: {kind: 'agent', id: 'chat-1'}, created_at: '2026-01-01T10:00:00Z'}}},
+];
+const history = browser.historyTimeline(historyRevisions, 'entry', [{id: 'evidence-1', quality: 'primary', source: {title: 'User statement'}}]);
+assert.strictEqual(history[0].action, 'Correct wording');
+assert.deepStrictEqual(history[0].changedFields, ['summary', 'title']);
+assert.strictEqual(history[0].evidence[0].source.title, 'User statement');
+assert.strictEqual(history[1].isCreation, true);
+assert.strictEqual(browser.historyTimeline([historyRevisions[1]], 'entry', [], {hasOlder: true})[0].isCreation, false);
+assert.deepStrictEqual(browser.deletionAssessment('chunk', {counts: {entries: 2, links: 1}, dependency_ids: ['chunk-dependency']}).groups, [
+  {label: 'Contained entries', kind: 'entry', ids: [], count: 2},
+  {label: 'Touching relationships', kind: 'link', ids: [], count: 1},
+  {label: 'Chunk dependencies', kind: 'chunk', ids: ['chunk-dependency'], count: 1},
+]);
+assert.deepStrictEqual(browser.deletionAssessment('entry', {}, {entry_blockers: {link_ids: ['link-1'], superseded_entry_ids: ['entry-old']}}).groups, [
+  {label: 'Touching relationships', kind: 'link', ids: ['link-1'], count: 1},
+  {label: 'Superseded entries using this replacement', kind: 'entry', ids: ['entry-old'], count: 1},
+]);
+assert.strictEqual(browser.relationshipShapeError('contradicts', {kind: 'entry', id: 'one'}, {kind: 'entry', id: 'two'}), '');
+assert.match(browser.relationshipShapeError('contradicts', {kind: 'chunk', id: 'one'}, {kind: 'entry', id: 'two'}), /two entries/);
+assert.match(browser.relationshipShapeError('part_of', {kind: 'entry', id: 'one'}, {kind: 'entry', id: 'two'}), /point to a chunk/);
+assert.deepStrictEqual(browser.linkContentFromValues({
+  source_kind: 'entry', source_id: 'entry-1', target_kind: 'chunk', target_id: 'chunk-2', kind: 'supported_by',
+  label: 'Manual', notes: 'See source', evidence_ids: 'evidence-1, evidence-2',
+}), {
+  source: {kind: 'entry', id: 'entry-1'}, target: {kind: 'chunk', id: 'chunk-2'}, kind: 'supported_by',
+  label: 'Manual', notes: 'See source', evidence_ids: ['evidence-1', 'evidence-2'],
+});
+assert.deepStrictEqual(browser.relationPreview({source_kind: 'chunk', source_id: 'one', target_kind: 'entry', target_id: 'two', kind: 'part_of'}, {source: 'One', target: 'Two'}), {
+  valid: false, path: 'One → Part of → Two', detail: 'Part of must point to a chunk.',
+});
+assert.strictEqual(browser.relationPreview({source_kind: 'entry', source_id: 'one', target_kind: 'entry', target_id: 'two', kind: 'contradicts'}, {source: 'One', target: 'Two'}).path, 'One ↔ Contradicts ↔ Two');
+assert.strictEqual(browser.graphDebugEnabled('?graph_debug=1'), true);
+assert.strictEqual(browser.graphDebugEnabled('?graph_debug=true'), false);
+const webglDocument = {createElement: () => ({getContext: name => name === 'webgl2' ? {} : null})};
+assert.strictEqual(browser.supportsWebGL(webglDocument), true);
+assert.deepStrictEqual(browser.graphEnvironment(webglDocument, () => ({matches: false})), {available: true, reason: ''});
+assert.deepStrictEqual(browser.graphEnvironment(webglDocument, () => ({matches: true})), {available: false, reason: 'reduced_motion'});
+assert.deepStrictEqual(browser.graphEnvironment({createElement: () => ({getContext: () => null})}, () => ({matches: false})), {available: false, reason: 'webgl_unavailable'});
+let sanitizeOptions;
+const sanitized = browser.sanitizedMarkdownHTML('unsafe', {parse: () => '<script>bad</script><p>safe</p>'}, {
+  sanitize: (html, options) => { sanitizeOptions = options; return html.replace('<script>bad</script>', ''); },
+});
+assert.strictEqual(sanitized, '<p>safe</p>');
+assert(sanitizeOptions.FORBID_TAGS.includes('script'));
+assert(sanitizeOptions.FORBID_TAGS.includes('iframe'));
+assert(sanitizeOptions.FORBID_ATTR.includes('style'));

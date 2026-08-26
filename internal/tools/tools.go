@@ -909,7 +909,7 @@ func ArgumentByteLimits() map[string]int {
 		FileEdit.String():    32 * 1024,
 		Bash.String():        8 * 1024,
 		ExecCommand.String(): 8 * 1024,
-		Knowledge.String():   128 * 1024,
+		Memory.String():      128 * 1024,
 	}
 }
 

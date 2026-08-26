@@ -20,7 +20,7 @@ var codexAdditionalTools = map[tools.ID]struct{}{
 	tools.Chats: {}, tools.ChatStatus: {},
 	tools.Sessions:    {},
 	tools.Present:     {},
-	tools.Knowledge:   {},
+	tools.Memory:      {},
 	tools.PhoneDevice: {}, tools.PhoneLocation: {}, tools.PhoneContacts: {}, tools.PhoneCalendar: {}, tools.PhoneMessages: {}, tools.PhoneCalls: {}, tools.PhoneNotifications: {},
 	tools.PhoneClock: {}, tools.PhoneClipboard: {}, tools.PhoneApps: {}, tools.PhoneMedia: {}, tools.PhoneShare: {}, tools.PhoneOpen: {}, tools.PhonePhotos: {},
 }

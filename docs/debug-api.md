@@ -33,7 +33,7 @@ Use the host and port from that URL:
 BASE=http://127.0.0.1:7979
 curl -sS "$BASE/debug/health" | jq .
 curl -sS "$BASE/debug/runtime" | jq .
-curl -sS "$BASE/debug/knowledge" | jq .
+curl -sS "$BASE/debug/memory" | jq .
 curl -sS "$BASE/debug/sessions" | jq .
 ```
 
@@ -97,7 +97,7 @@ Response fields:
 - `ok`: always `true` when the server responds.
 - `debug`: debug API base URL known by the process.
 - `subsystems`: sanitized runtime health for optional process subsystems. The
-  `knowledge` entry reports whether Knowledge is enabled, required, available,
+  `memory` entry reports whether Memory is enabled, required, available,
   or read-only, plus its backend, schema version, and index generation. Paths
   and raw backend errors are never exposed.
 
@@ -146,15 +146,15 @@ The response is the same shape as `GET /debug/runtime`.
 Deep debug is intended for short-lived investigation. It can increase retained
 diagnostic detail and should not be left on casually.
 
-### `GET /debug/knowledge`
+### `GET /debug/memory`
 
-Returns the authorized, content-free Knowledge operational snapshot used by the
-authenticated Knowledge status API. The service applies its operational policy before
-the response is produced; policy denial returns `403`, and an unavailable Knowledge
+Returns the authorized, content-free Memory operational snapshot used by the
+authenticated Memory status API. The service applies its operational policy before
+the response is produced; policy denial returns `403`, and an unavailable Memory
 service returns `503`.
 
 ```sh
-curl -sS "$BASE/debug/knowledge" \
+curl -sS "$BASE/debug/memory" \
   | jq '.status | {store, lexical_index, semantic_index, mutation_checkpoint, operations}'
 ```
 

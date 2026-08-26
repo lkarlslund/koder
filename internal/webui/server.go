@@ -71,19 +71,19 @@ type Options struct {
 
 // Server serves the browser UI and bridges websocket RPC to the controller.
 type Server struct {
-	controller              *app.Controller
-	options                 Options
-	server                  *http.Server
-	listener                net.Listener
-	connected               chan struct{}
-	once                    sync.Once
-	debug                   *debugsrv.Recorder
-	clientSelectionMu       sync.Mutex
-	clientSelections        map[string]clientSelection
-	devices                 *deviceauth.Registry
-	voice                   *voiceapi.Handler
-	knowledgeRequestTimeout time.Duration
-	knowledgeBrowserToken   string
+	controller           *app.Controller
+	options              Options
+	server               *http.Server
+	listener             net.Listener
+	connected            chan struct{}
+	once                 sync.Once
+	debug                *debugsrv.Recorder
+	clientSelectionMu    sync.Mutex
+	clientSelections     map[string]clientSelection
+	devices              *deviceauth.Registry
+	voice                *voiceapi.Handler
+	memoryRequestTimeout time.Duration
+	memoryBrowserToken   string
 }
 
 type clientSelection struct {
@@ -115,7 +115,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	if err != nil {
 		return nil, fmt.Errorf("listen web ui: %w", err)
 	}
-	knowledgeBrowserToken, err := newKnowledgeBrowserToken()
+	memoryBrowserToken, err := newMemoryBrowserToken()
 	if err != nil {
 		_ = listener.Close()
 		return nil, err
@@ -130,15 +130,15 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 		return nil, fmt.Errorf("migrate voice token: %w", err)
 	}
 	s := &Server{
-		controller:              controller,
-		options:                 options,
-		listener:                listener,
-		connected:               make(chan struct{}),
-		debug:                   options.Debug,
-		clientSelections:        map[string]clientSelection{},
-		devices:                 devices,
-		knowledgeRequestTimeout: defaultKnowledgeRequestTimeout,
-		knowledgeBrowserToken:   knowledgeBrowserToken,
+		controller:           controller,
+		options:              options,
+		listener:             listener,
+		connected:            make(chan struct{}),
+		debug:                options.Debug,
+		clientSelections:     map[string]clientSelection{},
+		devices:              devices,
+		memoryRequestTimeout: defaultMemoryRequestTimeout,
+		memoryBrowserToken:   memoryBrowserToken,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
@@ -154,7 +154,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	mux.HandleFunc("/api/attachments/session/", s.handleSessionAttachment)
 	mux.HandleFunc("/api/offered-files/", s.handleOfferedFile)
 	mux.HandleFunc("/api/voice-devices/qr", s.handleVoiceDeviceQR)
-	s.registerKnowledgeAPI(mux)
+	s.registerMemoryAPI(mux)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	voiceHandler := voiceapi.NewHandler(controller, options.VoiceToken)
 	voiceHandler.Auth = devices
@@ -165,7 +165,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 		s.debug.SetDebugAPI(s.URL())
 		debugServer := debugsrv.NewServer(controller, s.debug)
 		debugServer.Register(mux)
-		mux.HandleFunc("/debug/knowledge", s.handleKnowledgeDebug)
+		mux.HandleFunc("/debug/memory", s.handleMemoryDebug)
 	}
 	s.server = &http.Server{
 		Handler: mux, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second,
@@ -300,10 +300,10 @@ func (s *Server) markConnected() {
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	s.markConnected()
-	if isKnowledgeBrowserPath(r.URL.Path) {
+	if isMemoryBrowserPath(r.URL.Path) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
-		_, _ = w.Write([]byte(renderKnowledgeBrowserHTML(s.knowledgeBrowserToken)))
+		_, _ = w.Write([]byte(renderMemoryBrowserHTML(s.memoryBrowserToken)))
 		return
 	}
 	if _, ok := fileBrowserSessionFromPath(r.URL.Path); ok {
@@ -759,8 +759,8 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 func (s *Server) websocketHeartbeatPayload() map[string]any {
 	payload := map[string]any{"server_time": time.Now().UTC().Format(time.RFC3339Nano)}
 	if s != nil && s.controller != nil {
-		if service := s.controller.KnowledgeService(); service != nil {
-			payload["knowledge_checkpoint"] = service.MutationCheckpoint()
+		if service := s.controller.MemoryService(); service != nil {
+			payload["memory_checkpoint"] = service.MutationCheckpoint()
 		}
 	}
 	return payload

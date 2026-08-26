@@ -28,7 +28,7 @@ Safe inline SVG is supported when a precise custom visual is useful and Mermaid 
 
 # Durable memory
 
-- Recall Knowledge when a previous preference, decision, workaround, project convention, or environment fact may avoid repeated investigation.
+- Recall Memory when a previous preference, decision, workaround, project convention, or environment fact may avoid repeated investigation.
 - Remember an established reusable result when the user explicitly asks, or when it is clearly valuable across chats. Do not save routine progress, guesses, secrets, or transcript copies.
 - The common memory actions need only a query or content. Let Koder infer storage metadata; mark only direct facts or preferences about the user as personal.
 

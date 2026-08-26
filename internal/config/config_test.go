@@ -63,8 +63,8 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if cfg.Store.Backend != "pebble" {
 		t.Fatalf("unexpected store backend: %s", cfg.Store.Backend)
 	}
-	if !cfg.Knowledge.Enabled || cfg.Knowledge.Required {
-		t.Fatalf("knowledge should default to enabled but optional: %#v", cfg.Knowledge)
+	if !cfg.Memory.Enabled || cfg.Memory.Required {
+		t.Fatalf("memory should default to enabled but optional: %#v", cfg.Memory)
 	}
 	if !cfg.UI.AutoContinue {
 		t.Fatal("expected auto continue enabled by default")
@@ -95,7 +95,7 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	}
 }
 
-func TestKnowledgeConfigurationRoundTrip(t *testing.T) {
+func TestMemoryConfigurationRoundTrip(t *testing.T) {
 	temp := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", temp)
 	t.Setenv("XDG_STATE_HOME", temp)
@@ -105,8 +105,8 @@ func TestKnowledgeConfigurationRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Knowledge.Required = true
-	cfg.Knowledge.TrustedPublishers = []KnowledgeTrustedPublisher{{
+	cfg.Memory.Required = true
+	cfg.Memory.TrustedPublishers = []MemoryTrustedPublisher{{
 		ID: "publisher:example", Name: "Example", Keys: map[string]string{"example:key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
 	}}
 	if err := cfg.Save(); err != nil {
@@ -116,12 +116,12 @@ func TestKnowledgeConfigurationRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !loaded.Knowledge.Enabled || !loaded.Knowledge.Required || len(loaded.Knowledge.TrustedPublishers) != 1 || loaded.Knowledge.TrustedPublishers[0].Keys["example:key"] == "" {
-		t.Fatalf("knowledge configuration did not round-trip: %#v", loaded.Knowledge)
+	if !loaded.Memory.Enabled || !loaded.Memory.Required || len(loaded.Memory.TrustedPublishers) != 1 || loaded.Memory.TrustedPublishers[0].Keys["example:key"] == "" {
+		t.Fatalf("memory configuration did not round-trip: %#v", loaded.Memory)
 	}
 }
 
-func TestLegacyConfigurationEnablesOptionalKnowledge(t *testing.T) {
+func TestMissingMemoryConfigurationUsesOptionalDefaults(t *testing.T) {
 	temp := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", temp)
 	t.Setenv("XDG_STATE_HOME", temp)
@@ -138,18 +138,18 @@ func TestLegacyConfigurationEnablesOptionalKnowledge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.Knowledge.Enabled || cfg.Knowledge.Required {
-		t.Fatalf("legacy config knowledge policy = %#v", cfg.Knowledge)
+	if !cfg.Memory.Enabled || cfg.Memory.Required {
+		t.Fatalf("default memory policy = %#v", cfg.Memory)
 	}
 }
 
-func TestRequiredKnowledgeCannotBeDisabled(t *testing.T) {
+func TestRequiredMemoryCannotBeDisabled(t *testing.T) {
 	cfg := Default()
-	cfg.Knowledge.Enabled = false
-	cfg.Knowledge.Required = true
+	cfg.Memory.Enabled = false
+	cfg.Memory.Required = true
 	cfg.applyDefaults()
-	if !cfg.Knowledge.Enabled {
-		t.Fatalf("required knowledge remained disabled: %#v", cfg.Knowledge)
+	if !cfg.Memory.Enabled {
+		t.Fatalf("required memory remained disabled: %#v", cfg.Memory)
 	}
 }
 

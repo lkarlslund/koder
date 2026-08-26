@@ -1,0 +1,54 @@
+{
+  "api_version": "memory.v1",
+  "request_id": "01a01688-fc5d-7f7d-8bb8-de244977f8a1",
+  "status": {
+    "store": {
+      "backend": "pebble",
+      "open": true,
+      "read_only": false,
+      "schema_version": 1,
+      "schema_state": "current",
+      "index_generation": 4,
+      "index_state": "ready",
+      "storage_state": "current",
+      "details": {
+        "storage": {
+          "physical_bytes": 1048576,
+          "live_bytes": 786432,
+          "reclaimable_bytes": 65536,
+          "memory_bytes": 32768,
+          "wal_bytes": 131072,
+          "table_files": 7
+        },
+        "compaction": {
+          "state": "idle",
+          "count": 3,
+          "in_progress": 0,
+          "pending_bytes": 0,
+          "read_amplification": 2,
+          "write_amplification": 1.4,
+          "max_level_score": 0.42
+        }
+      }
+    },
+    "maintenance_available": true,
+    "lexical_index": {
+      "running": false,
+      "active_generation": 4,
+      "target_generation": 4,
+      "scanned": {
+        "chunks": 3,
+        "entries": 12,
+        "links": 8,
+        "evidence": 5,
+        "total": 28
+      },
+      "started_at": "2026-08-22T12:00:00Z",
+      "completed_at": "2026-08-22T12:00:01Z"
+    },
+    "mutation_checkpoint": {
+      "stream_id": "01a01688-fc5d-7f7d-8bb8-de244977f8a2",
+      "sequence": 42
+    }
+  }
+}

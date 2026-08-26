@@ -15,10 +15,10 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 		FallbackTop float64 `json:"fallbackTop"`
 		BottomGap   float64 `json:"bottomGap"`
 	}
-	chromium := knowledgeBrowserChromium(t)
+	chromium := memoryBrowserChromium(t)
 	ctrl := newTestController(t)
 	serverCtx, stopServer := context.WithCancel(context.Background())
-	server := startKnowledgeBrowserTestServer(t, serverCtx, ctrl)
+	server := startMemoryBrowserTestServer(t, serverCtx, ctrl)
 	t.Cleanup(func() {
 		stopServer()
 		_ = server.server.Close()
@@ -113,10 +113,12 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 		chromedp.Evaluate(`(() => {
 			const app = document.documentElement._x_dataStack[0];
 			const originalTranscriptElement = app.transcriptElement;
+			const originalTimelineHasNewer = app.timelineHasNewer;
 			const transcript = document.createElement('div');
 			transcript.style.cssText = 'position:fixed;top:0;left:0;width:400px;height:180px;overflow:auto';
 			document.body.append(transcript);
 			app.transcriptElement = () => transcript;
+			app.timelineHasNewer = () => false;
 			for (let index = 0; index < 4; index++) {
 				const row = document.createElement('section');
 				row.className = 'transcript-turn';
@@ -153,6 +155,7 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 				bottomGap: app.transcriptBottomDistance(transcript),
 			};
 			app.transcriptElement = originalTranscriptElement;
+			app.timelineHasNewer = originalTimelineHasNewer;
 			transcript.remove();
 			return result;
 		})()`, &scrollAnchorResult),

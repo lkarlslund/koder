@@ -1253,10 +1253,10 @@ func voiceRenderParts(timeline []domain.TimelineItem, sequence int64) []voice.Pa
 						data["summary"] = summary
 					}
 				}
-				// Knowledge results are bounded structured data. Keep that data in
+				// Memory results are bounded structured data. Keep that data in
 				// the transcript-only part so richer clients can inspect it without
 				// making TTS recite it.
-				if call.Tool == tools.Knowledge && call.Result.Data != nil {
+				if call.Tool == tools.Memory && call.Result.Data != nil {
 					data["result"] = call.Result.Data
 				}
 			}

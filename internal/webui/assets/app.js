@@ -817,37 +817,37 @@
       const value = String(action || '').replaceAll('_', ' ').trim();
       return value ? value.charAt(0).toUpperCase() + value.slice(1) : '';
     }
-    function knowledgeActionLabel(action) {
+    function memoryActionLabel(action) {
       const labels = {
-        recall: 'Recall knowledge', remember: 'Remember knowledge',
-        search: 'Search knowledge', get: 'Get knowledge', neighbors: 'Explore knowledge links',
-        chunk_list: 'List knowledge chunks', chunk_get: 'Get knowledge chunk', chunk_create: 'Create knowledge chunk',
-        chunk_update: 'Update knowledge chunk', chunk_archive: 'Archive knowledge chunk', chunk_restore: 'Restore knowledge chunk', chunk_delete: 'Delete knowledge chunk',
-        entry_create: 'Create knowledge entry', entry_update: 'Update knowledge entry', entry_supersede: 'Supersede knowledge entry',
-        entry_archive: 'Archive knowledge entry', entry_restore: 'Restore knowledge entry', entry_delete: 'Delete knowledge entry',
-        link: 'Link knowledge', unlink: 'Unlink knowledge', verify: 'Verify knowledge entry', history: 'Review knowledge history'
+        recall: 'Recall memory', remember: 'Remember memory',
+        search: 'Search memory', get: 'Get memory', neighbors: 'Explore memory links',
+        chunk_list: 'List memory chunks', chunk_get: 'Get memory chunk', chunk_create: 'Create memory chunk',
+        chunk_update: 'Update memory chunk', chunk_archive: 'Archive memory chunk', chunk_restore: 'Restore memory chunk', chunk_delete: 'Delete memory chunk',
+        entry_create: 'Create memory entry', entry_update: 'Update memory entry', entry_supersede: 'Supersede memory entry',
+        entry_archive: 'Archive memory entry', entry_restore: 'Restore memory entry', entry_delete: 'Delete memory entry',
+        link: 'Link memory', unlink: 'Unlink memory', verify: 'Verify memory entry', history: 'Review memory history'
       };
-      return labels[String(action || '')] || 'Use knowledge';
+      return labels[String(action || '')] || 'Use memory';
     }
-    function knowledgeExplorerHref(kind = '', id = '', query = '') {
+    function memoryExplorerHref(kind = '', id = '', query = '') {
       const params = new URLSearchParams();
       if (kind) params.set('object_kind', String(kind));
       if (id) params.set('id', String(id));
       if (query) params.set('query', String(query));
       if (/^\/s\/[^/]+\/c\/[^/]+$/.test(location.pathname)) params.set('return', location.pathname);
       const suffix = params.toString();
-      return '/knowledge' + (suffix ? '?' + suffix : '');
+      return '/memory' + (suffix ? '?' + suffix : '');
     }
-    function knowledgeObjectRow(kind, id, title, detail = '') {
-      const label = String(title || id || kind || 'Knowledge');
-      const href = knowledgeExplorerHref(kind, id);
-      return '<a class="tool-knowledge-row" href="' + escapeHTML(href) + '">' +
+    function memoryObjectRow(kind, id, title, detail = '') {
+      const label = String(title || id || kind || 'Memory');
+      const href = memoryExplorerHref(kind, id);
+      return '<a class="tool-memory-row" href="' + escapeHTML(href) + '">' +
         '<i class="bi bi-diagram-3" aria-hidden="true"></i>' +
-        '<span class="tool-knowledge-row-copy"><span class="tool-knowledge-row-title">' + escapeHTML(label) + '</span>' +
-        (detail ? '<span class="tool-knowledge-row-detail">' + escapeHTML(detail) + '</span>' : '') + '</span>' +
+        '<span class="tool-memory-row-copy"><span class="tool-memory-row-title">' + escapeHTML(label) + '</span>' +
+        (detail ? '<span class="tool-memory-row-detail">' + escapeHTML(detail) + '</span>' : '') + '</span>' +
         '<i class="bi bi-chevron-right" aria-hidden="true"></i></a>';
     }
-    function knowledgeResultObjects(action, data, args) {
+    function memoryResultObjects(action, data, args) {
       const values = [];
       const add = (kind, id, title, detail = '') => {
         if (id) values.push({kind: String(kind || ''), id: String(id), title: String(title || ''), detail: String(detail || '')});
@@ -884,17 +884,17 @@
       }
       return values;
     }
-    function renderKnowledgeBlock(action, data, args, fallbackText) {
-      const objects = knowledgeResultObjects(action, data, args);
+    function renderMemoryBlock(action, data, args, fallbackText) {
+      const objects = memoryResultObjects(action, data, args);
       const visible = objects.slice(0, 6);
       const query = firstValue(args, ['query']);
-      const explorerHref = knowledgeExplorerHref('', '', (action === 'search' || action === 'recall') ? query : '');
-      const rows = visible.map(item => knowledgeObjectRow(item.kind, item.id, item.title, item.detail)).join('');
+      const explorerHref = memoryExplorerHref('', '', (action === 'search' || action === 'recall') ? query : '');
+      const rows = visible.map(item => memoryObjectRow(item.kind, item.id, item.title, item.detail)).join('');
       const omitted = objects.length > visible.length ? '<div class="tool-result-omitted">' + escapeHTML(String(objects.length - visible.length) + ' more results') + '</div>' : '';
-      const empty = !rows ? '<div class="tool-result-body text-secondary">' + escapeHTML(fallbackText || 'No matching knowledge objects') + '</div>' : '';
-      return toolResultHeader(knowledgeActionLabel(action)) +
-        '<div class="tool-knowledge-result">' + rows + omitted + empty +
-        '<a class="tool-knowledge-open" href="' + escapeHTML(explorerHref) + '"><i class="bi bi-box-arrow-up-right"></i><span>Open Knowledge</span></a></div>';
+      const empty = !rows ? '<div class="tool-result-body text-secondary">' + escapeHTML(fallbackText || 'No matching memory objects') + '</div>' : '';
+      return toolResultHeader(memoryActionLabel(action)) +
+        '<div class="tool-memory-result">' + rows + omitted + empty +
+        '<a class="tool-memory-open" href="' + escapeHTML(explorerHref) + '"><i class="bi bi-box-arrow-up-right"></i><span>Open Memory</span></a></div>';
     }
     function compactCommandLabel(command) {
       const text = String(command || '').replace(/\s+/g, ' ').trim();
@@ -948,7 +948,7 @@
         }
         case 'milestones': return actionLabel(toolAction(tool)) + ' milestone';
         case 'tasks': return actionLabel(toolAction(tool)) + ' task';
-        case 'knowledge': return knowledgeActionLabel(toolAction(tool));
+        case 'memory': return memoryActionLabel(toolAction(tool));
         case 'mcp': {
           const call = mcpCallDetails(tool);
           if (call.name && call.action) return call.name + ' · ' + call.action;
@@ -975,7 +975,7 @@
         }
         return values.join('  ');
       }
-      if (String((tool && tool.tool) || '') === 'knowledge') return String(firstValue(args, ['query', 'id']) || '');
+      if (String((tool && tool.tool) || '') === 'memory') return String(firstValue(args, ['query', 'id']) || '');
       if (String((tool && tool.tool) || '') === 'file_read') return '';
       if (String((tool && tool.tool) || '') === 'bash' && (toolStatus(tool) === 'done' || toolStatus(tool) === 'errored')) return '';
       if (String((tool && tool.tool) || '') === 'chat_send') return chatSendMessage(args);
@@ -1079,7 +1079,7 @@
       }
       if (kind === 'chat_send') return renderCompactBlock('Sent message', chatSendMessage(args) || toolResultText(tool));
       if (kind === 'chats' && toolAction(tool) === 'send') return renderCompactBlock('Sent message', chatSendMessage(args) || toolResultText(tool));
-      if (kind === 'knowledge') return renderKnowledgeBlock(toolAction(tool), data, args, toolResultText(tool));
+      if (kind === 'memory') return renderMemoryBlock(toolAction(tool), data, args, toolResultText(tool));
       if (kind === 'mcp') return renderCompactBlock(toolTitleText(tool), toolResultText(tool));
       if (kind === 'view_image') {
         return renderImagePreviewBlock('Viewed image', data, toolResultText(tool), true);
@@ -1111,7 +1111,7 @@
     function koderApp() {
       return {
         ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, lastWSMessageBytes: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
-        knowledgeLive: window.KoderKnowledgeLive ? new window.KoderKnowledgeLive.Tracker() : null,
+        memoryLive: window.KoderMemoryLive ? new window.KoderMemoryLive.Tracker() : null,
         tabActivityIcon: null,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'overview', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', settingsHealth: {issue_count: 0, needs_setup: false, issues: []}, showObservability: false,
@@ -1432,7 +1432,7 @@
           this.connected = true;
           this.lastWSMessageAt = Date.now();
           this.reconnectDelay = 150;
-          this.invalidateKnowledgeLive('connection_reset');
+          this.invalidateMemoryLive('connection_reset');
           this.rpcOn(ws, 'hello', {}).then(hello => this.applyHello(hello)).catch(err => {
             this.error = (err && err.message) || 'failed to load session';
           });
@@ -1635,10 +1635,10 @@
         },
         onPush(msg) {
           if (msg.type === 'heartbeat') {
-            this.observeKnowledgeCheckpoint(msg.payload && msg.payload.knowledge_checkpoint);
+            this.observeMemoryCheckpoint(msg.payload && msg.payload.memory_checkpoint);
             return;
           }
-          if (msg.type === 'knowledge_delta') this.observeKnowledgeMutation(msg.payload);
+          if (msg.type === 'memory_delta') this.observeMemoryMutation(msg.payload);
           if (msg.type === 'snapshot') this.applyState(msg.payload);
           if (msg.type === 'state_delta') this.applyStateDelta(msg.payload);
           if (msg.type === 'chat_delta') this.applyChatDelta(msg.payload);
@@ -1652,32 +1652,32 @@
           if (msg.type === 'git_delta') this.applyGitDelta(msg.payload);
           if (msg.type === 'theme') { this.theme = msg.payload.theme || 'auto'; writePreference('theme', this.theme); this.applyTheme(); }
         },
-        resetKnowledgeLive(checkpoint) {
-          if (!this.knowledgeLive) return;
-          const result = this.knowledgeLive.reset(checkpoint);
-          if (result.action === 'ready') window.dispatchEvent(new CustomEvent('koder:knowledge-ready', {detail: result}));
-          else this.emitKnowledgeRefetch(result);
+        resetMemoryLive(checkpoint) {
+          if (!this.memoryLive) return;
+          const result = this.memoryLive.reset(checkpoint);
+          if (result.action === 'ready') window.dispatchEvent(new CustomEvent('koder:memory-ready', {detail: result}));
+          else this.emitMemoryRefetch(result);
         },
-        invalidateKnowledgeLive(reason) {
-          if (!this.knowledgeLive) return;
-          this.emitKnowledgeRefetch(this.knowledgeLive.invalidate(reason));
+        invalidateMemoryLive(reason) {
+          if (!this.memoryLive) return;
+          this.emitMemoryRefetch(this.memoryLive.invalidate(reason));
         },
-        observeKnowledgeMutation(event) {
-          if (!this.knowledgeLive) return;
-          const result = this.knowledgeLive.observe(event);
+        observeMemoryMutation(event) {
+          if (!this.memoryLive) return;
+          const result = this.memoryLive.observe(event);
           if (result.action === 'apply') {
-            window.dispatchEvent(new CustomEvent('koder:knowledge-mutation', {detail: {event, checkpoint: result.checkpoint}}));
+            window.dispatchEvent(new CustomEvent('koder:memory-mutation', {detail: {event, checkpoint: result.checkpoint}}));
           } else {
-            this.emitKnowledgeRefetch(result);
+            this.emitMemoryRefetch(result);
           }
         },
-        observeKnowledgeCheckpoint(checkpoint) {
-          if (!this.knowledgeLive || !checkpoint) return;
-          this.emitKnowledgeRefetch(this.knowledgeLive.observeCheckpoint(checkpoint));
+        observeMemoryCheckpoint(checkpoint) {
+          if (!this.memoryLive || !checkpoint) return;
+          this.emitMemoryRefetch(this.memoryLive.observeCheckpoint(checkpoint));
         },
-        emitKnowledgeRefetch(result) {
+        emitMemoryRefetch(result) {
           if (!result || result.action !== 'refetch') return;
-          window.dispatchEvent(new CustomEvent('koder:knowledge-refetch', {detail: result}));
+          window.dispatchEvent(new CustomEvent('koder:memory-refetch', {detail: result}));
         },
         applyStateDelta(delta) {
           if (!delta) return;
@@ -2448,11 +2448,11 @@
         openSessionFiles() {
           this.openURLInNewTab(this.sessionFilesURL());
         },
-        knowledgeExplorerURL() {
-          return knowledgeExplorerHref();
+        memoryExplorerURL() {
+          return memoryExplorerHref();
         },
-        openKnowledgeExplorer() {
-          this.openURLInNewTab(this.knowledgeExplorerURL());
+        openMemoryExplorer() {
+          this.openURLInNewTab(this.memoryExplorerURL());
         },
         chatURL(chatID, sessionID) {
           const session = String(sessionID || this.currentSessionID() || '').trim();

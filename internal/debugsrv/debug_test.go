@@ -166,7 +166,7 @@ func TestRecorderTracksSessionEventsAndRuntime(t *testing.T) {
 	rec.RecordLifecycle("session-7", "prompt_submitted", "hello", map[string]string{"source": "web"})
 	rec.RecordEvent("session-7", domain.Event{Kind: domain.EventKindToolResult, Text: "done"})
 	rec.UpdateProcess(ProcessDebug{Status: "Ready"})
-	rec.UpdateSubsystemHealth("knowledge", SubsystemHealth{Status: "ready", Enabled: true, Available: true, Backend: "pebble", SchemaVersion: 1, IndexGeneration: 2})
+	rec.UpdateSubsystemHealth("memory", SubsystemHealth{Status: "ready", Enabled: true, Available: true, Backend: "pebble", SchemaVersion: 1, IndexGeneration: 2})
 	rec.RegisterClient(ClientDebug{ID: "client-1", SelectedSession: "session-7", SelectedChat: "chat-9", ViewportWidth: 80})
 	rec.UpdateChats([]ChatDebug{{ID: "chat-9", SessionID: "session-7", Status: "idle"}})
 
@@ -194,11 +194,11 @@ func TestRecorderTracksSessionEventsAndRuntime(t *testing.T) {
 	if runtime.Process.Build.Version != version.Version {
 		t.Fatalf("expected runtime build version %q, got %#v", version.Version, runtime.Process.Build)
 	}
-	if health := runtime.Subsystems["knowledge"]; health.Status != "ready" || health.Backend != "pebble" || health.IndexGeneration != 2 {
-		t.Fatalf("unexpected knowledge subsystem health: %#v", health)
+	if health := runtime.Subsystems["memory"]; health.Status != "ready" || health.Backend != "pebble" || health.IndexGeneration != 2 {
+		t.Fatalf("unexpected memory subsystem health: %#v", health)
 	}
-	runtime.Subsystems["knowledge"] = SubsystemHealth{Status: "tampered"}
-	if health := rec.Runtime().Subsystems["knowledge"]; health.Status != "ready" {
+	runtime.Subsystems["memory"] = SubsystemHealth{Status: "tampered"}
+	if health := rec.Runtime().Subsystems["memory"]; health.Status != "ready" {
 		t.Fatalf("Runtime() exposed mutable subsystem map: %#v", health)
 	}
 	if runtime.DeepDebug {
@@ -210,13 +210,13 @@ func TestHealthEndpointIncludesSubsystems(t *testing.T) {
 	t.Parallel()
 	recorder := NewRecorder()
 	recorder.SetDebugAPI("http://127.0.0.1:7979")
-	recorder.UpdateSubsystemHealth("knowledge", SubsystemHealth{
+	recorder.UpdateSubsystemHealth("memory", SubsystemHealth{
 		Status:    "unavailable",
 		Enabled:   true,
 		Required:  false,
 		Available: false,
 		Backend:   "pebble",
-		LastError: "knowledge store failed to open",
+		LastError: "memory store failed to open",
 	})
 	req := httptest.NewRequest(http.MethodGet, "/debug/health", nil)
 	response := httptest.NewRecorder()
@@ -231,7 +231,7 @@ func TestHealthEndpointIncludesSubsystems(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode health response: %v", err)
 	}
-	if !payload.OK || payload.Subsystems["knowledge"].LastError != "knowledge store failed to open" {
+	if !payload.OK || payload.Subsystems["memory"].LastError != "memory store failed to open" {
 		t.Fatalf("health response = %#v", payload)
 	}
 }

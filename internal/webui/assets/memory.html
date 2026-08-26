@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0d6efd">
+  <title>Koder Memory</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/svg+xml" href="/assets/koder-logo.svg">
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png">
+  <link rel="manifest" href="/assets/site.webmanifest">
+  <link href="/assets/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
+  <link href="/assets/vendor/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="/assets/app.css" rel="stylesheet">
+  <link href="/assets/memory_browser.css" rel="stylesheet">
+  <script>window.KODER_ASSET_HASH = "__KODER_ASSET_HASH__"; window.KODER_MEMORY_CONFIG = __KODER_MEMORY_CONFIG__;</script>
+  <script defer src="/assets/vendor/graphology/graphology.umd.min.js"></script>
+  <script defer src="/assets/vendor/memory-layouts/memory-layouts.min.js"></script>
+  <script defer src="/assets/vendor/sigma/sigma.min.js"></script>
+  <script defer src="/assets/vendor/marked/marked.umd.js"></script>
+  <script defer src="/assets/vendor/dompurify/purify.min.js"></script>
+  <script defer src="/assets/memory_api_client.js"></script>
+  <script defer src="/assets/memory_graph_adapter.js"></script>
+  <script defer src="/assets/memory_graph.js"></script>
+  <script defer src="/assets/memory_graph_rendering.js"></script>
+  <script defer src="/assets/memory_graph_renderer.js"></script>
+  <script defer src="/assets/memory_graph_viewport.js"></script>
+  <script defer src="/assets/memory_graph_layouts.js"></script>
+  <script defer src="/assets/memory_graph_interactions.js"></script>
+  <script defer src="/assets/memory_graph_table.js"></script>
+  <script defer src="/assets/memory_packages.js"></script>
+  <script defer src="/assets/memory_curation.js"></script>
+  <script defer src="/assets/memory_browser.js"></script>
+</head>
+<body class="bg-body text-body">
+  <div id="memory-browser" class="memory-shell" data-state="shell" data-mobile-pane="graph">
+    <nav class="memory-topbar" aria-label="Memory explorer">
+      <div class="memory-brand">
+        <img class="koder-logo" src="/assets/koder-logo.svg" alt="" aria-hidden="true">
+        <div class="memory-brand-copy">
+          <span class="memory-brand-title">Koder Memory</span>
+          <span class="memory-brand-subtitle"><span class="memory-status-dot" aria-hidden="true"></span>Local memory explorer</span>
+        </div>
+      </div>
+      <button type="button" class="memory-icon-button memory-curation-open" data-memory-curation-open title="Review proposed memory" hidden>
+        <i class="bi bi-inbox" aria-hidden="true"></i><span class="memory-curation-badge" data-memory-curation-badge hidden></span><span class="visually-hidden">Review proposed memory</span>
+      </button>
+      <a class="memory-icon-button" href="/" data-memory-return title="Return to Koder chat">
+        <i class="bi bi-chat-left-text" aria-hidden="true"></i>
+        <span class="visually-hidden">Return to Koder chat</span>
+      </a>
+    </nav>
+
+    <div class="memory-mobile-tabs" role="tablist" aria-label="Explorer pane">
+      <button type="button" role="tab" data-memory-tab="sources" aria-controls="memory-sources-pane" aria-selected="false" tabindex="-1"><i class="bi bi-collection" aria-hidden="true"></i><span>Memory</span></button>
+      <button type="button" role="tab" data-memory-tab="graph" aria-controls="memory-graph-pane" aria-selected="true"><i class="bi bi-diagram-3" aria-hidden="true"></i><span>Graph</span></button>
+      <button type="button" role="tab" data-memory-tab="inspector" aria-controls="memory-inspector-pane" aria-selected="false" tabindex="-1"><i class="bi bi-card-text" aria-hidden="true"></i><span>Inspector</span></button>
+    </div>
+
+    <main class="memory-layout">
+      <aside class="memory-pane memory-sources-pane" id="memory-sources-pane" data-memory-pane="sources" role="tabpanel" aria-labelledby="memory-sources-title">
+        <header class="memory-pane-header">
+          <div>
+            <span class="memory-eyebrow">Browse</span>
+            <h1 id="memory-sources-title">Memory</h1>
+          </div>
+          <div class="memory-pane-header-actions">
+            <span class="memory-count-placeholder" data-memory-count aria-label="Loading chunk count">—</span>
+            <button type="button" class="memory-icon-button" data-memory-package-open title="Import memory package"><i class="bi bi-box-arrow-in-down" aria-hidden="true"></i><span class="visually-hidden">Import memory package</span></button>
+            <button type="button" class="memory-icon-button" data-memory-chunk-create title="Create memory chunk"><i class="bi bi-plus-lg" aria-hidden="true"></i><span class="visually-hidden">Create memory chunk</span></button>
+          </div>
+        </header>
+        <div class="memory-pane-body memory-shell-list">
+          <form class="memory-search-form" data-memory-search-form role="search">
+            <label class="visually-hidden" for="memory-search-input">Search memory</label>
+            <i class="bi bi-search" aria-hidden="true"></i>
+            <input id="memory-search-input" type="search" inputmode="search" autocomplete="off" maxlength="500" placeholder="Search memory" data-memory-search>
+            <button type="button" data-memory-search-clear title="Clear search" hidden><i class="bi bi-x-lg" aria-hidden="true"></i><span class="visually-hidden">Clear search</span></button>
+          </form>
+          <div class="memory-filter-grid" aria-label="Memory filters">
+            <label><span>Chunk type</span><select data-memory-filter="kind">
+              <option value="">All types</option><option value="reference">Reference</option><option value="personal">Personal</option><option value="project">Project</option><option value="environment">Environment</option>
+            </select></label>
+            <label><span>Scope</span><select data-memory-filter="scope_kind">
+              <option value="">All scopes</option><option value="global">Global</option><option value="personal">Personal</option><option value="project">Project</option><option value="session">Session</option><option value="environment">Environment</option>
+            </select></label>
+            <label><span>Lifecycle</span><select data-memory-filter="state">
+              <option value="">Active</option><option value="draft">Draft</option><option value="archived">Archived</option>
+            </select></label>
+            <label><span>Tag</span><input type="text" maxlength="80" placeholder="Any tag" data-memory-filter="tag"></label>
+          </div>
+          <div class="memory-loading-skeleton" aria-hidden="true">
+            <div class="memory-skeleton memory-skeleton-row"></div>
+            <div class="memory-skeleton memory-skeleton-row is-short"></div>
+            <div class="memory-skeleton memory-skeleton-row"></div>
+          </div>
+          <div class="memory-source-status" data-memory-source-status role="status">Connecting to Memory…</div>
+          <div class="memory-result-list" data-memory-results role="list"></div>
+          <button type="button" class="btn btn-sm btn-outline-secondary memory-load-more" data-memory-load-more hidden><i class="bi bi-chevron-down" aria-hidden="true"></i> Load more</button>
+        </div>
+      </aside>
+
+      <section class="memory-pane memory-graph-pane" id="memory-graph-pane" data-memory-pane="graph" role="tabpanel" aria-labelledby="memory-graph-title">
+        <header class="memory-pane-header memory-graph-toolbar">
+          <div>
+            <span class="memory-eyebrow">Explore</span>
+            <h1 id="memory-graph-title">Graph</h1>
+          </div>
+          <div class="memory-graph-toolbar-actions">
+            <div class="memory-saved-views" data-memory-saved-views>
+              <select data-memory-saved-view aria-label="Named graph view"><option value="">Named views</option></select>
+              <button type="button" class="memory-icon-button" data-memory-saved-view-create title="Save current graph as a new named view"><i class="bi bi-bookmark-plus" aria-hidden="true"></i><span class="visually-hidden">Create named view</span></button>
+              <button type="button" class="memory-icon-button" data-memory-saved-view-update title="Update or rename selected named view" disabled><i class="bi bi-floppy" aria-hidden="true"></i><span class="visually-hidden">Update named view</span></button>
+              <button type="button" class="memory-icon-button" data-memory-saved-view-delete title="Delete selected named view" disabled><i class="bi bi-bookmark-x" aria-hidden="true"></i><span class="visually-hidden">Delete named view</span></button>
+              <span class="visually-hidden" data-memory-saved-view-status role="status"></span>
+            </div>
+            <span class="memory-stage-status"><span class="spinner-grow spinner-grow-sm" data-memory-spinner aria-hidden="true"></span><span data-memory-status-label>Preparing explorer</span></span>
+            <span class="memory-selection-count" data-memory-selection-count hidden></span>
+            <button type="button" class="memory-icon-button" data-memory-link-create title="Create a relationship between exactly two selected nodes" disabled><i class="bi bi-bezier2" aria-hidden="true"></i><span class="visually-hidden">Create relationship</span></button>
+            <button type="button" class="memory-icon-button" data-memory-view-hide title="Hide selected locally" disabled><i class="bi bi-eye-slash" aria-hidden="true"></i><span class="visually-hidden">Hide selected locally</span></button>
+            <button type="button" class="memory-icon-button" data-memory-view-isolate title="Isolate selected locally" disabled><i class="bi bi-bullseye" aria-hidden="true"></i><span class="visually-hidden">Isolate selected locally</span></button>
+            <button type="button" class="memory-icon-button" data-memory-view-reveal title="Reveal hidden graph items" disabled><i class="bi bi-eye" aria-hidden="true"></i><span class="visually-hidden">Reveal hidden graph items</span></button>
+            <button type="button" class="memory-icon-button" data-memory-view-undo title="Undo local graph view change" disabled><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i><span class="visually-hidden">Undo local graph view change</span></button>
+            <button type="button" class="memory-icon-button" data-memory-preferences-reset title="Reset local explorer preferences"><i class="bi bi-eraser" aria-hidden="true"></i><span class="visually-hidden">Reset local explorer preferences</span></button>
+            <button type="button" class="memory-icon-button" data-memory-graph-table-toggle title="Show accessible graph table" aria-pressed="false"><i class="bi bi-table" aria-hidden="true"></i><span class="visually-hidden" data-memory-graph-table-toggle-label>Show accessible graph table</span></button>
+            <button type="button" class="memory-icon-button" data-memory-graph-center title="Center selected node"><i class="bi bi-crosshair" aria-hidden="true"></i><span class="visually-hidden">Center selected node</span></button>
+            <button type="button" class="memory-icon-button" data-memory-graph-fit title="Fit graph to view"><i class="bi bi-arrows-fullscreen" aria-hidden="true"></i><span class="visually-hidden">Fit graph to view</span></button>
+          </div>
+        </header>
+        <div class="memory-graph-stage" id="memory-graph" role="region" aria-live="polite">
+          <div class="memory-graph-canvas" data-memory-graph-canvas tabindex="0" role="application" aria-label="Memory graph. Press Shift+F10 for actions on the selected item."></div>
+          <div class="memory-selection-box" data-memory-selection-box hidden aria-hidden="true"></div>
+          <section class="memory-graph-table" data-memory-graph-table aria-label="Memory graph table" hidden>
+            <div class="memory-graph-table-summary" data-memory-graph-table-summary role="status">No graph objects loaded.</div>
+            <div class="memory-graph-table-viewport" data-memory-graph-table-viewport tabindex="0">
+              <table aria-label="Visible memory graph objects" aria-rowcount="1" data-memory-graph-table-element>
+                <caption class="visually-hidden">A keyboard-operable, windowed table of the nodes and relationships visible in the Memory graph.</caption>
+                <thead><tr><th scope="col">Select</th><th scope="col">Object</th><th scope="col">Details</th><th scope="col">State</th><th scope="col">Actions</th></tr></thead>
+                <tbody data-memory-graph-table-body></tbody>
+              </table>
+            </div>
+          </section>
+          <div class="memory-graph-context-menu" data-memory-context-menu role="menu" aria-label="Graph item actions" hidden>
+            <div class="memory-context-heading" data-memory-context-heading></div>
+            <button type="button" role="menuitem" data-memory-context-action="inspect"><i class="bi bi-info-circle" aria-hidden="true"></i><span>Inspect</span><kbd>Enter</kbd></button>
+            <button type="button" role="menuitem" data-memory-context-action="incoming"><i class="bi bi-box-arrow-in-left" aria-hidden="true"></i><span>Expand incoming</span><kbd>[</kbd></button>
+            <button type="button" role="menuitem" data-memory-context-action="outgoing"><i class="bi bi-box-arrow-right" aria-hidden="true"></i><span>Expand outgoing</span><kbd>]</kbd></button>
+            <button type="button" role="menuitem" data-memory-context-action="center"><i class="bi bi-crosshair" aria-hidden="true"></i><span>Center node</span><kbd>C</kbd></button>
+            <button type="button" role="menuitem" data-memory-context-action="pin"><i class="bi bi-pin-angle" aria-hidden="true"></i><span data-memory-context-pin-label>Pin locally</span><kbd>P</kbd></button>
+            <button type="button" role="menuitem" data-memory-context-action="relate"><i class="bi bi-bezier2" aria-hidden="true"></i><span>Create relationship</span></button>
+            <button type="button" role="menuitem" data-memory-context-action="hide"><i class="bi bi-eye-slash" aria-hidden="true"></i><span>Hide selection</span><kbd>H</kbd></button>
+            <button type="button" role="menuitem" data-memory-context-action="isolate"><i class="bi bi-bullseye" aria-hidden="true"></i><span>Isolate selection</span><kbd>I</kbd></button>
+          </div>
+          <div class="memory-graph-fallback" data-memory-graph-fallback role="status" hidden>
+            <span class="memory-empty-icon"><i class="bi bi-list-nested" aria-hidden="true"></i></span>
+            <strong>Graph canvas disabled</strong>
+            <span data-memory-graph-fallback-detail>Browse the same memory through Memory and Inspector.</span>
+          </div>
+          <div class="memory-state-banner" data-memory-banner hidden></div>
+          <div class="memory-graph-legend" data-memory-legend aria-label="Visible relationship types" hidden></div>
+          <div class="memory-constellation" aria-hidden="true">
+            <span class="memory-orbit orbit-one"></span>
+            <span class="memory-orbit orbit-two"></span>
+            <span class="memory-star star-one"></span>
+            <span class="memory-star star-two"></span>
+            <span class="memory-star star-three"></span>
+            <img src="/assets/koder-logo.svg" alt="">
+          </div>
+          <div class="memory-graph-message">
+            <strong data-memory-state-title>Building your memory map</strong>
+            <span data-memory-state-detail>Connecting to the local Memory store.</span>
+            <button type="button" class="btn btn-sm btn-outline-info memory-retry-button" data-memory-retry hidden><i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Retry</button>
+          </div>
+        </div>
+      </section>
+
+      <aside class="memory-pane memory-inspector-pane" id="memory-inspector-pane" data-memory-pane="inspector" role="tabpanel" aria-labelledby="memory-inspector-title">
+        <header class="memory-pane-header">
+          <div>
+            <span class="memory-eyebrow">Details</span>
+            <h1 id="memory-inspector-title">Inspector</h1>
+          </div>
+        </header>
+        <div class="memory-pane-empty" data-memory-inspector-empty>
+          <span class="memory-empty-icon"><i class="bi bi-bezier2" aria-hidden="true"></i></span>
+          <strong>No selection</strong>
+          <span>Select a chunk, entry, or relationship to inspect its content, evidence, and history.</span>
+        </div>
+        <div class="memory-inspector-loading" data-memory-inspector-loading hidden>
+          <span class="spinner-border spinner-border-sm text-info" aria-hidden="true"></span>
+          <span>Loading selection</span>
+        </div>
+        <div class="memory-inspector-error" data-memory-inspector-error hidden role="alert"></div>
+        <article class="memory-inspector-content" data-memory-inspector-content hidden>
+          <header>
+            <span class="memory-eyebrow" data-memory-inspector-kind>Memory</span>
+            <h2 data-memory-inspector-title></h2>
+            <p data-memory-inspector-summary hidden></p>
+          </header>
+          <div class="memory-inspector-badges" data-memory-inspector-badges></div>
+          <section class="memory-inspector-warnings" data-memory-inspector-warnings hidden aria-label="Memory warnings"></section>
+          <dl class="memory-inspector-meta" data-memory-inspector-meta></dl>
+          <section class="memory-inspector-markdown markdown-body" data-memory-inspector-markdown hidden></section>
+          <section class="memory-inspector-section" data-memory-inspector-applicability hidden>
+            <h3><i class="bi bi-funnel" aria-hidden="true"></i> Applies when</h3>
+            <div class="memory-applicability-list" data-memory-applicability-list></div>
+          </section>
+          <section class="memory-inspector-section" data-memory-inspector-evidence hidden>
+            <h3><i class="bi bi-shield-check" aria-hidden="true"></i> Evidence <span data-memory-evidence-count></span></h3>
+            <div class="memory-evidence-list" data-memory-evidence-list></div>
+            <span class="memory-support-status" data-memory-support-status></span>
+          </section>
+          <section class="memory-inspector-section memory-history" data-memory-inspector-history>
+            <h3><i class="bi bi-clock-history" aria-hidden="true"></i> History <span data-memory-history-count></span></h3>
+            <div class="memory-history-status" data-memory-history-status role="status">Loading revision history…</div>
+            <ol class="memory-history-list" data-memory-history-list></ol>
+            <button type="button" class="btn btn-sm btn-outline-secondary memory-history-more" data-memory-history-more hidden><i class="bi bi-chevron-down" aria-hidden="true"></i> Load older revisions</button>
+          </section>
+          <footer class="memory-inspector-actions">
+            <div class="memory-chunk-actions" data-memory-chunk-actions hidden>
+              <button type="button" class="btn btn-sm btn-info" data-memory-entry-create><i class="bi bi-plus-lg" aria-hidden="true"></i> New entry</button>
+              <button type="button" class="btn btn-sm btn-outline-info" data-memory-chunk-edit><i class="bi bi-pencil" aria-hidden="true"></i> Edit</button>
+              <button type="button" class="btn btn-sm btn-outline-info" data-memory-package-export><i class="bi bi-download" aria-hidden="true"></i> Export</button>
+              <button type="button" class="btn btn-sm btn-outline-warning" data-memory-chunk-archive><i class="bi bi-archive" aria-hidden="true"></i> Archive</button>
+              <button type="button" class="btn btn-sm btn-outline-success" data-memory-chunk-restore hidden><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Restore</button>
+              <button type="button" class="btn btn-sm btn-outline-danger" data-memory-chunk-delete hidden><i class="bi bi-trash" aria-hidden="true"></i> Delete</button>
+              <span data-memory-chunk-mutation-status role="status"></span>
+            </div>
+            <div class="memory-entry-actions" data-memory-entry-actions hidden>
+              <button type="button" class="btn btn-sm btn-outline-info" data-memory-entry-edit><i class="bi bi-pencil" aria-hidden="true"></i> Edit</button>
+              <button type="button" class="btn btn-sm btn-outline-primary" data-memory-entry-supersede><i class="bi bi-arrow-left-right" aria-hidden="true"></i> Supersede</button>
+              <button type="button" class="btn btn-sm btn-outline-warning" data-memory-entry-archive><i class="bi bi-archive" aria-hidden="true"></i> Archive</button>
+              <button type="button" class="btn btn-sm btn-outline-success" data-memory-entry-restore hidden><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Restore</button>
+              <button type="button" class="btn btn-sm btn-outline-danger" data-memory-entry-delete hidden><i class="bi bi-trash" aria-hidden="true"></i> Delete</button>
+              <span data-memory-entry-mutation-status role="status"></span>
+            </div>
+            <div class="memory-link-actions" data-memory-link-actions hidden>
+              <button type="button" class="btn btn-sm btn-outline-warning" data-memory-link-unlink><i class="bi bi-link-45deg" aria-hidden="true"></i> Unlink</button>
+              <button type="button" class="btn btn-sm btn-outline-success" data-memory-link-restore hidden><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Restore</button>
+              <span data-memory-link-mutation-status role="status"></span>
+            </div>
+            <div class="memory-expand-actions" data-memory-expand-actions hidden>
+              <button type="button" class="btn btn-sm btn-outline-info" data-memory-expand-incoming><i class="bi bi-box-arrow-in-down" aria-hidden="true"></i> Incoming</button>
+              <button type="button" class="btn btn-sm btn-outline-info" data-memory-expand-outgoing><i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> Outgoing</button>
+              <span data-memory-expand-status>Add a bounded one-hop neighborhood to the visible graph.</span>
+            </div>
+            <button type="button" class="btn btn-sm btn-info" data-memory-send-chat disabled><i class="bi bi-chat-square-arrow-up" aria-hidden="true"></i> Send to chat</button>
+            <span data-memory-send-status>Open Memory from a chat to send context back.</span>
+          </footer>
+        </article>
+      </aside>
+    </main>
+
+    <dialog class="memory-editor-dialog memory-compact-dialog" data-memory-saved-view-dialog aria-labelledby="memory-saved-view-dialog-title">
+      <form method="dialog" data-memory-saved-view-form>
+        <header>
+          <div><span class="memory-eyebrow">Explorer layout</span><h2 id="memory-saved-view-dialog-title" data-memory-saved-view-dialog-title>Save named view</h2></div>
+          <button type="button" class="memory-icon-button" data-memory-saved-view-cancel title="Close"><i class="bi bi-x-lg" aria-hidden="true"></i><span class="visually-hidden">Close named view editor</span></button>
+        </header>
+        <div class="memory-editor-fields">
+          <p class="memory-dialog-explanation is-wide">Named views are stored by Koder for your account. They save the current filters, graph root, expansions, hidden items, and pinned positions without changing Memory content.</p>
+          <label class="is-wide"><span>Name</span><input name="name" maxlength="120" autocomplete="off" required placeholder="For example: Linux disk tools"></label>
+        </div>
+        <div class="memory-editor-error" data-memory-saved-view-error role="alert" hidden></div>
+        <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-memory-saved-view-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-info" data-memory-saved-view-submit>Save view</button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="memory-editor-dialog memory-package-dialog" data-memory-package-dialog aria-labelledby="memory-package-dialog-title">
+      <form method="dialog">
+        <header>
+          <div><span class="memory-eyebrow">Portable memory</span><h2 id="memory-package-dialog-title">Import package</h2></div>
+          <button type="button" class="memory-icon-button" data-memory-package-cancel title="Close"><i class="bi bi-x-lg" aria-hidden="true"></i><span class="visually-hidden">Close package import</span></button>
+        </header>
+        <div class="memory-package-body">
+          <p class="memory-dialog-explanation">Koder validates hashes, compatibility, signatures, secrets, dependencies, and conflicts before anything is written. A staged package remains private until you activate it.</p>
+          <label class="memory-package-drop"><i class="bi bi-file-earmark-zip" aria-hidden="true"></i><span><strong>Select .kmemory package</strong><small data-memory-package-file-name>Choose a .kmemory package from this device.</small></span><input type="file" accept=".kmemory,application/vnd.koder.memory+zip,application/zip" data-memory-package-file></label>
+          <section class="memory-package-preview" data-memory-package-preview hidden>
+            <header><div><span class="memory-eyebrow">Validated preview</span><h3 data-memory-package-preview-title></h3></div><span class="memory-package-safe"><i class="bi bi-shield-check" aria-hidden="true"></i> No writes yet</span></header>
+            <p data-memory-package-preview-meta></p>
+            <div class="memory-package-summary" data-memory-package-summary></div>
+            <section class="memory-package-findings"><strong>Classifier and integrity findings</strong><div data-memory-package-findings>No prohibited findings reported.</div></section>
+            <details open><summary>Object impact preview</summary><p data-memory-package-impact-note></p><ol data-memory-package-impacts></ol></details>
+            <label data-memory-package-conflict-field hidden><span>Conflict policy</span><select data-memory-package-conflict-policy><option value="">Choose deliberately…</option><option value="merge">Merge — preserve local conflicting records</option><option value="replace">Replace — use package records</option><option value="keep_both">Keep both — import remapped copies</option></select></label>
+            <label class="memory-review-checkbox" data-memory-package-review-field hidden><input type="checkbox" data-memory-package-review><span>I reviewed the sensitive-content findings and approve staging.</span></label>
+          </section>
+          <div class="memory-editor-error" data-memory-package-error role="alert" hidden></div>
+          <div class="memory-package-status" data-memory-package-status role="status">Nothing is imported until you review and activate a staged package.</div>
+        </div>
+        <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-memory-package-cancel>Cancel</button><button type="button" class="btn btn-sm btn-outline-info" data-memory-package-preview-button disabled>Preview</button><button type="button" class="btn btn-sm btn-warning" data-memory-package-stage-button hidden disabled>Stage package</button><button type="button" class="btn btn-sm btn-success" data-memory-package-activate-button hidden disabled>Activate import</button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="memory-editor-dialog memory-compact-dialog" data-memory-personal-export-dialog aria-labelledby="memory-personal-export-dialog-title">
+      <form method="dialog" data-memory-personal-export-form>
+        <header>
+          <div><span class="memory-eyebrow">Private memory</span><h2 id="memory-personal-export-dialog-title">Export personal memory?</h2></div>
+          <button type="button" class="memory-icon-button" data-memory-personal-export-cancel title="Close"><i class="bi bi-x-lg" aria-hidden="true"></i><span class="visually-hidden">Close personal export confirmation</span></button>
+        </header>
+        <div class="memory-editor-fields">
+          <section class="memory-personal-editor-note is-wide"><i class="bi bi-shield-lock" aria-hidden="true"></i><div><strong>This package can contain private facts about you</strong><span>The downloaded file leaves Koder's private store. Anyone with the file may be able to read its contents.</span></div></section>
+          <label class="memory-review-checkbox is-wide"><input name="acknowledge" type="checkbox"><span>I understand and want to export this personal memory now.</span></label>
+        </div>
+        <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-memory-personal-export-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-warning" data-memory-personal-export-submit disabled>Export private package</button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="memory-editor-dialog" data-memory-chunk-dialog aria-labelledby="memory-chunk-dialog-title">
+      <form method="dialog" data-memory-chunk-form>
+        <header>
+          <div><span class="memory-eyebrow">Memory chunk</span><h2 id="memory-chunk-dialog-title" data-memory-chunk-dialog-title>Create chunk</h2></div>
+          <button type="button" class="memory-icon-button" data-memory-chunk-cancel title="Close editor"><i class="bi bi-x-lg" aria-hidden="true"></i><span class="visually-hidden">Close editor</span></button>
+        </header>
+        <div class="memory-editor-fields">
+          <label class="is-wide"><span>Title</span><input name="title" maxlength="240" required></label>
+          <label class="is-wide"><span>Description</span><textarea name="description" maxlength="8000" rows="4"></textarea></label>
+          <details class="is-wide">
+            <summary>Advanced settings</summary>
+            <div class="memory-editor-fields">
+              <p class="memory-dialog-explanation is-wide">New chunks default to private, general memory. Change these only when the memory has a specific audience or context.</p>
+              <label><span>Type</span><select name="kind" required><option value="reference">Reference</option><option value="personal">Personal</option><option value="project">Project</option><option value="environment">Environment</option></select></label>
+              <label><span>Visibility</span><select name="visibility" required><option value="private">Private</option><option value="installation">Installation</option><option value="shared">Shared</option><option value="public">Public</option></select></label>
+              <label><span>Scope</span><select name="scope_kind" required><option value="global">Global</option><option value="personal">Personal</option><option value="project">Project</option><option value="session">Session</option><option value="environment">Environment</option></select></label>
+              <label><span>Scope selector</span><input name="scope_selector" maxlength="240" placeholder="Required except for global"></label>
+              <label class="is-wide"><span>Tags</span><input name="tags" maxlength="1000" placeholder="Comma-separated"></label>
+              <label class="is-wide"><span>Aliases</span><input name="aliases" maxlength="2000" placeholder="Comma-separated"></label>
+              <label><span>Language</span><input name="language" maxlength="35" placeholder="en"></label>
+              <label><span>Locale</span><input name="locale" maxlength="35" placeholder="en-DK"></label>
+              <label><span>Domain</span><input name="domain" maxlength="160"></label>
+              <label><span>Review after</span><input name="review_after" type="datetime-local"></label>
+              <label class="is-wide"><span>Risk classes</span><input name="risk" maxlength="1000" placeholder="medical, security_sensitive"></label>
+              <label class="is-wide"><span>Shared principals</span><input name="shared_with" maxlength="2000" placeholder="kind:id, kind:id"></label>
+              <label class="is-wide"><span>Dependency chunk IDs</span><input name="dependency_ids" maxlength="4000" placeholder="Comma-separated IDs"></label>
+              <label><span>Publisher ID</span><input name="publisher_id" maxlength="240"></label>
+              <label><span>Publisher name</span><input name="publisher_name" maxlength="240"></label>
+              <label><span>License</span><input name="license" maxlength="240"></label>
+              <label><span>Minimum Koder version</span><input name="min_koder_version" maxlength="80"></label>
+              <label class="is-wide"><span>Source policy</span><textarea name="source_policy" maxlength="4000" rows="3"></textarea></label>
+              <label class="memory-review-checkbox is-wide"><input name="review_approved" type="checkbox"><span>I reviewed any sensitive content before saving.</span></label>
+            </div>
+          </details>
+        </div>
+        <section class="memory-editor-conflict" data-memory-chunk-conflict role="alert" hidden>
+          <header><i class="bi bi-intersect" aria-hidden="true"></i><div><strong>This chunk changed while you were editing</strong><span data-memory-chunk-conflict-revision></span></div></header>
+          <dl><dt>Changed on server</dt><dd data-memory-chunk-conflict-server></dd><dt>Changed in your draft</dt><dd data-memory-chunk-conflict-draft></dd><dt>Changed in both</dt><dd data-memory-chunk-conflict-overlap></dd></dl>
+          <p data-memory-chunk-conflict-detail></p>
+          <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-memory-chunk-conflict-reload>Reload latest</button><button type="button" class="btn btn-sm btn-warning" data-memory-chunk-conflict-rebase>Merge draft onto latest</button></footer>
+        </section>
+        <div class="memory-editor-error" data-memory-chunk-form-error role="alert" hidden></div>
+        <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-memory-chunk-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-info" data-memory-chunk-submit>Save chunk</button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="memory-editor-dialog" data-memory-entry-dialog aria-labelledby="memory-entry-dialog-title">
+      <form method="dialog" data-memory-entry-form>
+        <header>
+          <div><span class="memory-eyebrow">Memory entry</span><h2 id="memory-entry-dialog-title" data-memory-entry-dialog-title>Create entry</h2></div>
+          <button type="button" class="memory-icon-button" data-memory-entry-cancel title="Close editor"><i class="bi bi-x-lg" aria-hidden="true"></i><span class="visually-hidden">Close editor</span></button>
+        </header>
+        <div class="memory-editor-fields">
+          <label class="is-wide"><span>Chunk</span><input name="chunk_id" readonly required></label>
+          <section class="memory-personal-editor-note is-wide" data-memory-personal-editor-note hidden><i class="bi bi-person-lock" aria-hidden="true"></i><div><strong>About me is private personal memory</strong><span>Its scope stays locked to you. Directly stated information is the default; other origins are available under Advanced settings.</span></div></section>
+          <label class="is-wide"><span>Title</span><input name="title" maxlength="240" required></label>
+          <label class="is-wide"><span>Summary</span><textarea name="summary" maxlength="4000" rows="2"></textarea></label>
+          <label class="is-wide"><span>Body (Markdown)</span><textarea name="body" maxlength="64000" rows="9"></textarea></label>
+          <details class="is-wide">
+            <summary>Advanced settings</summary>
+            <div class="memory-editor-fields">
+              <p class="memory-dialog-explanation is-wide">Entries inherit a safe scope from their chunk and default to a fact. Change these only when needed.</p>
+              <label><span>Type</span><select name="kind" required><option value="fact">Fact</option><option value="procedure">Procedure</option><option value="concept">Concept</option><option value="warning">Warning</option><option value="preference">Preference</option><option value="decision">Decision</option><option value="reference">Reference</option></select></label>
+              <label><span>Confidence</span><input name="confidence" type="number" min="0" max="1" step="0.01" placeholder="0–1"></label>
+              <label><span>Scope</span><select name="scope_kind" required><option value="global">Global</option><option value="personal">Personal</option><option value="project">Project</option><option value="session">Session</option><option value="environment">Environment</option></select></label>
+              <label><span>Scope selector</span><input name="scope_selector" maxlength="240" placeholder="Required except for global"></label>
+              <label class="is-wide" data-memory-personal-origin-field hidden><span>How Koder learned this</span><select name="personal_origin"><option value="explicit">You told Koder directly</option><option value="observed">Observed through an authorized tool</option><option value="inferred">Inferred — keep unconfirmed</option></select><small data-memory-personal-origin-help></small></label>
+              <label class="is-wide"><span>Tags</span><input name="tags" maxlength="1000" placeholder="Comma-separated"></label>
+              <label class="is-wide"><span>Aliases</span><input name="aliases" maxlength="2000" placeholder="Comma-separated"></label>
+              <label class="is-wide"><span>Operating systems</span><input name="operating_systems" maxlength="2000" placeholder="Linux, Android"></label>
+              <label class="is-wide"><span>Architectures</span><input name="architectures" maxlength="1000" placeholder="amd64, arm64"></label>
+              <label class="is-wide"><span>Software</span><input name="software" maxlength="3000" placeholder="Go|&gt;=1.24, Pebble"></label>
+              <label class="is-wide"><span>Locales</span><input name="locales" maxlength="1000" placeholder="en-DK, da-DK"></label>
+              <label class="is-wide"><span>Conditions</span><input name="conditions" maxlength="3000" placeholder="Comma-separated"></label>
+              <label class="is-wide"><span>Risk classes</span><input name="risk" maxlength="1000" placeholder="medical, security_sensitive"></label>
+              <label><span>Valid from</span><input name="valid_from" type="datetime-local"></label>
+              <label><span>Valid until</span><input name="valid_until" type="datetime-local"></label>
+              <label><span>Observed at</span><input name="observed_at" type="datetime-local"></label>
+              <label><span>Review after</span><input name="review_after" type="datetime-local"></label>
+              <label class="is-wide"><span>Evidence IDs</span><input name="evidence_ids" maxlength="4000" placeholder="Comma-separated IDs"></label>
+              <label class="memory-review-checkbox is-wide"><input name="review_approved" type="checkbox"><span>I reviewed any sensitive content before saving.</span></label>
+            </div>
+          </details>
+        </div>
+        <section class="memory-editor-conflict" data-memory-entry-conflict role="alert" hidden>
+          <header><i class="bi bi-intersect" aria-hidden="true"></i><div><strong>This entry changed while you were editing</strong><span data-memory-entry-conflict-revision></span></div></header>
+          <dl><dt>Changed on server</dt><dd data-memory-entry-conflict-server></dd><dt>Changed in your draft</dt><dd data-memory-entry-conflict-draft></dd><dt>Changed in both</dt><dd data-memory-entry-conflict-overlap></dd></dl>
+          <p data-memory-entry-conflict-detail></p>
+          <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-memory-entry-conflict-reload>Reload latest</button><button type="button" class="btn btn-sm btn-warning" data-memory-entry-conflict-rebase>Merge draft onto latest</button></footer>
+        </section>
+        <div class="memory-editor-error" data-memory-entry-form-error role="alert" hidden></div>
+        <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-memory-entry-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-info" data-memory-entry-submit>Create entry</button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="memory-editor-dialog memory-compact-dialog" data-memory-supersede-dialog aria-labelledby="memory-supersede-dialog-title">
+      <form method="dialog" data-memory-supersede-form>
+        <header><div><span class="memory-eyebrow">Entry lifecycle</span><h2 id="memory-supersede-dialog-title">Supersede entry</h2></div><button type="button" class="memory-icon-button" data-memory-supersede-cancel title="Close"><i class="bi bi-x-lg" aria-hidden="true"></i></button></header>
+        <div class="memory-editor-fields">
+          <p class="memory-dialog-explanation is-wide">Choose an existing active entry in the same chunk. The current entry remains in history but normal lookup will prefer its replacement.</p>
+          <label class="is-wide"><span>Replacement entry</span><select name="replacement_entry_id" required></select></label>
+          <label class="is-wide"><span>Reason</span><input name="reason" maxlength="1000" placeholder="Why this memory was replaced"></label>
+        </div>
+        <div class="memory-editor-error" data-memory-supersede-error role="alert" hidden></div>
+        <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-memory-supersede-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-primary" data-memory-supersede-submit>Supersede</button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="memory-editor-dialog" data-memory-link-dialog aria-labelledby="memory-link-dialog-title">
+      <form method="dialog" data-memory-link-form>
+        <header>
+          <div><span class="memory-eyebrow">Memory graph</span><h2 id="memory-link-dialog-title">Create relationship</h2></div>
+          <button type="button" class="memory-icon-button" data-memory-link-cancel title="Close editor"><i class="bi bi-x-lg" aria-hidden="true"></i><span class="visually-hidden">Close editor</span></button>
+        </header>
+        <div class="memory-editor-fields">
+          <input name="source_kind" type="hidden"><input name="source_id" type="hidden">
+          <input name="target_kind" type="hidden"><input name="target_id" type="hidden">
+          <section class="memory-relation-endpoint" aria-label="Relationship source"><span>Source</span><strong data-memory-link-source-label></strong><code data-memory-link-source-ref></code></section>
+          <section class="memory-relation-direction" aria-hidden="true"><i class="bi bi-arrow-right"></i></section>
+          <section class="memory-relation-endpoint" aria-label="Relationship target"><span>Target</span><strong data-memory-link-target-label></strong><code data-memory-link-target-ref></code></section>
+          <button type="button" class="btn btn-sm btn-outline-secondary memory-relation-swap is-wide" data-memory-link-swap><i class="bi bi-arrow-left-right" aria-hidden="true"></i> Swap direction</button>
+          <label><span>Relationship</span><select name="kind" required><option value="related_to">Related to</option><option value="part_of">Part of</option><option value="requires">Requires</option><option value="alternative_to">Alternative to</option><option value="applies_to">Applies to</option><option value="supersedes">Supersedes</option><option value="contradicts">Contradicts</option><option value="caused_by">Caused by</option><option value="supported_by">Supported by</option><option value="derived_from">Derived from</option></select></label>
+          <label><span>Label</span><input name="label" maxlength="240" placeholder="Optional human-friendly label"></label>
+          <label class="is-wide"><span>Notes (Markdown)</span><textarea name="notes" maxlength="8000" rows="4"></textarea></label>
+          <label class="is-wide"><span>Evidence IDs</span><input name="evidence_ids" maxlength="4000" placeholder="Comma-separated IDs"></label>
+          <section class="memory-relation-preview is-wide" data-memory-link-preview aria-live="polite"><span>Preview</span><strong data-memory-link-preview-path></strong><p data-memory-link-preview-detail></p></section>
+          <label class="memory-review-checkbox is-wide"><input name="review_approved" type="checkbox"><span>I reviewed any sensitive relationship label or notes before saving.</span></label>
+        </div>
+        <div class="memory-editor-error" data-memory-link-form-error role="alert" hidden></div>
+        <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-memory-link-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-info" data-memory-link-submit>Create relationship</button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="memory-editor-dialog memory-compact-dialog" data-memory-delete-dialog aria-labelledby="memory-delete-dialog-title">
+      <form method="dialog" data-memory-delete-form>
+        <header>
+          <div><span class="memory-eyebrow">Permanent deletion</span><h2 id="memory-delete-dialog-title" data-memory-delete-dialog-title>Delete memory</h2></div>
+          <button type="button" class="memory-icon-button" data-memory-delete-cancel title="Close"><i class="bi bi-x-lg" aria-hidden="true"></i><span class="visually-hidden">Close confirmation</span></button>
+        </header>
+        <div class="memory-delete-body">
+          <div class="memory-delete-object"><span class="memory-empty-icon"><i class="bi bi-trash" aria-hidden="true"></i></span><div><strong data-memory-delete-object-title></strong><code data-memory-delete-object-ref></code></div></div>
+          <p data-memory-delete-explanation></p>
+          <section class="memory-delete-blockers" data-memory-delete-blockers hidden><strong>This object cannot be deleted yet</strong><p>Resolve these dependencies first; Koder will not silently cascade from this dialog.</p><div data-memory-delete-blocker-list></div></section>
+          <p class="memory-delete-retention">Deletion erases the canonical object and its Memory revision history. Existing operational logs are outside the Memory store and are not rewritten by this action.</p>
+          <label class="memory-delete-ack"><input name="acknowledge" type="checkbox"><span>I understand this cannot be undone.</span></label>
+        </div>
+        <div class="memory-editor-error" data-memory-delete-error role="alert" hidden></div>
+        <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-memory-delete-cancel>Cancel</button><button type="submit" class="btn btn-sm btn-danger" data-memory-delete-submit disabled>Delete</button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="memory-editor-dialog memory-curation-dialog" data-memory-curation-dialog aria-labelledby="memory-curation-dialog-title">
+      <section>
+        <header>
+          <div><span class="memory-eyebrow">Curator</span><h2 id="memory-curation-dialog-title">Review proposed memory</h2></div>
+          <button type="button" class="memory-icon-button" data-memory-curation-close title="Close review queue"><i class="bi bi-x-lg" aria-hidden="true"></i><span class="visually-hidden">Close review queue</span></button>
+        </header>
+        <div class="memory-curation-toolbar">
+          <label><span>Status</span><select data-memory-curation-filter><option value="pending_review">Needs review</option><option value="applied">Accepted</option><option value="rejected">Rejected</option><option value="undone">Undone</option><option value="">All</option></select></label>
+          <button type="button" class="btn btn-sm btn-outline-info" data-memory-curation-refresh><i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Refresh</button>
+        </div>
+        <div class="memory-curation-status" data-memory-curation-status role="status">Loading proposed memory…</div>
+        <div class="memory-curation-list" data-memory-curation-list></div>
+        <section class="memory-curation-reject" data-memory-curation-reject hidden>
+          <label><span>Why should Koder discard this proposal?</span><textarea maxlength="1000" rows="3" data-memory-curation-reject-reason></textarea></label>
+          <div><button type="button" class="btn btn-sm btn-outline-secondary" data-memory-curation-reject-cancel>Cancel</button><button type="button" class="btn btn-sm btn-danger" data-memory-curation-reject-confirm disabled>Reject proposal</button></div>
+        </section>
+        <footer><button type="button" class="btn btn-sm btn-outline-secondary" data-memory-curation-close>Close</button></footer>
+      </section>
+    </dialog>
+
+    <noscript>
+      <div class="alert alert-warning m-3">The Memory explorer needs JavaScript for graph navigation.</div>
+    </noscript>
+  </div>
+</body>
+</html>

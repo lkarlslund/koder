@@ -20,8 +20,8 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
-	"github.com/lkarlslund/koder/internal/knowledge/curation"
-	knowledgeService "github.com/lkarlslund/koder/internal/knowledge/service"
+	"github.com/lkarlslund/koder/internal/memory/curation"
+	memoryService "github.com/lkarlslund/koder/internal/memory/service"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
@@ -575,9 +575,9 @@ type Controller struct {
 	restartBuild                RestartBuildInfo
 	clearedStartupRunningTools  bool
 	providerHealth              *provider.HealthTracker
-	knowledgeEventMu            sync.Mutex
-	knowledgeEventUnsubscribe   func()
-	knowledgeCuration           *curation.ReviewManager
+	memoryEventMu               sync.Mutex
+	memoryEventUnsubscribe      func()
+	memoryCuration              *curation.ReviewManager
 
 	subMu   sync.Mutex
 	nextSub int
@@ -606,8 +606,8 @@ func New(cfg config.Config, engine *agent.Engine) *Controller {
 	if engine != nil {
 		engine.SetVoiceSessionControl(controller)
 		engine.SetPhoneDeviceControl(phone)
-		controller.attachKnowledgeEvents(engine.KnowledgeService())
-		controller.knowledgeCuration = engine.KnowledgeCuration()
+		controller.attachMemoryEvents(engine.MemoryService())
+		controller.memoryCuration = engine.MemoryCuration()
 	}
 	return controller
 }
@@ -621,65 +621,65 @@ func (c *Controller) PhoneDeviceHub() *phonedevice.Hub {
 	return c.phone
 }
 
-// KnowledgeService returns the process-wide durable Knowledge capability.
-func (c *Controller) KnowledgeService() *knowledgeService.Service {
+// MemoryService returns the process-wide durable Memory capability.
+func (c *Controller) MemoryService() *memoryService.Service {
 	if c == nil || c.agent == nil {
 		return nil
 	}
-	return c.agent.KnowledgeService()
+	return c.agent.MemoryService()
 }
 
-// SetKnowledgeService changes the process-wide Knowledge capability. It is
+// SetMemoryService changes the process-wide Memory capability. It is
 // primarily useful to hosts and tests that construct a controller before the
-// optional Knowledge store is available.
-func (c *Controller) SetKnowledgeService(service *knowledgeService.Service) {
+// optional Memory store is available.
+func (c *Controller) SetMemoryService(service *memoryService.Service) {
 	if c != nil && c.agent != nil {
-		c.agent.SetKnowledgeService(service)
-		c.attachKnowledgeEvents(service)
+		c.agent.SetMemoryService(service)
+		c.attachMemoryEvents(service)
 	}
 }
 
-// KnowledgeCuration returns the optional human review capability. Keeping it
-// separate from the canonical service lets Knowledge browsing remain available
+// MemoryCuration returns the optional human review capability. Keeping it
+// separate from the canonical service lets Memory browsing remain available
 // when no background curator is configured.
-func (c *Controller) KnowledgeCuration() *curation.ReviewManager {
+func (c *Controller) MemoryCuration() *curation.ReviewManager {
 	if c == nil {
 		return nil
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.knowledgeCuration
+	return c.memoryCuration
 }
 
-// SetKnowledgeCuration installs the process-wide curator review capability.
-func (c *Controller) SetKnowledgeCuration(manager *curation.ReviewManager) {
+// SetMemoryCuration installs the process-wide curator review capability.
+func (c *Controller) SetMemoryCuration(manager *curation.ReviewManager) {
 	if c == nil {
 		return
 	}
 	c.mu.Lock()
-	c.knowledgeCuration = manager
+	c.memoryCuration = manager
 	c.mu.Unlock()
 }
 
-func (c *Controller) attachKnowledgeEvents(service *knowledgeService.Service) {
+func (c *Controller) attachMemoryEvents(service *memoryService.Service) {
 	if c == nil {
 		return
 	}
-	c.knowledgeEventMu.Lock()
-	if c.knowledgeEventUnsubscribe != nil {
-		c.knowledgeEventUnsubscribe()
-		c.knowledgeEventUnsubscribe = nil
+	c.memoryEventMu.Lock()
+	if c.memoryEventUnsubscribe != nil {
+		c.memoryEventUnsubscribe()
+		c.memoryEventUnsubscribe = nil
 	}
 	if service == nil {
-		c.knowledgeEventMu.Unlock()
+		c.memoryEventMu.Unlock()
 		return
 	}
 	events, unsubscribe := service.SubscribeMutations(128)
-	c.knowledgeEventUnsubscribe = unsubscribe
-	c.knowledgeEventMu.Unlock()
+	c.memoryEventUnsubscribe = unsubscribe
+	c.memoryEventMu.Unlock()
 	go func() {
 		for event := range events {
-			c.broadcast("knowledge_delta", event)
+			c.broadcast("memory_delta", event)
 		}
 	}()
 }
@@ -1595,7 +1595,7 @@ func (c *Controller) ShutdownWithCancelReason(ctx context.Context, reason chat.C
 	started := time.Now()
 	c.shutdownMu.Lock()
 	defer c.shutdownMu.Unlock()
-	defer c.attachKnowledgeEvents(nil)
+	defer c.attachMemoryEvents(nil)
 
 	c.mu.Lock()
 	agent := c.agent

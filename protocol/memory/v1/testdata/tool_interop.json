@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "tool": "memory",
+  "cases": [
+    {
+      "name": "recall durable memory",
+      "call_id": "memory-interop-recall",
+      "arguments": {
+        "action": "recall",
+        "query": "linux partition tools"
+      },
+      "normalized": {
+        "action": "recall",
+        "query": "linux partition tools"
+      },
+      "result_array": "matches",
+      "result_count": 0
+    }
+  ]
+}
