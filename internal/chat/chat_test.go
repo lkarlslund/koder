@@ -87,6 +87,54 @@ type restartToolBoundaryRunner struct {
 	release chan struct{}
 }
 
+const gracefulStopTestToolID tools.ID = "test_graceful_stop"
+
+type gracefulStopTestTool struct{}
+
+type gracefulStopTestService struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+type gracefulStopTestRuntime struct {
+	runtime tools.Runtime
+}
+
+type gracefulStopRunner struct {
+	runtimeFakeRunner
+	modelStarted chan struct{}
+	releaseModel chan struct{}
+	modelCalls   atomic.Int32
+}
+
+func init() {
+	tools.Register(gracefulStopTestTool{}, tools.ToolSpec{Title: "Graceful stop test", ExposeToLLM: false})
+}
+
+func (gracefulStopTestTool) ID() tools.ID             { return gracefulStopTestToolID }
+func (gracefulStopTestTool) BypassesPermission() bool { return true }
+func (gracefulStopTestTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	return args, nil
+}
+func (gracefulStopTestTool) Preview(tools.Request) string { return "graceful stop test tool" }
+func (gracefulStopTestTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	service, _ := opts.Runtime.Services["graceful_stop_test"].(*gracefulStopTestService)
+	if service == nil {
+		return tools.Result{}, errors.New("graceful stop test service is unavailable")
+	}
+	close(service.started)
+	select {
+	case <-service.release:
+		return tools.Result{Text: "finished", Status: domain.ToolResultStatusOK}, nil
+	case <-ctx.Done():
+		return tools.Result{}, ctx.Err()
+	}
+}
+
+func (r gracefulStopTestRuntime) ToolRuntime(context.Context, *Chat) (tools.Runtime, error) {
+	return r.runtime, nil
+}
+
 type pendingToolFakeRunner struct {
 	runtimeFakeRunner
 	resumeCalls         int
@@ -306,6 +354,37 @@ func (f *restartToolBoundaryRunner) ParseProviderToolCallsForTranscript([]provid
 			Tool:       domain.ToolKindBash,
 			ToolCallID: "call_1",
 			Args:       map[string]string{"cmd": "echo hi"},
+		}},
+	}
+}
+
+func (f *gracefulStopRunner) MaxToolLoopSteps() int { return 5 }
+
+func (f *gracefulStopRunner) CompleteModelRequest(context.Context, domain.Session, domain.Chat, *provider.Client, chan<- domain.Event, provider.ChatRequest, domain.TimelineItem) (ModelResponse, error) {
+	if f.modelCalls.Add(1) == 1 {
+		close(f.modelStarted)
+		<-f.releaseModel
+		return ModelResponse{ToolCalls: []provider.ToolCall{{
+			ID:   "call_graceful_stop",
+			Type: "function",
+			Function: provider.FunctionCall{
+				Name:      string(gracefulStopTestToolID),
+				Arguments: `{}`,
+			},
+		}}}, nil
+	}
+	return ModelResponse{Text: "resumed"}, nil
+}
+
+func (f *gracefulStopRunner) ParseProviderToolCallsForTranscript([]provider.ToolCall, id.ID) ToolCallParseResult {
+	return ToolCallParseResult{
+		ToolCalls: []domain.ToolCall{{
+			ToolCallID: "call_graceful_stop",
+			Tool:       domain.ToolKind(gracefulStopTestToolID),
+		}},
+		Requests: []tools.Request{{
+			Tool:       gracefulStopTestToolID,
+			ToolCallID: "call_graceful_stop",
 		}},
 	}
 }
@@ -3707,6 +3786,115 @@ func TestRuntimeRestartShutdownStopsAfterCurrentLLMTurnBeforeTools(t *testing.T)
 	}
 	if pendingTools != 1 {
 		t.Fatalf("expected one pending tool call after restart shutdown, got %d; timeline=%#v", pendingTools, rt.SnapshotTimeline())
+	}
+}
+
+func TestRuntimeUserStopFinishesEmittedToolsThenCanContinue(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	service := &gracefulStopTestService{started: make(chan struct{}), release: make(chan struct{})}
+	runner := &gracefulStopRunner{modelStarted: make(chan struct{}), releaseModel: make(chan struct{})}
+	deps := depsForFake(st, runner)
+	deps.Runtime = gracefulStopTestRuntime{runtime: tools.Runtime{
+		SessionID: session.ID,
+		ChatID:    chatRecord.ID,
+		Services:  map[string]any{"graceful_stop_test": service},
+	}}
+	rt, err := Load(context.Background(), session, chatRecord, deps, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Close)
+	updates, unsubscribe := rt.Subscribe()
+	defer unsubscribe()
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "run a tool"})
+	select {
+	case <-runner.modelStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for model request")
+	}
+	rt.StopAfterCurrentTurn()
+	waitForDrainUpdate(t, updates)
+	close(runner.releaseModel)
+
+	select {
+	case <-service.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("graceful stop did not start the emitted tool")
+	}
+	if got := runner.modelCalls.Load(); got != 1 {
+		t.Fatalf("model calls before tool completion = %d, want 1", got)
+	}
+	close(service.release)
+	waitForIdleUpdate(t, updates)
+
+	if got := runner.modelCalls.Load(); got != 1 {
+		t.Fatalf("graceful stop continued to another model call: %d", got)
+	}
+	timeline := rt.SnapshotTimeline()
+	assistant, ok := timeline[len(timeline)-1].Content.(domain.AssistantMessage)
+	if !ok || len(assistant.Tools) != 1 || assistant.Tools[0].Status != domain.ToolStatusDone {
+		t.Fatalf("tool did not finish before graceful stop: %#v", timeline[len(timeline)-1].Content)
+	}
+
+	rt.Enqueue(QueueItem{Kind: QueueKindContinue})
+	deadline := time.After(2 * time.Second)
+	for runner.modelCalls.Load() != 2 {
+		select {
+		case <-updates:
+		case <-deadline:
+			t.Fatalf("continue did not resume the model, calls=%d", runner.modelCalls.Load())
+		}
+	}
+}
+
+func TestRuntimeHardStopCancelsPersistedPendingTool(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	rt := newTestChat(t, st, session, chatRecord, &runtimeFakeRunner{})
+	req := tools.Request{Tool: gracefulStopTestToolID, ToolCallID: "call_pending_stop"}
+	if _, err := rt.AppendAssistantToolRequests(context.Background(), domain.TimelineItem{}, []tools.Request{req}, "", domain.ReasoningContent{}, domain.Usage{}, domain.ModelPerformance{}); err != nil {
+		t.Fatal(err)
+	}
+	rt.mu.Lock()
+	rt.active = true
+	rt.status = StatusWaitingLLM
+	rt.cancel = func() {}
+	rt.mu.Unlock()
+
+	rt.Interrupt()
+	timeline := rt.SnapshotTimeline()
+	assistant, ok := timeline[len(timeline)-1].Content.(domain.AssistantMessage)
+	if !ok || len(assistant.Tools) != 1 {
+		t.Fatalf("unexpected pending tool item: %#v", timeline[len(timeline)-1].Content)
+	}
+	call := assistant.Tools[0]
+	if call.Status != domain.ToolStatusCanceled || call.Error == nil || call.Error.Code != domain.NoticeReasonUserInterrupted {
+		t.Fatalf("hard-stopped tool was not canceled: %#v", call)
+	}
+	stored, err := timelineForChat(context.Background(), st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedAssistant, ok := stored[len(stored)-1].Content.(domain.AssistantMessage)
+	if !ok || len(storedAssistant.Tools) != 1 || storedAssistant.Tools[0].Status != domain.ToolStatusCanceled {
+		t.Fatalf("hard-stopped tool cancellation was not persisted: %#v", stored[len(stored)-1].Content)
+	}
+}
+
+func waitForIdleUpdate(t *testing.T, updates <-chan Update) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if !update.Snapshot.Active && update.Snapshot.Status == StatusIdle {
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for idle chat")
+		}
 	}
 }
 

@@ -135,7 +135,7 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 				}
 				return TurnStepResult{Continue: true}, nil
 			}
-			if rt.shouldStopAfterCurrentLLMTurn() {
+			if rt.shouldStopBeforeToolCalls() {
 				return TurnStepResult{Done: true}, nil
 			}
 			if result, handled, err := l.handleRepeatedToolCall(ctx, rt, session.ID, calls, out); handled || err != nil {
@@ -189,7 +189,7 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 		if ShouldStop(ctx) {
 			return TurnStepResult{Done: true}, nil
 		}
-		if rt.shouldStopAfterCurrentLLMTurn() {
+		if rt.shouldStopBeforeToolCalls() {
 			return TurnStepResult{Done: true}, nil
 		}
 		if hasUserInputRequest([]tools.Request{*call}) {

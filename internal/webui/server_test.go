@@ -1937,8 +1937,9 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `Token burn since compact`) {
 		t.Fatalf("expected sidebar to render chat token usage counters")
 	}
-	if !strings.Contains(fullPage, `class="btn btn-danger interrupt-button"`) ||
-		!strings.Contains(fullPage, `:disabled="!chatInterruptible()"`) ||
+	if !strings.Contains(fullPage, `class="btn interrupt-button"`) ||
+		!strings.Contains(fullPage, `:disabled="!(chatInterruptible() || chatContinuable())"`) ||
+		!strings.Contains(fullPage, `rpc('continue', {})`) ||
 		!strings.Contains(fullPage, `rpc('stop_after_turn', {})`) ||
 		!strings.Contains(fullPage, `rpc('stop', {})`) ||
 		!strings.Contains(fullPage, `event.key === 'Escape'`) {

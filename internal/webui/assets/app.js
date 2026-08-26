@@ -2993,11 +2993,15 @@
           const snapshot = this.activeSnapshot();
           return !!(snapshot.Active || snapshot.active);
         },
+        chatContinuable() {
+          const snapshot = this.activeSnapshot();
+          return !!this.activeChatID() && String(snapshot.Status || snapshot.status || '').toLowerCase() === 'idle';
+        },
         interruptArmed() {
           return this.interruptArmedChatID && this.interruptArmedChatID === String(this.activeChatID() || '');
         },
         interruptButtonTitle() {
-          if (!this.chatInterruptible()) return 'Koder is idle';
+          if (!this.chatInterruptible()) return this.chatContinuable() ? 'Continue conversation' : 'Koder is waiting';
           return this.interruptArmed() ? 'Interrupt immediately' : 'Stop after current turn';
         },
         syncInterruptArmed() {
@@ -3068,7 +3072,12 @@
         },
         interruptChat() {
           const id = String(this.activeChatID() || '');
-          if (!id || !this.chatInterruptible()) return;
+          if (!id) return;
+          if (this.chatContinuable()) {
+            this.rpc('continue', {}).catch(() => {});
+            return;
+          }
+          if (!this.chatInterruptible()) return;
           if (this.interruptArmed()) {
             this.interruptArmedChatID = '';
             this.rpc('stop', {}).catch(() => {});

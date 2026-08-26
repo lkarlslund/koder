@@ -163,6 +163,7 @@ type Chat struct {
 	running           map[string]struct{}
 	turnSeq           uint64
 	draining          bool
+	drainReason       CancelReason
 	closed            bool
 	timelineLoaded    bool
 	timelineHasOlder  bool
@@ -1087,6 +1088,13 @@ func (r *Chat) Cancel(reason CancelReason) {
 		cancel()
 	}
 	if hardUpdated {
+		message := "Tool call canceled by user."
+		if reason.NoticeReason() != domain.NoticeReasonUserInterrupted {
+			message = "Tool call canceled because koder is stopping."
+		}
+		if _, err := r.cancelInterruptedToolCalls(context.Background(), message, reason.NoticeReason()); err != nil {
+			_ = r.markPersistError(err)
+		}
 		evt := domain.Event{Kind: domain.EventKindStatus, Text: "Interrupted"}
 		r.broadcast(r.snapshotUpdateFlags(&evt, true, false, true, true, false))
 		r.maybeDispatchNext()
@@ -1101,13 +1109,13 @@ func (r *Chat) StopAfterCurrentTurn() {
 	r.Cancel(CancelReasonUserInterrupt)
 }
 
-func (r *Chat) shouldStopAfterCurrentLLMTurn() bool {
+func (r *Chat) shouldStopBeforeToolCalls() bool {
 	if r == nil {
 		return false
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.draining && r.cancelState != CancelStateCancelling
+	return r.draining && r.cancelState != CancelStateCancelling && r.drainReason != CancelReasonUserInterrupt
 }
 
 func (r *Chat) Interrupt() {
@@ -2090,17 +2098,21 @@ func (r *Chat) RequestForToolCall(ctx context.Context, toolCallID string) (domai
 
 // FailRunningToolCalls marks currently running tool calls as failed.
 func (r *Chat) FailRunningToolCalls(ctx context.Context, message string) (int, error) {
-	return r.failToolCallsMatching(ctx, message, func(status domain.ToolStatus) bool {
+	return r.finalizeToolCallsMatching(ctx, message, domain.NoticeReasonProcessRestart, domain.ToolStatusErrored, func(status domain.ToolStatus) bool {
 		return status == domain.ToolStatusRunning
 	})
 }
 
 // FailInterruptedToolCalls marks pending or running tool calls as failed.
 func (r *Chat) FailInterruptedToolCalls(ctx context.Context, message string) (int, error) {
-	return r.failToolCallsMatching(ctx, message, interruptedToolStatus)
+	return r.finalizeToolCallsMatching(ctx, message, domain.NoticeReasonProcessRestart, domain.ToolStatusErrored, interruptedToolStatus)
 }
 
-func (r *Chat) failToolCallsMatching(ctx context.Context, message string, match func(domain.ToolStatus) bool) (int, error) {
+func (r *Chat) cancelInterruptedToolCalls(ctx context.Context, message, code string) (int, error) {
+	return r.finalizeToolCallsMatching(ctx, message, code, domain.ToolStatusCanceled, interruptedToolStatus)
+}
+
+func (r *Chat) finalizeToolCallsMatching(ctx context.Context, message, code string, terminalStatus domain.ToolStatus, match func(domain.ToolStatus) bool) (int, error) {
 	if r == nil {
 		return 0, fmt.Errorf("chat runtime is required")
 	}
@@ -2115,6 +2127,9 @@ func (r *Chat) failToolCallsMatching(ctx context.Context, message string, match 
 	message = strings.TrimSpace(message)
 	if message == "" {
 		message = "Tool execution failed because koder restarted before the tool completed."
+	}
+	if strings.TrimSpace(code) == "" {
+		code = domain.NoticeReasonProcessRestart
 	}
 	now := time.Now().UTC()
 	var changed []dirtyTimelineItem
@@ -2138,8 +2153,8 @@ func (r *Chat) failToolCallsMatching(ctx context.Context, message string, match 
 			if !match(call.Status) || call.Result != nil || call.Error != nil {
 				continue
 			}
-			call.Status = domain.ToolStatusErrored
-			call.Error = &domain.ToolError{Message: message, Code: domain.NoticeReasonProcessRestart}
+			call.Status = terminalStatus
+			call.Error = &domain.ToolError{Message: message, Code: code}
 			call.Approval = nil
 			call.ApprovalID = ""
 			if call.CompletedAt.IsZero() {
@@ -2619,6 +2634,7 @@ func (r *Chat) handleInterrupt(reason CancelReason) {
 		return
 	}
 	r.draining = true
+	r.drainReason = reason
 	if reason.Restart() {
 		r.chat.AutoRestart = true
 		if r.state != nil {
@@ -2790,7 +2806,7 @@ func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID str
 			r.handleTurnError(ctx, out, err)
 			return
 		}
-		if shouldContinue {
+		if shouldContinue && !r.shouldStopAfterCompletedStep() {
 			r.continueTurnLoop(ctx, nil, nil, out)
 		}
 	})
@@ -3315,7 +3331,11 @@ func (r *Chat) handleStreamClosedForTurn(turn uint64) {
 	r.running = nil
 	r.activeUserSource = ""
 	draining := r.draining
-	r.draining = false
+	preserveGracefulStop := !turnFinished && r.drainReason == CancelReasonUserInterrupt
+	if !preserveGracefulStop {
+		r.draining = false
+		r.drainReason = ""
+	}
 	r.mu.Unlock()
 	if sealedItem.ID != "" {
 		r.broadcast(r.snapshotUpdateWithItem(sealedItem, nil, true, false, true, true, false))
@@ -3363,6 +3383,7 @@ func (r *Chat) abortActiveTurnLocked() {
 	r.activeUserSource = ""
 	r.active = false
 	r.draining = false
+	r.drainReason = ""
 	r.status = StatusIdle
 	r.statusText = "Idle"
 }
@@ -3534,12 +3555,24 @@ func (r *Chat) continueTurnLoop(ctx context.Context, turnInstructions, ephemeral
 		if result.WaitingApproval || result.WaitingInput || result.Done {
 			return
 		}
+		if r.shouldStopAfterCompletedStep() {
+			return
+		}
 		if !result.Continue {
 			return
 		}
 		turnInstructions = result.TurnInstructions
 	}
 	loop.pauseLimit(ctx, r, out)
+}
+
+func (r *Chat) shouldStopAfterCompletedStep() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.draining && r.cancelState != CancelStateCancelling
 }
 
 func (r *Chat) handleTurnError(ctx context.Context, out chan<- domain.Event, err error) {
