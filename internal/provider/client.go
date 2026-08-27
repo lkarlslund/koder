@@ -301,6 +301,7 @@ func (r ChatRequest) MarshalJSON() ([]byte, error) {
 	}
 	if len(r.Tools) > 0 {
 		body["tools"] = r.Tools
+		body["parallel_tool_calls"] = true
 	}
 	if strings.TrimSpace(r.ToolChoice) != "" {
 		body["tool_choice"] = r.ToolChoice

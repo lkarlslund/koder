@@ -219,6 +219,36 @@ func TestChatRequestMarshalJSONIncludesExtraBody(t *testing.T) {
 	}
 }
 
+func TestChatRequestMarshalJSONEnablesParallelToolCalls(t *testing.T) {
+	data, err := json.Marshal(ChatRequest{
+		Model: "test-model",
+		Tools: []ToolDefinition{{
+			Type: "function",
+			Function: FunctionDefinition{
+				Name: "lookup",
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if !strings.Contains(got, `"parallel_tool_calls":true`) {
+		t.Fatalf("expected requests with tools to enable parallel tool calls, got %s", got)
+	}
+}
+
+func TestChatRequestMarshalJSONOmitsParallelToolCallsWithoutTools(t *testing.T) {
+	data, err := json.Marshal(ChatRequest{Model: "test-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, `"parallel_tool_calls"`) {
+		t.Fatalf("expected requests without tools to omit parallel tool calls, got %s", got)
+	}
+}
+
 func TestChatRequestMarshalJSONOmitsInternalIDs(t *testing.T) {
 	data, err := json.Marshal(ChatRequest{
 		SessionID: "session-a",
