@@ -15,6 +15,11 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 		FallbackTop float64 `json:"fallbackTop"`
 		BottomGap   float64 `json:"bottomGap"`
 	}
+	var mermaidLightboxResult struct {
+		HTMLLength int     `json:"htmlLength"`
+		Width      float64 `json:"width"`
+		Height     float64 `json:"height"`
+	}
 	chromium := memoryBrowserChromium(t)
 	ctrl := newTestController(t)
 	serverCtx, stopServer := context.WithCancel(context.Background())
@@ -89,7 +94,7 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 			window.__mermaidRenderCalls = [];
 			window.mermaid.render = (id, source) => {
 				window.__mermaidRenderCalls.push(source);
-				const result = {svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>' + source + '</text></svg>'};
+				const result = {svg: '<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 640 320"><text x="20" y="40">' + source + '</text></svg>'};
 				if (window.__mermaidRenderCalls.length > 1) return Promise.resolve(result);
 				return new Promise(resolve => { window.__resolveFirstMermaidRender = () => resolve(result); });
 			};
@@ -161,10 +166,21 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 		})()`, &scrollAnchorResult),
 		chromedp.Evaluate(`document.querySelector('.transcript').insertAdjacentHTML('beforeend', '<div id="media-observer-test" class="markdown-body"><img alt="preview" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></div>')`, nil),
 		chromedp.Poll(`document.querySelector('#media-observer-test img')?.closest('.markdown-media-preview')?.querySelector('.media-expand-button') !== null`, nil),
+		chromedp.Evaluate(`document.querySelector('#mermaid-observer-test .media-expand-button').click()`, nil),
+		chromedp.Poll(`document.querySelector('.image-lightbox-svg')?.offsetParent !== null`, nil),
+		chromedp.Evaluate(`(() => {
+			const app = document.documentElement._x_dataStack[0];
+			const svg = document.querySelector('.image-lightbox-svg svg');
+			const rect = svg?.getBoundingClientRect();
+			return {htmlLength: app.imageLightbox.html.length, width: rect?.width || 0, height: rect?.height || 0};
+		})()`, &mermaidLightboxResult),
 	); err != nil {
 		t.Fatalf("enhance replacement Markdown media: %v", err)
 	}
 	if scrollAnchorResult.ItemID != "anchor-1" || scrollAnchorResult.Top != 290 || scrollAnchorResult.FallbackTop != 75 || scrollAnchorResult.BottomGap != 0 {
 		t.Fatalf("restore transcript position = %+v, want anchored top 290, fallback top 75, and sticky bottom gap 0", scrollAnchorResult)
+	}
+	if mermaidLightboxResult.HTMLLength == 0 || mermaidLightboxResult.Width <= 0 || mermaidLightboxResult.Height <= 0 {
+		t.Fatalf("expanded Mermaid dimensions = %+v, want retained SVG with positive width and height", mermaidLightboxResult)
 	}
 }
