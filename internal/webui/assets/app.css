@@ -309,6 +309,11 @@
     .image-lightbox-svg { width: min(90vw, 1180px); max-width: 100%; max-height: calc(94vh - 7rem); overflow: visible; pointer-events: none; }
     .image-lightbox-svg svg { display: block; width: auto; max-width: 100%; height: auto; max-height: calc(94vh - 7rem); background: var(--bs-body-bg); }
     .reasoning { color: var(--bs-secondary-color); }
+    .assistant-header { align-items: flex-start; }
+    .assistant-header .turn-header-title { flex: 1 1 auto; align-items: flex-start; }
+    .assistant-reasoning { min-width: 0; flex: 1 1 auto; font-weight: 400; }
+    .assistant-reasoning > summary { width: max-content; max-width: 100%; cursor: pointer; white-space: nowrap; }
+    .assistant-reasoning pre { margin-top: .35rem; max-height: min(28rem, 60vh); overflow: auto; white-space: pre-wrap; }
     .reasoning-view-toggle { margin: .5rem 0 .35rem; }
     .notice { display: inline-flex; align-items: center; gap: .45rem; color: var(--bs-secondary-color); font-size: .9rem; }
     .notice-warning { color: var(--bs-warning-text-emphasis); }

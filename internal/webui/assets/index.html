@@ -125,8 +125,20 @@
           </template>
           <template x-if="item.kind === 'assistant'">
             <div class="turn assistant-turn">
-              <div class="turn-header">
-                <div class="turn-header-title"><i class="bi bi-robot"></i><span class="turn-source-label">agent</span></div>
+              <div class="turn-header assistant-header">
+                <div class="turn-header-title">
+                  <i class="bi bi-robot"></i><span class="turn-source-label">agent</span>
+                  <template x-if="item.content?.reasoning?.text">
+                    <details class="reasoning assistant-reasoning">
+                      <summary x-text="thinkingLabel(item.content.reasoning)"></summary>
+                      <div class="reasoning-view-toggle btn-group btn-group-sm" x-show="hasCavemanReasoning(item.content.reasoning)">
+                        <button type="button" class="btn" :class="reasoningView(item) === 'original' ? 'btn-secondary' : 'btn-outline-secondary'" @click="setReasoningView(item, 'original')">Original</button>
+                        <button type="button" class="btn" :class="reasoningView(item) === 'caveman' ? 'btn-secondary' : 'btn-outline-secondary'" @click="setReasoningView(item, 'caveman')">Caveman</button>
+                      </div>
+                      <pre x-text="reasoningDisplayText(item)"></pre>
+                    </details>
+                  </template>
+                </div>
                 <div class="turn-header-actions">
                   <span class="turn-performance" x-show="assistantPerformanceLabel(item)" x-text="assistantPerformanceLabel(item)" :title="assistantPerformanceTooltip(item)"></span>
                   <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>
@@ -134,16 +146,6 @@
                   <button type="button" class="timeline-action-button" title="Fork chat through this item" @click="openTimelineFork(item)" x-show="timelineItemActionAvailable(item)"><i class="bi bi-diagram-2"></i></button>
                 </div>
               </div>
-              <template x-if="item.content?.reasoning?.text">
-                <details class="reasoning mb-2">
-                  <summary x-text="thinkingLabel(item.content.reasoning)"></summary>
-                  <div class="reasoning-view-toggle btn-group btn-group-sm" x-show="hasCavemanReasoning(item.content.reasoning)">
-                    <button type="button" class="btn" :class="reasoningView(item) === 'original' ? 'btn-secondary' : 'btn-outline-secondary'" @click="setReasoningView(item, 'original')">Original</button>
-                    <button type="button" class="btn" :class="reasoningView(item) === 'caveman' ? 'btn-secondary' : 'btn-outline-secondary'" @click="setReasoningView(item, 'caveman')">Caveman</button>
-                  </div>
-                  <pre x-text="reasoningDisplayText(item)"></pre>
-                </details>
-              </template>
               <div class="markdown-body" x-effect="renderTimelineMarkdownElement($el, item, item.content?.text || '', itemMarkdownOptions(item))"></div>
               <template x-for="tool in item.content?.tools || []" :key="tool.tool_call_id">
                 <div class="tool mt-3">

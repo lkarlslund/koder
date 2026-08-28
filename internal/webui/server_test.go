@@ -2784,6 +2784,10 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected active chat context to render as a progress meter")
 	}
 	if !strings.Contains(fullPage, `thinkingLabel(item.content.reasoning)`) ||
+		!strings.Contains(fullPage, `class="turn-header assistant-header"`) ||
+		!strings.Contains(fullPage, `class="reasoning assistant-reasoning"`) ||
+		!strings.Contains(fullPage, `.assistant-header .turn-header-title { flex: 1 1 auto; align-items: flex-start; }`) ||
+		!strings.Contains(fullPage, `.assistant-reasoning pre { margin-top: .35rem;`) ||
 		!strings.Contains(fullPage, `estimateTextTokens(text)`) ||
 		!strings.Contains(fullPage, `'thinking (' + tokens + ' tokens)'`) ||
 		!strings.Contains(fullPage, `cavemanThinkingSuffix(reasoning)`) ||
