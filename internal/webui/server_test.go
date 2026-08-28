@@ -2154,7 +2154,10 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `tool-diff-del`) {
 		t.Fatalf("expected edit and patch results to use colored diff rendering")
 	}
-	if !strings.Contains(fullPage, `compactLines(lines, head = 2, tail = 2)`) {
+	if !strings.Contains(fullPage, `compactLines(lines, head = 2, tail = 2, minimumOmitted = 2)`) ||
+		!strings.Contains(fullPage, `function renderCompactLines(lines, head = 2, tail = 2, minimumOmitted = 2, expandable = false)`) ||
+		!strings.Contains(fullPage, `tool-result-omitted-details`) ||
+		!strings.Contains(fullPage, `Expand or collapse omitted output`) {
 		t.Fatalf("expected file write results to use compact head/tail rendering")
 	}
 	if !strings.Contains(fullPage, `toolStatus(tool) === 'done' || toolStatus(tool) === 'errored'`) || !strings.Contains(fullPage, `return 'exit ' + exitCode`) || !strings.Contains(fullPage, `isBareExitStatus(error)`) || !strings.Contains(fullPage, `return renderCompactBlock('Output'`) {
@@ -2179,19 +2182,20 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `function execStartResultLines(data)`) ||
 		!strings.Contains(fullPage, `function renderExecStartResult(data)`) ||
 		!strings.Contains(fullPage, `toolCommandInspectable(tool)`) ||
+		!strings.Contains(fullPage, `(kind === 'exec_command' || kind.startsWith('exec_'))`) ||
 		!strings.Contains(fullPage, `openToolCommandModal(tool)`) ||
 		!strings.Contains(fullPage, `tool-command-modal`) ||
 		!strings.Contains(fullPage, `toolCommandText(tool)`) ||
 		!strings.Contains(fullPage, `add('exit code', firstValue(data, ['exit_code', 'ExitCode']))`) ||
 		!strings.Contains(fullPage, `toolCommandModal.output`) ||
 		!strings.Contains(fullPage, `tool-command-output`) ||
-		!strings.Contains(fullPage, `'... ' + (lines.length - 1) + ' lines omitted ...'`) {
+		!strings.Contains(fullPage, `renderCompactLines(lines, 1, 0, 1, true)`) {
 		t.Fatalf("expected command preview and exec result helpers")
 	}
 	if !strings.Contains(fullPage, `tool-result-body-mono`) ||
 		!strings.Contains(fullPage, `return renderExecStartResult(data)`) ||
 		!strings.Contains(fullPage, `tool.result && toolResultHTML(tool)`) ||
-		!strings.Contains(fullPage, `renderCompactBlock('Result', execResultLines(data, toolResultText(tool)), 'tool-result-body-mono')`) {
+		!strings.Contains(fullPage, `renderCompactBlock('Result', execResultLines(data, toolResultText(tool)), 'tool-result-body-mono', true)`) {
 		t.Fatalf("expected exec output to render with monospace result styling")
 	}
 	if !strings.Contains(fullPage, `function renderImagePreviewBlock`) ||

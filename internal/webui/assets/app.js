@@ -471,13 +471,15 @@
       if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
       return lines;
     }
-    function compactLines(lines, head = 2, tail = 2) {
+    function compactLines(lines, head = 2, tail = 2, minimumOmitted = 2) {
       const clean = Array.isArray(lines) ? lines.map(line => String(line ?? '')) : splitLines(lines);
-      if (clean.length <= head + tail + 1) return clean.map(text => ({text}));
+      if (clean.length < head + tail + minimumOmitted) return clean.map(text => ({text}));
+      const omittedEnd = tail > 0 ? clean.length - tail : clean.length;
+      const expanded = clean.slice(head, omittedEnd);
       return [
         ...clean.slice(0, head).map(text => ({text})),
-        {text: '... ' + (clean.length - head - tail) + ' lines omitted ...', omitted: true},
-        ...clean.slice(clean.length - tail).map(text => ({text}))
+        {text: '... ' + expanded.length + ' lines omitted ...', omitted: true, expanded},
+        ...(tail > 0 ? clean.slice(clean.length - tail).map(text => ({text})) : [])
       ];
     }
     function toolData(tool) {
@@ -609,11 +611,23 @@
     function toolResultHeader(title) {
       return '<div class="tool-result-header">' + escapeHTML(title) + '</div>';
     }
-    function renderCompactBlock(title, lines, extraClass = '') {
-      const body = compactLines(lines).map(line => {
-        const cls = line.omitted ? 'tool-result-line tool-result-omitted' : 'tool-result-line';
-        return '<div class="' + cls + '" title="' + escapeHTML(line.text || '') + '">' + escapeHTML(line.text || ' ') + '</div>';
+    function renderToolResultLine(text, extraClass = '') {
+      const cls = ['tool-result-line', extraClass].filter(Boolean).join(' ');
+      return '<div class="' + cls + '" title="' + escapeHTML(text || '') + '">' + escapeHTML(text || ' ') + '</div>';
+    }
+    function renderCompactLines(lines, head = 2, tail = 2, minimumOmitted = 2, expandable = false) {
+      return compactLines(lines, head, tail, minimumOmitted).map(line => {
+        if (!line.omitted) return renderToolResultLine(line.text);
+        if (!expandable) return renderToolResultLine(line.text, 'tool-result-omitted');
+        const expanded = (line.expanded || []).map(text => renderToolResultLine(text)).join('');
+        return '<details class="tool-result-omitted-details">' +
+          '<summary class="tool-result-line tool-result-omitted" title="Expand or collapse omitted output">' + escapeHTML(line.text || '') + '</summary>' +
+          '<div class="tool-result-expanded">' + expanded + '</div>' +
+          '</details>';
       }).join('');
+    }
+    function renderCompactBlock(title, lines, extraClass = '', expandable = false) {
+      const body = renderCompactLines(lines, 2, 2, 2, expandable);
       const bodyClass = ['tool-result-body', extraClass].filter(Boolean).join(' ');
       return toolResultHeader(title) + '<div class="' + bodyClass + '">' + body + '</div>';
     }
@@ -1011,17 +1025,12 @@
     function execStartResultLines(data) {
       const output = firstValue(data, ['output', 'Output']);
       if (!output) return [];
-      const lines = splitLines(output);
-      if (lines.length <= 1) return lines;
-      return [lines[0], '... ' + (lines.length - 1) + ' lines omitted ...'];
+      return splitLines(output);
     }
     function renderExecStartResult(data) {
       const lines = execStartResultLines(data);
       if (!lines.length) return '';
-      const body = lines.map((text, idx) => {
-        const cls = idx > 0 && String(text).startsWith('... ') ? 'tool-result-line tool-result-omitted' : 'tool-result-line';
-        return '<div class="' + cls + '" title="' + escapeHTML(text || '') + '">' + escapeHTML(text || ' ') + '</div>';
-      }).join('');
+      const body = renderCompactLines(lines, 1, 0, 1, true);
       return '<div class="tool-result-body tool-result-body-mono">' + body + '</div>';
     }
     function timeoutLabel(value) {
@@ -1063,7 +1072,7 @@
         return renderExecStartResult(data);
       }
       if (kind.startsWith('exec_')) {
-        return renderCompactBlock('Result', execResultLines(data, toolResultText(tool)), 'tool-result-body-mono');
+        return renderCompactBlock('Result', execResultLines(data, toolResultText(tool)), 'tool-result-body-mono', true);
       }
       if (kind === 'file_glob') return renderCompactBlock('Matches', data.matches || data.Matches || toolResultText(tool));
       if (kind === 'file_grep') return renderCompactBlock('Matches', firstValue(data, ['output', 'Output']) || toolResultText(tool));
@@ -1104,7 +1113,7 @@
         return renderCompactBlock('Output', output || error, 'tool-result-body-mono');
       }
       if (kind.startsWith('exec_')) {
-        return renderCompactBlock('Result', execResultLines(data, toolErrorText(tool)), 'tool-result-body-mono');
+        return renderCompactBlock('Result', execResultLines(data, toolErrorText(tool)), 'tool-result-body-mono', true);
       }
       return renderCompactBlock('Error', toolErrorText(tool));
     }
@@ -3827,7 +3836,8 @@
             .catch(err => this.showToast(err.message || 'cancel tool failed'));
         },
         toolCommandInspectable(tool) {
-          return String((tool && tool.tool) || '') === 'exec_command' && this.toolCommandText(tool) !== '';
+          const kind = String((tool && tool.tool) || '');
+          return (kind === 'exec_command' || kind.startsWith('exec_')) && this.toolCommandText(tool) !== '';
         },
         toolCommandText(tool) {
           const args = toolArgs(tool);
