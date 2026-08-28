@@ -39,6 +39,11 @@ func TestExecToolOutputExpansionAndWaitInspection(t *testing.T) {
 		WaitInspectable  bool   `json:"waitInspectable"`
 		InspectedCommand string `json:"inspectedCommand"`
 		InspectedProcess string `json:"inspectedProcess"`
+		MCPSummary       string `json:"mcpSummary"`
+		MCPExpanded      bool   `json:"mcpExpanded"`
+		MCPCopied        string `json:"mcpCopied"`
+		PreCopyButton    bool   `json:"preCopyButton"`
+		PreCopied        string `json:"preCopied"`
 	}
 	if err := chromedp.Run(browserCtx,
 		chromedp.Navigate(server.URL()),
@@ -46,6 +51,7 @@ func TestExecToolOutputExpansionAndWaitInspection(t *testing.T) {
 		chromedp.Poll(`document.documentElement._x_dataStack?.[0]?.toolResultHTML`, nil),
 		chromedp.Evaluate(`(() => {
 			const app = document.documentElement._x_dataStack[0];
+			Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: async text => { window.__copiedOutput = text; }}});
 			const host = document.createElement('div');
 			host.innerHTML = app.toolResultHTML({
 				tool: 'exec_command',
@@ -68,6 +74,26 @@ func TestExecToolOutputExpansionAndWaitInspection(t *testing.T) {
 			waitHost.innerHTML = app.toolResultHTML(waitTool);
 			const waitInspectable = app.toolCommandInspectable(waitTool);
 			app.openToolCommandModal(waitTool);
+
+			const mcpHost = document.createElement('div');
+			mcpHost.innerHTML = app.toolResultHTML({
+				tool: 'mcp',
+				args: {server: 'redok', tool: 'search'},
+				result: {text: 'mcp one\nmcp two\nmcp three\nmcp four\nmcp five\nmcp six\nmcp seven'}
+			});
+			document.body.append(mcpHost);
+			const mcpDetails = mcpHost.querySelector('.tool-result-omitted-details');
+			mcpDetails?.querySelector('summary')?.click();
+			mcpHost.querySelector('.copy-output-button')?.click();
+			const mcpCopied = window.__copiedOutput || '';
+
+			const markdownHost = document.createElement('div');
+			markdownHost.className = 'markdown-body';
+			markdownHost.innerHTML = '<pre><code>alpha\nbeta</code></pre>';
+			document.body.append(markdownHost);
+			app.enhanceDisplayedMedia(markdownHost);
+			const preCopyButton = markdownHost.querySelector('.copyable-mono > .copy-output-button');
+			preCopyButton?.click();
 			return {
 				summary: summary?.textContent || '',
 				expanded: details?.open === true,
@@ -75,7 +101,12 @@ func TestExecToolOutputExpansionAndWaitInspection(t *testing.T) {
 				waitSummary: waitHost.querySelector('.tool-result-omitted-details summary')?.textContent || '',
 				waitInspectable,
 				inspectedCommand: app.toolCommandModal.command,
-				inspectedProcess: app.toolCommandModal.meta.find(row => row.label === 'process id')?.value || ''
+				inspectedProcess: app.toolCommandModal.meta.find(row => row.label === 'process id')?.value || '',
+				mcpSummary: mcpDetails?.querySelector('summary')?.textContent || '',
+				mcpExpanded: mcpDetails?.open === true,
+				mcpCopied,
+				preCopyButton: !!preCopyButton,
+				preCopied: window.__copiedOutput || ''
 			};
 		})()`, &result),
 	); err != nil {
@@ -93,5 +124,14 @@ func TestExecToolOutputExpansionAndWaitInspection(t *testing.T) {
 	}
 	if !result.WaitInspectable || result.InspectedCommand != "serve --foreground" || result.InspectedProcess != "exec_7" {
 		t.Fatalf("wait inspection = %#v", result)
+	}
+	if result.MCPSummary != "... 3 lines omitted ..." || !result.MCPExpanded {
+		t.Fatalf("MCP omitted output summary=%q expanded=%v", result.MCPSummary, result.MCPExpanded)
+	}
+	if result.MCPCopied != "mcp one\nmcp two\nmcp three\nmcp four\nmcp five\nmcp six\nmcp seven" {
+		t.Fatalf("copied MCP output = %q", result.MCPCopied)
+	}
+	if !result.PreCopyButton || result.PreCopied != "alpha\nbeta" {
+		t.Fatalf("pre copy button=%v copied=%q", result.PreCopyButton, result.PreCopied)
 	}
 }

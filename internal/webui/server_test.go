@@ -2155,10 +2155,17 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected edit and patch results to use colored diff rendering")
 	}
 	if !strings.Contains(fullPage, `compactLines(lines, head = 2, tail = 2, minimumOmitted = 2)`) ||
-		!strings.Contains(fullPage, `function renderCompactLines(lines, head = 2, tail = 2, minimumOmitted = 2, expandable = false)`) ||
+		!strings.Contains(fullPage, `function renderCompactLines(lines, head = 2, tail = 2, minimumOmitted = 2, expandable = true)`) ||
 		!strings.Contains(fullPage, `tool-result-omitted-details`) ||
 		!strings.Contains(fullPage, `Expand or collapse omitted output`) {
-		t.Fatalf("expected file write results to use compact head/tail rendering")
+		t.Fatalf("expected tool results to use expandable compact head/tail rendering")
+	}
+	if !strings.Contains(fullPage, `function copyOutputButton(extraClass = '')`) ||
+		!strings.Contains(fullPage, `handleCopyOutputClick(event)`) ||
+		!strings.Contains(fullPage, `copyableOutputText(trigger)`) ||
+		!strings.Contains(fullPage, `root.querySelectorAll('pre:not([data-copy-enhanced])')`) ||
+		!strings.Contains(fullPage, `.copy-output-overlay`) {
+		t.Fatalf("expected monospaced blocks and tool results to expose shared copy controls")
 	}
 	if !strings.Contains(fullPage, `toolStatus(tool) === 'done' || toolStatus(tool) === 'errored'`) || !strings.Contains(fullPage, `return 'exit ' + exitCode`) || !strings.Contains(fullPage, `isBareExitStatus(error)`) || !strings.Contains(fullPage, `return renderCompactBlock('Output'`) {
 		t.Fatalf("expected bash tool rendering to show Ran command, exit code, and compact output")

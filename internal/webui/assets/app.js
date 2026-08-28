@@ -608,14 +608,18 @@
         default: return 'bi-person-circle';
       }
     }
-    function toolResultHeader(title) {
-      return '<div class="tool-result-header">' + escapeHTML(title) + '</div>';
+    function copyOutputButton(extraClass = '') {
+      const cls = ['copy-output-button', extraClass].filter(Boolean).join(' ');
+      return '<button type="button" class="' + cls + '" title="Copy output" aria-label="Copy output"><i class="bi bi-copy" aria-hidden="true"></i></button>';
+    }
+    function toolResultHeader(title, copyable = false) {
+      return '<div class="tool-result-header"><span>' + escapeHTML(title) + '</span>' + (copyable ? copyOutputButton() : '') + '</div>';
     }
     function renderToolResultLine(text, extraClass = '') {
       const cls = ['tool-result-line', extraClass].filter(Boolean).join(' ');
       return '<div class="' + cls + '" title="' + escapeHTML(text || '') + '">' + escapeHTML(text || ' ') + '</div>';
     }
-    function renderCompactLines(lines, head = 2, tail = 2, minimumOmitted = 2, expandable = false) {
+    function renderCompactLines(lines, head = 2, tail = 2, minimumOmitted = 2, expandable = true) {
       return compactLines(lines, head, tail, minimumOmitted).map(line => {
         if (!line.omitted) return renderToolResultLine(line.text);
         if (!expandable) return renderToolResultLine(line.text, 'tool-result-omitted');
@@ -626,10 +630,10 @@
           '</details>';
       }).join('');
     }
-    function renderCompactBlock(title, lines, extraClass = '', expandable = false) {
+    function renderCompactBlock(title, lines, extraClass = '', expandable = true) {
       const body = renderCompactLines(lines, 2, 2, 2, expandable);
       const bodyClass = ['tool-result-body', extraClass].filter(Boolean).join(' ');
-      return toolResultHeader(title) + '<div class="' + bodyClass + '">' + body + '</div>';
+      return toolResultHeader(title, true) + '<div class="' + bodyClass + '">' + body + '</div>';
     }
     function renderKeyValueBlock(title, pairs) {
       const lines = pairs.filter(pair => pair[1] !== undefined && pair[1] !== null && String(pair[1]) !== '').map(pair => pair[0] + ': ' + pair[1]);
@@ -644,7 +648,7 @@
           '<span class="tool-diff-text">' + escapeHTML(row.text || ' ') + '</span>' +
           '</div>';
       }).join('');
-      return toolResultHeader(title) + '<div>' + (rows || '<div class="tool-result-body text-secondary">No diff</div>') + '</div>';
+      return toolResultHeader(title, true) + '<div>' + (rows || '<div class="tool-result-body text-secondary">No diff</div>') + '</div>';
     }
     function diffRows(diff) {
       let oldLine = null;
@@ -1031,7 +1035,7 @@
       const lines = execStartResultLines(data);
       if (!lines.length) return '';
       const body = renderCompactLines(lines, 1, 0, 1, true);
-      return '<div class="tool-result-body tool-result-body-mono">' + body + '</div>';
+      return '<div class="tool-result-body tool-result-body-mono tool-result-copy-overlay">' + copyOutputButton('copy-output-overlay') + body + '</div>';
     }
     function timeoutLabel(value) {
       const ms = Number(value || 0);
@@ -1156,7 +1160,9 @@
           window.addEventListener('focus', () => { this.connectNow(); this.reportClientStateSoon(); });
           window.addEventListener('blur', () => this.reportClientStateSoon());
           document.addEventListener('visibilitychange', () => { if (!document.hidden) this.connectNow(); this.reportClientStateSoon(); });
-          document.addEventListener('click', event => this.handleMediaPreviewClick(event));
+          document.addEventListener('click', event => {
+            if (!this.handleCopyOutputClick(event)) this.handleMediaPreviewClick(event);
+          });
           document.addEventListener('keydown', event => this.handleGlobalKeydown(event));
           this.restartAgeTimer = setInterval(() => { this.restartAgeTick = Date.now(); }, 30000);
           this.websocketHealthTimer = setInterval(() => this.checkWebsocketHealth(), 5000);
@@ -1204,6 +1210,56 @@
           if (tag !== 'input') return false;
           const type = String(el.getAttribute('type') || 'text').toLowerCase();
           return !['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit'].includes(type);
+        },
+        copyText(text, label = 'Copied output') {
+          text = String(text || '');
+          if (!text) return Promise.resolve(false);
+          if (navigator.clipboard?.writeText) {
+            return navigator.clipboard.writeText(text).then(() => {
+              this.showToast(label);
+              return true;
+            }).catch(() => {
+              this.showToast('Could not copy output');
+              return false;
+            });
+          }
+          const input = document.createElement('textarea');
+          input.value = text;
+          input.setAttribute('readonly', '');
+          input.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+          document.body.appendChild(input);
+          input.select();
+          let copied = false;
+          try { copied = document.execCommand('copy'); } catch (_) {}
+          input.remove();
+          this.showToast(copied ? label : 'Could not copy output');
+          return Promise.resolve(copied);
+        },
+        copyableOutputText(trigger) {
+          const pre = trigger?.closest?.('pre') || trigger?.closest?.('.copyable-mono')?.querySelector('pre');
+          if (pre) {
+            const code = pre.querySelector('code');
+            if (code) return code.textContent || '';
+            const clone = pre.cloneNode(true);
+            clone.querySelectorAll('.copy-output-button').forEach(button => button.remove());
+            return clone.textContent || '';
+          }
+          const header = trigger?.closest?.('.tool-result-header');
+          const scope = header?.nextElementSibling || trigger?.closest?.('.tool-result-body');
+          if (!scope) return '';
+          const diffLines = Array.from(scope.querySelectorAll('.tool-diff-line')).map(line => line.querySelector('.tool-diff-text')?.textContent || '');
+          if (diffLines.length) return diffLines.join('\n');
+          const lines = Array.from(scope.querySelectorAll('.tool-result-line:not(summary)')).map(line => line.textContent || '');
+          if (lines.length) return lines.join('\n');
+          return scope.textContent || '';
+        },
+        handleCopyOutputClick(event) {
+          const trigger = event?.target?.closest?.('.copy-output-button');
+          if (!trigger) return false;
+          event.preventDefault();
+          event.stopPropagation();
+          this.copyText(this.copyableOutputText(trigger));
+          return true;
         },
         focusComposerAndInsert(text) {
           const el = this.$refs?.composerInput;
@@ -2335,6 +2391,20 @@
         },
         enhanceDisplayedMedia(root) {
           if (!root) return;
+          root.querySelectorAll('pre:not([data-copy-enhanced])').forEach(pre => {
+            pre.dataset.copyEnhanced = 'true';
+            const wrapper = document.createElement('div');
+            wrapper.className = 'copyable-mono';
+            pre.parentNode.insertBefore(wrapper, pre);
+            wrapper.appendChild(pre);
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'copy-output-button copy-output-overlay';
+            button.title = 'Copy output';
+            button.setAttribute('aria-label', 'Copy output');
+            button.innerHTML = '<i class="bi bi-copy" aria-hidden="true"></i>';
+            wrapper.appendChild(button);
+          });
           root.querySelectorAll('.markdown-body img:not([data-lightbox-enhanced])').forEach(img => {
             img.dataset.lightboxEnhanced = 'true';
             const wrapper = document.createElement('span');

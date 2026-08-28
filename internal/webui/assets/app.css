@@ -212,6 +212,8 @@
     .markdown-body th { background: var(--bs-secondary-bg); font-weight: 600; }
     .markdown-body code { color: #c9d1d9; background: #0d1117; border-radius: .25rem; padding: .1rem .25rem; }
     .markdown-body pre { background: #0d1117; color: #c9d1d9; border-radius: .45rem; padding: .75rem; overflow: auto; white-space: pre; }
+    .copyable-mono { position: relative; min-width: 0; }
+    .copyable-mono > pre { padding-right: 2.65rem; }
     .markdown-body pre code { background: transparent; color: inherit; padding: 0; border-radius: 0; }
     .markdown-body svg { max-width: 100%; height: auto; }
     .markdown-media-preview { position: relative; display: inline-block; max-width: 100%; vertical-align: top; }
@@ -234,7 +236,7 @@
     .markdown-body blockquote { border-left: 3px solid var(--bs-border-color); color: var(--bs-secondary-color); padding-left: .75rem; margin: .75rem 0; }
     .tool { padding-left: 0; }
     .tool-result { border: 1px solid var(--bs-border-color); border-radius: .45rem; overflow: hidden; background: var(--bs-body-bg); }
-    .tool-result-header { padding: .35rem .55rem; background: var(--bs-secondary-bg); border-bottom: 1px solid var(--bs-border-color); font-size: .82rem; font-weight: 600; }
+    .tool-result-header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .35rem .55rem; background: var(--bs-secondary-bg); border-bottom: 1px solid var(--bs-border-color); font-size: .82rem; font-weight: 600; }
     .tool-result-body { padding: .45rem .55rem; font-family: var(--bs-font-monospace); font-size: .82rem; line-height: 1.35; overflow: hidden; }
     .tool-result-body-mono { font-family: var(--bs-font-monospace); }
     .tool-result-line { min-height: 1.35em; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
@@ -243,6 +245,11 @@
     .tool-result-omitted-details > summary:hover { color: var(--bs-body-color); }
     .tool-result-omitted-details[open] > summary { margin-bottom: .2rem; }
     .tool-result-expanded { margin-left: .45rem; padding-left: .55rem; border-left: 2px solid var(--bs-border-color); }
+    .copy-output-button { display: inline-grid; flex: 0 0 auto; place-items: center; width: 1.45rem; height: 1.45rem; padding: 0; border: 1px solid transparent; border-radius: .3rem; background: transparent; color: var(--bs-secondary-color); font-size: .78rem; line-height: 1; opacity: .72; }
+    .copy-output-button:hover, .copy-output-button:focus-visible { border-color: var(--bs-border-color); background: var(--bs-body-bg); color: var(--bs-body-color); opacity: 1; }
+    .tool-result-copy-overlay { position: relative; }
+    .copy-output-overlay { position: absolute; top: .35rem; right: .35rem; z-index: 2; border-color: rgba(255, 255, 255, .18); background: rgba(0, 0, 0, .58); color: #fff; opacity: .82; }
+    .copy-output-overlay:hover, .copy-output-overlay:focus-visible { background: rgba(0, 0, 0, .78); color: #fff; opacity: 1; }
     .tool-memory-result { display: grid; }
     .tool-memory-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .55rem; align-items: center; padding: .45rem .55rem; border-bottom: 1px solid var(--bs-border-color); color: inherit; text-decoration: none; }
     .tool-memory-row:hover, .tool-memory-row:focus-visible { background: var(--bs-tertiary-bg); color: var(--bs-link-color); }
