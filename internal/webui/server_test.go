@@ -1890,6 +1890,19 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `rpc('promote_quick_chat'`) {
 		t.Fatalf("expected one-click Quick Chat creation, new-tab handling, and management")
 	}
+	if !strings.Contains(document, `x-show="welcomeMode() || showSessions"`) ||
+		!strings.Contains(document, `sessionTab === 'sessions'`) ||
+		!strings.Contains(document, `sessionTab === 'chats'`) ||
+		!strings.Contains(document, `sessionTab === 'voice'`) ||
+		!strings.Contains(appJS, `refreshSessionSelector()`) {
+		t.Fatalf("expected homepage and popup to share one session, quick-chat, and voice selector")
+	}
+	if !strings.Contains(document, `x-show="confirmationDialog.open"`) ||
+		!strings.Contains(appJS, `requestConfirmation(options = {})`) ||
+		!strings.Contains(document, `x-transition.opacity.duration.200ms`) ||
+		strings.Contains(appJS, `confirm(`) {
+		t.Fatalf("expected app actions to use the shared confirmation modal and fading selector rows")
+	}
 	if !strings.Contains(fullPage, `timelineItemActionAvailable(item) && workspaceSessionMode()`) ||
 		!strings.Contains(fullPage, `x-show="quickChatMode()" :title="activeModelTooltip()" @click="openModelDialog()"`) ||
 		!strings.Contains(fullPage, `class="sidebar p-3 bg-body-tertiary" x-show="sessionLoadedMode()"`) ||

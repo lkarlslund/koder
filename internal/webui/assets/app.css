@@ -48,7 +48,8 @@
     .restart-needed.btn-warning, .restart-needed.btn-danger { color: var(--bs-btn-color); }
     @keyframes restart-needed-pulse { 0%, 100% { opacity: .55; transform: scale(.95); } 50% { opacity: 1; transform: scale(1.08); } }
     .welcome-view { grid-column: 1 / 4; min-height: 0; overflow: auto; display: grid; place-items: start center; background: var(--bs-body-bg); }
-    .welcome-panel { width: min(840px, 100%); margin: min(8vh, 4rem) auto; display: grid; gap: 1.25rem; }
+    .session-selector-home { grid-row: 2; padding: min(5vh, 2.5rem) 1rem; }
+    .session-selector-home .session-dialog { width: min(900px, 100%); max-height: 100%; }
     .hydrating-view { grid-column: 1 / 4; min-height: 0; overflow: hidden; display: grid; place-items: center; background: var(--bs-body-bg); }
     .hydrating-panel { width: min(24rem, 100%); display: grid; justify-items: center; gap: .25rem; }
     .welcome-header { display: flex; align-items: end; justify-content: space-between; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--bs-border-color); }
@@ -366,6 +367,10 @@
     }
     .session-dialog { width: min(820px, 100%); max-height: min(720px, 90vh); overflow: hidden; display: flex; flex-direction: column; }
     .session-list { overflow: auto; }
+    .session-selector-row { transition: opacity .2s ease; }
+    .confirmation-backdrop { z-index: 1080; }
+    .confirmation-dialog { width: min(480px, 100%); }
+    .confirmation-message { white-space: pre-line; }
     .settings-dialog { width: min(1120px, 100%); max-height: min(860px, 94vh); overflow: hidden; display: flex; flex-direction: column; }
     .settings-body { min-height: 0; display: grid; grid-template-columns: 190px minmax(0, 1fr); }
     .settings-tabs { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: .45rem; padding: .75rem; background: var(--bs-tertiary-bg); }

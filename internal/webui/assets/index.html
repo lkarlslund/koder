@@ -67,47 +67,6 @@
       <span class="visually-hidden">Open sidebar</span>
     </button>
 
-    <main class="welcome-view p-3" x-show="welcomeMode()" style="display: none;">
-      <section class="welcome-panel">
-        <div class="welcome-header">
-          <div>
-            <div class="welcome-kicker"><img class="koder-logo" src="/assets/koder-logo.svg" alt="" aria-hidden="true"> koder</div>
-            <h1>Welcome</h1>
-          </div>
-          <div class="d-flex gap-2">
-            <button class="btn btn-success" type="button" :disabled="quickChatCreating" @click="newQuickChat($event)" @auxclick.stop.prevent="newQuickChat($event)"><i class="bi bi-lightning-charge"></i> Quick Chat</button>
-            <button class="btn btn-primary" type="button" @click="beginCreateSessionFromWelcome()"><i class="bi bi-plus-lg"></i> New Session</button>
-          </div>
-        </div>
-        <template x-if="welcomeMessage()">
-          <div class="alert alert-warning" x-text="welcomeMessage()"></div>
-        </template>
-        <div class="welcome-section">
-          <div class="welcome-section-header">
-            <div>
-              <div class="fw-semibold">Sessions</div>
-              <div class="small text-secondary" x-text="state.project_root || ''"></div>
-            </div>
-            <button class="btn btn-sm btn-outline-secondary" type="button" @click="loadWelcomeSessions()"><i class="bi bi-arrow-clockwise"></i></button>
-          </div>
-          <template x-if="sessionRows().length === 0">
-            <div class="welcome-empty">No sessions in this workspace</div>
-          </template>
-          <div class="welcome-session-list">
-            <template x-for="session in sessionRows()" :key="sessionID(session)">
-              <button type="button" class="welcome-session-row" @click="switchSession(sessionID(session), $event)" @auxclick.prevent="switchSession(sessionID(session), $event)">
-                <span>
-                  <span class="fw-semibold" x-text="sessionTitle(session)"></span>
-                  <span class="d-block small text-secondary text-truncate" x-text="sessionProjectRoot(session)"></span>
-                </span>
-                <i class="bi bi-arrow-right"></i>
-              </button>
-            </template>
-          </div>
-        </div>
-      </section>
-    </main>
-
     <main class="hydrating-view p-3" x-show="hydratingSessionMode()" style="display: none;">
       <section class="hydrating-panel text-center">
         <div class="spinner-border text-primary" aria-hidden="true"></div>
@@ -1060,15 +1019,22 @@
     </section>
   </div>
 
-  <div class="modal-backdrop-lite" x-show="showSessions" x-transition @keydown.escape.window="closeSessionDialog()" style="display: none;">
+  <main class="session-selector-host" :class="welcomeMode() ? 'welcome-view session-selector-home' : 'modal-backdrop-lite'" x-show="welcomeMode() || showSessions" x-transition @keydown.escape.window="if (showSessions && !welcomeMode()) closeSessionDialog()" style="display: none;">
     <section class="session-dialog bg-body border rounded shadow">
       <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
         <div>
-          <div class="fw-semibold"><i class="bi bi-collection me-1"></i> Sessions &amp; Chats</div>
+          <div class="welcome-kicker" x-show="welcomeMode()"><img class="koder-logo" src="/assets/koder-logo.svg" alt="" aria-hidden="true"> koder</div>
+          <div :class="welcomeMode() ? 'fs-4 fw-semibold' : 'fw-semibold'"><i class="bi bi-collection me-1"></i> Sessions &amp; Chats</div>
           <div class="small text-secondary" x-text="sessionState.project_root || state.project_root || ''"></div>
         </div>
-        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeSessionDialog()"><i class="bi bi-x-lg"></i></button>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" title="Refresh" :disabled="sessionLoading" @click="refreshSessionSelector()"><i class="bi" :class="sessionLoading ? 'bi-hourglass-split' : 'bi-arrow-clockwise'"></i></button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" x-show="showSessions && !welcomeMode()" title="Close" @click="closeSessionDialog()"><i class="bi bi-x-lg"></i></button>
+        </div>
       </header>
+      <template x-if="welcomeMessage()">
+        <div class="alert alert-warning rounded-0 border-start-0 border-end-0 mb-0" x-text="welcomeMessage()"></div>
+      </template>
       <div class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
         <ul class="nav nav-tabs border-0">
           <li class="nav-item"><button type="button" class="nav-link" :class="{'active': sessionTab === 'sessions'}" @click="sessionTab = 'sessions'">Sessions <span class="badge text-bg-secondary" x-text="sessionRows().length"></span></button></li>
@@ -1093,7 +1059,7 @@
           <div class="list-group-item text-secondary">No sessions in this workspace</div>
         </template>
         <template x-for="session in sessionRows()" :key="sessionID(session)">
-          <div class="list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" :class="{'active': sessionID(session) === activeSessionID()}">
+          <div class="session-selector-row list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" x-transition.opacity.duration.200ms :class="{'active': sessionID(session) === activeSessionID()}">
             <button type="button" class="btn btn-link text-start p-0 flex-grow-1 text-decoration-none" :class="sessionID(session) === activeSessionID() ? 'text-white' : 'text-body'" @click="switchSession(sessionID(session), $event)" @auxclick.stop.prevent="switchSession(sessionID(session), $event)">
               <span>
 				<span class="fw-semibold"><i class="bi me-1" :class="isVoiceSession(session) ? 'bi-telephone-fill' : 'bi-folder'"></i><span x-text="sessionTitle(session)"></span></span>
@@ -1120,7 +1086,7 @@
           <div class="list-group-item text-secondary">No Quick Chats</div>
         </template>
         <template x-for="session in quickChatRows()" :key="sessionID(session)">
-          <div class="list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" :class="{'active': sessionID(session) === activeSessionID()}">
+          <div class="session-selector-row list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" x-transition.opacity.duration.200ms :class="{'active': sessionID(session) === activeSessionID()}">
             <button type="button" class="btn btn-link text-start p-0 flex-grow-1 text-decoration-none" :class="sessionID(session) === activeSessionID() ? 'text-white' : 'text-body'" @click="switchSession(sessionID(session), $event)" @auxclick.stop.prevent="switchSession(sessionID(session), $event)">
               <span>
                 <span class="fw-semibold"><i class="bi bi-lightning-charge me-1"></i><span x-text="sessionTitle(session)"></span></span>
@@ -1142,7 +1108,7 @@
           <div class="list-group-item text-secondary">No Voice Chats</div>
         </template>
         <template x-for="session in voiceSessionRows()" :key="sessionID(session)">
-          <div class="list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" :class="{'active': sessionID(session) === activeSessionID()}">
+          <div class="session-selector-row list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" x-transition.opacity.duration.200ms :class="{'active': sessionID(session) === activeSessionID()}">
             <button type="button" class="btn btn-link text-start p-0 flex-grow-1 text-decoration-none" :class="sessionID(session) === activeSessionID() ? 'text-white' : 'text-body'" @click="switchSession(sessionID(session), $event)" @auxclick.stop.prevent="switchSession(sessionID(session), $event)">
               <span>
                 <span class="fw-semibold"><i class="bi bi-telephone-fill me-1"></i><span x-text="sessionTitle(session)"></span></span>
@@ -1159,7 +1125,7 @@
         </template>
       </div>
     </section>
-  </div>
+  </main>
 
   <div class="modal-backdrop-lite modal-backdrop-nested" x-show="showQuickPromotion" x-transition @keydown.escape.window="closeQuickPromotion()" style="display: none;">
     <section class="bg-body border rounded shadow" style="width: min(620px, 100%);">
@@ -1960,6 +1926,20 @@
           </div>
         </template>
       </div>
+    </section>
+  </div>
+
+  <div class="modal-backdrop-lite confirmation-backdrop" x-show="confirmationDialog.open" x-transition @click.self="resolveConfirmation(false)" @keydown.escape.window="resolveConfirmation(false)" style="display: none;">
+    <section class="confirmation-dialog bg-body border rounded shadow" role="alertdialog" aria-modal="true" aria-labelledby="confirmation-title" aria-describedby="confirmation-message">
+      <header class="d-flex align-items-center gap-2 p-3 border-bottom">
+        <i class="bi" :class="confirmationDialog.danger ? 'bi-exclamation-triangle-fill text-danger' : 'bi-question-circle-fill text-primary'"></i>
+        <div id="confirmation-title" class="fw-semibold" x-text="confirmationDialog.title"></div>
+      </header>
+      <div id="confirmation-message" class="confirmation-message p-3" x-text="confirmationDialog.message"></div>
+      <footer class="d-flex justify-content-end gap-2 p-3 border-top">
+        <button type="button" class="btn btn-outline-secondary" @click="resolveConfirmation(false)">Cancel</button>
+        <button type="button" class="btn" :class="confirmationDialog.danger ? 'btn-danger' : 'btn-primary'" @click="resolveConfirmation(true)" x-text="confirmationDialog.confirmLabel"></button>
+      </footer>
     </section>
   </div>
 

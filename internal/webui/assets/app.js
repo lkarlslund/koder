@@ -1117,6 +1117,7 @@
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'overview', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', settingsHealth: {issue_count: 0, needs_setup: false, issues: []}, showObservability: false,
 		showPhoneBinding: false, phoneBinding: null, phoneBindingLoading: false, phoneBindingError: '', voiceDevices: [], voiceDevicesLoading: false, voiceDevicesError: '',
         showSessions: false, sessionTab: 'sessions', sessionFilter: 'active', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
+        confirmationDialog: {open: false, title: '', message: '', confirmLabel: 'Confirm', danger: false}, confirmationResolver: null,
 		providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
 		showModelDetails: false, modelDetails: null, settingsModelQuery: '', showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
 		settingsSkillQuery: '', showSkillInspector: false, skillInspection: null, skillInspectionLoading: false,
@@ -3048,6 +3049,7 @@
           return '';
         },
         modalOpenName() {
+          if (this.confirmationDialog.open) return 'confirmation';
           if (this.userInputQuestions().length > 0) return 'user_input';
 		  if (this.browserVoice?.open) return 'browser_voice';
           if (this.imageLightbox?.open) return 'image';
@@ -4467,9 +4469,9 @@
             });
         },
         endChatDrag() { this.dragChatID = ''; },
-        archiveChat(chat) {
+        async archiveChat(chat) {
           const id = this.chatID(chat);
-          if (!id || !confirm('Archive this chat?')) return;
+          if (!id || !await this.requestConfirmation({title: 'Archive this chat?', message: 'This chat will move out of the active list.', confirmLabel: 'Archive'})) return;
           this.rpc('archive_chat', {chat_id: id, archived: true}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); }).catch(err => this.showToast(err.message));
         },
         restoreChat(chat) {
@@ -4477,9 +4479,9 @@
           if (!id) return;
           this.rpc('archive_chat', {chat_id: id, archived: false}).then(s => { this.applyState(s); this.writeSelectedChat(); this.syncActiveChatURL(); }).catch(err => this.showToast(err.message));
         },
-        deleteChat(chat) {
+        async deleteChat(chat) {
           const id = this.chatID(chat);
-          if (!id || !confirm('Delete this chat and its history? This cannot be undone.')) return;
+          if (!id || !await this.requestConfirmation({title: 'Delete chat?', message: 'Delete this chat and its history? This cannot be undone.', confirmLabel: 'Delete', danger: true})) return;
           this.rpc('delete_chat', {chat_id: id}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); }).catch(err => this.showToast(err.message));
         },
         openObservabilityPanel() {
@@ -4544,7 +4546,7 @@
         },
         async runChatCleanup() {
           const candidates = this.cleanupCandidates();
-          if (!candidates.length || !confirm('Archive ' + candidates.length + ' matching chat' + (candidates.length === 1 ? '' : 's') + '?')) return;
+          if (!candidates.length || !await this.requestConfirmation({title: 'Archive matching chats?', message: 'Archive ' + candidates.length + ' matching chat' + (candidates.length === 1 ? '' : 's') + '?', confirmLabel: 'Archive'})) return;
           this.cleanupDialog.busy = true;
           this.cleanupDialog.error = '';
           try {
@@ -4567,6 +4569,26 @@
           this.toast = message || '';
           if (this.toastTimer) clearTimeout(this.toastTimer);
           this.toastTimer = setTimeout(() => { this.toast = ''; this.toastTimer = null; }, 4500);
+        },
+        requestConfirmation(options = {}) {
+          if (this.confirmationResolver) this.confirmationResolver(false);
+          this.confirmationDialog = {
+            open: true,
+            title: String(options.title || 'Confirm action'),
+            message: String(options.message || ''),
+            confirmLabel: String(options.confirmLabel || 'Confirm'),
+            danger: !!options.danger,
+          };
+          this.reportClientStateSoon();
+          return new Promise(resolve => { this.confirmationResolver = resolve; });
+        },
+        resolveConfirmation(confirmed) {
+          if (!this.confirmationDialog.open) return;
+          const resolve = this.confirmationResolver;
+          this.confirmationResolver = null;
+          this.confirmationDialog = {open: false, title: '', message: '', confirmLabel: 'Confirm', danger: false};
+          this.reportClientStateSoon();
+          if (resolve) resolve(!!confirmed);
         },
         async openBrowserVoice() {
           if (!this.voiceChatMode()) {
@@ -5086,10 +5108,10 @@
             this.modelSettingsStatus = 'Set as default model'; this.modelSettingsStatusKind = 'success';
           }).catch(err => { this.modelSettingsStatus = err.message; this.modelSettingsStatusKind = 'danger'; }).finally(() => { this.modelSettingsSaving = false; });
         },
-        deleteActiveModelConfig() {
+        async deleteActiveModelConfig() {
           const draft = this.modelSettingsDraft;
           if (!draft?.provider_id || !draft?.model_id || !this.modelSettingsPersistedCustom()) return;
-          if (!confirm('Delete custom model "' + draft.model_id + '"?')) return;
+          if (!await this.requestConfirmation({title: 'Delete custom model?', message: 'Delete custom model “' + draft.model_id + '”?', confirmLabel: 'Delete', danger: true})) return;
           this.modelSettingsSaving = true; this.modelSettingsStatus = ''; this.modelSettingsStatusKind = 'secondary';
           this.rpc('delete_model_config', {provider_id: draft.provider_id, model_id: draft.model_id}).then(result => {
             this.setSettingsState(result);
@@ -5101,13 +5123,15 @@
         openSessionDialog() {
           this.sessionTab = this.quickChatMode() ? 'chats' : (this.legacyVoiceSessionMode() ? 'voice' : 'sessions');
           this.sessionFilter = 'active';
-          this.showSessions = true; this.sessionLoading = true; this.closeSessionEditor();
+          this.showSessions = true; this.closeSessionEditor();
           this.reportClientStateSoon();
-          this.rpc('list_sessions', {}).then(result => { this.sessionState = this.normalizeSessionState(result); }).finally(() => { this.sessionLoading = false; });
+          this.refreshSessionSelector();
         },
         closeSessionDialog() { this.showSessions = false; this.closeSessionEditor(); this.reportClientStateSoon(); },
-        loadWelcomeSessions() {
-          this.rpc('list_sessions', {}).then(result => {
+        refreshSessionSelector() {
+          if (this.sessionLoading) return Promise.resolve();
+          this.sessionLoading = true;
+          return this.rpc('list_sessions', {}).then(result => {
             this.sessionState = this.normalizeSessionState(result);
             this.state.sessions = this.sessionState.sessions;
             this.state.Sessions = this.state.sessions;
@@ -5115,8 +5139,9 @@
             this.state.QuickChats = this.state.quick_chats;
             this.state.project_root = this.sessionState.project_root || this.state.project_root || '';
             this.state.ProjectRoot = this.state.project_root;
-          }).catch(err => this.showToast(err.message));
+          }).catch(err => this.showToast(err.message)).finally(() => { this.sessionLoading = false; });
         },
+        loadWelcomeSessions() { return this.refreshSessionSelector(); },
         normalizeSessionState(value) {
           const source = value || {};
           const sessions = source.sessions || source.Sessions || [];
@@ -5134,7 +5159,7 @@
           return this.filterManagedSessions(this.allSessionRows().filter(session => this.isVoiceSession(session)));
         },
         filterManagedSessions(rows) {
-          if (!this.showSessions) return rows.filter(session => !this.sessionArchived(session));
+          if (!this.showSessions && !this.welcomeMode()) return rows.filter(session => !this.sessionArchived(session));
           if (this.sessionFilter === 'archived') return rows.filter(session => this.sessionArchived(session));
           if (this.sessionFilter === 'starred') return rows.filter(session => this.sessionFavorite(session) && !this.sessionArchived(session));
           return rows.filter(session => !this.sessionArchived(session));
@@ -5226,14 +5251,14 @@
             this.showToast(err.message || 'Quick Chat creation failed');
           }).finally(() => { this.quickChatCreating = false; });
         },
-        closeQuickChat(id) {
+        async closeQuickChat(id) {
           id = String(id || '').trim();
-          if (!id || !confirm('Close this Quick Chat and permanently delete its chat and generated files?')) return;
+          if (!id || !await this.requestConfirmation({title: 'Close Quick Chat?', message: 'Permanently delete this Quick Chat, its chat history, and generated files?', confirmLabel: 'Close and delete', danger: true})) return;
           const close = cancelActive => this.rpc('close_quick_chat', {session_id: id, cancel_active: cancelActive});
-          close(false).then(state => { this.applyState(state); this.showSessions = false; }).catch(err => {
+          close(false).then(state => { this.applyState(state); return this.refreshSessionSelector(); }).catch(async err => {
             if (!String(err.message || '').includes('cancellation confirmation')) { this.showToast(err.message); return; }
-            if (!confirm('This Quick Chat is active. Cancel its current work and close it now?')) return;
-            close(true).then(state => { this.applyState(state); this.showSessions = false; }).catch(closeErr => this.showToast(closeErr.message));
+            if (!await this.requestConfirmation({title: 'Cancel active work?', message: 'This Quick Chat is active. Cancel its current work and close it now?', confirmLabel: 'Cancel and close', danger: true})) return;
+            close(true).then(state => { this.applyState(state); return this.refreshSessionSelector(); }).catch(closeErr => this.showToast(closeErr.message));
           });
         },
         beginPromoteQuickChat(session) {
@@ -5324,13 +5349,13 @@
             this.showToast(message);
           });
         },
-        deleteSession(id) {
+        async deleteSession(id) {
           if (!id) return;
-          if (!confirm('Delete this session and all of its chats and history? This cannot be undone.')) return;
+          if (!await this.requestConfirmation({title: 'Delete session?', message: 'Delete this session and all of its chats and history? This cannot be undone.', confirmLabel: 'Delete', danger: true})) return;
           this.rpc('delete_session', {session_id: id}).then(s => {
             this.applyState(s);
-            return this.rpc('list_sessions', {});
-          }).then(result => { this.sessionState = this.normalizeSessionState(result || this.sessionState); });
+            return this.refreshSessionSelector();
+          }).catch(err => this.showToast(err.message));
         },
         updateSessionOrganization(session, changes) {
           const id = this.sessionID(session);
@@ -5344,8 +5369,8 @@
         toggleSessionFavorite(session) {
           this.updateSessionOrganization(session, {favorite: !this.sessionFavorite(session)});
         },
-        archiveSession(session) {
-          if (!confirm('Archive this session?')) return;
+        async archiveSession(session) {
+          if (!await this.requestConfirmation({title: 'Archive session?', message: 'This session will move out of the active list.', confirmLabel: 'Archive'})) return;
           this.updateSessionOrganization(session, {archived: true});
         },
         restoreSession(session) {
@@ -5503,8 +5528,8 @@
             this.showProviderEditor = false;
           }).catch(err => { this.providerStatus = err.message; this.providerStatusKind = 'danger'; }).finally(() => { this.providerSaving = false; });
         },
-        deleteProvider(id) {
-          if (!id || !confirm('Delete this provider?')) return;
+        async deleteProvider(id) {
+          if (!id || !await this.requestConfirmation({title: 'Delete provider?', message: 'Delete this provider and its model settings?', confirmLabel: 'Delete', danger: true})) return;
           this.rpc('delete_provider', {provider_id: id}).then(result => {
             this.providerState = result.providers || result;
             if (this.settings) this.settings.providers = this.providerState;
@@ -5524,8 +5549,8 @@
 			if (this.settingsTab === 'voice') this.loadVoiceDevices();
           }).finally(() => { this.settingsLoading = false; });
         },
-        closeSettingsDialog() {
-          if (this.settingsDirty() && !confirm('Discard unsaved settings changes?')) return;
+        async closeSettingsDialog() {
+          if (this.settingsDirty() && !await this.requestConfirmation({title: 'Discard changes?', message: 'Discard unsaved settings changes?', confirmLabel: 'Discard', danger: true})) return;
 		  this.showSettings = false; this.settings = null; this.settingsBaselineJSON = ''; this.settingsStatus = '';
 		  this.closeProviderEditor(); this.closeModelDetails(); this.closeModelConfigEditor(); this.closeMCPEditor(); this.closeSkillInspector(); this.reportClientStateSoon();
         },
@@ -5677,8 +5702,8 @@
 			if (Number.isNaN(date.getTime())) return '';
 			return (device?.last_seen_at ? 'Last used ' : 'Registered ') + date.toLocaleString();
 		},
-		revokeVoiceDevice(device) {
-			if (!device?.id || device.revoked_at || !confirm('Revoke ' + (device.name || 'this Android phone') + '? It will need to be bound again.')) return;
+		async revokeVoiceDevice(device) {
+			if (!device?.id || device.revoked_at || !await this.requestConfirmation({title: 'Revoke Android phone?', message: 'Revoke ' + (device.name || 'this Android phone') + '? It will need to be bound again.', confirmLabel: 'Revoke', danger: true})) return;
 			this.rpc('voice_device_revoke', {device_id: device.id}).then(result => {
 				this.voiceDevices = Array.isArray(result?.devices) ? result.devices : this.voiceDevices;
 				this.showToast('Android phone revoked');
@@ -5777,8 +5802,8 @@
 			this.settingsStatus = 'Browser ' + action + ' complete'; this.settingsStatusKind = 'success';
 		  }).catch(err => { this.settingsStatus = err.message; this.settingsStatusKind = 'danger'; this.refreshBrowserStatus(); });
 		},
-		resetBrowserProfile() {
-		  if (!confirm('Reset the managed browser profile? This permanently removes browser logins, cookies, history, and site data.')) return;
+		async resetBrowserProfile() {
+		  if (!await this.requestConfirmation({title: 'Reset browser profile?', message: 'Permanently remove browser logins, cookies, history, and site data?', confirmLabel: 'Reset', danger: true})) return;
 		  this.browserAction('reset_profile');
 		},
         ttsModelOptions() {
@@ -6311,14 +6336,14 @@
           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Custom request JSON must be an object');
           return parsed;
         },
-        deleteModelConfig(key) {
+        async deleteModelConfig(key) {
           if (!this.settings || !key) return;
           const item = this.modelConfigRows().find(row => this.modelConfigKey(row) === key);
           const usage = item ? this.modelUsageEntries(item.provider_id, item.model_id) : [];
           const message = usage.length
             ? 'Delete this model setting?\n\nCurrently used by:\n- ' + usage.map(entry => entry.detail).join('\n- ')
             : 'Delete this model setting?';
-          if (!confirm(message)) return;
+          if (!await this.requestConfirmation({title: 'Delete model setting?', message, confirmLabel: 'Delete', danger: true})) return;
           this.settings.model_configs = this.modelConfigRows().filter(item => this.modelConfigKey(item) !== key);
           if (item && this.settings?.general?.default_provider === item.provider_id && this.settings?.general?.default_model === item.model_id) {
             const replacement = (this.settings.models || []).find(model => this.modelOptionValue(model) !== this.modelOptionValue(item) && model.supports_chat !== false);
@@ -6469,8 +6494,8 @@
             this.showToast(this.mcpProbeSummary(result.runtime, 'MCP server saved'));
           }).catch(err => { this.mcpStatus = err.message; this.mcpStatusKind = 'danger'; }).finally(() => { this.mcpSaving = false; });
         },
-        deleteMCPServer(id) {
-          if (!this.settings || !id || !confirm('Delete this MCP server?')) return;
+        async deleteMCPServer(id) {
+          if (!this.settings || !id || !await this.requestConfirmation({title: 'Delete MCP server?', message: 'Delete this MCP server configuration?', confirmLabel: 'Delete', danger: true})) return;
           this.settings.mcp_servers = this.mcpRows().filter(item => item.id !== id);
         },
         toolDefaultRows() { return this.settings?.tool_defaults || []; },
