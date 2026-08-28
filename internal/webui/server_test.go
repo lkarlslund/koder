@@ -1876,10 +1876,13 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `welcomeMode()`) ||
 		!strings.Contains(fullPage, `welcome-view`) ||
+		!strings.Contains(fullPage, `.welcome-view { position: fixed; inset: 0;`) ||
+		!strings.Contains(fullPage, `.session-selector-home .session-dialog { width: 100%; height: 100%; max-height: none; border: 0 !important;`) ||
+		!strings.Contains(fullPage, `.session-selector-home .session-list { min-height: 0; flex: 1 1 auto; }`) ||
 		!strings.Contains(fullPage, `beginCreateSessionFromWelcome()`) ||
 		!strings.Contains(fullPage, `allowSessionURLSync`) ||
 		!strings.Contains(fullPage, `syncActiveChatURL()`) {
-		t.Fatalf("expected app to include welcome screen and opt-in URL sync")
+		t.Fatalf("expected app to include a full-page session selector and opt-in URL sync")
 	}
 	if !strings.Contains(fullPage, `rpc('new_quick_chat', {})`) ||
 		!strings.Contains(fullPage, `@auxclick.stop.prevent="newQuickChat($event)"`) ||

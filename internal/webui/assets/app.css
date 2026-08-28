@@ -47,9 +47,10 @@
     .restart-needed { color: var(--bs-warning); font-size: 1.05rem; line-height: 1; animation: restart-needed-pulse 1s ease-in-out infinite; }
     .restart-needed.btn-warning, .restart-needed.btn-danger { color: var(--bs-btn-color); }
     @keyframes restart-needed-pulse { 0%, 100% { opacity: .55; transform: scale(.95); } 50% { opacity: 1; transform: scale(1.08); } }
-    .welcome-view { grid-column: 1 / 4; min-height: 0; overflow: auto; display: grid; place-items: start center; background: var(--bs-body-bg); }
-    .session-selector-home { grid-row: 2; padding: min(5vh, 2.5rem) 1rem; }
-    .session-selector-home .session-dialog { width: min(900px, 100%); max-height: 100%; }
+    .welcome-view { position: fixed; inset: 0; z-index: 1020; width: 100%; min-height: 100vh; min-height: 100dvh; overflow: hidden; background: var(--bs-body-bg); }
+    .session-selector-home { padding: 0; }
+    .session-selector-home .session-dialog { width: 100%; height: 100%; max-height: none; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
+    .session-selector-home .session-list { min-height: 0; flex: 1 1 auto; }
     .hydrating-view { grid-column: 1 / 4; min-height: 0; overflow: hidden; display: grid; place-items: center; background: var(--bs-body-bg); }
     .hydrating-panel { width: min(24rem, 100%); display: grid; justify-items: center; gap: .25rem; }
     .welcome-header { display: flex; align-items: end; justify-content: space-between; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--bs-border-color); }
