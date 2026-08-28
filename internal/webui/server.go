@@ -2375,7 +2375,7 @@ func clientErrorCode(err error) string {
 
 const (
 	websocketHeartbeatInterval = 15 * time.Second
-	websocketStreamInterval    = 500 * time.Millisecond
+	websocketStreamInterval    = 100 * time.Millisecond
 	websocketWriteTimeout      = 5 * time.Second
 	websocketReadLimit         = 1 << 20
 )

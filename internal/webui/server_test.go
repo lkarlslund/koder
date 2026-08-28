@@ -1732,22 +1732,22 @@ func TestWebSocketStreamCoalescerLimitsAppendRate(t *testing.T) {
 		}}
 	}
 	base := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)
-	coalescer := websocketStreamCoalescer{interval: 500 * time.Millisecond}
+	coalescer := websocketStreamCoalescer{interval: websocketStreamInterval}
 
 	ready := coalescer.add(base, streamEvent("a", ""))
 	if len(ready) != 1 {
 		t.Fatalf("first chunk should be sent immediately, got %d events", len(ready))
 	}
-	if ready = coalescer.add(base.Add(100*time.Millisecond), streamEvent("b", "")); len(ready) != 0 {
+	if ready = coalescer.add(base.Add(20*time.Millisecond), streamEvent("b", "")); len(ready) != 0 {
 		t.Fatalf("second chunk should be held, got %d events", len(ready))
 	}
-	if ready = coalescer.add(base.Add(200*time.Millisecond), streamEvent("", "reasoning")); len(ready) != 0 {
+	if ready = coalescer.add(base.Add(40*time.Millisecond), streamEvent("", "reasoning")); len(ready) != 0 {
 		t.Fatalf("third chunk should merge into the pending batch, got %d events", len(ready))
 	}
-	if wait, ok := coalescer.wait(base.Add(200 * time.Millisecond)); !ok || wait != 300*time.Millisecond {
-		t.Fatalf("flush wait = %v, %v; want 300ms, true", wait, ok)
+	if wait, ok := coalescer.wait(base.Add(40 * time.Millisecond)); !ok || wait != 60*time.Millisecond {
+		t.Fatalf("flush wait = %v, %v; want 60ms, true", wait, ok)
 	}
-	flushed, ok := coalescer.flush(base.Add(500 * time.Millisecond))
+	flushed, ok := coalescer.flush(base.Add(100 * time.Millisecond))
 	if !ok {
 		t.Fatal("expected pending stream batch")
 	}
@@ -1764,25 +1764,25 @@ func TestWebSocketStreamCoalescerFlushesBeforeOtherEvents(t *testing.T) {
 		}}
 	}
 	base := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)
-	coalescer := websocketStreamCoalescer{interval: 500 * time.Millisecond}
+	coalescer := websocketStreamCoalescer{interval: websocketStreamInterval}
 	_ = coalescer.add(base, streamEvent("item-1", "a"))
-	_ = coalescer.add(base.Add(100*time.Millisecond), streamEvent("item-1", "b"))
+	_ = coalescer.add(base.Add(20*time.Millisecond), streamEvent("item-1", "b"))
 
 	stateEvent := app.Event{Type: "planning_delta", Payload: map[string]any{"ready": true}}
-	ready := coalescer.add(base.Add(200*time.Millisecond), stateEvent)
+	ready := coalescer.add(base.Add(40*time.Millisecond), stateEvent)
 	if len(ready) != 2 || ready[0].Type != "chat_delta" || ready[1].Type != "planning_delta" {
 		t.Fatalf("pending stream must precede state event, got %#v", ready)
 	}
-	if _, ok := coalescer.wait(base.Add(200 * time.Millisecond)); ok {
+	if _, ok := coalescer.wait(base.Add(40 * time.Millisecond)); ok {
 		t.Fatal("state event should leave no pending stream batch")
 	}
 
-	_ = coalescer.add(base.Add(250*time.Millisecond), streamEvent("item-1", "c"))
-	ready = coalescer.add(base.Add(300*time.Millisecond), streamEvent("item-2", "d"))
+	_ = coalescer.add(base.Add(50*time.Millisecond), streamEvent("item-1", "c"))
+	ready = coalescer.add(base.Add(60*time.Millisecond), streamEvent("item-2", "d"))
 	if len(ready) != 1 || ready[0].Payload.(chatDelta).ItemAppend.Text != "c" {
 		t.Fatalf("new assistant item should flush the previous item, got %#v", ready)
 	}
-	flushed, ok := coalescer.flush(base.Add(700 * time.Millisecond))
+	flushed, ok := coalescer.flush(base.Add(140 * time.Millisecond))
 	if !ok || flushed.Payload.(chatDelta).ItemAppend.ItemID != "item-2" {
 		t.Fatalf("new assistant item was not retained: %#v, %v", flushed, ok)
 	}
