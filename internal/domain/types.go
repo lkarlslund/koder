@@ -518,6 +518,18 @@ type Chat struct {
 	Activity               ChatActivity
 }
 
+// DefaultModelReference is persisted in both chat model fields when the chat
+// should resolve against the current system default instead of pinning the
+// provider/model that happened to be default when it was created.
+const DefaultModelReference = "default-model"
+
+// UsesDefaultModel reports whether a chat stores the dynamic system-default
+// model reference.
+func (c Chat) UsesDefaultModel() bool {
+	return strings.TrimSpace(c.ProviderID) == DefaultModelReference &&
+		strings.TrimSpace(c.ModelID) == DefaultModelReference
+}
+
 // EffectiveBackend returns the backend used by old and new chat records.
 func (c Chat) EffectiveBackend() ChatBackend {
 	if c.Backend == "" {

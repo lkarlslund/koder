@@ -3110,8 +3110,8 @@
           if (id) lines.push('Chat: ' + id);
           return lines.join('\n');
         },
-        activeProvider() { return this.activeSnapshot()?.chat?.provider_id || this.activeSnapshot()?.Chat?.ProviderID || this.activeSnapshot()?.chat?.ProviderID || this.state.snapshot?.Chat?.ProviderID || ''; },
-        activeModel() { return this.activeSnapshot()?.chat?.model_id || this.activeSnapshot()?.Chat?.ModelID || this.activeSnapshot()?.chat?.ModelID || this.state.snapshot?.Chat?.ModelID || ''; },
+        activeProvider() { const info = this.activeModelInfo(); return info.provider_id || info.ProviderID || this.activeSnapshot()?.chat?.provider_id || this.activeSnapshot()?.Chat?.ProviderID || this.activeSnapshot()?.chat?.ProviderID || this.state.snapshot?.Chat?.ProviderID || ''; },
+        activeModel() { const info = this.activeModelInfo(); return info.model_id || info.ModelID || this.activeSnapshot()?.chat?.model_id || this.activeSnapshot()?.Chat?.ModelID || this.activeSnapshot()?.chat?.ModelID || this.state.snapshot?.Chat?.ModelID || ''; },
         activeModelInfo() { return this.state.model_info || this.state.ModelInfo || {}; },
         formatTokens(value) {
           const n = Number(value || 0);
@@ -3143,6 +3143,7 @@
             'Images: ' + this.capabilityLabel(info.supports_images || info.SupportsImages, known),
             'PDFs: ' + this.capabilityLabel(info.supports_pdfs || info.SupportsPDFs, known),
           ];
+		  if (info.follows_default || info.FollowsDefault) lines.unshift('Assignment: follows system default');
           if (source) lines.push('Source: ' + source);
           return lines.join('\n');
         },
@@ -4342,8 +4343,8 @@
 		  const backend = this.chatCreatorBackend();
 		  const chat = this.activeChat();
 		  if (!backend || !chat || String(chat.Backend || chat.backend || 'koder') !== backend.id) return;
-		  const provider = String(chat.ProviderID || chat.provider_id || '');
-		  const modelID = String(chat.ModelID || chat.model_id || '');
+		  const provider = this.activeProvider();
+		  const modelID = this.activeModel();
 		  if (!provider || !modelID || (backend.models || []).some(model => String(model.provider_id || '') === provider && String(model.id || '') === modelID)) return;
 		  const replacement = (backend.models || []).find(model => model.default) || backend.models?.[0];
 		  if (replacement) {
@@ -4355,8 +4356,8 @@
 		checkActiveModelAvailability() {
 		  const chat = this.activeChat();
 		  if (!chat || String(chat.Backend || chat.backend || 'koder') !== 'koder') return;
-		  const provider = String(chat.ProviderID || chat.provider_id || '');
-		  const modelID = String(chat.ModelID || chat.model_id || '');
+		  const provider = this.activeProvider();
+		  const modelID = this.activeModel();
 		  this.rpc('chat_backends', {}).then(backends => {
 			const backend = (backends || []).find(item => item.id === 'koder');
 			if (backend && (backend.models || []).length && !(backend.models || []).some(model => String(model.provider_id || '') === provider && String(model.id || '') === modelID)) {
@@ -4384,10 +4385,9 @@
 		  this.chatCreator.draft.provider_id = String(pair[0] || ''); this.chatCreator.draft.model_id = String(pair[1] || '');
 		},
 		chatCreatorInheritedModelLabel() {
-		  const chat = this.activeChat();
-		  const provider = String(chat?.ProviderID || chat?.provider_id || '');
-		  const model = String(chat?.ModelID || chat?.model_id || '');
-		  return provider && model ? `Session default — ${provider} / ${model}` : 'Session default';
+		  const provider = this.activeProvider();
+		  const model = this.activeModel();
+		  return provider && model ? `Automatic — ${provider} / ${model}` : 'Automatic model assignment';
 		},
 		codexToolChoices() { return this.chatCreatorBackend('codex')?.additional_tools || []; },
 		createChatFromDraft() {

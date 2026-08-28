@@ -160,6 +160,7 @@ type RuntimeHealth = provider.RuntimeHealth
 type ModelInfo struct {
 	ProviderID        string `json:"provider_id"`
 	ModelID           string `json:"model_id"`
+	FollowsDefault    bool   `json:"follows_default,omitempty"`
 	SourceProviderID  string `json:"source_provider_id,omitempty"`
 	SourceModelID     string `json:"source_model_id,omitempty"`
 	BackingDetected   bool   `json:"backing_detected"`
@@ -393,10 +394,12 @@ type CodexPreferences struct {
 
 // GeneralPreferences contains global non-provider settings.
 type GeneralPreferences struct {
-	DefaultProvider  string `json:"default_provider"`
-	DefaultModel     string `json:"default_model"`
-	MaxToolLoopSteps int    `json:"max_tool_loop_steps"`
-	MaxChildChats    int    `json:"max_child_chats"`
+	DefaultProvider      string `json:"default_provider"`
+	DefaultModel         string `json:"default_model"`
+	FollowForNewSessions bool   `json:"follow_default_for_new_sessions"`
+	FollowForNewChats    bool   `json:"follow_default_for_new_chats"`
+	MaxToolLoopSteps     int    `json:"max_tool_loop_steps"`
+	MaxChildChats        int    `json:"max_child_chats"`
 }
 
 // BrowserPreferences contains browser behavior settings persisted in config.
@@ -775,6 +778,10 @@ func (c *Controller) validateChatModelAvailable(ctx context.Context, chatRecord 
 	c.mu.RLock()
 	cfg := c.cfg
 	c.mu.RUnlock()
+	if chatRecord.UsesDefaultModel() {
+		providerID = strings.TrimSpace(cfg.Defaults.ProviderID)
+		modelID = strings.TrimSpace(cfg.Defaults.ModelID)
+	}
 	// Tests and embedded callers may intentionally supply a turn runner without
 	// configuring provider discovery. There is no catalog against which to
 	// declare a historical model removed in that mode.
@@ -799,6 +806,15 @@ func (c *Controller) prepareKoderCreateSpec(ctx context.Context, spec domain.Cha
 	spec = spec.Normalized()
 	if spec.Backend != domain.ChatBackendKoder {
 		return spec, nil
+	}
+	if spec.ProviderID == "" && spec.ModelID == "" {
+		c.mu.RLock()
+		followDefault := c.cfg.Defaults.FollowForNewChats
+		c.mu.RUnlock()
+		if followDefault {
+			spec.ProviderID = domain.DefaultModelReference
+			spec.ModelID = domain.DefaultModelReference
+		}
 	}
 	if spec.ProviderID == "" && template.EffectiveBackend() == domain.ChatBackendKoder {
 		spec.ProviderID = strings.TrimSpace(template.ProviderID)
@@ -2848,6 +2864,10 @@ func (c *Controller) contextWindowForChat(chatRecord domain.Chat) int {
 	c.mu.RLock()
 	cfg := c.cfg
 	c.mu.RUnlock()
+	if chatRecord.UsesDefaultModel() {
+		providerID = strings.TrimSpace(cfg.Defaults.ProviderID)
+		modelID = strings.TrimSpace(cfg.Defaults.ModelID)
+	}
 	if providerID == "" || modelID == "" {
 		if strings.TrimSpace(cfg.Defaults.ProviderID) != "" && strings.TrimSpace(cfg.Defaults.ModelID) != "" {
 			return cfg.ContextWindow(cfg.Defaults.ProviderID, cfg.Defaults.ModelID)
@@ -2863,6 +2883,11 @@ func (c *Controller) modelInfoForChat(chatRecord domain.Chat) ModelInfo {
 	c.mu.RLock()
 	cfg := c.cfg
 	c.mu.RUnlock()
+	followsDefault := chatRecord.UsesDefaultModel()
+	if followsDefault {
+		providerID = strings.TrimSpace(cfg.Defaults.ProviderID)
+		modelID = strings.TrimSpace(cfg.Defaults.ModelID)
+	}
 	sourceProviderID, sourceModelID := cfg.ResolveModel(providerID, modelID)
 	providerCfg, ok := cfg.Provider(sourceProviderID)
 	if !ok {
@@ -2876,6 +2901,7 @@ func (c *Controller) modelInfoForChat(chatRecord domain.Chat) ModelInfo {
 		ContextWindow:    c.contextWindowForChat(chatRecord),
 		SupportsChat:     true,
 		SupportsTools:    true,
+		FollowsDefault:   followsDefault,
 	}
 	if sourceModelID == "" {
 		return info

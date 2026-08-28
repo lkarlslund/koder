@@ -2872,6 +2872,8 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected thinking preferences tab with caveman controls")
 	}
 	if !strings.Contains(fullPage, `settings.general.max_child_chats`) ||
+		!strings.Contains(fullPage, `settings.general.follow_default_for_new_sessions`) ||
+		!strings.Contains(fullPage, `settings.general.follow_default_for_new_chats`) ||
 		!strings.Contains(document, `Max active sub chats`) {
 		t.Fatalf("expected general preferences to include child chat concurrency control")
 	}

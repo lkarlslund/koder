@@ -79,8 +79,10 @@ type Thinking struct {
 }
 
 type Defaults struct {
-	ProviderID string `toml:"provider_id"`
-	ModelID    string `toml:"model_id"`
+	ProviderID           string `toml:"provider_id"`
+	ModelID              string `toml:"model_id"`
+	FollowForNewSessions bool   `toml:"follow_for_new_sessions,omitempty"`
+	FollowForNewChats    bool   `toml:"follow_for_new_chats,omitempty"`
 }
 
 type Compaction struct {
@@ -688,6 +690,10 @@ func (c Config) ModelConfig(providerID, modelID string) (ModelConfig, bool) {
 func (c Config) ResolveModel(providerID, modelID string) (string, string) {
 	providerID = strings.TrimSpace(providerID)
 	modelID = strings.TrimSpace(modelID)
+	if providerID == domain.DefaultModelReference && modelID == domain.DefaultModelReference {
+		providerID = strings.TrimSpace(c.Defaults.ProviderID)
+		modelID = strings.TrimSpace(c.Defaults.ModelID)
+	}
 	if model, ok := c.ModelConfig(providerID, modelID); ok {
 		sourceProviderID := strings.TrimSpace(model.SourceProviderID)
 		sourceModelID := strings.TrimSpace(model.SourceModelID)

@@ -88,6 +88,38 @@ func TestModelResolvesCustomSource(t *testing.T) {
 	}
 }
 
+func TestModelReferenceFollowsUpdatedSystemDefault(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers["first"] = config.Provider{BaseURL: "http://127.0.0.1:8080/v1"}
+	cfg.Providers["second"] = config.Provider{BaseURL: "http://127.0.0.1:8081/v1"}
+	cfg.Defaults.ProviderID = "first"
+	cfg.Defaults.ModelID = "model-a"
+	store := New(cfg)
+	chat := domain.Chat{ID: "chat-1", ProviderID: domain.DefaultModelReference, ModelID: domain.DefaultModelReference}
+
+	first, err := store.Model(chat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ProviderID != "first" || first.ModelID != "model-a" {
+		t.Fatalf("first resolved model = %q/%q", first.ProviderID, first.ModelID)
+	}
+
+	cfg.Defaults.ProviderID = "second"
+	cfg.Defaults.ModelID = "model-b"
+	store.Update(cfg)
+	second, err := store.Model(chat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ProviderID != "second" || second.ModelID != "model-b" {
+		t.Fatalf("updated resolved model = %q/%q", second.ProviderID, second.ModelID)
+	}
+	if !chat.UsesDefaultModel() {
+		t.Fatalf("stored chat assignment changed: %#v", chat)
+	}
+}
+
 func TestCompactionFallsBackToChatModel(t *testing.T) {
 	cfg := config.Default()
 	cfg.Providers["chat"] = config.Provider{BaseURL: "http://127.0.0.1:8080/v1"}

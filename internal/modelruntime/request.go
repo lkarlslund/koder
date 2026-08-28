@@ -37,7 +37,7 @@ func (r *Runtime) ChatRequest(session domain.Session, chat domain.Chat, messages
 		providerCfg = model.Provider
 		modelCfg = model.Model
 	} else {
-		providerID, fallbackModelID, _ := chatModel(chat)
+		providerID, fallbackModelID, _ := resolvedChatModel(r.cfg, chat)
 		_, modelID = r.cfg.ResolveModel(providerID, fallbackModelID)
 		providerCfg = r.providerConfigForChat(chat)
 		modelCfg = r.modelConfigForChat(chat)
@@ -126,7 +126,7 @@ func (r *Runtime) providerConfigForChat(chat domain.Chat) config.Provider {
 		}
 		return model.Provider
 	}
-	providerID, modelID, _ := chatModel(chat)
+	providerID, modelID, _ := resolvedChatModel(r.cfg, chat)
 	providerID, _ = r.cfg.ResolveModel(providerID, modelID)
 	cfg, _ := r.providerConfig(id.ID(providerID))
 	return cfg
@@ -136,7 +136,8 @@ func (r *Runtime) modelConfigForChat(chat domain.Chat) config.ModelConfig {
 	if model, err := r.settings.Model(chat); err == nil {
 		return model.Model
 	}
-	return modelConfigForRequest(r.cfg, chat.ProviderID, chat.ModelID)
+	providerID, modelID, _ := resolvedChatModel(r.cfg, chat)
+	return modelConfigForRequest(r.cfg, providerID, modelID)
 }
 
 func chatModel(chat domain.Chat) (string, string, error) {
@@ -149,6 +150,14 @@ func chatModel(chat domain.Chat) (string, string, error) {
 		return "", "", fmt.Errorf("chat %s has no model", chat.ID)
 	}
 	return providerID, modelID, nil
+}
+
+func resolvedChatModel(cfg config.Config, chat domain.Chat) (string, string, error) {
+	if chat.UsesDefaultModel() {
+		chat.ProviderID = strings.TrimSpace(cfg.Defaults.ProviderID)
+		chat.ModelID = strings.TrimSpace(cfg.Defaults.ModelID)
+	}
+	return chatModel(chat)
 }
 
 func modelConfigForRequest(cfg config.Config, providerID, modelID string) config.ModelConfig {

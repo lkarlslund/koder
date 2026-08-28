@@ -16,11 +16,13 @@ type Store struct {
 }
 
 type NewSessionDefaults struct {
-	ProviderID        string
-	ModelID           string
-	PermissionProfile string
-	Access            accesssettings.Settings
-	MaxChildChats     int
+	ProviderID           string
+	ModelID              string
+	FollowForNewSessions bool
+	FollowForNewChats    bool
+	PermissionProfile    string
+	Access               accesssettings.Settings
+	MaxChildChats        int
 }
 
 type ToolSettings struct {
@@ -86,11 +88,13 @@ func (s *Store) Snapshot() config.Config {
 func (s *Store) NewSessionDefaults() NewSessionDefaults {
 	cfg := s.Snapshot()
 	return NewSessionDefaults{
-		ProviderID:        strings.TrimSpace(cfg.Defaults.ProviderID),
-		ModelID:           strings.TrimSpace(cfg.Defaults.ModelID),
-		PermissionProfile: strings.TrimSpace(cfg.Permissions.Profile),
-		Access:            accesssettings.Normalize(cfg.Access),
-		MaxChildChats:     cfg.MaxChildChats,
+		ProviderID:           strings.TrimSpace(cfg.Defaults.ProviderID),
+		ModelID:              strings.TrimSpace(cfg.Defaults.ModelID),
+		FollowForNewSessions: cfg.Defaults.FollowForNewSessions,
+		FollowForNewChats:    cfg.Defaults.FollowForNewChats,
+		PermissionProfile:    strings.TrimSpace(cfg.Permissions.Profile),
+		Access:               accesssettings.Normalize(cfg.Access),
+		MaxChildChats:        cfg.MaxChildChats,
 	}
 }
 
@@ -187,6 +191,10 @@ func (s *Store) Thinking(chat domain.Chat, prompt string, preserveThinking bool)
 func modelSettings(cfg config.Config, providerID, modelID string) (ModelSettings, error) {
 	providerID = strings.TrimSpace(providerID)
 	modelID = strings.TrimSpace(modelID)
+	if providerID == domain.DefaultModelReference && modelID == domain.DefaultModelReference {
+		providerID = strings.TrimSpace(cfg.Defaults.ProviderID)
+		modelID = strings.TrimSpace(cfg.Defaults.ModelID)
+	}
 	sourceProviderID, sourceModelID := cfg.ResolveModel(providerID, modelID)
 	providerCfg, ok := cfg.Provider(sourceProviderID)
 	if !ok {

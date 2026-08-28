@@ -19,11 +19,13 @@ import (
 
 func (e *Engine) sessionRegistryConfig(defaults settings.NewSessionDefaults) sessionpkg.RegistryConfig {
 	cfg := sessionpkg.RegistryConfig{
-		DefaultProvider:   defaults.ProviderID,
-		DefaultModel:      defaults.ModelID,
-		PermissionProfile: defaults.PermissionProfile,
-		AccessSettings:    defaults.Access,
-		MaxChildChats:     defaults.MaxChildChats,
+		DefaultProvider:      defaults.ProviderID,
+		DefaultModel:         defaults.ModelID,
+		FollowForNewSessions: defaults.FollowForNewSessions,
+		FollowForNewChats:    defaults.FollowForNewChats,
+		PermissionProfile:    defaults.PermissionProfile,
+		AccessSettings:       defaults.Access,
+		MaxChildChats:        defaults.MaxChildChats,
 	}
 	cfg.PrepareChatSpec = e.prepareChatCreateSpec
 	if e != nil && e.browser != nil {

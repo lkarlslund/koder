@@ -368,6 +368,14 @@ func chatModel(chat domain.Chat) (string, string, error) {
 	return providerID, modelID, nil
 }
 
+func resolvedChatModel(cfg config.Config, chat domain.Chat) (string, string, error) {
+	if chat.UsesDefaultModel() {
+		chat.ProviderID = strings.TrimSpace(cfg.Defaults.ProviderID)
+		chat.ModelID = strings.TrimSpace(cfg.Defaults.ModelID)
+	}
+	return chatModel(chat)
+}
+
 func (e *Engine) clientForChat(chat domain.Chat) (*provider.Client, error) {
 	model, err := e.settings.Model(chat)
 	if err != nil {
@@ -614,7 +622,7 @@ func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages 
 		providerCfg = model.Provider
 		modelCfg = model.Model
 	} else {
-		providerID, fallbackModelID, _ := chatModel(chat)
+		providerID, fallbackModelID, _ := resolvedChatModel(e.cfg, chat)
 		_, modelID = e.cfg.ResolveModel(providerID, fallbackModelID)
 		providerCfg = e.providerConfigForChat(chat)
 		modelCfg = e.modelConfigForChat(chat)
@@ -645,7 +653,7 @@ func (e *Engine) providerConfigForChat(chat domain.Chat) config.Provider {
 	if model, err := e.settings.Model(chat); err == nil {
 		return model.Provider
 	}
-	providerID, modelID, _ := chatModel(chat)
+	providerID, modelID, _ := resolvedChatModel(e.cfg, chat)
 	providerID, _ = e.cfg.ResolveModel(providerID, modelID)
 	cfg, _ := e.cfg.Provider(providerID)
 	return cfg
@@ -1503,20 +1511,28 @@ func formatThinkingBlock(reasoning string) string {
 }
 
 func (e *Engine) validatePromptAttachments(chat domain.Chat, drafts []attachment.Draft) error {
+	if len(drafts) == 0 {
+		return nil
+	}
+	providerID, modelID, err := resolvedChatModel(e.cfg, chat)
+	if err != nil {
+		return err
+	}
+	providerCfg, _ := e.cfg.Provider(providerID)
 	for _, draft := range drafts {
 		kind := attachment.ClassifyMIME(draft.MIME)
 		switch kind {
 		case attachment.KindText:
 			continue
 		case attachment.KindImage, attachment.KindPDF:
-			supported, err := e.caps.SupportsAttachment(chat.ProviderID, providerCfgForChat(e.cfg, chat), chat.ModelID, kind)
+			supported, err := e.caps.SupportsAttachment(providerID, providerCfg, modelID, kind)
 			if err != nil {
 				return err
 			}
 			if supported {
 				continue
 			}
-			return fmt.Errorf("provider %s model %s does not support %s attachments", chat.ProviderID, chat.ModelID, kind)
+			return fmt.Errorf("provider %s model %s does not support %s attachments", providerID, modelID, kind)
 		default:
 			return fmt.Errorf("unsupported attachment type %q", draft.MIME)
 		}
@@ -1525,12 +1541,21 @@ func (e *Engine) validatePromptAttachments(chat domain.Chat, drafts []attachment
 }
 
 func (e *Engine) chatSupportsImageAttachments(chat domain.Chat) bool {
-	supported, err := e.caps.SupportsAttachment(chat.ProviderID, providerCfgForChat(e.cfg, chat), chat.ModelID, attachment.KindImage)
+	providerID, modelID, err := resolvedChatModel(e.cfg, chat)
+	if err != nil {
+		return false
+	}
+	providerCfg, _ := e.cfg.Provider(providerID)
+	supported, err := e.caps.SupportsAttachment(providerID, providerCfg, modelID, attachment.KindImage)
 	return err == nil && supported
 }
 
 func providerCfgForChat(cfg config.Config, chat domain.Chat) config.Provider {
-	if providerCfg, ok := cfg.Provider(chat.ProviderID); ok {
+	providerID := chat.ProviderID
+	if chat.UsesDefaultModel() {
+		providerID = cfg.Defaults.ProviderID
+	}
+	if providerCfg, ok := cfg.Provider(providerID); ok {
 		return providerCfg
 	}
 	return config.Provider{}

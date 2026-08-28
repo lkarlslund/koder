@@ -152,10 +152,15 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 	}
 	modelID := strings.TrimSpace(req.ModelID)
 	providerID := ""
-	if backend == parentChat.EffectiveBackend() {
+	if backend == domain.ChatBackendKoder && modelID == "" && config.FollowForNewChats {
+		providerID = domain.DefaultModelReference
+		modelID = domain.DefaultModelReference
+	} else if backend == parentChat.EffectiveBackend() {
 		providerID = strings.TrimSpace(parentChat.ProviderID)
 		if modelID == "" {
 			modelID = strings.TrimSpace(parentChat.ModelID)
+		} else if parentChat.UsesDefaultModel() {
+			providerID = strings.TrimSpace(config.DefaultProvider)
 		}
 	} else if backend == domain.ChatBackendKoder {
 		providerID = strings.TrimSpace(config.DefaultProvider)

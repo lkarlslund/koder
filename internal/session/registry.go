@@ -18,16 +18,18 @@ import (
 )
 
 type RegistryConfig struct {
-	DefaultProvider   string
-	DefaultModel      string
-	PermissionProfile string
-	AccessSettings    accesssettings.Settings
-	MaxChildChats     int
-	PrepareChatSpec   func(context.Context, domain.ChatCreateSpec) (domain.ChatCreateSpec, error)
-	OnChatArchived    func(context.Context, id.ID)
-	BackendAvailable  func(domain.ChatBackend) error
-	BeforeChatUpdate  func(context.Context, domain.Chat, chattool.UpdateRequest) error
-	BeforeChatDelete  func(context.Context, domain.Chat) error
+	DefaultProvider      string
+	DefaultModel         string
+	FollowForNewSessions bool
+	FollowForNewChats    bool
+	PermissionProfile    string
+	AccessSettings       accesssettings.Settings
+	MaxChildChats        int
+	PrepareChatSpec      func(context.Context, domain.ChatCreateSpec) (domain.ChatCreateSpec, error)
+	OnChatArchived       func(context.Context, id.ID)
+	BackendAvailable     func(domain.ChatBackend) error
+	BeforeChatUpdate     func(context.Context, domain.Chat, chattool.UpdateRequest) error
+	BeforeChatDelete     func(context.Context, domain.Chat) error
 }
 
 type Registry struct {
@@ -268,6 +270,11 @@ func (r *Registry) createWithSpec(ctx context.Context, title, projectRoot string
 	}
 	modelID := cfg.DefaultModel
 	providerID := cfg.DefaultProvider
+	if (kind == domain.SessionKindRegular && cfg.FollowForNewSessions) ||
+		(kind != domain.SessionKindRegular && cfg.FollowForNewChats) {
+		providerID = domain.DefaultModelReference
+		modelID = domain.DefaultModelReference
+	}
 	if strings.TrimSpace(spec.ProviderID) != "" {
 		providerID = strings.TrimSpace(spec.ProviderID)
 	}

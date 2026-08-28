@@ -116,6 +116,54 @@ func TestNewRootChatInheritsSessionChatSettings(t *testing.T) {
 	}
 }
 
+func TestNewChatCanStoreDynamicDefaultModelReference(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner.UpdateConfig(RegistryConfig{FollowForNewChats: true})
+	parentID := owner.Snapshot().Chats[0].ID
+	created, err := owner.NewChatWithSpec(ctx, &parentID, domain.ChatCreateSpec{Title: "dynamic"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created.Snapshot().Chat.UsesDefaultModel() {
+		t.Fatalf("new chat model assignment = %q/%q", created.Snapshot().Chat.ProviderID, created.Snapshot().Chat.ModelID)
+	}
+}
+
+func TestNewSessionCanStoreDynamicDefaultModelReference(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	chatsSrc, planSrc := testSources(st)
+	registry := NewRegistry(st, chatsSrc, planSrc, RegistryConfig{
+		DefaultProvider:      "provider",
+		DefaultModel:         "model",
+		FollowForNewSessions: true,
+	})
+	owner, err := registry.Create(ctx, "dynamic", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chat := owner.Snapshot().Chats[0]; !chat.UsesDefaultModel() {
+		t.Fatalf("new session model assignment = %q/%q", chat.ProviderID, chat.ModelID)
+	}
+}
+
 func TestNewChatWithSpecDoesNotInheritKoderModelIntoCodex(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})

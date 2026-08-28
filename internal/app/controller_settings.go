@@ -691,7 +691,8 @@ func discoverModelOptionsForConfig(ctx context.Context, cfg config.Config, curre
 	return options, nil
 }
 
-// SetDefaultModel persists the model used for new sessions.
+// SetDefaultModel persists the system model used by creation fallbacks and
+// dynamic default-model chat assignments.
 func (c *Controller) SetDefaultModel(ctx context.Context, providerID, modelID string) (PreferencesState, error) {
 	providerID = strings.TrimSpace(providerID)
 	modelID = strings.TrimSpace(modelID)
@@ -986,6 +987,12 @@ func providerEntryLabel(providerID string, cfg config.Provider) string {
 }
 
 func (c *Controller) ensureModelConfig(ctx context.Context, providerID, modelID string) {
+	if strings.TrimSpace(providerID) == domain.DefaultModelReference && strings.TrimSpace(modelID) == domain.DefaultModelReference {
+		c.mu.RLock()
+		providerID = c.cfg.Defaults.ProviderID
+		modelID = c.cfg.Defaults.ModelID
+		c.mu.RUnlock()
+	}
 	providerID = strings.TrimSpace(providerID)
 	modelID = strings.TrimSpace(modelID)
 	if providerID == "" || modelID == "" {
@@ -1208,10 +1215,12 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 	}
 	state := PreferencesState{
 		General: GeneralPreferences{
-			DefaultProvider:  strings.TrimSpace(c.cfg.Defaults.ProviderID),
-			DefaultModel:     strings.TrimSpace(c.cfg.Defaults.ModelID),
-			MaxToolLoopSteps: c.cfg.MaxToolLoopSteps,
-			MaxChildChats:    c.cfg.MaxChildChats,
+			DefaultProvider:      strings.TrimSpace(c.cfg.Defaults.ProviderID),
+			DefaultModel:         strings.TrimSpace(c.cfg.Defaults.ModelID),
+			FollowForNewSessions: c.cfg.Defaults.FollowForNewSessions,
+			FollowForNewChats:    c.cfg.Defaults.FollowForNewChats,
+			MaxToolLoopSteps:     c.cfg.MaxToolLoopSteps,
+			MaxChildChats:        c.cfg.MaxChildChats,
 		},
 		UI:             browserPreferencesFromConfig(c.cfg.UI),
 		Compaction:     compactionPreferencesFromConfig(c.cfg),
@@ -2209,6 +2218,8 @@ func toolDefaultGroup(kind tools.ID) (string, string) {
 func applyGeneralPreferences(cfg *config.Config, prefs GeneralPreferences) error {
 	cfg.Defaults.ProviderID = strings.TrimSpace(prefs.DefaultProvider)
 	cfg.Defaults.ModelID = strings.TrimSpace(prefs.DefaultModel)
+	cfg.Defaults.FollowForNewSessions = prefs.FollowForNewSessions
+	cfg.Defaults.FollowForNewChats = prefs.FollowForNewChats
 	if cfg.Defaults.ProviderID != "" && !cfg.HasUsableProvider(cfg.Defaults.ProviderID) {
 		return fmt.Errorf("default provider %q is not configured or is disabled", cfg.Defaults.ProviderID)
 	}

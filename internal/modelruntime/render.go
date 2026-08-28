@@ -604,12 +604,21 @@ func toolMessageWithImage(toolCallID, body, mimeType string, data []byte) provid
 }
 
 func (r *Runtime) chatSupportsImageAttachments(chat domain.Chat) bool {
-	supported, err := r.caps.SupportsAttachment(chat.ProviderID, providerCfgForChat(r.cfg, chat), chat.ModelID, attachment.KindImage)
+	providerID, modelID, err := resolvedChatModel(r.cfg, chat)
+	if err != nil {
+		return false
+	}
+	providerCfg, _ := r.cfg.Provider(providerID)
+	supported, err := r.caps.SupportsAttachment(providerID, providerCfg, modelID, attachment.KindImage)
 	return err == nil && supported
 }
 
 func providerCfgForChat(cfg config.Config, chat domain.Chat) config.Provider {
-	if providerCfg, ok := cfg.Provider(chat.ProviderID); ok {
+	providerID := chat.ProviderID
+	if chat.UsesDefaultModel() {
+		providerID = cfg.Defaults.ProviderID
+	}
+	if providerCfg, ok := cfg.Provider(providerID); ok {
 		return providerCfg
 	}
 	return config.Provider{}

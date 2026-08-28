@@ -93,20 +93,28 @@ func (r *Runtime) MaxToolLoopSteps() int {
 }
 
 func (r *Runtime) validatePromptAttachments(chat domain.Chat, drafts []attachment.Draft) error {
+	if len(drafts) == 0 {
+		return nil
+	}
+	providerID, modelID, err := resolvedChatModel(r.cfg, chat)
+	if err != nil {
+		return err
+	}
+	providerCfg, _ := r.cfg.Provider(providerID)
 	for _, draft := range drafts {
 		kind := attachment.ClassifyMIME(draft.MIME)
 		switch kind {
 		case attachment.KindText:
 			continue
 		case attachment.KindImage, attachment.KindPDF:
-			supported, err := r.caps.SupportsAttachment(chat.ProviderID, providerCfgForChat(r.cfg, chat), chat.ModelID, kind)
+			supported, err := r.caps.SupportsAttachment(providerID, providerCfg, modelID, kind)
 			if err != nil {
 				return err
 			}
 			if supported {
 				continue
 			}
-			return fmt.Errorf("provider %s model %s does not support %s attachments", chat.ProviderID, chat.ModelID, kind)
+			return fmt.Errorf("provider %s model %s does not support %s attachments", providerID, modelID, kind)
 		default:
 			return fmt.Errorf("unsupported attachment type %q", draft.MIME)
 		}
@@ -118,14 +126,19 @@ func (r *Runtime) validateChatRequirements(chat domain.Chat) error {
 	if !chat.RequiresImages {
 		return nil
 	}
-	supported, err := r.caps.SupportsAttachment(chat.ProviderID, providerCfgForChat(r.cfg, chat), chat.ModelID, attachment.KindImage)
+	providerID, modelID, err := resolvedChatModel(r.cfg, chat)
+	if err != nil {
+		return err
+	}
+	providerCfg, _ := r.cfg.Provider(providerID)
+	supported, err := r.caps.SupportsAttachment(providerID, providerCfg, modelID, attachment.KindImage)
 	if err != nil {
 		return err
 	}
 	if supported {
 		return nil
 	}
-	return fmt.Errorf("chat history contains image context, but provider %s model %s does not support image attachments; choose an image-capable model to continue", chat.ProviderID, chat.ModelID)
+	return fmt.Errorf("chat history contains image context, but provider %s model %s does not support image attachments; choose an image-capable model to continue", providerID, modelID)
 }
 
 func (r *Runtime) userMessageForPrompt(session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft) (domain.UserMessage, error) {

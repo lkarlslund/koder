@@ -1379,6 +1379,8 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	}
 	prefs.General.MaxToolLoopSteps = 77
 	prefs.General.MaxChildChats = 3
+	prefs.General.FollowForNewSessions = true
+	prefs.General.FollowForNewChats = true
 	prefs.UI.Theme = "dark"
 	prefs.Codex.Enabled = true
 	prefs.Codex.Executable = "/opt/codex/bin/codex"
@@ -1435,6 +1437,9 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	}
 	if loaded.MaxToolLoopSteps != 77 || loaded.MaxChildChats != 3 || loaded.UI.Theme != "dark" || loaded.Compaction.ModelID != "compact-model" {
 		t.Fatalf("expected saved config, got max=%d child=%d theme=%q compact=%q/%q", loaded.MaxToolLoopSteps, loaded.MaxChildChats, loaded.UI.Theme, loaded.Compaction.ProviderID, loaded.Compaction.ModelID)
+	}
+	if !loaded.Defaults.FollowForNewSessions || !loaded.Defaults.FollowForNewChats {
+		t.Fatalf("expected saved dynamic model creation policies, got %#v", loaded.Defaults)
 	}
 	if !loaded.Codex.Enabled || loaded.Codex.Executable != "/opt/codex/bin/codex" || loaded.Codex.Home != "/var/lib/koder-codex" {
 		t.Fatalf("expected saved codex settings, got %#v", loaded.Codex)

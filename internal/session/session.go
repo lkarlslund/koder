@@ -529,6 +529,10 @@ func (s *Session) NewRootChatWithDimensions(ctx context.Context, title string, r
 // NewChatWithSpec creates a chat from the shared surface-independent contract.
 func (s *Session) NewChatWithSpec(ctx context.Context, parentChatID *id.ID, spec domain.ChatCreateSpec) (*chatpkg.Chat, error) {
 	spec = spec.Normalized()
+	if spec.Backend == domain.ChatBackendKoder && spec.ProviderID == "" && spec.ModelID == "" && s.configSnapshot().FollowForNewChats {
+		spec.ProviderID = domain.DefaultModelReference
+		spec.ModelID = domain.DefaultModelReference
+	}
 	if prepare := s.configSnapshot().PrepareChatSpec; prepare != nil {
 		var err error
 		spec, err = prepare(ctx, spec)
