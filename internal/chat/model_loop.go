@@ -81,10 +81,7 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 			session = rt.Snapshot().Session
 			l.session = session
 			l.skipAutoCompactOnce = true
-			return TurnStepResult{
-				Continue:         true,
-				TurnInstructions: TurnInstructionBlocks("", "Continue from the compacted session summary. Do not restart, greet, or restate the summary. Continue the pending task from the latest tool result."),
-			}, nil
+			return TurnStepResult{Continue: true}, nil
 		}
 	}
 

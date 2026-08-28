@@ -4798,8 +4798,20 @@ func TestRunPromptAutoCompactsKnownOverLimitAfterPauseNotice(t *testing.T) {
 	if !strings.Contains(requests[1], "continue") {
 		t.Fatalf("expected second request to include the queued user message, got %s", requests[1])
 	}
+	if strings.Contains(requests[1], "Continue from the compacted session summary") {
+		t.Fatalf("expected compacted history to continue without a synthetic user instruction, got %s", requests[1])
+	}
 	if strings.Contains(requests[1], "previous work") || strings.Contains(requests[1], "stopped before next action") {
 		t.Fatalf("expected second request to omit pre-compaction raw history, got %s", requests[1])
+	}
+	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range timeline {
+		if user, ok := item.Content.(domain.UserMessage); ok && user.Source == domain.UserMessageSourceTurnInstruction {
+			t.Fatalf("expected compaction not to persist a turn instruction, got %#v", user)
+		}
 	}
 }
 
