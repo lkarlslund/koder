@@ -674,6 +674,40 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		defer close(done)
 		heartbeat := time.NewTicker(websocketHeartbeatInterval)
 		defer heartbeat.Stop()
+		stream := websocketStreamCoalescer{interval: websocketStreamInterval}
+		var streamTimer *time.Timer
+		var streamTimerC <-chan time.Time
+		defer func() {
+			if streamTimer != nil {
+				streamTimer.Stop()
+			}
+		}()
+		scheduleStreamFlush := func(now time.Time) {
+			wait, ok := stream.wait(now)
+			if !ok {
+				if streamTimer != nil {
+					streamTimer.Stop()
+				}
+				streamTimerC = nil
+				return
+			}
+			if streamTimer == nil {
+				streamTimer = time.NewTimer(wait)
+			} else {
+				streamTimer.Reset(wait)
+			}
+			streamTimerC = streamTimer.C
+		}
+		writeEvent := func(webEvent app.Event) bool {
+			s.updateDebugChats()
+			size, err := writeJSON(ctx, conn, &writeMu, webEvent)
+			if err != nil {
+				slog.Info("websocket closed while writing event", "client", clientID, "type", webEvent.Type, "error", err)
+				return false
+			}
+			s.recordWebSocketWrite(clientID, webEvent.Type, size)
+			return true
+		}
 		for {
 			select {
 			case event := <-pushEvents:
@@ -687,13 +721,19 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				if !ok {
 					continue
 				}
-				s.updateDebugChats()
-				size, err := writeJSON(ctx, conn, &writeMu, webEvent)
-				if err != nil {
-					slog.Info("websocket closed while writing event", "client", clientID, "type", webEvent.Type, "error", err)
+				now := time.Now()
+				readyEvents := stream.add(now, webEvent)
+				scheduleStreamFlush(now)
+				for _, readyEvent := range readyEvents {
+					if !writeEvent(readyEvent) {
+						return
+					}
+				}
+			case now := <-streamTimerC:
+				streamTimerC = nil
+				if webEvent, ok := stream.flush(now); ok && !writeEvent(webEvent) {
 					return
 				}
-				s.recordWebSocketWrite(clientID, webEvent.Type, size)
 			case <-heartbeat.C:
 				size, err := writeJSON(ctx, conn, &writeMu, map[string]any{
 					"type":    "heartbeat",
@@ -1951,6 +1991,94 @@ type assistantAppendDelta struct {
 	Reasoning string    `json:"reasoning,omitempty"`
 }
 
+type websocketStreamCoalescer struct {
+	interval  time.Duration
+	lastWrite time.Time
+	pending   *app.Event
+}
+
+func (c *websocketStreamCoalescer) add(now time.Time, event app.Event) []app.Event {
+	if !isWebsocketStreamEvent(event) {
+		ready := make([]app.Event, 0, 2)
+		if pending, ok := c.flush(now); ok {
+			ready = append(ready, pending)
+		}
+		return append(ready, event)
+	}
+	var ready []app.Event
+	if c.pending != nil {
+		if merged, ok := mergeWebsocketStreamEvents(*c.pending, event); ok {
+			c.pending = &merged
+			return nil
+		}
+		if pending, ok := c.flush(now); ok {
+			ready = append(ready, pending)
+		}
+	}
+	if c.lastWrite.IsZero() || now.Sub(c.lastWrite) >= c.interval {
+		c.lastWrite = now
+		return append(ready, event)
+	}
+	copyEvent := event
+	c.pending = &copyEvent
+	return ready
+}
+
+func (c *websocketStreamCoalescer) flush(now time.Time) (app.Event, bool) {
+	if c.pending == nil {
+		return app.Event{}, false
+	}
+	event := *c.pending
+	c.pending = nil
+	c.lastWrite = now
+	return event, true
+}
+
+func (c *websocketStreamCoalescer) wait(now time.Time) (time.Duration, bool) {
+	if c.pending == nil {
+		return 0, false
+	}
+	wait := c.interval - now.Sub(c.lastWrite)
+	if wait < 0 {
+		wait = 0
+	}
+	return wait, true
+}
+
+func isWebsocketStreamEvent(event app.Event) bool {
+	if event.Type != "chat_delta" {
+		return false
+	}
+	delta, ok := event.Payload.(chatDelta)
+	return ok && delta.ItemAppend != nil
+}
+
+func mergeWebsocketStreamEvents(current, next app.Event) (app.Event, bool) {
+	currentDelta, currentOK := current.Payload.(chatDelta)
+	nextDelta, nextOK := next.Payload.(chatDelta)
+	if !currentOK || !nextOK || currentDelta.ItemAppend == nil || nextDelta.ItemAppend == nil ||
+		currentDelta.ChatID != nextDelta.ChatID || currentDelta.ItemAppend.ItemID != nextDelta.ItemAppend.ItemID {
+		return app.Event{}, false
+	}
+	merged := next
+	mergedDelta := nextDelta
+	mergedAppend := *nextDelta.ItemAppend
+	mergedAppend.Text = currentDelta.ItemAppend.Text + mergedAppend.Text
+	mergedAppend.Reasoning = currentDelta.ItemAppend.Reasoning + mergedAppend.Reasoning
+	if mergedAppend.Seq == 0 {
+		mergedAppend.Seq = currentDelta.ItemAppend.Seq
+	}
+	if mergedAppend.CreatedAt.IsZero() {
+		mergedAppend.CreatedAt = currentDelta.ItemAppend.CreatedAt
+	}
+	if mergedAppend.UpdatedAt.IsZero() {
+		mergedAppend.UpdatedAt = currentDelta.ItemAppend.UpdatedAt
+	}
+	mergedDelta.ItemAppend = &mergedAppend
+	merged.Payload = mergedDelta
+	return merged, true
+}
+
 func webEventFromControllerEvent(event app.Event) (app.Event, bool) {
 	switch event.Type {
 	case "chat_delta":
@@ -2247,6 +2375,7 @@ func clientErrorCode(err error) string {
 
 const (
 	websocketHeartbeatInterval = 15 * time.Second
+	websocketStreamInterval    = 500 * time.Millisecond
 	websocketWriteTimeout      = 5 * time.Second
 	websocketReadLimit         = 1 << 20
 )

@@ -1722,6 +1722,72 @@ func TestWebSocketStreamingDeltaUsesAppendAndFinalItemReconciliation(t *testing.
 	}
 }
 
+func TestWebSocketStreamCoalescerLimitsAppendRate(t *testing.T) {
+	streamEvent := func(text, reasoning string) app.Event {
+		return app.Event{Type: "chat_delta", Payload: chatDelta{
+			ChatID: "chat-7",
+			ItemAppend: &assistantAppendDelta{
+				ItemID: "item-1", Text: text, Reasoning: reasoning,
+			},
+		}}
+	}
+	base := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)
+	coalescer := websocketStreamCoalescer{interval: 500 * time.Millisecond}
+
+	ready := coalescer.add(base, streamEvent("a", ""))
+	if len(ready) != 1 {
+		t.Fatalf("first chunk should be sent immediately, got %d events", len(ready))
+	}
+	if ready = coalescer.add(base.Add(100*time.Millisecond), streamEvent("b", "")); len(ready) != 0 {
+		t.Fatalf("second chunk should be held, got %d events", len(ready))
+	}
+	if ready = coalescer.add(base.Add(200*time.Millisecond), streamEvent("", "reasoning")); len(ready) != 0 {
+		t.Fatalf("third chunk should merge into the pending batch, got %d events", len(ready))
+	}
+	if wait, ok := coalescer.wait(base.Add(200 * time.Millisecond)); !ok || wait != 300*time.Millisecond {
+		t.Fatalf("flush wait = %v, %v; want 300ms, true", wait, ok)
+	}
+	flushed, ok := coalescer.flush(base.Add(500 * time.Millisecond))
+	if !ok {
+		t.Fatal("expected pending stream batch")
+	}
+	delta := flushed.Payload.(chatDelta)
+	if delta.ItemAppend.Text != "b" || delta.ItemAppend.Reasoning != "reasoning" {
+		t.Fatalf("unexpected coalesced append: %#v", delta.ItemAppend)
+	}
+}
+
+func TestWebSocketStreamCoalescerFlushesBeforeOtherEvents(t *testing.T) {
+	streamEvent := func(itemID, text string) app.Event {
+		return app.Event{Type: "chat_delta", Payload: chatDelta{
+			ChatID: "chat-7", ItemAppend: &assistantAppendDelta{ItemID: id.ID(itemID), Text: text},
+		}}
+	}
+	base := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)
+	coalescer := websocketStreamCoalescer{interval: 500 * time.Millisecond}
+	_ = coalescer.add(base, streamEvent("item-1", "a"))
+	_ = coalescer.add(base.Add(100*time.Millisecond), streamEvent("item-1", "b"))
+
+	stateEvent := app.Event{Type: "planning_delta", Payload: map[string]any{"ready": true}}
+	ready := coalescer.add(base.Add(200*time.Millisecond), stateEvent)
+	if len(ready) != 2 || ready[0].Type != "chat_delta" || ready[1].Type != "planning_delta" {
+		t.Fatalf("pending stream must precede state event, got %#v", ready)
+	}
+	if _, ok := coalescer.wait(base.Add(200 * time.Millisecond)); ok {
+		t.Fatal("state event should leave no pending stream batch")
+	}
+
+	_ = coalescer.add(base.Add(250*time.Millisecond), streamEvent("item-1", "c"))
+	ready = coalescer.add(base.Add(300*time.Millisecond), streamEvent("item-2", "d"))
+	if len(ready) != 1 || ready[0].Payload.(chatDelta).ItemAppend.Text != "c" {
+		t.Fatalf("new assistant item should flush the previous item, got %#v", ready)
+	}
+	flushed, ok := coalescer.flush(base.Add(700 * time.Millisecond))
+	if !ok || flushed.Payload.(chatDelta).ItemAppend.ItemID != "item-2" {
+		t.Fatalf("new assistant item was not retained: %#v, %v", flushed, ok)
+	}
+}
+
 func TestChatDeltaOmitsExecProcessesWhenSnapshotIsNotAuthoritative(t *testing.T) {
 	update := chat.Update{
 		Snapshot: chat.Snapshot{
