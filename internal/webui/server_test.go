@@ -2135,6 +2135,13 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `item.kind === 'notice'`) || !strings.Contains(fullPage, `noticeText(item.content || {})`) || !strings.Contains(fullPage, `.notice-warning`) {
 		t.Fatalf("expected notices to render as compact UI instead of raw JSON")
 	}
+	if !strings.Contains(fullPage, `item.kind === 'compaction'`) ||
+		!strings.Contains(fullPage, `compactionSummary(item)`) ||
+		!strings.Contains(fullPage, `Copy compaction result`) ||
+		!strings.Contains(fullPage, `renderTimelineMarkdownElement($el, item, compactionSummary(item)`) ||
+		!strings.Contains(fullPage, `.compaction-result`) {
+		t.Fatalf("expected compaction entries to expose their generated summary")
+	}
 	if !strings.Contains(fullPage, `noticeReasonText`) ||
 		!strings.Contains(fullPage, `case 'user_interrupted': return 'user interrupted'`) ||
 		!strings.Contains(fullPage, `case 'process_terminating': return 'process terminating'`) ||

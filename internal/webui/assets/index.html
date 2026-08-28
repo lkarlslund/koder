@@ -199,7 +199,35 @@
                   <pre x-text="lintText(item.content || {})"></pre>
                 </div>
               </template>
-              <template x-if="item.kind !== 'notice' && item.kind !== 'lint'">
+              <template x-if="item.kind === 'compaction'">
+                <div class="compaction-message">
+                  <div class="turn-header">
+                    <div class="turn-header-title">
+                      <i class="bi bi-arrows-collapse"></i>
+                      <span>compaction</span>
+                      <span class="turn-source-qualifier" x-show="compactionTrigger(item)" x-text="compactionTrigger(item)"></span>
+                      <span class="badge tool-status-badge" :class="compactionStatusClass(item)" x-text="compactionStatusLabel(item)"></span>
+                    </div>
+                    <div class="turn-header-actions">
+                      <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>
+                      <button type="button" class="timeline-action-button" title="Rollback chat to before this item" @click="openTimelineRollback(item)" x-show="timelineItemActionAvailable(item)"><i class="bi bi-arrow-counterclockwise"></i></button>
+                      <button type="button" class="timeline-action-button" title="Fork chat through this item" @click="openTimelineFork(item)" x-show="timelineItemActionAvailable(item)"><i class="bi bi-diagram-2"></i></button>
+                    </div>
+                  </div>
+                  <details class="compaction-result" x-show="compactionSummary(item)">
+                    <summary>
+                      <span>Compaction result</span>
+                      <span class="text-secondary" x-show="compactionContextLabel(item)" x-text="compactionContextLabel(item)"></span>
+                    </summary>
+                    <div class="tool-result-header">
+                      <span>Compacted context</span>
+                      <button type="button" class="copy-output-button" title="Copy compaction result" aria-label="Copy compaction result" @click.stop.prevent="copyText(compactionSummary(item), 'Copied compaction result')"><i class="bi bi-copy"></i></button>
+                    </div>
+                    <div class="compaction-result-body markdown-body" x-effect="renderTimelineMarkdownElement($el, item, compactionSummary(item), itemMarkdownOptions(item))"></div>
+                  </details>
+                </div>
+              </template>
+              <template x-if="item.kind !== 'notice' && item.kind !== 'lint' && item.kind !== 'compaction'">
                 <div class="message p-2 bg-body-tertiary">
                   <div class="turn-header">
                     <div class="turn-header-title"><i class="bi bi-info-circle"></i><span x-text="item.kind"></span></div>

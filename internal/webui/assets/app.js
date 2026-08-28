@@ -568,6 +568,30 @@
       const files = firstValue(content, ['files', 'Files']);
       return Array.isArray(files) ? files.filter(Boolean).join(', ') : '';
     }
+    function compactionContent(item) {
+      return (item && (item.content || item.Content)) || {};
+    }
+    function compactionSummary(item) {
+      return String(firstValue(compactionContent(item), ['summary', 'Summary'])).trim();
+    }
+    function compactionStatus(item) {
+      const status = String(firstValue(compactionContent(item), ['status', 'Status'])).trim().toLowerCase();
+      return status || (compactionSummary(item) ? 'completed' : 'pending');
+    }
+    function compactionStatusLabel(item) {
+      const status = compactionStatus(item);
+      if (status === 'pending') return 'compacting';
+      return status;
+    }
+    function compactionStatusClassName(item) {
+      const status = compactionStatus(item);
+      if (status === 'completed' || status === 'done') return 'tool-status-badge-done';
+      if (status === 'failed' || status === 'error' || status === 'errored') return 'tool-status-badge-error';
+      return 'tool-status-badge-running';
+    }
+    function compactionTrigger(item) {
+      return String(firstValue(compactionContent(item), ['trigger', 'Trigger'])).trim().replace(/_/g, ' ');
+    }
     function userMessageContent(item) {
       return (item && (item.content || item.Content)) || {};
     }
@@ -3204,6 +3228,15 @@
           if (n === 0) return '0';
           return this.formatTokens(n);
         },
+        compactionContextLabel(item) {
+          const content = compactionContent(item);
+          const before = Number(firstValue(content, ['before_context_tokens', 'BeforeContextTokens']) || 0);
+          const after = Number(firstValue(content, ['after_context_tokens', 'AfterContextTokens']) || 0);
+          if (before > 0 && after > 0) return this.formatContextTokens(before) + ' → ' + this.formatContextTokens(after) + ' context tokens';
+          if (before > 0) return this.formatContextTokens(before) + ' context tokens before';
+          if (after > 0) return this.formatContextTokens(after) + ' context tokens after';
+          return '';
+        },
         capabilityLabel(value, known) {
           if (value) return 'yes';
           return known ? 'no' : 'unknown';
@@ -4083,6 +4116,10 @@
         noticeDetail(content) { return noticeDetail(content); },
         lintText(content) { return lintText(content); },
         lintFiles(content) { return lintFiles(content); },
+        compactionSummary(item) { return compactionSummary(item); },
+        compactionStatusLabel(item) { return compactionStatusLabel(item); },
+        compactionStatusClass(item) { return compactionStatusClassName(item); },
+        compactionTrigger(item) { return compactionTrigger(item); },
         attachmentName(attachment) { return attachment?.name || attachment?.Name || 'image'; },
         attachmentIcon(attachment) {
           const mime = String(attachment?.mime || attachment?.MIME || '').toLowerCase();
