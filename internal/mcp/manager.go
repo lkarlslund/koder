@@ -141,7 +141,14 @@ type serverState struct {
 	resources          []ResourceDescriptor
 	resourceTemplates  []ResourceTemplateDescriptor
 	prompts            []PromptDescriptor
+	watchStop          chan struct{}
 }
+
+const (
+	mcpKeepAliveInterval = 15 * time.Second
+	mcpReconnectInitial  = 250 * time.Millisecond
+	mcpReconnectMaximum  = 30 * time.Second
+)
 
 func NewManager(cfgs map[string]config.MCPServer) (*Manager, error) {
 	m := &Manager{}
@@ -167,6 +174,7 @@ func (m *Manager) LoadConfig(cfgs map[string]config.MCPServer) error {
 	defer m.mu.Unlock()
 
 	for _, state := range m.state {
+		stopSessionWatch(state)
 		if state.session != nil {
 			_ = state.session.Close()
 		}
@@ -200,10 +208,10 @@ func (m *Manager) ConnectAll(ctx context.Context) error {
 func (m *Manager) ConnectServer(ctx context.Context, id string) error {
 	m.connectMu.Lock()
 	defer m.connectMu.Unlock()
-	return m.connectServer(ctx, id)
+	return m.connectServer(ctx, id, false)
 }
 
-func (m *Manager) connectServer(ctx context.Context, id string) error {
+func (m *Manager) connectServer(ctx context.Context, id string, preserveWatch bool) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return errors.New("mcp server id is empty")
@@ -217,6 +225,7 @@ func (m *Manager) connectServer(ctx context.Context, id string) error {
 	}
 	cfg := cloneServerConfig(state.config)
 	if cfg.Disabled {
+		stopSessionWatch(state)
 		if state.session != nil {
 			_ = state.session.Close()
 			state.session = nil
@@ -226,6 +235,9 @@ func (m *Manager) connectServer(ctx context.Context, id string) error {
 		state.lastErr = ""
 		m.mu.Unlock()
 		return nil
+	}
+	if !preserveWatch {
+		stopSessionWatch(state)
 	}
 	if state.session != nil {
 		_ = state.session.Close()
@@ -251,7 +263,9 @@ func (m *Manager) connectServer(ctx context.Context, id string) error {
 		Name:    "koder",
 		Version: version.Current().Version,
 	}, &sdkmcp.ClientOptions{
-		Capabilities: &sdkmcp.ClientCapabilities{},
+		Capabilities:              &sdkmcp.ClientCapabilities{},
+		KeepAlive:                 mcpKeepAliveInterval,
+		KeepAliveFailureThreshold: 2,
 		ToolListChangedHandler: func(context.Context, *sdkmcp.ToolListChangedRequest) {
 			m.refreshServerAsync(id, refreshTools)
 		},
@@ -282,16 +296,21 @@ func (m *Manager) connectServer(ctx context.Context, id string) error {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	current, ok := m.state[id]
 	if !ok {
+		m.mu.Unlock()
 		_ = session.Close()
 		return fmt.Errorf("mcp server %q removed during connect", id)
 	}
+	stopSessionWatch(current)
 	if current.session != nil && current.session != session {
 		_ = current.session.Close()
 	}
+	next.watchStop = make(chan struct{})
 	*current = *next
+	watchStop := current.watchStop
+	m.mu.Unlock()
+	go m.watchSession(id, session, watchStop)
 	return nil
 }
 
@@ -300,12 +319,15 @@ func (m *Manager) DisconnectServer(id string) error {
 	if id == "" {
 		return errors.New("mcp server id is empty")
 	}
+	m.connectMu.Lock()
+	defer m.connectMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	state, ok := m.state[id]
 	if !ok {
 		return fmt.Errorf("mcp server %q not configured", id)
 	}
+	stopSessionWatch(state)
 	if state.session != nil {
 		_ = state.session.Close()
 	}
@@ -333,6 +355,7 @@ func (m *Manager) Close() error {
 	defer m.mu.Unlock()
 	var errs []error
 	for id, state := range m.state {
+		stopSessionWatch(state)
 		if state.session != nil {
 			if err := state.session.Close(); err != nil {
 				errs = append(errs, fmt.Errorf("close mcp server %q: %w", id, err))
@@ -450,6 +473,7 @@ func (m *Manager) ExecuteTool(ctx context.Context, serverID, toolName string, ar
 		return tools.Result{}, fmt.Errorf("mcp server %q not configured", serverID)
 	}
 	session := state.session
+	supervised := state.watchStop != nil
 	serverName := strings.TrimSpace(state.config.Name)
 	cfg := cloneServerConfig(state.config)
 	readOnly := toolIsReadOnly(state.tools, toolName)
@@ -457,7 +481,25 @@ func (m *Manager) ExecuteTool(ctx context.Context, serverID, toolName string, ar
 	m.mu.RUnlock()
 
 	if session == nil {
-		return tools.Result{}, fmt.Errorf("mcp server %q is not connected", serverID)
+		if !supervised {
+			return tools.Result{}, fmt.Errorf("mcp server %q is not connected", serverID)
+		}
+		var err error
+		session, err = m.recoverSession(ctx, serverID, nil)
+		if err != nil {
+			return tools.Result{}, fmt.Errorf("reconnect mcp server %q: %w", serverID, err)
+		}
+		m.mu.RLock()
+		state = m.state[serverID]
+		if state == nil || state.session != session {
+			m.mu.RUnlock()
+			return tools.Result{}, fmt.Errorf("mcp server %q changed during reconnect", serverID)
+		}
+		serverName = strings.TrimSpace(state.config.Name)
+		cfg = cloneServerConfig(state.config)
+		readOnly = toolIsReadOnly(state.tools, toolName)
+		outputSchema = toolOutputSchema(state.tools, toolName)
+		m.mu.RUnlock()
 	}
 	if args == nil {
 		args = map[string]any{}
@@ -572,14 +614,80 @@ func (m *Manager) recoverSession(ctx context.Context, serverID string, failed *s
 	}
 	current := state.session
 	status := state.status
+	preserveWatch := state.watchStop != nil
 	m.mu.RUnlock()
 	if current != nil && current != failed && status == ServerStatusConnected {
 		return current, nil
 	}
-	if err := m.connectServer(ctx, serverID); err != nil {
+	if err := m.connectServer(ctx, serverID, preserveWatch); err != nil {
 		return nil, err
 	}
 	return m.sessionForServer(serverID)
+}
+
+func stopSessionWatch(state *serverState) {
+	if state == nil || state.watchStop == nil {
+		return
+	}
+	close(state.watchStop)
+	state.watchStop = nil
+}
+
+func (m *Manager) watchSession(id string, session *sdkmcp.ClientSession, stop <-chan struct{}) {
+	err := session.Wait()
+	select {
+	case <-stop:
+		return
+	default:
+	}
+
+	m.mu.Lock()
+	state := m.state[id]
+	if state == nil || state.session != session || state.watchStop != stop || state.config.Disabled {
+		m.mu.Unlock()
+		return
+	}
+	state.session = nil
+	state.client = nil
+	state.status = ServerStatusDisconnected
+	if err != nil {
+		state.lastErr = fmt.Sprintf("MCP session closed: %v", err)
+	} else {
+		state.lastErr = "MCP session closed"
+	}
+	m.mu.Unlock()
+
+	for delay := mcpReconnectInitial; ; delay = min(delay*2, mcpReconnectMaximum) {
+		select {
+		case <-stop:
+			return
+		default:
+		}
+
+		m.connectMu.Lock()
+		m.mu.RLock()
+		state = m.state[id]
+		current := state != nil && state.watchStop == stop && !state.config.Disabled
+		connected := current && state.session != nil
+		m.mu.RUnlock()
+		if !current || connected {
+			m.connectMu.Unlock()
+			return
+		}
+		err = m.connectServer(context.Background(), id, true)
+		m.connectMu.Unlock()
+		if err == nil {
+			return
+		}
+
+		timer := time.NewTimer(delay)
+		select {
+		case <-stop:
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
 }
 
 func ToolName(serverID, toolName string) string {

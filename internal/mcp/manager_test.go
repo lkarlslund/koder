@@ -316,7 +316,7 @@ func TestManagerReconnectsClosedSessionAndRetriesReadOnlyTool(t *testing.T) {
 	}
 }
 
-func TestManagerReconnectsButDoesNotReplayMutatingTool(t *testing.T) {
+func TestManagerReconnectsBeforeCallingMutatingToolOnObservedClosure(t *testing.T) {
 	ctx := context.Background()
 	var calls atomic.Int32
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "recoverable", Version: "v1.0.0"}, nil)
@@ -346,23 +346,29 @@ func TestManagerReconnectsButDoesNotReplayMutatingTool(t *testing.T) {
 	if err := stale.Close(); err != nil {
 		t.Fatalf("close stale session: %v", err)
 	}
-	_, err = manager.ExecuteTool(ctx, "docs", "mutate", nil)
-	if err == nil || !strings.Contains(err.Error(), "was not retried because it is not declared read-only") {
+	deadline := time.After(time.Second)
+	for {
+		manager.mu.RLock()
+		fresh := manager.state["docs"].session
+		manager.mu.RUnlock()
+		if fresh != nil && fresh != stale {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("closed session was not proactively replaced")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	result, err := manager.ExecuteTool(ctx, "docs", "mutate", nil)
+	if err != nil {
 		t.Fatalf("ExecuteTool() error = %v", err)
 	}
-	if got := calls.Load(); got != 0 {
-		t.Fatalf("mutating tool was replayed %d times", got)
+	if result.Output != "changed" || calls.Load() != 1 {
+		t.Fatalf("ExecuteTool() = %q, calls = %d", result.Output, calls.Load())
 	}
 	if managerSession(t, manager, "docs") == stale {
 		t.Fatal("closed session was not replaced")
-	}
-
-	result, err := manager.ExecuteTool(ctx, "docs", "mutate", nil)
-	if err != nil {
-		t.Fatalf("second ExecuteTool() error = %v", err)
-	}
-	if result.Output != "changed" || calls.Load() != 1 {
-		t.Fatalf("second ExecuteTool() = %q, calls = %d", result.Output, calls.Load())
 	}
 }
 
@@ -679,6 +685,81 @@ func TestToolListChangedRefreshesWithoutReplacingSession(t *testing.T) {
 	}
 	if current := managerSession(t, manager, "docs"); current != original || current.ID() != original.ID() {
 		t.Fatalf("list change replaced session: original=%q current=%q", original.ID(), current.ID())
+	}
+}
+
+func TestClosedSessionReconnectsAndRediscoversToolsWithoutToolCall(t *testing.T) {
+	firstServer := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "changing", Version: "v1"}, nil)
+	firstServer.AddTool(&sdkmcp.Tool{Name: "first", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{}, nil
+	})
+	secondServer := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "changing", Version: "v2"}, nil)
+	secondServer.AddTool(&sdkmcp.Tool{Name: "first", Description: "updated", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{}, nil
+	})
+	secondServer.AddTool(&sdkmcp.Tool{Name: "second", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{}, nil
+	})
+	var active atomic.Pointer[sdkmcp.Server]
+	active.Store(firstServer)
+	var available atomic.Bool
+	available.Store(true)
+	mcpHandler := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return active.Load() }, &sdkmcp.StreamableHTTPOptions{JSONResponse: true})
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !available.Load() {
+			http.Error(w, "restarting", http.StatusServiceUnavailable)
+			return
+		}
+		mcpHandler.ServeHTTP(w, r)
+	}))
+	defer httpServer.Close()
+
+	manager, err := NewManager(map[string]config.MCPServer{"docs": {URL: httpServer.URL, StartupTimeout: time.Second}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = manager.DisconnectServer("docs") }()
+	if err := manager.ConnectAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	stale := managerSession(t, manager, "docs")
+	active.Store(secondServer)
+	available.Store(false)
+	if err := stale.Close(); err != nil {
+		t.Fatalf("close stale session: %v", err)
+	}
+	downDeadline := time.After(time.Second)
+	downTicker := time.NewTicker(time.Millisecond)
+	defer downTicker.Stop()
+	for {
+		state := manager.ListServers()[0]
+		if state.Status == ServerStatusError {
+			break
+		}
+		select {
+		case <-downTicker.C:
+		case <-downDeadline:
+			t.Fatalf("reconnect did not observe server downtime: %#v", state)
+		}
+	}
+	available.Store(true)
+
+	deadline := time.After(2 * time.Second)
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		tools := manager.ListTools()
+		if len(tools) == 2 && tools[0].Name == "first" && tools[0].Description == "updated" && tools[1].Name == "second" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("tools were not rediscovered after reconnect: %#v", tools)
+		case <-ticker.C:
+		}
+	}
+	if fresh := managerSession(t, manager, "docs"); fresh == stale {
+		t.Fatal("closed session was not replaced")
 	}
 }
 
