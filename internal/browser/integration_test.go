@@ -31,6 +31,10 @@ func TestChromiumIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/popup" {
+			_, _ = w.Write([]byte(`<!doctype html><title>Popup test</title><p>popup content</p>`))
+			return
+		}
 		if r.URL.Path == "/history-one" {
 			_, _ = w.Write([]byte(`<!doctype html><title>history-one</title>
 <label>History value: <input id="history-value"></label>
@@ -61,6 +65,7 @@ func TestChromiumIntegration(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(`<!doctype html><title>Browser test</title>
 <button id="button" onclick="document.querySelector('output').textContent='clicked'">Run</button>
+<button id="popup" onclick="window.open('/popup','koder-popup','width=600,height=400')">Open popup</button>
 <a href="/download">Download</a>
 <label>Customer name <input id="name" onkeydown="if(event.key==='Enter')document.querySelector('output').textContent='entered';if(event.key==='a'&&event.ctrlKey)document.querySelector('output').textContent='control-a'"></label>
 <label><input id="terms" type="checkbox"> Accept terms</label>
@@ -108,6 +113,41 @@ func TestChromiumIntegration(t *testing.T) {
 	visibility, err := m.Evaluate(t.Context(), chat, `document.visibilityState`)
 	if err != nil || visibility != `"visible"` {
 		t.Fatalf("new tab is not active: %s, %v", visibility, err)
+	}
+	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Open popup", Role: "button", Exact: true}, ""); err != nil {
+		t.Fatalf("open popup: %v", err)
+	}
+	var popup browserapi.Tab
+	for range 40 {
+		listed, listErr := m.Tabs(t.Context(), chat)
+		if listErr != nil {
+			t.Fatalf("list popup tabs: %v", listErr)
+		}
+		for _, candidate := range listed {
+			if strings.HasSuffix(candidate.URL, "/popup") {
+				popup = candidate
+				break
+			}
+		}
+		if popup.ID != "" {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if popup.ID == "" || !popup.Owned {
+		t.Fatalf("owned popup tab not discovered: %#v", popup)
+	}
+	if _, err := m.SelectTab(t.Context(), chat, popup.ID); err != nil {
+		t.Fatalf("select popup tab: %v", err)
+	}
+	if title, err := m.Evaluate(t.Context(), chat, `document.title`); err != nil || title != `"Popup test"` {
+		t.Fatalf("popup tab not selected: title=%s err=%v", title, err)
+	}
+	if err := m.CloseTab(t.Context(), chat, popup.ID); err != nil {
+		t.Fatalf("close popup tab: %v", err)
+	}
+	if _, err := m.SelectTab(t.Context(), chat, tab.ID); err != nil {
+		t.Fatalf("restore original tab: %v", err)
 	}
 	windowSize, err := m.Evaluate(t.Context(), chat, `({width: window.outerWidth, height: window.outerHeight})`)
 	if err != nil {

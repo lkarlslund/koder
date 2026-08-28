@@ -219,6 +219,13 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.setError(err)
 		return err
 	}
+	if err := configureTargetAutoAttach(browserCtx); err != nil {
+		stop()
+		allocStop()
+		err = fmt.Errorf("configure Chrome target attachment: %w", err)
+		m.setError(err)
+		return err
+	}
 
 	version := browserVersion(ctx, executable)
 	m.mu.Lock()
@@ -325,7 +332,15 @@ func (m *Manager) Tabs(ctx context.Context, chat browserapi.Chat) ([]browserapi.
 		m.invalidateUnhealthyBrowser(ctx, browserCtx, err)
 		return nil, fmt.Errorf("list browser tabs: %w", err)
 	}
-	m.syncTargets(infos)
+	newTabs := m.syncTargets(infos)
+	for _, tab := range newTabs {
+		err := m.initializeDiscoveredTab(ctx, tab)
+		if err != nil {
+			m.invalidateUnhealthyBrowser(ctx, browserCtx, err)
+			return nil, fmt.Errorf("attach discovered browser tab: %w", err)
+		}
+		m.monitorTab(tab)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	selected := m.selected[chat.ChatID]
@@ -426,15 +441,21 @@ func (m *Manager) NewTab(ctx context.Context, chat browserapi.Chat, rawURL strin
 		m.invalidateUnhealthyBrowser(ctx, browserCtx, err)
 		return browserapi.Tab{}, fmt.Errorf("attach browser tab: %w", err)
 	}
+	if err := configureTargetAutoAttach(tabCtx); err != nil {
+		cancel()
+		return browserapi.Tab{}, fmt.Errorf("configure browser tab attachment: %w", err)
+	}
 	tab := &ownedTab{id: newOpaqueID("tab"), targetID: targetID, owner: chat, ctx: tabCtx, cancel: cancel, requests: map[string]*requestState{}}
 	m.monitorTab(tab)
 	m.mu.Lock()
 	m.tabs[tab.id] = tab
-	m.selected[chat.ChatID] = tab.id
 	m.mu.Unlock()
 	if err := m.activateTab(ctx, tab); err != nil {
 		return browserapi.Tab{}, fmt.Errorf("activate new browser tab: %w", err)
 	}
+	m.mu.Lock()
+	m.selected[chat.ChatID] = tab.id
+	m.mu.Unlock()
 	if url != "about:blank" {
 		result, err := m.Navigate(ctx, chat, url, "load")
 		if err != nil {
@@ -473,7 +494,6 @@ func (m *Manager) ClaimTab(ctx context.Context, chat browserapi.Chat, tabID stri
 			_ = os.Remove(download.path)
 		}
 	}
-	m.selected[chat.ChatID] = tab.id
 	m.mu.Unlock()
 	if tab.targetID == "" {
 		return browserapi.Tab{ID: tab.id, Owned: true, Selected: true}, nil
@@ -481,6 +501,9 @@ func (m *Manager) ClaimTab(ctx context.Context, chat browserapi.Chat, tabID stri
 	if err := m.activateTab(ctx, tab); err != nil {
 		return browserapi.Tab{}, fmt.Errorf("activate claimed browser tab: %w", err)
 	}
+	m.mu.Lock()
+	m.selected[chat.ChatID] = tab.id
+	m.mu.Unlock()
 	return m.tabInfo(ctx, chat, tab)
 }
 
@@ -489,12 +512,12 @@ func (m *Manager) SelectTab(ctx context.Context, chat browserapi.Chat, tabID str
 	if err != nil {
 		return browserapi.Tab{}, err
 	}
-	m.mu.Lock()
-	m.selected[chat.ChatID] = tab.id
-	m.mu.Unlock()
 	if err := m.activateTab(ctx, tab); err != nil {
 		return browserapi.Tab{}, fmt.Errorf("activate selected browser tab: %w", err)
 	}
+	m.mu.Lock()
+	m.selected[chat.ChatID] = tab.id
+	m.mu.Unlock()
 	return m.tabInfo(ctx, chat, tab)
 }
 
@@ -1148,10 +1171,11 @@ func (m *Manager) ownedTab(chat browserapi.Chat, tabID string) (*ownedTab, error
 	return tab, nil
 }
 
-func (m *Manager) syncTargets(infos []*target.Info) {
+func (m *Manager) syncTargets(infos []*target.Info) []*ownedTab {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	seen := map[target.ID]bool{}
+	var added []*ownedTab
 	for _, info := range infos {
 		if info.Type != "page" {
 			continue
@@ -1171,8 +1195,8 @@ func (m *Manager) syncTargets(infos []*target.Info) {
 			ctx, cancel = chromedp.NewContext(m.browserCtx, chromedp.WithTargetID(info.TargetID))
 		}
 		tab := &ownedTab{id: newOpaqueID("tab"), targetID: info.TargetID, owner: owner, ctx: ctx, cancel: cancel, requests: map[string]*requestState{}}
-		m.monitorTab(tab)
 		m.tabs[tab.id] = tab
+		added = append(added, tab)
 		if owner.ChatID != "" && m.selected[owner.ChatID] == "" {
 			m.selected[owner.ChatID] = tab.id
 		}
@@ -1183,6 +1207,41 @@ func (m *Manager) syncTargets(infos []*target.Info) {
 			m.removeTabLocked(tab)
 		}
 	}
+	return added
+}
+
+func (m *Manager) initializeDiscoveredTab(ctx context.Context, tab *ownedTab) error {
+	done := make(chan error, 1)
+	go func() {
+		err := chromedp.Run(tab.ctx)
+		if err == nil {
+			err = configureTargetAutoAttach(tab.ctx)
+		}
+		done <- err
+	}()
+	timer := time.NewTimer(m.timeout())
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		tab.cancel()
+		return ctx.Err()
+	case <-timer.C:
+		tab.cancel()
+		return context.DeadlineExceeded
+	}
+}
+
+// configureTargetAutoAttach leaves workers and out-of-process frames under
+// chromedp's automatic management while reserving child pages for Koder's tab
+// registry. Otherwise window.open popups are already attached by the time
+// Koder discovers them, and attaching their owned context can stall.
+func configureTargetAutoAttach(ctx context.Context) error {
+	filter := target.Filter{{Type: "page", Exclude: true}, {}}
+	return chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		return target.SetAutoAttach(true, false).WithFlatten(true).WithFilter(filter).Do(ctx)
+	}))
 }
 
 func (m *Manager) selectedTab(chatID id.ID) string {
@@ -1263,9 +1322,6 @@ func (m *Manager) monitorTab(tab *ownedTab) {
 		_ = chromedp.Run(ctx,
 			network.Enable(),
 			cdpruntime.Enable(),
-			cdpbrowser.SetDownloadBehavior(cdpbrowser.SetDownloadBehaviorBehaviorAllowAndName).
-				WithDownloadPath("/tmp/koder/run/downloads").
-				WithEventsEnabled(true),
 		)
 	}()
 }
@@ -1383,10 +1439,18 @@ func (m *Manager) tabInfo(ctx context.Context, chat browserapi.Chat, tab *ownedT
 func (m *Manager) activateTab(ctx context.Context, tab *ownedTab) error {
 	tab.mu.Lock()
 	defer tab.mu.Unlock()
-	opCtx, cancel := m.operationContext(ctx, tab.ctx)
+	m.mu.Lock()
+	browserCtx := m.browserCtx
+	m.mu.Unlock()
+	chromedpContext := chromedp.FromContext(browserCtx)
+	if chromedpContext == nil || chromedpContext.Browser == nil {
+		return errors.New("browser is not running")
+	}
+	opCtx, cancel := m.operationContext(ctx, browserCtx)
 	defer cancel()
-	if err := chromedp.Run(opCtx, page.BringToFront()); err != nil {
-		return fmt.Errorf("bring browser tab to front: %w", err)
+	browserExecutor := cdp.WithExecutor(opCtx, chromedpContext.Browser)
+	if err := target.ActivateTarget(tab.targetID).Do(browserExecutor); err != nil {
+		return fmt.Errorf("activate browser target: %w", err)
 	}
 	return nil
 }

@@ -27,11 +27,11 @@ type tool struct {
 
 var specs = []tool{
 	{tools.BrowserStatus, "Browser status", "Inspect the managed browser's health and this chat's tab count.", object(saveToFileProperty)},
-	{tools.BrowserTabList, "List browser tabs", "List this chat's tabs and unowned manual tabs without starting Chrome. Tabs owned by other chats are hidden.", object(saveToFileProperty)},
+	{tools.BrowserTabList, "List browser pages", "List this chat's browser pages, including tabs and popup windows, plus unowned manual pages without starting Chrome. Pages owned by other chats are hidden.", object(saveToFileProperty)},
 	{tools.BrowserTabNew, "New browser tab", "Create and select a browser tab owned by this chat.", object(`"url":{"type":"string"}`)},
-	{tools.BrowserTabClaim, "Claim browser tab", "Atomically claim an unowned manual browser tab.", required(object(`"tab_id":{"type":"string"}`), "tab_id")},
-	{tools.BrowserTabSelect, "Select browser tab", "Select one of this chat's browser tabs.", required(object(`"tab_id":{"type":"string"}`), "tab_id")},
-	{tools.BrowserTabClose, "Close browser tab", "Close one of this chat's browser tabs.", required(object(`"tab_id":{"type":"string"}`), "tab_id")},
+	{tools.BrowserTabClaim, "Claim browser page", "Atomically claim an unowned manual browser page by its returned opaque ID.", required(object(tabIDProperty), "tab_id")},
+	{tools.BrowserTabSelect, "Select browser page", "Select one of this chat's browser pages by its returned opaque ID; titles are informational and are not selectors.", required(object(tabIDProperty), "tab_id")},
+	{tools.BrowserTabClose, "Close browser page", "Close one of this chat's browser pages by its returned opaque ID.", required(object(tabIDProperty), "tab_id")},
 	{tools.BrowserNavigate, "Navigate browser", "Navigate the selected tab to an HTTP, HTTPS, or permitted local file URL.", required(object(`"url":{"type":"string"},"wait_until":{"type":"string","enum":["domcontentloaded","load","networkidle"]}`), "url")},
 	{tools.BrowserBack, "Browser back", "Navigate the selected tab back.", object(``)},
 	{tools.BrowserForward, "Browser forward", "Navigate the selected tab forward.", object(``)},
@@ -63,6 +63,7 @@ var specs = []tool{
 }
 
 const saveToFileProperty = `"save_to_file":{"type":"string","description":"Optional destination file. Omit to return the extracted data to the model; set to persist it to disk instead."}`
+const tabIDProperty = `"tab_id":{"type":"string","description":"Exact opaque page ID returned by browser_tabs list or create; never use a title or URL."}`
 
 func init() {
 	for _, spec := range specs {
@@ -81,8 +82,8 @@ func legacyBrowserOperation(kind tools.ID) bool {
 }
 
 func registerResourceTools() {
-	registerActionTool(tools.BrowserTabs, "Browser tabs", "Manage tabs owned by this chat. list returns owned and claimable manual tabs; create opens and selects a new tab; claim takes ownership of a manual tab; select changes the active tab; close closes an owned tab.",
-		`{"type":"object","properties":{"action":{"type":"string"},"tab_id":{"type":"string"},"url":{"type":"string"},"save_to_file":{"type":"string"}},"required":["action"],"additionalProperties":false}`,
+	registerActionTool(tools.BrowserTabs, "Browser pages", "Manage browser pages owned by this chat. A page may be a tab or a separate popup window. list returns owned and claimable manual pages; create opens and selects a new tab; claim takes ownership of a manual page; select changes the active page; close closes an owned page. claim, select, and close require the exact opaque tab_id returned by list or create; titles and URLs are informational, not selectors.",
+		`{"type":"object","properties":{"action":{"type":"string"},`+tabIDProperty+`,"url":{"type":"string"},"save_to_file":{"type":"string"}},"required":["action"],"additionalProperties":false}`,
 		[]tools.ActionRoute{{Action: "list", Tool: tools.BrowserTabList}, {Action: "create", Tool: tools.BrowserTabNew}, {Action: "claim", Tool: tools.BrowserTabClaim}, {Action: "select", Tool: tools.BrowserTabSelect}, {Action: "close", Tool: tools.BrowserTabClose}})
 	registerActionTool(tools.BrowserNavigation, "Browser navigation", "Navigate the selected tab. goto requires an HTTP, HTTPS, or permitted local file URL; back and forward move through history; reload refreshes the current page.",
 		`{"type":"object","properties":{"action":{"type":"string"},"url":{"type":"string"},"wait_until":{"type":"string","enum":["domcontentloaded","load","networkidle"]}},"required":["action"],"additionalProperties":false}`,
