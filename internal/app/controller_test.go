@@ -134,8 +134,8 @@ func TestSettingsHealthSurfacesProviderAndModelRuntimeFailures(t *testing.T) {
 	for _, issue := range health.Issues {
 		areas[issue.Area] = true
 	}
-	if health.NeedsSetup || !areas["models"] {
-		t.Fatalf("expected provider and model runtime issues on the models page, got %#v", health)
+	if health.NeedsSetup || !areas["integrations"] || !areas["models"] {
+		t.Fatalf("expected provider issues on integrations and model issues on models, got %#v", health)
 	}
 }
 

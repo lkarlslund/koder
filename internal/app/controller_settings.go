@@ -2185,9 +2185,9 @@ func (c *Controller) settingsHealthLocked() SettingsHealth {
 		usableProviders++
 		health := c.providerHealth.Provider(providerID)
 		if health.Status == provider.HealthUnhealthy {
-			add("models", "providers", providerID, "error", providerEntryLabel(providerID, providerCfg)+": "+health.Detail)
+			add("integrations", "providers", providerID, "error", providerEntryLabel(providerID, providerCfg)+": "+health.Detail)
 		} else if health.Status == provider.HealthHealthy && health.Operation == "list_models" && health.ModelCount == 0 {
-			add("models", "providers", providerID, "warning", providerEntryLabel(providerID, providerCfg)+" returned no models")
+			add("integrations", "providers", providerID, "warning", providerEntryLabel(providerID, providerCfg)+" returned no models")
 		}
 	}
 	if usableProviders == 0 {
@@ -2195,7 +2195,7 @@ func (c *Controller) settingsHealthLocked() SettingsHealth {
 		if len(c.cfg.Providers) > 0 {
 			message = "Enable or add a model provider to start chatting"
 		}
-		add("models", "providers", "model-providers", "setup", message)
+		add("integrations", "providers", "model-providers", "setup", message)
 	}
 
 	if usableProviders > 0 {
@@ -2264,11 +2264,11 @@ func (c *Controller) settingsHealthLocked() SettingsHealth {
 		if message == "" {
 			message = "MCP server connection failed"
 		}
-		add("tools", "mcp", runtime.ID, "error", runtime.ID+": "+message)
+		add("integrations", "mcp", runtime.ID, "error", runtime.ID+": "+message)
 	}
 	for _, skill := range skills.InspectWithOptions(c.projectRoot, skillDiscoverOptions(c.cfg)).Items {
 		if !skill.Valid {
-			add("tools", "skills", skill.CanonicalPath, "error", "Skill "+skill.Name+": "+skill.Error)
+			add("skills", "skills", skill.CanonicalPath, "error", "Skill "+skill.Name+": "+skill.Error)
 		}
 	}
 

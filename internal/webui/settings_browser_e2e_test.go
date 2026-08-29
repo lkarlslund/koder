@@ -39,7 +39,7 @@ func TestSettingsBrowserNavigationGroupsConfigurationByDomain(t *testing.T) {
 		chromedp.WaitVisible(`[data-settings-open]`, chromedp.ByQuery),
 		chromedp.Click(`[data-settings-open]`, chromedp.ByQuery),
 		chromedp.WaitVisible(`.settings-dialog`, chromedp.ByQuery),
-		chromedp.Poll(`document.querySelectorAll('[data-settings-tab]').length === 8`, nil),
+		chromedp.Poll(`document.querySelectorAll('[data-settings-tab]').length === 10`, nil),
 		chromedp.Poll(`document.querySelector('.settings-form').textContent.includes('Theme')`, nil),
 		chromedp.Poll(`Number(document.querySelector('[data-settings-open] .badge').textContent) > 0`, nil),
 		chromedp.Poll(`getComputedStyle(document.querySelector('.settings-setup-label')).display === 'none'`, nil),
@@ -51,7 +51,7 @@ func TestSettingsBrowserNavigationGroupsConfigurationByDomain(t *testing.T) {
 	if err := chromedp.Run(browserCtx, chromedp.Evaluate(`Array.from(document.querySelectorAll('[data-settings-tab]')).map(node => node.textContent.trim().replace(/\s+/g, ' '))`, &labels)); err != nil {
 		t.Fatalf("read settings navigation: %v", err)
 	}
-	wantLabels := []string{"Overview", "Models", "Backends", "Tools", "Voice & devices", "Conversation", "Access", "Prompts"}
+	wantLabels := []string{"Overview", "Models", "Integrations", "Backends", "Tools", "Skills", "Voice & devices", "Conversation", "Access", "Prompts"}
 	if len(labels) != len(wantLabels) {
 		t.Fatalf("settings tabs = %#v, want %#v", labels, wantLabels)
 	}
@@ -61,9 +61,11 @@ func TestSettingsBrowserNavigationGroupsConfigurationByDomain(t *testing.T) {
 		}
 	}
 
-	assertSettingsPageContains(t, browserCtx, "models", "Model providers", "Models", "Default model")
-	assertSettingsPageContains(t, browserCtx, "backends", "Koder", "Codex backend")
-	assertSettingsPageContains(t, browserCtx, "tools", "Agent Skills", "Managed browser", "MCP tool sources", "Native tools")
+	assertSettingsPageContains(t, browserCtx, "models", "Models", "Default model")
+	assertSettingsPageContains(t, browserCtx, "integrations", "Model providers", "MCP tool sources")
+	assertSettingsPageContains(t, browserCtx, "backends", "Koder", "Codex", "Configure")
+	assertSettingsPageContains(t, browserCtx, "tools", "Browser", "Configure", "Native tools")
+	assertSettingsPageContains(t, browserCtx, "skills", "Agent Skills")
 	assertSettingsPageContains(t, browserCtx, "voice", "Android devices", "Speech output")
 	assertSettingsPageContains(t, browserCtx, "conversation", "Turn execution", "Compaction", "Thinking helper")
 
@@ -84,7 +86,11 @@ func TestSettingsBrowserNavigationGroupsConfigurationByDomain(t *testing.T) {
 func assertSettingsPageContains(t *testing.T, browserCtx context.Context, tab string, expected ...string) {
 	t.Helper()
 	var text string
-	ready := `document.querySelector('.settings-form').innerText.includes(` + strconv.Quote(expected[0]) + `)`
+	checks := make([]string, 0, len(expected))
+	for _, text := range expected {
+		checks = append(checks, `document.querySelector('.settings-form').innerText.includes(`+strconv.Quote(text)+`)`)
+	}
+	ready := `document.querySelector('[data-settings-tab="` + tab + `"]').classList.contains('active') && ` + strings.Join(checks, " && ")
 	if err := chromedp.Run(browserCtx,
 		chromedp.Click(`[data-settings-tab="`+tab+`"]`, chromedp.ByQuery),
 		chromedp.Poll(ready, nil),

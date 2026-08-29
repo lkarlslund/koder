@@ -1295,9 +1295,11 @@
                   </template>
                 </div>
                 <div class="settings-overview-grid">
-                  <button type="button" class="settings-overview-card" @click="selectSettingsTab('models')"><i class="bi bi-cpu"></i><span><strong>Models</strong><small x-text="settingsModelOverview()"></small></span></button>
+				  <button type="button" class="settings-overview-card" @click="selectSettingsTab('models')"><i class="bi bi-cpu"></i><span><strong>Models</strong><small x-text="settingsModelOverview()"></small></span></button>
+				  <button type="button" class="settings-overview-card" @click="selectSettingsTab('integrations')"><i class="bi bi-plug"></i><span><strong>Integrations</strong><small x-text="settingsIntegrationOverview()"></small></span></button>
                   <button type="button" class="settings-overview-card" @click="selectSettingsTab('backends')"><i class="bi bi-terminal"></i><span><strong>Backends</strong><small>Koder and Codex turn execution</small></span></button>
-                  <button type="button" class="settings-overview-card" @click="selectSettingsTab('tools')"><i class="bi bi-tools"></i><span><strong>Tools</strong><small>Built-ins, browser, and MCP</small></span></button>
+				  <button type="button" class="settings-overview-card" @click="selectSettingsTab('tools')"><i class="bi bi-tools"></i><span><strong>Tools</strong><small>Built-ins and managed browser</small></span></button>
+				  <button type="button" class="settings-overview-card" @click="selectSettingsTab('skills')"><i class="bi bi-stars"></i><span><strong>Skills</strong><small>Portable agent workflows</small></span></button>
                   <button type="button" class="settings-overview-card" @click="selectSettingsTab('voice')"><i class="bi bi-mic"></i><span><strong>Voice</strong><small>Speech and companion devices</small></span></button>
                 </div>
                 <div class="settings-section settings-page-block">
@@ -1316,13 +1318,11 @@
                 </div>
               </div>
 
-			  <div class="settings-section" x-show="settingsTab === 'backends'">
-				<div class="settings-backend-card"><div><i class="bi bi-stars me-2 text-primary"></i><span class="fw-semibold">Koder</span><div class="small text-secondary">Built-in turn backend with native Koder tools.</div></div><span class="badge text-bg-success">Ready</span></div>
-				<div class="settings-section-header"><div><div class="fw-semibold">Codex backend</div><div class="small text-secondary">Run chats through an isolated Codex CLI process.</div></div><span class="badge" :class="settingsTargetIssueCount('codex') ? 'text-bg-danger' : 'text-bg-success'" x-text="settingsTargetIssueCount('codex') ? 'Needs attention' : 'Ready'"></span></div>
-				<div class="alert alert-info"><i class="bi bi-arrow-clockwise me-1"></i> Restart Koder after changing these process settings. Codex authentication and model configuration belong to the OS account running Koder.</div>
-				<div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Codex chats</span><div class="settings-field-help">Offer Codex as a turn backend in the new-chat dialog.</div></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="settings.codex.enabled"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></div></div>
-				<div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-codex-executable">Codex executable</label><div class="settings-field-help">Command name or absolute path visible to the Koder service.</div></div><div class="settings-field-control"><input id="settings-codex-executable" class="form-control font-monospace" x-model="settings.codex.executable" placeholder="codex" autocomplete="off"></div></div>
-				<div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-codex-home">Codex home</label><div class="settings-field-help">Optional absolute CODEX_HOME. Leave empty to use the service account's normal Codex login and configuration.</div></div><div class="settings-field-control"><input id="settings-codex-home" class="form-control font-monospace" x-model="settings.codex.home" placeholder="Use service account default" autocomplete="off"></div></div>
+			  <div class="settings-page-block" x-show="settingsTab === 'backends'">
+				<div class="settings-item-list">
+				  <div class="settings-item-row"><div class="settings-item-main"><span class="settings-item-title"><i class="bi bi-stars me-1 text-primary"></i>Koder</span><span class="settings-item-subtitle">Built-in turn backend with native Koder tools.</span></div><span class="badge text-bg-success">Ready</span></div>
+				  <div class="settings-item-row"><div class="settings-item-main"><span class="settings-item-title"><i class="bi bi-terminal me-1"></i>Codex</span><span class="settings-item-subtitle">Run chats through an isolated Codex CLI process.</span><span class="settings-provider-health" :class="settingsTargetIssueCount('codex') ? 'text-danger' : (settings.codex.enabled ? 'text-success' : 'text-secondary')"><i class="bi" :class="settingsTargetIssueCount('codex') ? 'bi-exclamation-triangle-fill' : (settings.codex.enabled ? 'bi-check-circle-fill' : 'bi-pause-circle')"></i><span x-text="settingsTargetIssueCount('codex') ? 'Needs attention' : (settings.codex.enabled ? 'Ready' : 'Disabled')"></span></span></div><div class="settings-item-actions"><label class="toggle-switch settings-item-toggle"><input class="toggle-switch-input" type="checkbox" x-model="settings.codex.enabled"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label><button type="button" class="btn btn-sm btn-outline-secondary" @click="openCodexEditor()"><i class="bi bi-sliders me-1"></i>Configure</button></div></div>
+				</div>
 			  </div>
 
 				<div x-show="settingsTab === 'voice'">
@@ -1370,23 +1370,8 @@
               </div>
 
 			  <div class="settings-page-block" x-show="settingsTab === 'tools'">
-				<div class="settings-section-header">
-				  <div><div class="fw-semibold">Managed browser</div><div class="small text-secondary" x-text="browserStatusDescription(browserStatus)"></div></div>
-				  <span class="badge" :class="browserStatusBadgeClass(browserStatus)" x-text="browserStatus?.state || 'unknown'"></span>
-				</div>
-				<div class="settings-section">
-				  <div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Browser tools</span></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="settings.browser.enabled"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></div></div>
-				  <div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Visible browser window</span><div class="settings-field-help">Show the managed browser while tools operate.</div></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="settings.browser.headed"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></div></div>
-				  <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-browser-executable">Chrome/Chromium executable</label><div class="settings-field-help">Leave empty to auto-detect.</div></div><div class="settings-field-control"><input id="settings-browser-executable" class="form-control font-monospace" x-model="settings.browser.executable" placeholder="auto-detect"></div></div>
-				  <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-browser-timeout">Operation timeout</label><div class="settings-field-help">Maximum duration of a browser operation, in seconds.</div></div><div class="settings-field-control settings-field-control-sm"><input id="settings-browser-timeout" class="form-control" type="number" min="1" max="120" x-model.number="settings.browser.operation_timeout_seconds"></div></div>
-				  <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-browser-chat-tabs">Tabs per chat</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-browser-chat-tabs" class="form-control" type="number" min="1" x-model.number="settings.browser.max_tabs_per_chat"></div></div>
-				  <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-browser-global-tabs">Global owned tabs</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-browser-global-tabs" class="form-control" type="number" min="1" x-model.number="settings.browser.max_tabs_global"></div></div>
-				</div>
-				<div class="settings-actions">
-				  <button class="btn btn-outline-secondary" type="button" @click="browserAction('show')"><i class="bi bi-window me-1"></i>Show</button>
-				  <button class="btn btn-outline-secondary" type="button" :disabled="browserStatus?.state !== 'running'" @click="browserAction('restart')"><i class="bi bi-arrow-clockwise me-1"></i>Restart</button>
-				  <button class="btn btn-outline-secondary" type="button" :disabled="browserStatus?.state !== 'running'" @click="browserAction('stop')"><i class="bi bi-stop-fill me-1"></i>Stop</button>
-				  <button class="btn btn-outline-danger ms-auto" type="button" @click="resetBrowserProfile()"><i class="bi bi-trash me-1"></i>Reset profile</button>
+				<div class="settings-item-list">
+				  <div class="settings-item-row"><div class="settings-item-main"><span class="settings-item-title"><i class="bi bi-window me-1"></i>Browser</span><span class="settings-item-subtitle" x-text="browserStatusDescription(browserStatus)"></span><span class="settings-provider-health" :class="settings.browser.enabled ? (browserStatus?.state === 'error' ? 'text-danger' : 'text-success') : 'text-secondary'"><i class="bi" :class="settings.browser.enabled ? (browserStatus?.state === 'error' ? 'bi-exclamation-triangle-fill' : 'bi-check-circle-fill') : 'bi-pause-circle'"></i><span x-text="settings.browser.enabled ? (browserStatus?.state || 'Enabled') : 'Disabled'"></span></span></div><div class="settings-item-actions"><label class="toggle-switch settings-item-toggle"><input class="toggle-switch-input" type="checkbox" x-model="settings.browser.enabled"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label><button type="button" class="btn btn-sm btn-outline-secondary" @click="openBrowserEditor()"><i class="bi bi-sliders me-1"></i>Configure</button></div></div>
 				</div>
 			  </div>
 
@@ -1421,7 +1406,7 @@
                 </template>
               </div>
 
-              <div class="settings-page-block" x-show="settingsTab === 'models'">
+			  <div class="settings-page-block" x-show="settingsTab === 'integrations'">
                 <div class="settings-list-header">
                   <div>
 					<div class="fw-semibold">Model providers</div>
@@ -1512,7 +1497,7 @@
 								<div class="settings-item-actions" role="group" :aria-label="'Actions for ' + item.model_id">
 								  <button type="button" class="btn btn-sm btn-outline-success" title="Make default model" x-show="!modelConfigIsDefault(item)" @click="setModelConfigAsDefault(item)"><i class="bi bi-bookmark-check"></i></button>
 								  <button type="button" class="btn btn-sm btn-outline-secondary" title="Duplicate custom model" @click="duplicateModelConfig(modelConfigKey(item))"><i class="bi bi-copy"></i></button>
-								  <button type="button" class="btn btn-sm btn-outline-secondary" title="Edit custom model" @click="editModelConfig(modelConfigKey(item))"><i class="bi bi-pencil"></i></button>
+								  <button type="button" class="btn btn-sm btn-outline-secondary" @click="editModelConfig(modelConfigKey(item))"><i class="bi bi-sliders me-1"></i>Configure</button>
 								  <button type="button" class="btn btn-sm btn-outline-danger" title="Delete custom model" @click="deleteModelConfig(modelConfigKey(item))"><i class="bi bi-trash"></i></button>
 								</div>
 							  </div>
@@ -1525,7 +1510,7 @@
 				</div>
               </div>
 
-              <div class="settings-page-block" x-show="settingsTab === 'tools'">
+			  <div class="settings-page-block" x-show="settingsTab === 'skills'">
                 <div class="settings-list-header">
                   <div>
                     <div class="fw-semibold">Agent Skills</div>
@@ -1579,7 +1564,7 @@
                 </details>
               </div>
 
-              <div class="settings-page-block" x-show="settingsTab === 'tools'">
+			  <div class="settings-page-block" x-show="settingsTab === 'integrations'">
                 <div class="settings-list-header">
                   <div>
 					<div class="fw-semibold">MCP tool sources</div>
@@ -1721,6 +1706,35 @@
       </div>
     </section>
   </div>
+
+	<div class="modal-backdrop-lite modal-backdrop-nested" x-show="showSettings && showBrowserEditor" x-transition @keydown.escape.window="closeBrowserEditor()" style="display: none;">
+	  <section class="settings-item-dialog bg-body border rounded shadow">
+		<header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom"><div><div class="fw-semibold"><i class="bi bi-window me-1"></i> Browser</div><div class="small text-secondary">Managed browser tool configuration</div></div><div class="d-flex align-items-center gap-2"><button type="button" class="btn btn-sm btn-primary" @click="saveSettings('browser')" :disabled="settingsSaving || !settingsDirty()"><i class="bi bi-check-lg me-1"></i>Save</button><button type="button" class="btn btn-sm btn-outline-secondary" @click="closeBrowserEditor()"><i class="bi bi-x-lg"></i></button></div></header>
+		<div class="settings-item-form p-3">
+		  <div class="settings-section">
+			<div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Visible browser window</span><div class="settings-field-help">Show the managed browser while tools operate.</div></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="settings.browser.headed"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></div></div>
+			<div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-browser-executable">Chrome/Chromium executable</label><div class="settings-field-help">Leave empty to auto-detect.</div></div><div class="settings-field-control"><input id="settings-browser-executable" class="form-control font-monospace" x-model="settings.browser.executable" placeholder="auto-detect"></div></div>
+			<div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-browser-timeout">Operation timeout</label><div class="settings-field-help">Maximum duration of a browser operation, in seconds.</div></div><div class="settings-field-control settings-field-control-sm"><input id="settings-browser-timeout" class="form-control" type="number" min="1" max="120" x-model.number="settings.browser.operation_timeout_seconds"></div></div>
+			<div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-browser-chat-tabs">Tabs per chat</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-browser-chat-tabs" class="form-control" type="number" min="1" x-model.number="settings.browser.max_tabs_per_chat"></div></div>
+			<div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-browser-global-tabs">Global owned tabs</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-browser-global-tabs" class="form-control" type="number" min="1" x-model.number="settings.browser.max_tabs_global"></div></div>
+		  </div>
+		  <div class="settings-actions"><button class="btn btn-outline-secondary" type="button" @click="browserAction('show')"><i class="bi bi-window me-1"></i>Show</button><button class="btn btn-outline-secondary" type="button" :disabled="browserStatus?.state !== 'running'" @click="browserAction('restart')"><i class="bi bi-arrow-clockwise me-1"></i>Restart</button><button class="btn btn-outline-secondary" type="button" :disabled="browserStatus?.state !== 'running'" @click="browserAction('stop')"><i class="bi bi-stop-fill me-1"></i>Stop</button><button class="btn btn-outline-danger ms-auto" type="button" @click="resetBrowserProfile()"><i class="bi bi-trash me-1"></i>Reset profile</button></div>
+		</div>
+	  </section>
+	</div>
+
+	<div class="modal-backdrop-lite modal-backdrop-nested" x-show="showSettings && showCodexEditor" x-transition @keydown.escape.window="closeCodexEditor()" style="display: none;">
+	  <section class="settings-item-dialog bg-body border rounded shadow">
+		<header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom"><div><div class="fw-semibold"><i class="bi bi-terminal me-1"></i> Codex</div><div class="small text-secondary">Turn backend configuration</div></div><div class="d-flex align-items-center gap-2"><button type="button" class="btn btn-sm btn-primary" @click="saveSettings('codex')" :disabled="settingsSaving || !settingsDirty()"><i class="bi bi-check-lg me-1"></i>Save</button><button type="button" class="btn btn-sm btn-outline-secondary" @click="closeCodexEditor()"><i class="bi bi-x-lg"></i></button></div></header>
+		<div class="settings-item-form p-3">
+		  <div class="alert alert-info"><i class="bi bi-arrow-clockwise me-1"></i> Restart Koder after changing these process settings. Codex authentication and model configuration belong to the OS account running Koder.</div>
+		  <div class="settings-section">
+			<div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-codex-executable">Codex executable</label><div class="settings-field-help">Command name or absolute path visible to the Koder service.</div></div><div class="settings-field-control"><input id="settings-codex-executable" class="form-control font-monospace" x-model="settings.codex.executable" placeholder="codex" autocomplete="off"></div></div>
+			<div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-codex-home">Codex home</label><div class="settings-field-help">Optional absolute CODEX_HOME. Leave empty to use the service account's normal Codex login and configuration.</div></div><div class="settings-field-control"><input id="settings-codex-home" class="form-control font-monospace" x-model="settings.codex.home" placeholder="Use service account default" autocomplete="off"></div></div>
+		  </div>
+		</div>
+	  </section>
+	</div>
 
   <div class="modal-backdrop-lite modal-backdrop-nested" x-show="showSettings && showProviderEditor" x-transition @keydown.escape.window="closeProviderEditor()" style="display: none;">
     <section class="settings-item-dialog bg-body border rounded shadow">

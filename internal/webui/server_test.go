@@ -2091,6 +2091,16 @@ func TestIndexServesHTML(t *testing.T) {
 		strings.Contains(document, `Server disabled`) {
 		t.Fatalf("expected providers and MCP servers to share immediate enable, configure, and delete controls, and phones to be deleted")
 	}
+	if !strings.Contains(appJS, `settingsTabs() { return ['overview', 'models', 'integrations', 'backends', 'tools', 'skills'`) ||
+		!strings.Contains(document, `x-show="settingsTab === 'integrations'"`) ||
+		!strings.Contains(document, `x-show="settingsTab === 'skills'"`) ||
+		!strings.Contains(document, `@click="openBrowserEditor()"`) ||
+		!strings.Contains(document, `x-show="showSettings && showBrowserEditor"`) ||
+		!strings.Contains(document, `@click="openCodexEditor()"`) ||
+		!strings.Contains(document, `x-show="showSettings && showCodexEditor"`) ||
+		strings.Contains(document, `Browser tools</span>`) {
+		t.Fatalf("expected separate integrations and skills tabs plus row-based Browser and Codex configuration")
+	}
 	if !strings.Contains(fullPage, `x-effect="renderTimelineMarkdownElement($el, item, item.content?.text || '', itemMarkdownOptions(item))"`) {
 		t.Fatalf("expected assistant text to render through item-aware timeline markdown element renderer")
 	}
@@ -2999,7 +3009,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(document, `toggle-switch-track`) {
 		t.Fatalf("expected tools settings and boolean preferences to use shared toggle sliders")
 	}
-	if !strings.Contains(fullPage, `settingsTabs() { return ['overview', 'models', 'backends', 'tools', 'voice', 'conversation', 'access', 'prompts']; }`) ||
+	if !strings.Contains(fullPage, `settingsTabs() { return ['overview', 'models', 'integrations', 'backends', 'tools', 'skills', 'voice', 'conversation', 'access', 'prompts']; }`) ||
 		!strings.Contains(document, `data-settings-open`) ||
 		!strings.Contains(document, `settingsTabIssueCount(tab)`) ||
 		!strings.Contains(fullPage, `settings_health`) ||
