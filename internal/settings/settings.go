@@ -163,6 +163,16 @@ func (s *Store) Compaction(chat domain.Chat, prompt string) (CompactionSettings,
 
 func (s *Store) Thinking(chat domain.Chat, prompt string, preserveThinking bool) (ThinkingSettings, error) {
 	cfg := s.Snapshot()
+	settings := ThinkingSettings{
+		CavemanEnabled:   cfg.Thinking.CavemanEnabled,
+		Prompt:           strings.TrimSpace(prompt),
+		Parallelism:      cfg.Thinking.CavemanParallelism,
+		MinTokens:        cfg.Thinking.CavemanMinTokens,
+		PreserveThinking: preserveThinking,
+	}
+	if !settings.CavemanEnabled {
+		return settings, nil
+	}
 	providerID := strings.TrimSpace(cfg.Thinking.CavemanProviderID)
 	modelID := strings.TrimSpace(cfg.Thinking.CavemanModelID)
 	if providerID == "" {
@@ -175,17 +185,11 @@ func (s *Store) Thinking(chat domain.Chat, prompt string, preserveThinking bool)
 	if err != nil {
 		return ThinkingSettings{}, err
 	}
-	return ThinkingSettings{
-		CavemanEnabled:   cfg.Thinking.CavemanEnabled,
-		ProviderID:       model.ProviderID,
-		ModelID:          model.ModelID,
-		Provider:         model.Provider,
-		Model:            model.Model,
-		Prompt:           strings.TrimSpace(prompt),
-		Parallelism:      cfg.Thinking.CavemanParallelism,
-		MinTokens:        cfg.Thinking.CavemanMinTokens,
-		PreserveThinking: preserveThinking,
-	}, nil
+	settings.ProviderID = model.ProviderID
+	settings.ModelID = model.ModelID
+	settings.Provider = model.Provider
+	settings.Model = model.Model
+	return settings, nil
 }
 
 func modelSettings(cfg config.Config, providerID, modelID string) (ModelSettings, error) {

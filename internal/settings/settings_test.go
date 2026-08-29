@@ -145,3 +145,30 @@ func TestCompactionFallsBackToChatModel(t *testing.T) {
 		t.Fatalf("unexpected compaction settings: %#v", got)
 	}
 }
+
+func TestDisabledCavemanThinkingDoesNotResolveConfiguredProvider(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers["summarizer"] = config.Provider{
+		BaseURL:  "http://127.0.0.1:8080/v1",
+		Disabled: true,
+	}
+	cfg.Thinking.CavemanEnabled = false
+	cfg.Thinking.CavemanProviderID = "summarizer"
+	cfg.Thinking.CavemanModelID = "summary-model"
+	store := New(cfg)
+
+	got, err := store.Thinking(
+		domain.Chat{ID: "chat-1", ProviderID: "chat", ModelID: "chat-model"},
+		"thinking prompt",
+		true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CavemanEnabled || got.ProviderID != "" || got.ModelID != "" {
+		t.Fatalf("disabled caveman settings resolved an unused model: %#v", got)
+	}
+	if got.Prompt != "thinking prompt" || !got.PreserveThinking {
+		t.Fatalf("disabled caveman settings lost non-model preferences: %#v", got)
+	}
+}
