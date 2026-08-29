@@ -1456,6 +1456,9 @@ func (r *Chat) FullTimeline(ctx context.Context) ([]domain.TimelineItem, error) 
 
 // TimelinePage returns a page of the live transcript.
 func (r *Chat) TimelinePage(ctx context.Context, before id.ID, limit int, all bool) (TimelinePage, error) {
+	if err := r.EnsureTimeline(ctx); err != nil {
+		return TimelinePage{}, err
+	}
 	r.mu.RLock()
 	st := r.deps.Store
 	chatID := r.chat.ID
@@ -1471,6 +1474,9 @@ func (r *Chat) TimelinePage(ctx context.Context, before id.ID, limit int, all bo
 
 // TimelinePageAfter returns the page immediately newer than after.
 func (r *Chat) TimelinePageAfter(ctx context.Context, after id.ID, limit int) (TimelinePage, error) {
+	if err := r.EnsureTimeline(ctx); err != nil {
+		return TimelinePage{}, err
+	}
 	r.mu.RLock()
 	st := r.deps.Store
 	chatID := r.chat.ID

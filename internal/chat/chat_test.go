@@ -1006,8 +1006,12 @@ func TestHydrationRepairsPersistedRunningToolCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(runtime.Close)
-	if err := runtime.EnsureTimeline(ctx); err != nil {
+	page, err := runtime.TimelinePage(ctx, "", 10, false)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("timeline page length = %d, want 1", len(page.Items))
 	}
 
 	persisted, err := timelineForChat(ctx, st, chatRecord.ID)
