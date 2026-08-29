@@ -1436,7 +1436,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return s.createVoiceDeviceInvitation(in.Origin)
-	case "voice_device_revoke":
+	case "voice_device_delete":
 		var in struct {
 			DeviceID string `json:"device_id"`
 		}
@@ -1446,7 +1446,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if s.devices == nil {
 			return nil, errors.New("voice device registry is unavailable")
 		}
-		device, err := s.devices.Revoke(in.DeviceID)
+		device, err := s.devices.Delete(in.DeviceID)
 		if err != nil {
 			return nil, err
 		}

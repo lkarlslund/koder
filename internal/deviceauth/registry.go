@@ -255,13 +255,16 @@ func (r *Registry) Authorize(token string, info DeviceInfo) bool {
 	return ok
 }
 
-// List returns newest-seen devices first, including revoked registrations.
+// List returns active devices, newest-seen first. Revoked registrations from
+// older Koder versions remain invalid but are no longer presented to users.
 func (r *Registry) List() []Device {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]Device, len(r.devices))
+	out := make([]Device, 0, len(r.devices))
 	for index := range r.devices {
-		out[index] = r.devices[index].Device
+		if r.devices[index].RevokedAt == nil {
+			out = append(out, r.devices[index].Device)
+		}
 	}
 	slices.SortStableFunc(out, func(a, b Device) int {
 		aTime, bTime := a.LastSeenAt, b.LastSeenAt
@@ -276,8 +279,9 @@ func (r *Registry) List() []Device {
 	return out
 }
 
-// Revoke permanently disables one device credential.
-func (r *Registry) Revoke(deviceID string) (Device, error) {
+// Delete removes one device and its credential. A handset that reconnects
+// with the deleted token is rejected because its credential no longer exists.
+func (r *Registry) Delete(deviceID string) (Device, error) {
 	deviceID = strings.TrimSpace(deviceID)
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -285,15 +289,15 @@ func (r *Registry) Revoke(deviceID string) (Device, error) {
 		if r.devices[index].ID != deviceID {
 			continue
 		}
-		if r.devices[index].RevokedAt == nil {
-			now := r.now()
-			r.devices[index].RevokedAt = &now
-			if err := r.persistLocked(); err != nil {
-				r.devices[index].RevokedAt = nil
-				return Device{}, err
-			}
+		deleted := r.devices[index]
+		r.devices = append(r.devices[:index], r.devices[index+1:]...)
+		if err := r.persistLocked(); err != nil {
+			r.devices = append(r.devices, record{})
+			copy(r.devices[index+1:], r.devices[index:])
+			r.devices[index] = deleted
+			return Device{}, err
 		}
-		return r.devices[index].Device, nil
+		return deleted.Device, nil
 	}
 	return Device{}, fmt.Errorf("device %q was not found", deviceID)
 }

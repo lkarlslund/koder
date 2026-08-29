@@ -5819,12 +5819,12 @@
 			if (Number.isNaN(date.getTime())) return '';
 			return (device?.last_seen_at ? 'Last used ' : 'Registered ') + date.toLocaleString();
 		},
-		async revokeVoiceDevice(device) {
-			if (!device?.id || device.revoked_at || !await this.requestConfirmation({title: 'Revoke Android phone?', message: 'Revoke ' + (device.name || 'this Android phone') + '? It will need to be bound again.', confirmLabel: 'Revoke', danger: true})) return;
-			this.rpc('voice_device_revoke', {device_id: device.id}).then(result => {
+		async deleteVoiceDevice(device) {
+			if (!device?.id || !await this.requestConfirmation({title: 'Delete Android phone?', message: 'Delete ' + (device.name || 'this Android phone') + '? Its saved credential will no longer connect, and the phone must be bound again.', confirmLabel: 'Delete', danger: true})) return;
+			this.rpc('voice_device_delete', {device_id: device.id}).then(result => {
 				this.voiceDevices = Array.isArray(result?.devices) ? result.devices : this.voiceDevices;
-				this.showToast('Android phone revoked');
-			}).catch(error => { this.voiceDevicesError = error.message || 'Could not revoke Android phone'; });
+				this.showToast('Android phone deleted');
+			}).catch(error => { this.voiceDevicesError = error.message || 'Could not delete Android phone'; });
 		},
 		browserStatusBadgeClass(status) {
 		  const state = String(status?.state || 'unknown');

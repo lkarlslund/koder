@@ -1326,15 +1326,15 @@
 			  </div>
 
 				<div x-show="settingsTab === 'voice'">
-					<div class="settings-list-header"><div><div class="fw-semibold">Android devices</div><div class="small text-secondary">Each phone has a separate encrypted credential. Revoking one does not disconnect the others.</div></div><button class="btn btn-sm btn-outline-primary" type="button" @click="openPhoneBinding()"><i class="bi bi-phone me-1"></i>Bind phone</button></div>
+					<div class="settings-list-header"><div><div class="fw-semibold">Android devices</div><div class="small text-secondary">Each phone has a separate encrypted credential. Deleting one makes that credential invalid.</div></div><button class="btn btn-sm btn-outline-primary" type="button" @click="openPhoneBinding()"><i class="bi bi-phone me-1"></i>Bind phone</button></div>
 					<div class="text-secondary py-3" x-show="voiceDevicesLoading"><span class="spinner-border spinner-border-sm me-2"></span>Loading devices</div>
 					<div class="alert alert-danger" x-show="voiceDevicesError" x-text="voiceDevicesError"></div>
 					<div class="settings-item-list" x-show="!voiceDevicesLoading">
 						<div class="settings-empty" x-show="voiceDevices.length === 0">No Android phones are registered</div>
 						<template x-for="device in voiceDevices" :key="device.id">
 							<div class="settings-item-row">
-								<div class="settings-item-main"><span class="settings-item-title"><span x-text="device.name || 'Android phone'"></span><span class="badge ms-2" :class="device.revoked_at ? 'text-bg-danger' : 'text-bg-success'" x-text="device.revoked_at ? 'Revoked' : 'Active'"></span></span><span class="settings-item-subtitle" x-text="voiceDeviceDescription(device)"></span><span class="settings-item-subtitle" x-text="voiceDeviceLastSeen(device)"></span></div>
-								<button type="button" class="btn btn-sm btn-outline-danger" title="Revoke phone" @click="revokeVoiceDevice(device)" :disabled="!!device.revoked_at"><i class="bi bi-slash-circle"></i></button>
+								<div class="settings-item-main"><span class="settings-item-title"><span x-text="device.name || 'Android phone'"></span><span class="badge text-bg-success ms-2">Active</span></span><span class="settings-item-subtitle" x-text="voiceDeviceDescription(device)"></span><span class="settings-item-subtitle" x-text="voiceDeviceLastSeen(device)"></span></div>
+								<button type="button" class="btn btn-sm btn-outline-danger" title="Delete phone" aria-label="Delete phone" @click="deleteVoiceDevice(device)"><i class="bi bi-trash"></i></button>
 							</div>
 						</template>
 					</div>

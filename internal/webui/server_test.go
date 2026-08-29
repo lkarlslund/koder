@@ -872,9 +872,9 @@ func TestWebUIInvitesListsAndRevokesAndroidDevice(t *testing.T) {
 	if len(listed.Devices) != 1 || listed.Devices[0].Name != "Test Pixel" || listed.Devices[0].RevokedAt != nil {
 		t.Fatalf("listed devices = %#v", listed.Devices)
 	}
-	call("voice_device_revoke", map[string]string{"device_id": listed.Devices[0].ID}, &listed)
-	if len(listed.Devices) != 1 || listed.Devices[0].RevokedAt == nil {
-		t.Fatalf("revoked devices = %#v", listed.Devices)
+	call("voice_device_delete", map[string]string{"device_id": listed.Devices[0].ID}, &listed)
+	if len(listed.Devices) != 0 {
+		t.Fatalf("devices after delete = %#v", listed.Devices)
 	}
 
 	page, err := os.ReadFile(filepath.Join("assets", "index.html"))

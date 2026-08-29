@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestInvitationBindsPersistsAndRevokesDevice(t *testing.T) {
+func TestInvitationBindsPersistsAndDeletesDevice(t *testing.T) {
 	stateDir := t.TempDir()
 	registry, err := Open(stateDir)
 	if err != nil {
@@ -71,18 +71,18 @@ func TestInvitationBindsPersistsAndRevokesDevice(t *testing.T) {
 	if len(devices) != 1 || devices[0].AppVersion != "0.1.1" || !devices[0].LastSeenAt.Equal(now) {
 		t.Fatalf("devices = %#v", devices)
 	}
-	if _, err := registry.Revoke(binding.Device.ID); err != nil {
+	if _, err := registry.Delete(binding.Device.ID); err != nil {
 		t.Fatal(err)
 	}
 	if registry.Authorize(binding.Token, DeviceInfo{}) {
-		t.Fatal("revoked token was authorized")
+		t.Fatal("deleted token was authorized")
 	}
 	reloaded, err := Open(stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := reloaded.List()
-	if len(got) != 1 || got[0].RevokedAt == nil {
+	if len(got) != 0 {
 		t.Fatalf("reloaded devices = %#v", got)
 	}
 }
