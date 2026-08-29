@@ -238,6 +238,78 @@ func TestMCPDraftTestAndImmediateSave(t *testing.T) {
 	if len(prefs.MCPServers) != 1 || prefs.MCPServers[0].ID != "docs" || len(prefs.MCPRuntime) != 1 || prefs.MCPRuntime[0].Status != string(mcp.ServerStatusConnected) {
 		t.Fatalf("MCP save was not immediately persisted and connected: %#v %#v", prefs.MCPServers, prefs.MCPRuntime)
 	}
+	if err := ctrl.SetMCPServerEnabled(context.Background(), "docs", false); err != nil {
+		t.Fatalf("disable MCP server: %v", err)
+	}
+	prefs, err = ctrl.Preferences(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !prefs.MCPServers[0].Disabled || prefs.MCPRuntime[0].Status != string(mcp.ServerStatusDisabled) {
+		t.Fatalf("disabled MCP state = %#v %#v", prefs.MCPServers, prefs.MCPRuntime)
+	}
+	if err := ctrl.DeleteMCPServer(context.Background(), "docs"); err != nil {
+		t.Fatalf("delete MCP server: %v", err)
+	}
+	prefs, err = ctrl.Preferences(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prefs.MCPServers) != 0 || len(prefs.MCPRuntime) != 0 {
+		t.Fatalf("deleted MCP state = %#v %#v", prefs.MCPServers, prefs.MCPRuntime)
+	}
+}
+
+func TestProviderEnablementPersistsAndRepairsDefault(t *testing.T) {
+	dataDir := t.TempDir()
+	cfg, err := config.LoadWithOptions(config.LoadOptions{DataDir: dataDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Providers = map[string]config.Provider{
+		"alpha": {Name: "Alpha", BaseURL: "https://alpha.invalid/v1"},
+		"beta":  {Name: "Beta", BaseURL: "https://beta.invalid/v1"},
+	}
+	cfg.Defaults = config.Defaults{ProviderID: "alpha", ModelID: "alpha-model"}
+	cfg.Models = []config.ModelConfig{
+		{ProviderID: "alpha", ModelID: "alpha-model", ContextWindow: 32768},
+		{ProviderID: "beta", ModelID: "beta-model", ContextWindow: 32768},
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	ctrl := New(cfg, nil)
+
+	state, err := ctrl.SetProviderEnabled("alpha", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Providers[0].Disabled || state.DefaultProvider != "beta" || state.DefaultModel != "beta-model" {
+		t.Fatalf("provider state after disable = %#v", state)
+	}
+	loaded, err := config.LoadWithOptions(config.LoadOptions{DataDir: dataDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Providers["alpha"].Disabled || loaded.Defaults.ProviderID != "beta" {
+		t.Fatalf("persisted config after disable = %#v", loaded)
+	}
+	draft := state.Drafts["alpha"]
+	draft.Name = "Alpha offline"
+	state, err = ctrl.SaveProvider(context.Background(), draft)
+	if err != nil {
+		t.Fatalf("configure disabled provider without probing: %v", err)
+	}
+	if state.Providers[0].Name != "Alpha offline" || state.DefaultProvider != "beta" {
+		t.Fatalf("disabled provider configuration state = %#v", state)
+	}
+	state, err = ctrl.SetProviderEnabled("alpha", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Providers[0].Disabled || state.DefaultProvider != "beta" {
+		t.Fatalf("provider state after enable = %#v", state)
+	}
 }
 
 func TestBrowserEnablementOwnsBrowserToolDefaults(t *testing.T) {

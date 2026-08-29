@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
@@ -85,6 +86,15 @@ func TestModelResolvesCustomSource(t *testing.T) {
 	}
 	if got.SourceModelID != "real-model" || got.ContextWindow != 12345 || got.Model.ModelPreset != provider.ModelPresetDefault {
 		t.Fatalf("unexpected model settings: %#v", got)
+	}
+}
+
+func TestModelRejectsDisabledProvider(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers["offline"] = config.Provider{BaseURL: "http://127.0.0.1:8080/v1", Disabled: true}
+	_, err := New(cfg).Model(domain.Chat{ID: "chat-1", ProviderID: "offline", ModelID: "model"})
+	if err == nil || !strings.Contains(err.Error(), `provider "offline" is disabled`) {
+		t.Fatalf("disabled provider error = %v", err)
 	}
 }
 

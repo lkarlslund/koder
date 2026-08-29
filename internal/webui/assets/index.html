@@ -1334,7 +1334,7 @@
 						<template x-for="device in voiceDevices" :key="device.id">
 							<div class="settings-item-row">
 								<div class="settings-item-main"><span class="settings-item-title"><span x-text="device.name || 'Android phone'"></span><span class="badge text-bg-success ms-2">Active</span></span><span class="settings-item-subtitle" x-text="voiceDeviceDescription(device)"></span><span class="settings-item-subtitle" x-text="voiceDeviceLastSeen(device)"></span></div>
-								<button type="button" class="btn btn-sm btn-outline-danger" title="Delete phone" aria-label="Delete phone" @click="deleteVoiceDevice(device)"><i class="bi bi-trash"></i></button>
+								<div class="settings-item-actions"><button type="button" class="btn btn-sm btn-outline-danger" @click="deleteVoiceDevice(device)"><i class="bi bi-trash me-1"></i>Delete</button></div>
 							</div>
 						</template>
 					</div>
@@ -1434,8 +1434,8 @@
                     <div class="settings-empty">No providers configured</div>
                   </template>
                   <template x-for="item in settingsListRows('providers')" :key="item.id">
-                    <div class="settings-item-row settings-provider-row">
-                      <button type="button" class="settings-item-main" @click="editSettingsItem('providers', item.id)">
+                    <div class="settings-item-row">
+                      <div class="settings-item-main">
                         <span class="settings-item-title" x-text="settingsItemTitle('providers', item)"></span>
                         <span class="settings-item-subtitle" x-text="settingsItemSubtitle('providers', item)"></span>
 						<span class="settings-provider-health" :class="providerHealthClass(item.id)" :title="providerHealthTitle(item.id)">
@@ -1447,10 +1447,11 @@
                             <span class="badge text-bg-secondary" x-text="badge"></span>
                           </template>
                         </span>
-                      </button>
+                      </div>
 					  <div class="settings-item-actions" role="group" :aria-label="'Actions for ' + (item.name || item.id)">
-						<button type="button" class="btn btn-sm btn-outline-secondary" title="Edit provider" @click="editSettingsItem('providers', item.id)"><i class="bi bi-pencil"></i></button>
-						<button type="button" class="btn btn-sm btn-outline-danger" title="Delete provider" @click="deleteSettingsItem('providers', item.id)"><i class="bi bi-trash"></i></button>
+						<label class="toggle-switch settings-item-toggle" :title="item.disabled ? 'Enable provider' : 'Disable provider'"><input class="toggle-switch-input" type="checkbox" :checked="!item.disabled" @change="setSettingsItemEnabled('providers', item, $event)"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label>
+						<button type="button" class="btn btn-sm btn-outline-secondary" @click="editSettingsItem('providers', item.id)"><i class="bi bi-sliders me-1"></i>Configure</button>
+						<button type="button" class="btn btn-sm btn-outline-danger" @click="deleteSettingsItem('providers', item.id)"><i class="bi bi-trash me-1"></i>Delete</button>
 					  </div>
                     </div>
                   </template>
@@ -1592,7 +1593,7 @@
                   </template>
                   <template x-for="item in settingsListRows('mcp')" :key="item.id">
                     <div class="settings-item-row">
-                      <button type="button" class="settings-item-main" @click="editSettingsItem('mcp', item.id)">
+                      <div class="settings-item-main">
                         <span class="settings-item-title" x-text="settingsItemTitle('mcp', item)"></span>
                         <span class="settings-item-subtitle" x-text="settingsItemSubtitle('mcp', item)"></span>
 						<span class="settings-provider-health" :class="mcpRuntimeClass(item)" :title="mcpRuntimeTitle(item)">
@@ -1604,9 +1605,12 @@
                             <span class="badge text-bg-secondary" x-text="badge"></span>
                           </template>
                         </span>
-                      </button>
-                      <button type="button" class="btn btn-sm btn-outline-secondary" title="Edit MCP server" @click="editSettingsItem('mcp', item.id)"><i class="bi bi-pencil"></i></button>
-                      <button type="button" class="btn btn-sm btn-outline-danger" title="Delete MCP server" @click="deleteSettingsItem('mcp', item.id)"><i class="bi bi-trash"></i></button>
+                      </div>
+					  <div class="settings-item-actions" role="group" :aria-label="'Actions for ' + (item.name || item.id)">
+						<label class="toggle-switch settings-item-toggle" :title="item.disabled ? 'Enable MCP server' : 'Disable MCP server'"><input class="toggle-switch-input" type="checkbox" :checked="!item.disabled" @change="setSettingsItemEnabled('mcp', item, $event)"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label>
+						<button type="button" class="btn btn-sm btn-outline-secondary" @click="editSettingsItem('mcp', item.id)"><i class="bi bi-sliders me-1"></i>Configure</button>
+						<button type="button" class="btn btn-sm btn-outline-danger" @click="deleteSettingsItem('mcp', item.id)"><i class="bi bi-trash me-1"></i>Delete</button>
+					  </div>
                     </div>
                   </template>
                 </div>
@@ -1773,7 +1777,6 @@
               <div class="settings-field-control settings-field-control-sm"><input id="settings-provider-timeout" class="form-control" x-model="providerDraft.timeout" placeholder="10m" autocomplete="off"></div>
             </div>
             <div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Streaming responses</span></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="providerDraft.stream"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></div></div>
-            <div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Provider disabled</span></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="providerDraft.disabled"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Disabled</span></label></div></div>
             <div class="settings-field">
               <div class="settings-field-label"><span class="settings-field-title">Prompt progress</span><div class="settings-field-help" x-text="promptProgressState(providerDraft).label"></div></div>
               <div class="settings-field-control small text-secondary" x-text="promptProgressState(providerDraft).detail"></div>
@@ -1917,7 +1920,6 @@
             <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-mcp-request-timeout">Request timeout</label></div><div class="settings-field-control settings-field-control-sm"><input id="settings-mcp-request-timeout" class="form-control" x-model="mcpDraft.request_timeout" placeholder="30s" autocomplete="off"></div></div>
             <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-mcp-token">Bearer token</label><div class="settings-field-help">Only used by HTTP MCP servers.</div></div><div class="settings-field-control"><input id="settings-mcp-token" class="form-control" type="password" x-model="mcpDraft.bearer_token" autocomplete="off"></div></div>
             <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-mcp-token-env">Bearer token env</label></div><div class="settings-field-control settings-field-control-md"><input id="settings-mcp-token-env" class="form-control" x-model="mcpDraft.bearer_token_env" autocomplete="off"></div></div>
-            <div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Server disabled</span></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="mcpDraft.disabled"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Disabled</span></label></div></div>
             <div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Standalone SSE</span><div class="settings-field-help">Disable the legacy standalone SSE transport.</div></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="mcpDraft.disable_standalone_sse"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Disabled</span></label></div></div>
             <div class="settings-field settings-field-top"><div class="settings-field-label"><label class="settings-field-title" for="settings-mcp-headers">Headers JSON</label><div class="settings-field-help">Only used by HTTP MCP servers.</div></div><div class="settings-field-control"><textarea id="settings-mcp-headers" class="form-control font-monospace" rows="4" x-model="mcpHeadersText" spellcheck="false"></textarea></div></div>
             <div x-show="mcpStatus">

@@ -445,14 +445,14 @@
     .settings-prompt-item:last-child { padding-bottom: 0; margin-bottom: 0; border-bottom: 0; }
     .settings-list-header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .65rem; }
     .settings-item-list { display: grid; gap: .4rem; }
-    .settings-item-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: .4rem; padding: .45rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; }
-	.settings-provider-row { grid-template-columns: minmax(0, 1fr) auto; }
+	.settings-item-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .65rem; padding: .55rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; }
 	.settings-model-row { grid-template-columns: minmax(0, 1fr) auto; }
     .settings-item-main { min-width: 0; display: grid; gap: .08rem; text-align: left; color: inherit; background: transparent; border: 0; padding: 0; }
     .settings-item-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .settings-item-subtitle { color: var(--bs-secondary-color); font-size: .84rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .settings-item-badges { display: flex; flex-wrap: wrap; gap: .25rem; min-height: 1.1rem; }
-	.settings-item-actions { display: inline-flex; align-items: center; gap: .35rem; align-self: center; }
+	.settings-item-actions { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .35rem; align-self: center; }
+	.settings-item-toggle { margin-right: .2rem; }
 	.settings-provider-health { display: inline-flex; align-items: center; gap: .3rem; min-width: 0; max-width: 100%; width: fit-content; margin-top: .12rem; color: var(--bs-secondary-color); font-size: .82rem; }
 	.settings-provider-health > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.settings-provider-health.text-success, .settings-provider-health.text-danger, .settings-provider-health.text-primary { font-weight: 600; }
@@ -610,6 +610,8 @@
     @media (max-width: 680px) {
       .settings-field { grid-template-columns: 1fr; gap: .45rem; }
       .settings-field-control-sm, .settings-field-control-md { max-width: none; }
+	  .settings-item-row { grid-template-columns: 1fr; }
+	  .settings-item-actions { justify-content: flex-start; }
 	  .settings-overview-grid { grid-template-columns: 1fr; }
     }
 	@media (max-width: 991.98px) { .settings-setup-label { display: none !important; } }

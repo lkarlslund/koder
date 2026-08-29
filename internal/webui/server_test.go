@@ -2080,6 +2080,17 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `:title="compactionModelLabel()"`) {
 		t.Fatalf("expected settings forms to use labeled rows with compact scalar controls and full-width model selectors")
 	}
+	if !strings.Contains(document, `setSettingsItemEnabled('providers', item, $event)`) ||
+		!strings.Contains(document, `setSettingsItemEnabled('mcp', item, $event)`) ||
+		!strings.Contains(appJS, `rpc('set_provider_enabled'`) ||
+		!strings.Contains(appJS, `rpc('set_mcp_server_enabled'`) ||
+		!strings.Contains(appJS, `rpc('delete_mcp_server'`) ||
+		!strings.Contains(appJS, `rpc('voice_device_delete'`) ||
+		strings.Contains(fullPage, `voice_device_revoke`) ||
+		strings.Contains(document, `Provider disabled`) ||
+		strings.Contains(document, `Server disabled`) {
+		t.Fatalf("expected providers and MCP servers to share immediate enable, configure, and delete controls, and phones to be deleted")
+	}
 	if !strings.Contains(fullPage, `x-effect="renderTimelineMarkdownElement($el, item, item.content?.text || '', itemMarkdownOptions(item))"`) {
 		t.Fatalf("expected assistant text to render through item-aware timeline markdown element renderer")
 	}

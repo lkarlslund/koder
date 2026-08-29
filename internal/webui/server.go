@@ -1542,6 +1542,45 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return map[string]any{"runtime": runtime, "preferences": preferences, "state": state}, nil
+	case "set_mcp_server_enabled":
+		var in struct {
+			ServerID string `json:"server_id"`
+			Enabled  bool   `json:"enabled"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		if err := s.controller.SetMCPServerEnabled(ctx, in.ServerID, in.Enabled); err != nil {
+			return nil, err
+		}
+		preferences, err := s.controller.Preferences(ctx)
+		if err != nil {
+			return nil, err
+		}
+		state, err := s.stateForClient(ctx, clientID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"preferences": preferences, "state": state}, nil
+	case "delete_mcp_server":
+		var in struct {
+			ServerID string `json:"server_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		if err := s.controller.DeleteMCPServer(ctx, in.ServerID); err != nil {
+			return nil, err
+		}
+		preferences, err := s.controller.Preferences(ctx)
+		if err != nil {
+			return nil, err
+		}
+		state, err := s.stateForClient(ctx, clientID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"preferences": preferences, "state": state}, nil
 	case "reset_prompt":
 		var in struct {
 			Target string `json:"target"`
@@ -1677,11 +1716,36 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err != nil {
 			return nil, err
 		}
+		preferences, err := s.controller.Preferences(ctx)
+		if err != nil {
+			return nil, err
+		}
 		state, err := s.stateForClient(ctx, clientID)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"providers": providers, "state": state}, nil
+		return map[string]any{"providers": providers, "preferences": preferences, "state": state}, nil
+	case "set_provider_enabled":
+		var in struct {
+			ProviderID string `json:"provider_id"`
+			Enabled    bool   `json:"enabled"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		providers, err := s.controller.SetProviderEnabled(in.ProviderID, in.Enabled)
+		if err != nil {
+			return nil, err
+		}
+		preferences, err := s.controller.Preferences(ctx)
+		if err != nil {
+			return nil, err
+		}
+		state, err := s.stateForClient(ctx, clientID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"providers": providers, "preferences": preferences, "state": state}, nil
 	case "set_access_settings":
 		var in accesssettings.Settings
 		if err := decodeParams(params, &in); err != nil {

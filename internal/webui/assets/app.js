@@ -5636,11 +5636,7 @@
           const payload = this.providerDraftPayload(); if (!payload) return;
           this.providerSaving = true; this.providerStatus = ''; this.providerStatusKind = 'secondary';
           this.rpc('save_provider', payload).then(result => {
-            this.providerState = result.providers || result;
-            if (result.preferences) this.setSettingsState(result.preferences);
-            if (this.settings) this.settings.providers = this.providerState;
-            if (this.settings && this.providerDraft?.provider_id && this.providerDraft?.model) this.addOrUpdateModelConfig(this.providerDraft.provider_id, this.providerDraft.model);
-            if (result.state) this.applyState(result.state);
+			this.applyProviderMutation(result);
             this.providerStatus = 'Saved provider'; this.providerStatusKind = 'success';
             this.showProviderEditor = false;
           }).catch(err => { this.providerStatus = err.message; this.providerStatusKind = 'danger'; }).finally(() => { this.providerSaving = false; });
@@ -5648,16 +5644,34 @@
         async deleteProvider(id) {
           if (!id || !await this.requestConfirmation({title: 'Delete provider?', message: 'Delete this provider and its model settings?', confirmLabel: 'Delete', danger: true})) return;
           this.rpc('delete_provider', {provider_id: id}).then(result => {
-            this.providerState = result.providers || result;
-            if (this.settings) this.settings.providers = this.providerState;
-            if (this.settings?.model_configs) this.settings.model_configs = this.modelConfigRows().filter(item => item.provider_id !== id);
-            if (this.settings?.general) {
-              this.settings.general.default_provider = this.providerState.default_provider || '';
-              this.settings.general.default_model = this.providerState.default_model || '';
-            }
-            if (result.state) this.applyState(result.state);
+			this.applyProviderMutation(result);
+			this.showToast('Provider deleted');
           }).catch(err => this.showToast(err.message));
         },
+		applyProviderMutation(result) {
+			this.providerState = result?.providers || result || this.providerState;
+			const preferences = result?.preferences || {};
+			const patch = {providers: this.providerState};
+			for (const key of ['models', 'model_configs']) {
+				if (preferences[key] !== undefined) patch[key] = preferences[key];
+			}
+			this.commitImmediateSettings(patch, {
+				default_provider: this.providerState.default_provider || '',
+				default_model: this.providerState.default_model || ''
+			});
+			if (result?.state) this.applyState(result.state);
+		},
+		setProviderEnabled(item, enabled, input) {
+			if (!item?.id) return;
+			if (input) input.disabled = true;
+			this.rpc('set_provider_enabled', {provider_id: item.id, enabled}).then(result => {
+				this.applyProviderMutation(result);
+				this.showToast((item.name || item.id) + (enabled ? ' enabled' : ' disabled'));
+			}).catch(err => {
+				if (input) input.checked = !item.disabled;
+				this.showToast(err.message);
+			}).finally(() => { if (input) input.disabled = false; });
+		},
         openSettingsDialog(tab = 'overview') {
           this.showSettings = true; this.settingsTab = this.normalizeSettingsTab(tab); this.settingsLoading = true; this.settingsStatus = ''; this.settingsStatusKind = 'secondary';
           this.reportClientStateSoon();
@@ -5692,6 +5706,19 @@
           if (this.settingsTab === 'models') this.ensureDetectedDefaultModel();
           this.settingsBaselineJSON = this.settingsSnapshotJSON();
         },
+		commitImmediateSettings(patch, generalPatch = null) {
+			if (!this.settings) return;
+			const clone = value => JSON.parse(JSON.stringify(value));
+			for (const [key, value] of Object.entries(patch || {})) this.settings[key] = clone(value);
+			if (generalPatch) Object.assign(this.settings.general || (this.settings.general = {}), generalPatch);
+			if (!this.settingsBaselineJSON) return;
+			try {
+				const baseline = JSON.parse(this.settingsBaselineJSON);
+				for (const [key, value] of Object.entries(patch || {})) baseline[key] = clone(value);
+				if (generalPatch) Object.assign(baseline.general || (baseline.general = {}), generalPatch);
+				this.settingsBaselineJSON = JSON.stringify(baseline);
+			} catch (_) {}
+		},
         settingsSnapshotJSON() {
           try { return JSON.stringify(this.settings || {}); } catch (_) { return ''; }
         },
@@ -6184,6 +6211,12 @@
           if (kind === 'models') { this.deleteModelConfig(id); return; }
           if (kind === 'mcp') this.deleteMCPServer(id);
         },
+		setSettingsItemEnabled(kind, item, event) {
+			const input = event?.currentTarget;
+			const enabled = !!input?.checked;
+			if (kind === 'providers') { this.setProviderEnabled(item, enabled, input); return; }
+			if (kind === 'mcp') this.setMCPServerEnabled(item, enabled, input);
+		},
 		modelConfigRows() { return this.settings?.model_configs || []; },
 		settingsModelRows() {
 		  const options = Array.isArray(this.settings?.models) ? this.settings.models : [];
@@ -6605,16 +6638,38 @@
           const payload = this.mcpDraftPayload(); if (!payload) return;
           this.mcpSaving = true; this.mcpStatus = 'Testing and saving…'; this.mcpStatusKind = 'secondary';
           this.rpc('save_mcp_server', payload).then(result => {
-            if (result.preferences) this.setSettingsState(result.preferences);
-            if (result.state) this.applyState(result.state);
+			this.applyMCPMutation(result);
             this.showMCPEditor = false;
             this.showToast(this.mcpProbeSummary(result.runtime, 'MCP server saved'));
           }).catch(err => { this.mcpStatus = err.message; this.mcpStatusKind = 'danger'; }).finally(() => { this.mcpSaving = false; });
         },
         async deleteMCPServer(id) {
           if (!this.settings || !id || !await this.requestConfirmation({title: 'Delete MCP server?', message: 'Delete this MCP server configuration?', confirmLabel: 'Delete', danger: true})) return;
-          this.settings.mcp_servers = this.mcpRows().filter(item => item.id !== id);
+		  this.rpc('delete_mcp_server', {server_id: id}).then(result => {
+			this.applyMCPMutation(result);
+			this.showToast('MCP server deleted');
+		  }).catch(err => this.showToast(err.message));
         },
+		applyMCPMutation(result) {
+			const preferences = result?.preferences || {};
+			const patch = {};
+			for (const key of ['mcp_servers', 'mcp_runtime']) {
+				if (preferences[key] !== undefined) patch[key] = preferences[key];
+			}
+			this.commitImmediateSettings(patch);
+			if (result?.state) this.applyState(result.state);
+		},
+		setMCPServerEnabled(item, enabled, input) {
+			if (!item?.id) return;
+			if (input) input.disabled = true;
+			this.rpc('set_mcp_server_enabled', {server_id: item.id, enabled}).then(result => {
+				this.applyMCPMutation(result);
+				this.showToast((item.name || item.id) + (enabled ? ' enabled' : ' disabled'));
+			}).catch(err => {
+				if (input) input.checked = !item.disabled;
+				this.showToast(err.message);
+			}).finally(() => { if (input) input.disabled = false; });
+		},
         toolDefaultRows() { return this.settings?.tool_defaults || []; },
         toolDefaultTool(item) { return item.tool || item.Tool || ''; },
         toolDefaultLabel(item) { return item.label || item.Label || this.toolDefaultTool(item); },

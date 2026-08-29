@@ -200,6 +200,9 @@ func modelSettings(cfg config.Config, providerID, modelID string) (ModelSettings
 	if !ok {
 		return ModelSettings{}, fmt.Errorf("provider %q not found", sourceProviderID)
 	}
+	if providerCfg.Disabled {
+		return ModelSettings{}, fmt.Errorf("provider %q is disabled", sourceProviderID)
+	}
 	modelCfg := cfg.ModelRequestOptions(providerID, modelID)
 	if modelCfg.ProviderID == "" {
 		modelCfg.ProviderID = sourceProviderID

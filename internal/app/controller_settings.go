@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -128,21 +129,23 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 	if err := provider.ValidateDraft(catalogDraft); err != nil {
 		return ProviderState{}, err
 	}
-	started := time.Now()
-	probe, err := provider.Probe(ctx, catalogDraft, nil)
-	if err != nil {
-		c.recordProviderProbe(catalogDraft.ProviderID, nil, started, err)
-		return ProviderState{}, err
+	if !catalogDraft.Disabled {
+		started := time.Now()
+		probe, err := provider.Probe(ctx, catalogDraft, nil)
+		if err != nil {
+			c.recordProviderProbe(catalogDraft.ProviderID, nil, started, err)
+			return ProviderState{}, err
+		}
+		c.recordProviderProbe(catalogDraft.ProviderID, probe.Models, started, nil)
+		catalogDraft.Model = probe.SelectedModel
+		catalogDraft.PromptProgressProbed = probe.PromptProgressProbed
+		catalogDraft.PromptProgressSupported = probe.PromptProgressSupported
+		catalogDraft.PromptProgressCheckedAt = probe.PromptProgressCheckedAt
+		catalogDraft.PromptProgressTarget = probe.PromptProgressTarget
+		draft.PromptProgressProbed = probe.PromptProgressProbed
+		draft.PromptProgressSupported = probe.PromptProgressSupported
+		draft.PromptProgressCheckedAt = timePointer(probe.PromptProgressCheckedAt)
 	}
-	c.recordProviderProbe(catalogDraft.ProviderID, probe.Models, started, nil)
-	catalogDraft.Model = probe.SelectedModel
-	catalogDraft.PromptProgressProbed = probe.PromptProgressProbed
-	catalogDraft.PromptProgressSupported = probe.PromptProgressSupported
-	catalogDraft.PromptProgressCheckedAt = probe.PromptProgressCheckedAt
-	catalogDraft.PromptProgressTarget = probe.PromptProgressTarget
-	draft.PromptProgressProbed = probe.PromptProgressProbed
-	draft.PromptProgressSupported = probe.PromptProgressSupported
-	draft.PromptProgressCheckedAt = timePointer(probe.PromptProgressCheckedAt)
 	originalID := strings.TrimSpace(catalogDraft.OriginalProviderID)
 	catalogDraft.ProviderID = strings.TrimSpace(catalogDraft.ProviderID)
 	if catalogDraft.ProviderID == "" {
@@ -167,6 +170,12 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 	existing, ok := c.cfg.Providers[lookupID]
 	if ok {
 		mergeProviderEditDefaults(&next, existing)
+		if catalogDraft.Disabled {
+			catalogDraft.Model = firstModelForProvider(c.cfg, lookupID)
+			if c.cfg.Defaults.ProviderID == lookupID && strings.TrimSpace(c.cfg.Defaults.ModelID) != "" {
+				catalogDraft.Model = c.cfg.Defaults.ModelID
+			}
+		}
 	} else {
 		applyNewProviderDefaults(&next)
 	}
@@ -183,16 +192,19 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 		renameModelConfigs(&c.cfg, originalID, catalogDraft.ProviderID)
 	}
 	c.cfg.Providers[catalogDraft.ProviderID] = next
-	c.cfg.SetModelConfig(config.ModelConfig{
-		ProviderID:    catalogDraft.ProviderID,
-		ModelID:       catalogDraft.Model,
-		ContextWindow: c.cfg.ContextWindow(catalogDraft.ProviderID, catalogDraft.Model),
-		ModelPreset:   c.cfg.ModelPreset(catalogDraft.ProviderID, catalogDraft.Model),
-	})
-	if strings.TrimSpace(c.cfg.Defaults.ProviderID) == "" || c.cfg.Defaults.ProviderID == originalID || c.cfg.Defaults.ProviderID == catalogDraft.ProviderID {
+	if strings.TrimSpace(catalogDraft.Model) != "" {
+		c.cfg.SetModelConfig(config.ModelConfig{
+			ProviderID:    catalogDraft.ProviderID,
+			ModelID:       catalogDraft.Model,
+			ContextWindow: c.cfg.ContextWindow(catalogDraft.ProviderID, catalogDraft.Model),
+			ModelPreset:   c.cfg.ModelPreset(catalogDraft.ProviderID, catalogDraft.Model),
+		})
+	}
+	if !next.Disabled && (strings.TrimSpace(c.cfg.Defaults.ProviderID) == "" || c.cfg.Defaults.ProviderID == originalID || c.cfg.Defaults.ProviderID == catalogDraft.ProviderID) {
 		c.cfg.Defaults.ProviderID = catalogDraft.ProviderID
 		c.cfg.Defaults.ModelID = catalogDraft.Model
 	}
+	repairDefaultProvider(&c.cfg)
 	if err := c.cfg.Save(); err != nil {
 		c.mu.Unlock()
 		return ProviderState{}, err
@@ -231,23 +243,7 @@ func (c *Controller) DeleteProvider(ctx context.Context, providerID string) (Pro
 	}
 	delete(c.cfg.Providers, providerID)
 	deleteModelConfigs(&c.cfg, providerID)
-	nextDefault := strings.TrimSpace(c.cfg.Defaults.ProviderID)
-	if nextDefault == providerID || !c.cfg.HasUsableProvider(nextDefault) {
-		nextDefault = ""
-		ids := make([]string, 0, len(c.cfg.Providers))
-		for id := range c.cfg.Providers {
-			ids = append(ids, id)
-		}
-		slices.Sort(ids)
-		if len(ids) > 0 {
-			nextDefault = ids[0]
-		}
-	}
-	c.cfg.Defaults.ProviderID = nextDefault
-	c.cfg.Defaults.ModelID = ""
-	if nextDefault != "" {
-		c.cfg.Defaults.ModelID = firstModelForProvider(c.cfg, nextDefault)
-	}
+	repairDefaultProvider(&c.cfg)
 	if err := c.cfg.Save(); err != nil {
 		c.mu.Unlock()
 		return ProviderState{}, err
@@ -259,6 +255,56 @@ func (c *Controller) DeleteProvider(ctx context.Context, providerID string) (Pro
 	c.mu.Unlock()
 	c.broadcast("snapshot", c.State())
 	return state, nil
+}
+
+// SetProviderEnabled persists provider availability without probing or
+// rewriting its connection details.
+func (c *Controller) SetProviderEnabled(providerID string, enabled bool) (ProviderState, error) {
+	providerID = strings.TrimSpace(providerID)
+	if providerID == "" {
+		return ProviderState{}, fmt.Errorf("provider id is required")
+	}
+	c.mu.Lock()
+	providerConfig, ok := c.cfg.Providers[providerID]
+	if !ok {
+		c.mu.Unlock()
+		return ProviderState{}, fmt.Errorf("provider %q is not configured", providerID)
+	}
+	providerConfig.Disabled = !enabled
+	c.cfg.Providers[providerID] = providerConfig
+	repairDefaultProvider(&c.cfg)
+	if err := c.cfg.Save(); err != nil {
+		c.mu.Unlock()
+		return ProviderState{}, err
+	}
+	if c.agent != nil {
+		c.agent.UpdateConfig(c.cfg)
+	}
+	state := c.providerStateLocked()
+	c.mu.Unlock()
+	c.broadcast("snapshot", c.State())
+	return state, nil
+}
+
+func repairDefaultProvider(cfg *config.Config) {
+	providerID := strings.TrimSpace(cfg.Defaults.ProviderID)
+	if !cfg.HasUsableProvider(providerID) {
+		providerID = ""
+		ids := make([]string, 0, len(cfg.Providers))
+		for id, providerConfig := range cfg.Providers {
+			if !providerConfig.Disabled {
+				ids = append(ids, id)
+			}
+		}
+		slices.Sort(ids)
+		if len(ids) > 0 {
+			providerID = ids[0]
+		}
+	}
+	if providerID != cfg.Defaults.ProviderID {
+		cfg.Defaults.ProviderID = providerID
+		cfg.Defaults.ModelID = firstModelForProvider(*cfg, providerID)
+	}
 }
 
 // Preferences returns the complete editable settings state.
@@ -1812,6 +1858,64 @@ func (c *Controller) SaveMCPServer(ctx context.Context, draft MCPServerDraft) (M
 	}
 	c.broadcast("snapshot", c.State())
 	return state, nil
+}
+
+// SetMCPServerEnabled updates one server and reloads live MCP discovery.
+func (c *Controller) SetMCPServerEnabled(ctx context.Context, serverID string, enabled bool) error {
+	serverID = strings.TrimSpace(serverID)
+	if serverID == "" {
+		return errors.New("MCP server id is required")
+	}
+	c.mu.Lock()
+	server, ok := c.cfg.MCPServers[serverID]
+	if !ok {
+		c.mu.Unlock()
+		return fmt.Errorf("MCP server %q is not configured", serverID)
+	}
+	server.Disabled = !enabled
+	c.cfg.MCPServers[serverID] = server
+	if err := c.cfg.Save(); err != nil {
+		c.mu.Unlock()
+		return err
+	}
+	engine := c.agent
+	next := c.cfg
+	c.mu.Unlock()
+	if engine != nil {
+		if err := engine.UpdateConfigAndReloadMCP(ctx, next); err != nil {
+			return err
+		}
+	}
+	c.broadcast("snapshot", c.State())
+	return nil
+}
+
+// DeleteMCPServer removes one server and reloads live MCP discovery.
+func (c *Controller) DeleteMCPServer(ctx context.Context, serverID string) error {
+	serverID = strings.TrimSpace(serverID)
+	if serverID == "" {
+		return errors.New("MCP server id is required")
+	}
+	c.mu.Lock()
+	if _, ok := c.cfg.MCPServers[serverID]; !ok {
+		c.mu.Unlock()
+		return fmt.Errorf("MCP server %q is not configured", serverID)
+	}
+	delete(c.cfg.MCPServers, serverID)
+	if err := c.cfg.Save(); err != nil {
+		c.mu.Unlock()
+		return err
+	}
+	engine := c.agent
+	next := c.cfg
+	c.mu.Unlock()
+	if engine != nil {
+		if err := engine.UpdateConfigAndReloadMCP(ctx, next); err != nil {
+			return err
+		}
+	}
+	c.broadcast("snapshot", c.State())
+	return nil
 }
 
 func mcpServerConfigFromDraft(draft MCPServerDraft) (string, config.MCPServer, error) {
