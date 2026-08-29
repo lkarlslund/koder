@@ -924,6 +924,60 @@ func TestConcurrentToolResultsPersistCompleteAssistantItem(t *testing.T) {
 	}
 }
 
+func TestOutOfOrderToolResultEventsDoNotRegressSiblingCalls(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	rt := newTestChat(t, st, session, chatRecord, &runtimeFakeRunner{})
+
+	_, err := rt.AppendAssistantToolCalls(ctx, domain.TimelineItem{}, []domain.ToolCall{
+		{ToolCallID: "call-a", Tool: domain.ToolKindFileRead, Status: domain.ToolStatusPending},
+		{ToolCallID: "call-b", Tool: domain.ToolKindFileRead, Status: domain.ToolStatusPending},
+	}, "", domain.ReasoningContent{}, domain.Usage{}, domain.ModelPerformance{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.MarkToolRunning(ctx, "call-a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.MarkToolRunning(ctx, "call-b"); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := rt.AttachToolResult(ctx, "call-a", domain.ToolResult{Status: domain.ToolResultStatusOK, Text: "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest, err := rt.AttachToolResult(ctx, "call-b", domain.ToolResult{Status: domain.ToolResultStatusOK, Text: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Completion delivery is concurrent and may not preserve the order in
+	// which the chat owner applied the results.
+	rt.handleStreamEventForTurn(0, domain.Event{Kind: domain.EventKindToolResult, ToolCallID: "call-b", Item: latest})
+	rt.handleStreamEventForTurn(0, domain.Event{Kind: domain.EventKindToolResult, ToolCallID: "call-a", Item: stale})
+	if err := rt.Persist(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	assertDone := func(source string, items []domain.TimelineItem) {
+		t.Helper()
+		assistant := items[len(items)-1].Content.(domain.AssistantMessage)
+		for _, call := range assistant.Tools {
+			if call.Status != domain.ToolStatusDone || call.Result == nil {
+				t.Fatalf("%s tool %q regressed to status %q, result %#v", source, call.ToolCallID, call.Status, call.Result)
+			}
+		}
+	}
+	assertDone("live", rt.Snapshot().Timeline)
+	persisted, err := timelineForChat(ctx, st, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDone("persisted", persisted)
+}
+
 func TestHydrationRepairsPersistedRunningToolCalls(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -2493,6 +2547,9 @@ func TestRewindLiveTimelineFromDeletesTailFromStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt := newTestChat(t, st, session, chatRecord, &runtimeFakeRunner{})
+	updates, unsubscribe := rt.Subscribe()
+	t.Cleanup(unsubscribe)
+	<-updates // Initial metadata snapshot.
 
 	result, err := rt.RewindLiveTimelineFrom(ctx, anchor.ID)
 	if err != nil {
@@ -2521,6 +2578,17 @@ func TestRewindLiveTimelineFromDeletesTailFromStore(t *testing.T) {
 	}
 	if snapshot.Context.AnchorTokens != 0 || snapshot.Context.TotalTokens != 0 {
 		t.Fatalf("expected live snapshot context to ignore estimated compaction, got %#v", snapshot.Context)
+	}
+	select {
+	case update := <-updates:
+		if !update.ReplaceTimeline {
+			t.Fatalf("rewind update did not replace timeline: %#v", update)
+		}
+		if len(update.Snapshot.Timeline) != 2 || update.Snapshot.Timeline[0].ID != keep.ID || update.Snapshot.Timeline[1].ID != compacted.ID {
+			t.Fatalf("rewind replacement omitted retained timeline: %#v", update.Snapshot.Timeline)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for rewind update")
 	}
 }
 

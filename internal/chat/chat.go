@@ -1666,6 +1666,10 @@ func (r *Chat) RewindLiveTimelineFrom(ctx context.Context, anchorItemID id.ID) (
 		return LiveRewindResult{}, err
 	}
 	update := r.snapshotUpdateFlags(nil, false, false, true, true, true)
+	// Timeline replacement is the one update where consumers need the complete
+	// retained transcript. A metadata-only snapshot would instruct browser
+	// caches to replace the current timeline with an empty slice.
+	update.Snapshot = r.Snapshot()
 	update.ReplaceTimeline = true
 	r.broadcast(update)
 	return result, nil
@@ -2995,7 +2999,17 @@ func (r *Chat) handleStreamEventForTurn(turn uint64, evt domain.Event) {
 	}
 	if evt.Item.ID != "" && r.state != nil {
 		switch evt.Kind {
-		case domain.EventKindMessageDelta, domain.EventKindReasoning:
+		case domain.EventKindMessageDelta,
+			domain.EventKindReasoning,
+			domain.EventKindToolStart,
+			domain.EventKindToolResult,
+			domain.EventKindApprovalAsk,
+			domain.EventKindApprovalReply,
+			domain.EventKindUserInputAsk,
+			domain.EventKindUserInputReply:
+			// These events describe mutations already applied through the chat
+			// owner. Parallel tool events can arrive out of order, so replacing
+			// the item with the event's older value would regress sibling calls.
 			r.state.EnsureTimelineItem(evt.Item)
 		default:
 			r.state.UpsertTimelineItem(evt.Item)
