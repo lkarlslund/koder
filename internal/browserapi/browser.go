@@ -35,6 +35,50 @@ type Snapshot struct {
 	Truncated bool   `json:"truncated"`
 }
 
+type ElementState struct {
+	Found   bool   `json:"found"`
+	Name    string `json:"name,omitempty"`
+	Role    string `json:"role,omitempty"`
+	Value   string `json:"value,omitempty"`
+	Focused bool   `json:"focused,omitempty"`
+	Enabled bool   `json:"enabled"`
+	Checked *bool  `json:"checked,omitempty"`
+}
+
+type InteractionOutcome struct {
+	Action          string        `json:"action"`
+	Locator         Locator       `json:"locator,omitempty"`
+	Tab             Tab           `json:"page"`
+	LoadState       string        `json:"load_state,omitempty"`
+	Changed         bool          `json:"page_changed"`
+	Changes         []string      `json:"changes,omitempty"`
+	TargetState     *ElementState `json:"target_state,omitempty"`
+	Observation     string        `json:"observation,omitempty"`
+	PendingRequests int           `json:"pending_requests,omitempty"`
+}
+
+type WaitOptions struct {
+	Condition string
+	Text      string
+	URL       string
+	State     string
+	Locator   Locator
+	Timeout   time.Duration
+	Idle      time.Duration
+}
+
+type WaitOutcome struct {
+	Condition       string        `json:"condition"`
+	State           string        `json:"state,omitempty"`
+	Matched         bool          `json:"matched"`
+	ElapsedMS       int64         `json:"elapsed_ms"`
+	Tab             Tab           `json:"page"`
+	LoadState       string        `json:"load_state,omitempty"`
+	TargetState     *ElementState `json:"target_state,omitempty"`
+	Observation     string        `json:"observation,omitempty"`
+	PendingRequests int           `json:"pending_requests,omitempty"`
+}
+
 type Locator struct {
 	Target     string `json:"target,omitempty"`
 	Role       string `json:"role,omitempty"`
@@ -95,7 +139,8 @@ type Service interface {
 	History(context.Context, Chat, string) (Tab, error)
 	Snapshot(context.Context, Chat, string, int, int) (Snapshot, error)
 	Find(context.Context, Chat, string, string, int) (Snapshot, error)
-	Interact(context.Context, Chat, string, Locator, string) error
+	InteractOutcome(context.Context, Chat, string, Locator, string) (InteractionOutcome, error)
+	Wait(context.Context, Chat, WaitOptions) (WaitOutcome, error)
 	Drag(context.Context, Chat, Locator, Locator) error
 	Scroll(context.Context, Chat, Locator, int, int) error
 	Upload(context.Context, Chat, Locator, []string) error

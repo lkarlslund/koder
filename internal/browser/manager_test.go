@@ -150,6 +150,29 @@ func TestSnapshotScriptIsInformational(t *testing.T) {
 	}
 }
 
+func TestPageChanges(t *testing.T) {
+	before := pageObservation{URL: "https://example.test/one", Title: "One", Document: "doc-1", Generation: 2, ScrollY: 10}
+	after := pageObservation{URL: "https://example.test/two", Title: "Two", Document: "doc-2", Generation: 3, ScrollY: 20}
+	if got := strings.Join(pageChanges(before, after), ","); got != "document,url,title,dom,scroll" {
+		t.Fatalf("pageChanges() = %q", got)
+	}
+}
+
+func TestTargetStateMatches(t *testing.T) {
+	checked := true
+	state := browserapi.ElementState{Found: true, Enabled: true, Checked: &checked}
+	for _, wanted := range []string{"present", "visible", "enabled", "checked"} {
+		if !targetStateMatches(state, wanted) {
+			t.Errorf("state should match %q", wanted)
+		}
+	}
+	for _, wanted := range []string{"absent", "hidden", "disabled", "unchecked"} {
+		if targetStateMatches(state, wanted) {
+			t.Errorf("state should not match %q", wanted)
+		}
+	}
+}
+
 func TestLocatorExpressionContainsSemanticInputs(t *testing.T) {
 	script := locatorExpression(browserapi.Locator{Target: "Submit order", Role: "button", Within: "Checkout", Exact: true, Occurrence: 2}, "click")
 	for _, want := range []string{"Submit order", "button", "Checkout", `"occurrence":2`, "ambiguous"} {

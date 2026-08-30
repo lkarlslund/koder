@@ -257,7 +257,7 @@ func TestBrowserExtractionPathRequiresWriteAccess(t *testing.T) {
 	}
 }
 
-func TestBrowserWaitUsesDirectEvaluation(t *testing.T) {
+func TestBrowserWaitUsesServiceCondition(t *testing.T) {
 	browser := &waitBrowser{}
 	result, err := (tool{id: tools.BrowserWait, title: "Browser wait"}).Call(t.Context(), tools.Options{
 		Runtime: tools.Runtime{Browser: browser, SessionID: "session-1", ChatID: "chat-1"},
@@ -266,25 +266,27 @@ func TestBrowserWaitUsesDirectEvaluation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if browser.findCalls != 0 || browser.evaluateCalls != 1 {
-		t.Fatalf("wait used find %d times and evaluate %d times", browser.findCalls, browser.evaluateCalls)
+	if browser.waitCalls != 1 || browser.options.Condition != "text" || browser.options.Text != "ready" || browser.options.Timeout != 100*time.Millisecond {
+		t.Fatalf("unexpected wait call: calls=%d options=%#v", browser.waitCalls, browser.options)
 	}
-	if !strings.Contains(result.Output, `"found": "ready"`) {
+	if !strings.Contains(result.Output, `"matched": true`) || !strings.Contains(result.Output, `"observation": "status ready"`) {
 		t.Fatalf("unexpected wait output: %s", result.Output)
 	}
 }
 
-func TestBrowserWaitBoundsBlockedEvaluation(t *testing.T) {
-	started := time.Now()
-	_, err := (tool{id: tools.BrowserWait, title: "Browser wait"}).Call(t.Context(), tools.Options{
-		Runtime: tools.Runtime{Browser: blockingBrowser{}, SessionID: "session-1", ChatID: "chat-1"},
-		Request: tools.Request{Tool: tools.BrowserWait, Args: map[string]string{"text": "missing", "timeout_ms": "20.00000"}},
-	})
-	if err == nil || !strings.Contains(err.Error(), `timed out waiting for "missing" after 20ms`) {
-		t.Fatalf("unexpected wait error: %v", err)
-	}
-	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
-		t.Fatalf("browser wait exceeded deadline: %s", elapsed)
+func TestBrowserWaitValidatesConditionInputs(t *testing.T) {
+	wait := tool{id: tools.BrowserWait}
+	for name, args := range map[string]map[string]string{
+		"text":    {"condition": "text"},
+		"target":  {"condition": "target"},
+		"url":     {"condition": "url"},
+		"unknown": {"condition": "sleep"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := wait.NormalizeArgs(args); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
 	}
 }
 
@@ -332,25 +334,14 @@ type locatorBrowser struct {
 
 type waitBrowser struct {
 	fakeBrowser
-	findCalls     int
-	evaluateCalls int
+	waitCalls int
+	options   browserapi.WaitOptions
 }
 
-type blockingBrowser struct{ fakeBrowser }
-
-func (blockingBrowser) Evaluate(ctx context.Context, _ browserapi.Chat, _ string) (string, error) {
-	<-ctx.Done()
-	return "", ctx.Err()
-}
-
-func (b *waitBrowser) Find(context.Context, browserapi.Chat, string, string, int) (browserapi.Snapshot, error) {
-	b.findCalls++
-	return browserapi.Snapshot{}, nil
-}
-
-func (b *waitBrowser) Evaluate(context.Context, browserapi.Chat, string) (string, error) {
-	b.evaluateCalls++
-	return "true", nil
+func (b *waitBrowser) Wait(_ context.Context, _ browserapi.Chat, options browserapi.WaitOptions) (browserapi.WaitOutcome, error) {
+	b.waitCalls++
+	b.options = options
+	return browserapi.WaitOutcome{Condition: options.Condition, Matched: true, Observation: "status ready"}, nil
 }
 
 func (savingBrowser) Snapshot(context.Context, browserapi.Chat, string, int, int) (browserapi.Snapshot, error) {
@@ -416,6 +407,12 @@ func (fakeBrowser) Find(context.Context, browserapi.Chat, string, string, int) (
 }
 func (fakeBrowser) Interact(context.Context, browserapi.Chat, string, browserapi.Locator, string) error {
 	return nil
+}
+func (fakeBrowser) InteractOutcome(context.Context, browserapi.Chat, string, browserapi.Locator, string) (browserapi.InteractionOutcome, error) {
+	return browserapi.InteractionOutcome{}, nil
+}
+func (fakeBrowser) Wait(context.Context, browserapi.Chat, browserapi.WaitOptions) (browserapi.WaitOutcome, error) {
+	return browserapi.WaitOutcome{}, nil
 }
 func (fakeBrowser) Drag(context.Context, browserapi.Chat, browserapi.Locator, browserapi.Locator) error {
 	return nil

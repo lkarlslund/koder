@@ -743,13 +743,166 @@ func (m *Manager) Find(ctx context.Context, chat browserapi.Chat, query, role st
 	return browserapi.Snapshot{TabID: tab.id, Text: text, Truncated: truncated}, nil
 }
 
+type pageObservation struct {
+	URL        string `json:"url"`
+	Title      string `json:"title"`
+	Ready      string `json:"ready"`
+	Document   string `json:"document"`
+	Generation int64  `json:"generation"`
+	ScrollX    int64  `json:"scroll_x"`
+	ScrollY    int64  `json:"scroll_y"`
+}
+
+func observePage(ctx context.Context) (pageObservation, error) {
+	var observation pageObservation
+	err := chromedp.Run(ctx, chromedp.Evaluate(`(()=>{
+		if(!globalThis.__koderPageState){
+			const state={document:String(Date.now())+'-'+Math.random().toString(36).slice(2),generation:0};
+			new MutationObserver(()=>state.generation++).observe(document,{subtree:true,childList:true,attributes:true,characterData:true});
+			globalThis.__koderPageState=state;
+		}
+		const state=globalThis.__koderPageState;
+		return {url:location.href,title:document.title,ready:document.readyState,document:state.document,generation:state.generation,scroll_x:Math.round(scrollX),scroll_y:Math.round(scrollY)};
+	})()`, &observation))
+	return observation, err
+}
+
+func pageChanges(before, after pageObservation) []string {
+	changes := make([]string, 0, 6)
+	if before.Document != after.Document {
+		changes = append(changes, "document")
+	}
+	if before.URL != after.URL {
+		changes = append(changes, "url")
+	}
+	if before.Title != after.Title {
+		changes = append(changes, "title")
+	}
+	if before.Ready != after.Ready {
+		changes = append(changes, "load_state")
+	}
+	if before.Generation != after.Generation {
+		changes = append(changes, "dom")
+	}
+	if before.ScrollX != after.ScrollX || before.ScrollY != after.ScrollY {
+		changes = append(changes, "scroll")
+	}
+	return changes
+}
+
+func settlePage(ctx context.Context, before pageObservation, maximum time.Duration) (pageObservation, []string) {
+	deadline := time.NewTimer(maximum)
+	defer deadline.Stop()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	last := before
+	var changedAt time.Time
+	for {
+		if current, err := observePage(ctx); err == nil {
+			if len(pageChanges(last, current)) > 0 {
+				changedAt = time.Now()
+			}
+			last = current
+			if !changedAt.IsZero() && time.Since(changedAt) >= 150*time.Millisecond {
+				return current, pageChanges(before, current)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return last, pageChanges(before, last)
+		case <-deadline.C:
+			return last, pageChanges(before, last)
+		case <-ticker.C:
+		}
+	}
+}
+
+func observeTarget(ctx context.Context, locator browserapi.Locator, action string) (browserapi.ElementState, error) {
+	var state browserapi.ElementState
+	expression := fmt.Sprintf(`(()=>{try{%s;const e=resolve(%s,%q);const checked=typeof e.checked==='boolean'?e.checked:null;const labels=e.labels?[...e.labels].map(label=>label.innerText||label.textContent||'').join(' '):'';const secret=e instanceof HTMLInputElement&&e.type==='password';return {found:true,name:(e.getAttribute('aria-label')||labels||e.innerText||e.textContent||'').replace(/\s+/g,' ').trim().slice(0,200),role:e.getAttribute('role')||e.tagName.toLowerCase(),value:secret?'[redacted]':typeof e.value==='string'?e.value:'',focused:document.activeElement===e,enabled:!e.disabled&&e.getAttribute('aria-disabled')!=='true',checked};}catch(error){return {found:false}}})()`, semanticResolverJS, mustJSON(locator), action)
+	err := chromedp.Run(ctx, chromedp.Evaluate(expression, &state))
+	return state, err
+}
+
+func targetStateMatches(state browserapi.ElementState, wanted string) bool {
+	switch wanted {
+	case "present", "visible":
+		return state.Found
+	case "absent", "hidden":
+		return !state.Found
+	case "enabled":
+		return state.Found && state.Enabled
+	case "disabled":
+		return state.Found && !state.Enabled
+	case "checked":
+		return state.Found && state.Checked != nil && *state.Checked
+	case "unchecked":
+		return state.Found && state.Checked != nil && !*state.Checked
+	default:
+		return false
+	}
+}
+
+func visibleTextContains(ctx context.Context, text string) (bool, error) {
+	var found bool
+	expression := fmt.Sprintf(`(document.body?.innerText||'').toLocaleLowerCase().includes(%s)`, mustJSON(strings.ToLower(strings.TrimSpace(text))))
+	err := chromedp.Run(ctx, chromedp.Evaluate(expression, &found))
+	return found, err
+}
+
+func pendingRequests(tab *ownedTab) int {
+	tab.dataMu.Lock()
+	defer tab.dataMu.Unlock()
+	pending := 0
+	for _, requestID := range tab.order {
+		if request := tab.requests[requestID]; request != nil && !request.record.Finished {
+			pending++
+		}
+	}
+	return pending
+}
+
+func compactPageObservation(parent context.Context, maxChars int, queryAndRole ...string) string {
+	query, role := "", ""
+	if len(queryAndRole) > 0 {
+		query = queryAndRole[0]
+	}
+	if len(queryAndRole) > 1 {
+		role = queryAndRole[1]
+	}
+	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
+	defer cancel()
+	var text string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(snapshotScript(query, role, 4), &text)); err != nil {
+		return ""
+	}
+	if strings.TrimSpace(text) == "" && query != "" {
+		if err := chromedp.Run(ctx, chromedp.Evaluate(snapshotScript("", "", 3), &text)); err != nil {
+			return ""
+		}
+	}
+	text, truncated := truncateSnapshot(text, maxChars)
+	if truncated {
+		text += "\n… observation truncated …"
+	}
+	return text
+}
+
 func (m *Manager) Interact(ctx context.Context, chat browserapi.Chat, action string, locator browserapi.Locator, value string) error {
+	_, err := m.InteractOutcome(ctx, chat, action, locator, value)
+	return err
+}
+
+func (m *Manager) InteractOutcome(ctx context.Context, chat browserapi.Chat, action string, locator browserapi.Locator, value string) (browserapi.InteractionOutcome, error) {
 	tab, tabCtx, err := m.ownedSelected(ctx, chat)
 	if err != nil {
-		return err
+		return browserapi.InteractionOutcome{}, err
 	}
 	tab.mu.Lock()
 	defer tab.mu.Unlock()
+	opCtx, cancel := m.operationContext(ctx, tabCtx)
+	defer cancel()
+	before, _ := observePage(opCtx)
 	var task chromedp.Action
 	switch action {
 	case "click":
@@ -778,14 +931,167 @@ func (m *Manager) Interact(ctx context.Context, chat browserapi.Chat, action str
 	case "select", "check", "uncheck", "hover":
 		task = chromedp.Evaluate(interactionExpression(locator, action, value), nil)
 	default:
-		return fmt.Errorf("unsupported browser interaction %q", action)
+		return browserapi.InteractionOutcome{}, fmt.Errorf("unsupported browser interaction %q", action)
 	}
-	opCtx, cancel := m.operationContext(ctx, tabCtx)
-	defer cancel()
 	if err := chromedp.Run(opCtx, task); err != nil {
-		return fmt.Errorf("browser %s: %w", action, err)
+		return browserapi.InteractionOutcome{}, fmt.Errorf("browser %s: %w", action, err)
 	}
-	return nil
+	after, _ := observePage(opCtx)
+	changes := pageChanges(before, after)
+	if len(changes) == 0 && (action == "click" || action == "press" || action == "hover") {
+		after, changes = settlePage(opCtx, before, 750*time.Millisecond)
+	}
+	outcome := browserapi.InteractionOutcome{Action: action, Locator: locator, Changed: len(changes) > 0, Changes: changes}
+	if state, stateErr := observeTarget(opCtx, locator, action); stateErr == nil {
+		outcome.TargetState = &state
+	}
+	if len(changes) > 0 && (action == "click" || action == "press") {
+		outcome.Observation = compactPageObservation(opCtx, 2500)
+	}
+	selected := true
+	m.mu.Lock()
+	selected = m.selected[chat.ChatID] == tab.id
+	m.mu.Unlock()
+	outcome.Tab = browserapi.Tab{ID: tab.id, Title: after.Title, URL: after.URL, Owned: true, Selected: selected}
+	outcome.LoadState = after.Ready
+	outcome.PendingRequests = pendingRequests(tab)
+	return outcome, nil
+}
+
+func (m *Manager) Wait(ctx context.Context, chat browserapi.Chat, options browserapi.WaitOptions) (browserapi.WaitOutcome, error) {
+	tab, tabCtx, err := m.ownedSelected(ctx, chat)
+	if err != nil {
+		return browserapi.WaitOutcome{}, err
+	}
+	tab.mu.Lock()
+	defer tab.mu.Unlock()
+	timeout := options.Timeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	if timeout > 120*time.Second {
+		timeout = 120 * time.Second
+	}
+	waitCtx, cancel := context.WithTimeout(tabCtx, timeout)
+	defer cancel()
+	if ctx != nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+				cancel()
+			case <-waitCtx.Done():
+			}
+		}()
+	}
+	condition := strings.ToLower(strings.TrimSpace(options.Condition))
+	if condition == "" {
+		condition = "text"
+	}
+	state := strings.ToLower(strings.TrimSpace(options.State))
+	if state == "" && (condition == "text" || condition == "target") {
+		state = "present"
+	}
+	switch condition {
+	case "text":
+		if strings.TrimSpace(options.Text) == "" {
+			return browserapi.WaitOutcome{}, errors.New("browser text wait requires text")
+		}
+		if state != "present" && state != "visible" && state != "absent" && state != "hidden" {
+			return browserapi.WaitOutcome{}, fmt.Errorf("unsupported browser text state %q", state)
+		}
+	case "target":
+		if options.Locator.Empty() {
+			return browserapi.WaitOutcome{}, errors.New("browser target wait requires a target")
+		}
+		if !slices.Contains([]string{"present", "visible", "absent", "hidden", "enabled", "disabled", "checked", "unchecked"}, state) {
+			return browserapi.WaitOutcome{}, fmt.Errorf("unsupported browser target state %q", state)
+		}
+	case "url":
+		if strings.TrimSpace(options.URL) == "" {
+			return browserapi.WaitOutcome{}, errors.New("browser URL wait requires a URL fragment")
+		}
+	case "page_change", "network_idle":
+	default:
+		return browserapi.WaitOutcome{}, fmt.Errorf("unsupported browser wait condition %q", condition)
+	}
+	started := time.Now()
+	baseline, _ := observePage(waitCtx)
+	lastObservation := baseline
+	var targetState *browserapi.ElementState
+	idleSince := time.Time{}
+	matched := false
+	for {
+		switch condition {
+		case "text":
+			present, evalErr := visibleTextContains(waitCtx, options.Text)
+			if evalErr == nil {
+				matched = present == (state != "absent" && state != "hidden")
+			}
+		case "target":
+			current, evalErr := observeTarget(waitCtx, options.Locator, "capture")
+			if evalErr == nil {
+				targetState = &current
+				matched = targetStateMatches(current, state)
+			}
+		case "url":
+			current, evalErr := observePage(waitCtx)
+			if evalErr == nil {
+				lastObservation = current
+				matched = strings.Contains(strings.ToLower(current.URL), strings.ToLower(options.URL))
+			}
+		case "page_change":
+			current, evalErr := observePage(waitCtx)
+			if evalErr == nil {
+				lastObservation = current
+				matched = len(pageChanges(baseline, current)) > 0
+			}
+		case "network_idle":
+			pending := pendingRequests(tab)
+			if pending == 0 {
+				if idleSince.IsZero() {
+					idleSince = time.Now()
+				}
+				idle := options.Idle
+				if idle <= 0 {
+					idle = 500 * time.Millisecond
+				}
+				matched = time.Since(idleSince) >= idle
+			} else {
+				idleSince = time.Time{}
+			}
+		}
+		if matched || waitCtx.Err() != nil {
+			break
+		}
+		select {
+		case <-waitCtx.Done():
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	finalCtx, finalCancel := context.WithTimeout(tabCtx, 2*time.Second)
+	defer finalCancel()
+	if current, observeErr := observePage(finalCtx); observeErr == nil {
+		lastObservation = current
+	}
+	selected := true
+	m.mu.Lock()
+	selected = m.selected[chat.ChatID] == tab.id
+	m.mu.Unlock()
+	query, role := options.Text, ""
+	if condition == "target" {
+		query, role = options.Locator.Target, options.Locator.Role
+	}
+	return browserapi.WaitOutcome{
+		Condition:       condition,
+		State:           state,
+		Matched:         matched,
+		ElapsedMS:       time.Since(started).Milliseconds(),
+		Tab:             browserapi.Tab{ID: tab.id, Title: lastObservation.Title, URL: lastObservation.URL, Owned: true, Selected: selected},
+		LoadState:       lastObservation.Ready,
+		TargetState:     targetState,
+		Observation:     compactPageObservation(finalCtx, 2500, query, role),
+		PendingRequests: pendingRequests(tab),
+	}, nil
 }
 
 func (m *Manager) Drag(ctx context.Context, chat browserapi.Chat, source, target browserapi.Locator) error {

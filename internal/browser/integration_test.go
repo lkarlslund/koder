@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -65,6 +66,8 @@ func TestChromiumIntegration(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(`<!doctype html><title>Browser test</title>
 <button id="button" onclick="document.querySelector('output').textContent='clicked'">Run</button>
+<button id="async-button" onclick="setTimeout(()=>{document.querySelector('#async-target').hidden=false},150)">Start async</button>
+<p id="async-target" hidden>Async ready</p><p id="wait-target" hidden>Background ready</p>
 <button id="popup" onclick="window.open('/popup','koder-popup','width=600,height=400')">Open popup</button>
 <a href="/download">Download</a>
 <label>Customer name <input id="name" onkeydown="if(event.key==='Enter')document.querySelector('output').textContent='entered';if(event.key==='a'&&event.ctrlKey)document.querySelector('output').textContent='control-a'"></label>
@@ -177,8 +180,12 @@ func TestChromiumIntegration(t *testing.T) {
 	if err != nil || !strings.Contains(textbox.Text, `textbox "Customer name"`) {
 		t.Fatalf("informational snapshot omitted accessible label: %q, %v", textbox.Text, err)
 	}
-	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Run", Role: "button", Exact: true}, ""); err != nil {
+	clickOutcome, err := m.InteractOutcome(t.Context(), chat, "click", browserapi.Locator{Target: "Run", Role: "button", Exact: true}, "")
+	if err != nil {
 		t.Fatalf("click semantic target: %v", err)
+	}
+	if !clickOutcome.Changed || !slices.Contains(clickOutcome.Changes, "dom") || !strings.Contains(clickOutcome.Observation, "clicked") || clickOutcome.TargetState == nil || !clickOutcome.TargetState.Found {
+		t.Fatalf("click omitted post-action evidence: %#v", clickOutcome)
 	}
 	value, err := m.Evaluate(t.Context(), chat, `document.querySelector('output').textContent`)
 	if err != nil || value != `"clicked"` {
@@ -196,8 +203,27 @@ func TestChromiumIntegration(t *testing.T) {
 	if value, err = m.Evaluate(t.Context(), chat, `document.querySelectorAll('[data-koder-ref]').length`); err != nil || value != "0" {
 		t.Fatalf("browser snapshot mutated DOM: %s, %v", value, err)
 	}
-	if err := m.Interact(t.Context(), chat, "fill", browserapi.Locator{Target: "Customer name", Exact: true}, "Ada"); err != nil {
+	asyncOutcome, err := m.InteractOutcome(t.Context(), chat, "click", browserapi.Locator{Target: "Start async", Role: "button", Exact: true}, "")
+	if err != nil || !asyncOutcome.Changed || !strings.Contains(asyncOutcome.Observation, "Async ready") {
+		t.Fatalf("async click did not settle with useful evidence: %#v, %v", asyncOutcome, err)
+	}
+	if _, err := m.Evaluate(t.Context(), chat, `setTimeout(()=>{document.querySelector('#wait-target').hidden=false},150);true`); err != nil {
+		t.Fatalf("schedule background page change: %v", err)
+	}
+	waited, err := m.Wait(t.Context(), chat, browserapi.WaitOptions{Condition: "target", Locator: browserapi.Locator{Target: "Background ready", Exact: true}, State: "visible", Timeout: 2 * time.Second})
+	if err != nil || !waited.Matched || waited.TargetState == nil || !waited.TargetState.Found || !strings.Contains(waited.Observation, "Background ready") {
+		t.Fatalf("target wait omitted matching evidence: %#v, %v", waited, err)
+	}
+	timedOut, err := m.Wait(t.Context(), chat, browserapi.WaitOptions{Condition: "text", Text: "Never appears", Timeout: 25 * time.Millisecond})
+	if err != nil || timedOut.Matched || timedOut.Tab.ID != tab.ID || timedOut.Observation == "" {
+		t.Fatalf("timeout omitted diagnostic page state: %#v, %v", timedOut, err)
+	}
+	fillOutcome, err := m.InteractOutcome(t.Context(), chat, "fill", browserapi.Locator{Target: "Customer name", Exact: true}, "Ada")
+	if err != nil {
 		t.Fatalf("fill semantic textbox: %v", err)
+	}
+	if fillOutcome.TargetState == nil || fillOutcome.TargetState.Value != "Ada" || !fillOutcome.TargetState.Focused {
+		t.Fatalf("fill omitted verified target state: %#v", fillOutcome)
 	}
 	if err := m.Interact(t.Context(), chat, "type", browserapi.Locator{Target: "Customer name", Exact: true}, " Lovelace"); err != nil {
 		t.Fatalf("type semantic textbox: %v", err)

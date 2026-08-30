@@ -48,7 +48,7 @@ var specs = []tool{
 	{tools.BrowserHover, "Hover browser element", "Find a current visible element and hover it.", locatorObject("", true)},
 	{tools.BrowserDrag, "Drag browser element", "Find current source and destination elements and drag the source onto the destination.", dragLocatorObject()},
 	{tools.BrowserScroll, "Scroll browser", "Scroll the page, or find and scroll a current element when a semantic target or selector is provided.", locatorObject(`"x":{"type":"integer"},"y":{"type":"integer"}`, false)},
-	{tools.BrowserWait, "Wait in browser", "Wait for text to appear in the selected page.", required(object(`"text":{"type":"string"},"timeout_ms":{"type":"integer","minimum":1,"maximum":120000},`+saveToFileProperty), "text")},
+	{tools.BrowserWait, "Wait in browser", "Wait for an independently asynchronous condition. text uses text plus present/absent state; target uses semantic locator fields plus visible/hidden/enabled/disabled/checked/unchecked state; url uses a URL fragment; page_change needs no value; network_idle optionally uses idle_ms. A timeout returns matched=false with current page evidence. Ordinary interactions already settle briefly, so do not wait after every action.", required(object(`"condition":{"type":"string","enum":["text","target","url","page_change","network_idle"]},"text":{"type":"string"},"url":{"type":"string"},"state":{"type":"string","enum":["present","absent","visible","hidden","enabled","disabled","checked","unchecked"]},`+locatorProperties("")+`,"timeout_ms":{"type":"integer","minimum":1,"maximum":120000},"idle_ms":{"type":"integer","minimum":100,"maximum":10000},`+saveToFileProperty), "condition")},
 	{tools.BrowserUpload, "Upload browser files", "Find a current file input and upload authorized workspace files through it.", locatorObject(`"paths":{"type":"array","items":{"type":"string"}}`, true, "paths")},
 	{tools.BrowserEvaluate, "Evaluate browser JavaScript", "Evaluate JavaScript in the selected tab and return bounded JSON.", required(object(`"expression":{"type":"string"},`+saveToFileProperty), "expression")},
 	{tools.BrowserScreenshot, "Screenshot browser", "Capture the viewport, full page, or a current semantic target. Return it as a session attachment unless save_to_file persists it to disk instead.", locatorObject(`"full_page":{"type":"boolean"},"format":{"type":"string","enum":["png","jpeg"]},"quality":{"type":"integer"},`+saveToFileProperty, false)},
@@ -88,10 +88,10 @@ func registerResourceTools() {
 	registerActionTool(tools.BrowserNavigation, "Browser navigation", "Navigate the selected tab. goto requires an HTTP, HTTPS, or permitted local file URL; back and forward move through history; reload refreshes the current page.",
 		`{"type":"object","properties":{"action":{"type":"string"},"url":{"type":"string"},"wait_until":{"type":"string","enum":["domcontentloaded","load","networkidle"]}},"required":["action"],"additionalProperties":false}`,
 		[]tools.ActionRoute{{Action: "goto", Tool: tools.BrowserNavigate}, {Action: "back", Tool: tools.BrowserBack}, {Action: "forward", Tool: tools.BrowserForward}, {Action: "reload", Tool: tools.BrowserReload}})
-	registerActionTool(tools.BrowserPage, "Browser page", "Inspect the selected page. snapshot returns a compact visible DOM; find returns semantic locator arguments for matching elements; wait blocks until specified visible text appears or timeout_ms expires.",
-		`{"type":"object","properties":{"action":{"type":"string"},"query":{"type":"string"},"role":{"type":"string"},"text":{"type":"string"},"depth":{"type":"integer"},"max_chars":{"type":"integer"},"timeout_ms":{"type":"integer","minimum":1,"maximum":120000},"save_to_file":{"type":"string"}},"required":["action"],"additionalProperties":false}`,
+	registerActionTool(tools.BrowserPage, "Browser page", "Inspect the selected page. snapshot returns compact visible DOM; find returns ready-to-use semantic locator arguments. wait is only for independently asynchronous conditions: text uses text, target uses locator fields and state, url uses a URL fragment, while page_change and network_idle need no value. Wait timeouts return matched=false with page evidence; ordinary interactions already settle briefly.",
+		`{"type":"object","properties":{"action":{"type":"string"},"query":{"type":"string"},"condition":{"type":"string","enum":["text","target","url","page_change","network_idle"]},"text":{"type":"string"},"url":{"type":"string"},"state":{"type":"string","enum":["present","absent","visible","hidden","enabled","disabled","checked","unchecked"]},`+locatorProperties("")+`,"depth":{"type":"integer"},"max_chars":{"type":"integer"},"timeout_ms":{"type":"integer","minimum":1,"maximum":120000},"idle_ms":{"type":"integer","minimum":100,"maximum":10000},"save_to_file":{"type":"string"}},"required":["action"],"additionalProperties":false}`,
 		[]tools.ActionRoute{{Action: "snapshot", Tool: tools.BrowserSnapshot}, {Action: "find", Tool: tools.BrowserFind}, {Action: "wait", Tool: tools.BrowserWait}})
-	registerActionTool(tools.BrowserInteract, "Browser interaction", "Interact with the selected page using current semantic targets. click, fill, type, press, select, check, uncheck, hover, drag, scroll, and upload map to their ordinary browser meanings. fill replaces a value while type appends keystrokes; upload requires authorized workspace paths.",
+	registerActionTool(tools.BrowserInteract, "Browser interaction", "Interact with the selected page using current semantic targets. click, fill, type, press, select, check, uncheck, and hover briefly settle and return the resulting page and target state; changed clicks and keypresses also return a compact page observation. fill replaces a value while type appends keystrokes; upload requires authorized workspace paths.",
 		required(object(`"action":{"type":"string"},`+locatorProperties("")+`,`+locatorProperties("source")+`,"value":{"type":"string"},"key":{"type":"string"},"x":{"type":"integer"},"y":{"type":"integer"},"paths":{"type":"array","items":{"type":"string"}}`), "action"),
 		[]tools.ActionRoute{{Action: "click", Tool: tools.BrowserClick}, {Action: "fill", Tool: tools.BrowserFill}, {Action: "type", Tool: tools.BrowserType}, {Action: "press", Tool: tools.BrowserPress}, {Action: "select", Tool: tools.BrowserSelect}, {Action: "check", Tool: tools.BrowserCheck}, {Action: "uncheck", Tool: tools.BrowserUncheck}, {Action: "hover", Tool: tools.BrowserHover}, {Action: "drag", Tool: tools.BrowserDrag}, {Action: "scroll", Tool: tools.BrowserScroll}, {Action: "upload", Tool: tools.BrowserUpload}})
 	registerActionTool(tools.BrowserCapture, "Browser capture", "Capture page output. screenshot captures rendered pixels; image extracts original image, canvas, or SVG bytes; pdf prints the selected page. Omit save_to_file for a session attachment or set it to persist the result.",
@@ -133,6 +133,9 @@ func (t tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	if path := out["save_to_file"]; path != "" {
 		out["save_to_file"] = tools.NormalizePathInput(path)
 	}
+	if t.id == tools.BrowserWait && out["condition"] == "" && out["text"] != "" {
+		out["condition"] = "text"
+	}
 	for _, key := range requiredArgs(t.id) {
 		if out[key] == "" {
 			return nil, fmt.Errorf("%s is required", key)
@@ -164,6 +167,25 @@ func (t tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 		var paths []string
 		if err := json.Unmarshal([]byte(out["paths"]), &paths); err != nil || len(paths) == 0 {
 			return nil, errors.New("paths must be a non-empty array")
+		}
+	}
+	if t.id == tools.BrowserWait {
+		switch out["condition"] {
+		case "text":
+			if out["text"] == "" {
+				return nil, errors.New("text is required for a text wait")
+			}
+		case "target":
+			if _, err := locatorFromArgs(out, "", true); err != nil {
+				return nil, err
+			}
+		case "url":
+			if out["url"] == "" {
+				return nil, errors.New("url is required for a URL wait")
+			}
+		case "page_change", "network_idle":
+		default:
+			return nil, fmt.Errorf("unsupported browser wait condition %q", out["condition"])
 		}
 	}
 	return out, nil
@@ -226,8 +248,7 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 			input = args["key"]
 		}
 		locator, _ := locatorFromArgs(args, "", false)
-		err = service.Interact(ctx, chat, action, locator, input)
-		value = map[string]any{"action": action, "locator": locator}
+		value, err = service.InteractOutcome(ctx, chat, action, locator, input)
 	case tools.BrowserDrag:
 		source, _ := locatorFromArgs(args, "source", true)
 		target, _ := locatorFromArgs(args, "", true)
@@ -238,37 +259,15 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 		err = service.Scroll(ctx, chat, locator, intArg(args, "x", 0), intArg(args, "y", 600))
 		value = map[string]any{"locator": locator, "x": intArg(args, "x", 0), "y": intArg(args, "y", 600)}
 	case tools.BrowserWait:
-		wait := time.Duration(intArg(args, "timeout_ms", 30000)) * time.Millisecond
-		if wait < time.Millisecond {
-			wait = time.Millisecond
+		locator, _ := locatorFromArgs(args, "", false)
+		condition := args["condition"]
+		if condition == "" && args["text"] != "" {
+			condition = "text"
 		}
-		if wait > 120*time.Second {
-			wait = 120 * time.Second
-		}
-		waitCtx, cancel := context.WithTimeout(ctx, wait)
-		defer cancel()
-		for {
-			value, err = service.Evaluate(waitCtx, chat, fmt.Sprintf(`(document.body?.innerText || '').toLowerCase().includes(%s)`, jsonString(strings.ToLower(args["text"]))))
-			if err == nil && value == "true" {
-				value = map[string]string{"found": args["text"]}
-				break
-			}
-			if waitCtx.Err() != nil {
-				err = fmt.Errorf("timed out waiting for %q after %s", args["text"], wait)
-				break
-			}
-			if err != nil {
-				break
-			}
-			select {
-			case <-waitCtx.Done():
-				err = fmt.Errorf("timed out waiting for %q after %s", args["text"], wait)
-			case <-time.After(100 * time.Millisecond):
-			}
-			if err != nil {
-				break
-			}
-		}
+		value, err = service.Wait(ctx, chat, browserapi.WaitOptions{
+			Condition: condition, Text: args["text"], URL: args["url"], State: args["state"], Locator: locator,
+			Timeout: toolsDurationMS(args, "timeout_ms", 10000), Idle: toolsDurationMS(args, "idle_ms", 500),
+		})
 	case tools.BrowserUpload:
 		var paths []string
 		_ = json.Unmarshal([]byte(args["paths"]), &paths)
@@ -514,7 +513,7 @@ func requiredArgs(kind tools.ID) []string {
 	case tools.BrowserPress:
 		return []string{"key"}
 	case tools.BrowserWait:
-		return []string{"text"}
+		return []string{"condition"}
 	case tools.BrowserUpload:
 		return []string{"paths"}
 	case tools.BrowserEvaluate:
@@ -538,6 +537,10 @@ func intArg(args map[string]string, key string, fallback int) int {
 		return fallback
 	}
 	return parsed.Int()
+}
+
+func toolsDurationMS(args map[string]string, key string, fallback int) time.Duration {
+	return time.Duration(intArg(args, key, fallback)) * time.Millisecond
 }
 
 func boolArg(args map[string]string, key string) bool {
