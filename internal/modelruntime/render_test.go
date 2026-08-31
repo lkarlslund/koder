@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/attachment"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
@@ -71,6 +72,33 @@ func TestTimelineToolResultMessageIncludesMCPImage(t *testing.T) {
 	}
 	if msg.ContentParts[0].Type != "text" || msg.ContentParts[1].Type != "image_url" || len(msg.ContentParts[1].Data) == 0 {
 		t.Fatalf("MCP image content parts = %#v", msg.ContentParts)
+	}
+}
+
+func TestTimelineToolResultMessageIncludesDurableViewImage(t *testing.T) {
+	manager := attachment.NewManager(t.TempDir())
+	var encoded bytes.Buffer
+	photo := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	photo.Set(0, 0, color.NRGBA{G: 0xff, A: 0xff})
+	if err := png.Encode(&encoded, photo); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := manager.ImportSessionData("session-1", encoded.Bytes(), "remote.png", "image/png", "view_image")
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta.Path, meta.Original = "", ""
+	runtime := New(Config{Config: testConfig(t), Files: manager})
+	msg, ok := runtime.timelineToolResultMessage(domain.Chat{ProviderID: "openai", ModelID: "gpt-5.4"}, domain.ToolCall{
+		Tool:       domain.ToolKindViewImage,
+		ToolCallID: "call_remote_image",
+		Status:     domain.ToolStatusDone,
+		Result: &domain.ToolResult{Status: domain.ToolResultStatusOK, Text: "Viewed image", Data: tools.ViewImageStoredResult{
+			Path: "https://example.test/remote.png", MIMEType: "image/png", SessionID: "session-1", Attachment: &meta,
+		}},
+	})
+	if !ok || msg.Role != provider.RoleTool || len(msg.ContentParts) != 2 || msg.ContentParts[1].Type != "image_url" || len(msg.ContentParts[1].Data) == 0 {
+		t.Fatalf("durable view image message = %#v, %v", msg, ok)
 	}
 }
 

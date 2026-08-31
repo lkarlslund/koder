@@ -17,6 +17,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/environment"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
@@ -574,6 +575,9 @@ func (r *Runtime) toolImageMessage(chat domain.Chat, part domain.Part, toolCallI
 	}
 	stored, ok := tools.ViewImageStoredResultForPart(part)
 	sourcePath, mimeType := strings.TrimSpace(stored.SourcePath), strings.TrimSpace(stored.MIMEType)
+	if ok && sourcePath == "" && stored.Attachment != nil && r.files != nil {
+		sourcePath, _ = r.files.SessionFile(id.ID(stored.SessionID), stored.Attachment.ID)
+	}
 	if !ok {
 		browserResult, browserOK := tools.BrowserStoredResultForPart(part)
 		if !browserOK || browserResult.Attachment == nil || attachment.ClassifyMIME(browserResult.Attachment.MIME) != attachment.KindImage {

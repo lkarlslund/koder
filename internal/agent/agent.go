@@ -1473,6 +1473,9 @@ func (e *Engine) toolImageMessage(chat domain.Chat, part domain.Part, toolCallID
 	}
 	stored, ok := tools.ViewImageStoredResultForPart(part)
 	sourcePath, mimeType := strings.TrimSpace(stored.SourcePath), strings.TrimSpace(stored.MIMEType)
+	if ok && sourcePath == "" && stored.Attachment != nil && e.files != nil {
+		sourcePath, _ = e.files.SessionFile(id.ID(stored.SessionID), stored.Attachment.ID)
+	}
 	if !ok {
 		browserResult, browserOK := tools.BrowserStoredResultForPart(part)
 		if !browserOK || browserResult.Attachment == nil || attachment.ClassifyMIME(browserResult.Attachment.MIME) != attachment.KindImage {

@@ -403,7 +403,12 @@ func checkRuntimeAccess(runtime Runtime, req Request) error {
 		return checkBrowserUploadPaths(runtime, req)
 	case FileWrite, FileEdit, PhonePhotoTransfer:
 		return checkRequestPath(runtime, req, accesssettings.AccessWrite)
-	case FileRead, ViewImage, ViewPDF, ShowImage, ShowMedia, OfferFile, FileGlob, FileGrep, CodeSearch, Lint:
+	case ViewImage, ShowImage, ShowMedia:
+		if IsHTTPURL(req.Args["path"]) {
+			return runtime.CheckNetworkAccess()
+		}
+		return checkRequestPath(runtime, req, accesssettings.AccessRead)
+	case FileRead, ViewPDF, OfferFile, FileGlob, FileGrep, CodeSearch, Lint:
 		return checkRequestPath(runtime, req, accesssettings.AccessRead)
 	default:
 		return nil

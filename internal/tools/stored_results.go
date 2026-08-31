@@ -314,13 +314,15 @@ type WebSearchStoredResult struct {
 }
 
 type ViewImageStoredResult struct {
-	Path       string `json:"path"`
-	SourcePath string `json:"source_path"`
-	MIMEType   string `json:"mime_type"`
-	Detail     string `json:"detail,omitempty"`
-	Summary    string `json:"summary,omitempty"`
-	Page       int    `json:"page,omitempty"`
-	PageCount  int    `json:"page_count,omitempty"`
+	Path       string               `json:"path"`
+	SourcePath string               `json:"source_path,omitempty"`
+	MIMEType   string               `json:"mime_type"`
+	Detail     string               `json:"detail,omitempty"`
+	SessionID  string               `json:"session_id,omitempty"`
+	Attachment *attachment.Metadata `json:"attachment,omitempty"`
+	Summary    string               `json:"summary,omitempty"`
+	Page       int                  `json:"page,omitempty"`
+	PageCount  int                  `json:"page_count,omitempty"`
 }
 
 type ShowMediaStoredResult struct {

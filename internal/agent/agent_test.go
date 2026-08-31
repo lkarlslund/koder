@@ -2042,12 +2042,18 @@ func TestBuildConversationIncludesViewImageToolContentParts(t *testing.T) {
 	chat := defaultChatForSession(t, st, session.ID)
 	imagePath := filepath.Join(workdir, "screen.png")
 	writeAgentTestPNG(t, imagePath)
+	imageMeta, err := attachment.NewManager(cfg.StateDir()).ImportSessionFile(session.ID, imagePath, "image/png", "view_image")
+	if err != nil {
+		t.Fatal(err)
+	}
+	imageMeta.Path, imageMeta.Original = "", ""
 	toolReq := tools.Request{Tool: domain.ToolKindViewImage, ToolCallID: "call_image", Args: map[string]string{"path": "screen.png"}}
 	appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
 	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "Viewed image screen.png", tools.ViewImageStoredResult{
 		Path:       "screen.png",
-		SourcePath: imagePath,
 		MIMEType:   "image/png",
+		SessionID:  string(session.ID),
+		Attachment: &imageMeta,
 		Summary:    "Viewed image screen.png",
 	})
 

@@ -119,6 +119,20 @@ func (m *Manager) SessionDir(sessionID id.ID) string {
 	return filepath.Join(m.root, "sessions", string(sessionID))
 }
 
+func (m *Manager) SessionFile(sessionID id.ID, attachmentID string) (string, error) {
+	if m == nil || sessionID == "" || len(attachmentID) != 24 {
+		return "", fmt.Errorf("invalid attachment reference")
+	}
+	if _, err := hex.DecodeString(attachmentID); err != nil {
+		return "", fmt.Errorf("invalid attachment reference")
+	}
+	matches, err := filepath.Glob(filepath.Join(m.SessionDir(sessionID), attachmentID+".*"))
+	if err != nil || len(matches) != 1 {
+		return "", fmt.Errorf("attachment not found")
+	}
+	return matches[0], nil
+}
+
 // DeleteSessionData removes all durable attachments owned by a session.
 func (m *Manager) DeleteSessionData(sessionID id.ID) error {
 	if m == nil || sessionID == "" {

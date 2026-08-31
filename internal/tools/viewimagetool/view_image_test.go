@@ -5,11 +5,14 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -23,12 +26,14 @@ func TestNormalizeArgsValidatesInputs(t *testing.T) {
 	}
 }
 
-func TestExecuteAcceptsImageAndStoresSourcePath(t *testing.T) {
+func TestExecuteAcceptsImageAndStoresDurableAttachment(t *testing.T) {
 	workspace := t.TempDir()
 	target := filepath.Join(workspace, "screen.png")
 	writeTestPNG(t, target)
+	manager := attachment.NewManager(t.TempDir())
+	sessionID := id.New()
 
-	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace, SessionID: sessionID, Attachments: manager}, Request: tools.Request{
 		Args: map[string]string{"path": "screen.png", "detail": "original"},
 	}})
 	if err != nil {
@@ -44,11 +49,14 @@ func TestExecuteAcceptsImageAndStoresSourcePath(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected view image stored result, got %#v", result.Stored)
 	}
-	if stored.SourcePath != filepath.ToSlash(target) && stored.SourcePath != target {
-		t.Fatalf("expected stored source path %q, got %q", target, stored.SourcePath)
+	if stored.SourcePath != "" || stored.Attachment == nil || stored.SessionID != string(sessionID) {
+		t.Fatalf("expected durable attachment without source path, got %#v", stored)
 	}
 	if stored.Detail != "original" {
 		t.Fatalf("expected original detail, got %#v", stored)
+	}
+	if _, err := manager.SessionFile(sessionID, stored.Attachment.ID); err != nil {
+		t.Fatalf("resolve durable image: %v", err)
 	}
 }
 
@@ -59,7 +67,7 @@ func TestExecuteRejectsNonImageFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace}, Request: tools.Request{
+	_, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: workspace, SessionID: id.New(), Attachments: attachment.NewManager(t.TempDir())}, Request: tools.Request{
 		Args: map[string]string{"path": "note.txt"},
 	}})
 	if err == nil || !strings.Contains(err.Error(), "unsupported image type") {
@@ -68,7 +76,7 @@ func TestExecuteRejectsNonImageFile(t *testing.T) {
 }
 
 func TestExecuteReadsImageFromSessionTmp(t *testing.T) {
-	runtime := tools.Runtime{Workdir: t.TempDir(), SessionID: id.New()}
+	runtime := tools.Runtime{Workdir: t.TempDir(), SessionID: id.New(), Attachments: attachment.NewManager(t.TempDir())}
 	t.Cleanup(func() { _ = os.RemoveAll(runtime.SessionTmpDir()) })
 	if err := os.MkdirAll(runtime.SessionTmpDir(), 0o700); err != nil {
 		t.Fatal(err)
@@ -87,8 +95,8 @@ func TestExecuteReadsImageFromSessionTmp(t *testing.T) {
 		t.Fatalf("path label = %q, want /tmp/screen.png", result.Meta["path"])
 	}
 	stored, ok := result.Stored.(tools.ViewImageStoredResult)
-	if !ok || stored.SourcePath != target {
-		t.Fatalf("stored image = %#v, want source %q", result.Stored, target)
+	if !ok || stored.SourcePath != "" || stored.Attachment == nil {
+		t.Fatalf("stored image = %#v, want durable attachment", result.Stored)
 	}
 }
 
@@ -118,7 +126,7 @@ func TestExecuteRecognizesQEMUPortablePixmapWithPNGExtension(t *testing.T) {
 	}
 
 	result, err := tool{}.Call(t.Context(), tools.Options{
-		Runtime: tools.Runtime{Workdir: workspace},
+		Runtime: tools.Runtime{Workdir: workspace, SessionID: id.New(), Attachments: attachment.NewManager(t.TempDir())},
 		Request: tools.Request{Args: map[string]string{"path": "screen.png"}},
 	})
 	if err != nil {
@@ -127,5 +135,40 @@ func TestExecuteRecognizesQEMUPortablePixmapWithPNGExtension(t *testing.T) {
 	stored, ok := result.Stored.(tools.ViewImageStoredResult)
 	if !ok || stored.MIMEType != "image/png" {
 		t.Fatalf("stored image = %#v, want normalized image/png", result.Stored)
+	}
+}
+
+func TestExecuteDownloadsAndPersistsRemoteImage(t *testing.T) {
+	imagePath := filepath.Join(t.TempDir(), "source.png")
+	writeTestPNG(t, imagePath)
+	imageData, err := os.ReadFile(imagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Content-Disposition", `inline; filename="photo.png"`)
+		_, _ = w.Write(imageData)
+	}))
+	manager := attachment.NewManager(t.TempDir())
+	sessionID := id.New()
+	result, err := tool{}.Call(t.Context(), tools.Options{
+		Runtime: tools.Runtime{HTTPClient: server.Client(), SessionID: sessionID, Attachments: manager},
+		Request: tools.Request{Args: map[string]string{"path": server.URL + "/photo"}},
+	})
+	server.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := result.Stored.(tools.ViewImageStoredResult)
+	if !ok || stored.Attachment == nil || stored.MIMEType != "image/png" || stored.Path != server.URL+"/photo" {
+		t.Fatalf("remote stored result = %#v", result.Stored)
+	}
+	path, err := manager.SessionFile(sessionID, stored.Attachment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("remote image was not retained after server closed: %v", err)
 	}
 }

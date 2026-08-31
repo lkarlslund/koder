@@ -3903,7 +3903,8 @@ func toolResultRequiresImages(tool domain.ToolKind, toolCallID domain.ToolCallID
 	}
 	stored, ok := tools.ViewImageStoredResultForPart(part)
 	if ok {
-		return strings.TrimSpace(stored.SourcePath) != "" || strings.TrimSpace(stored.Path) != ""
+		return strings.TrimSpace(stored.SourcePath) != "" || strings.TrimSpace(stored.Path) != "" ||
+			(stored.Attachment != nil && strings.TrimSpace(stored.Attachment.ID) != "" && strings.TrimSpace(stored.SessionID) != "")
 	}
 	browserResult, ok := tools.BrowserStoredResultForPart(part)
 	return ok && browserResult.Attachment != nil && attachment.ClassifyMIME(browserResult.Attachment.MIME) == attachment.KindImage

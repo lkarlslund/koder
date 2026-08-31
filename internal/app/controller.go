@@ -2,10 +2,8 @@ package app
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -1504,18 +1502,7 @@ func (c *Controller) ImportImageAttachment(data []byte, name, mimeType, source s
 }
 
 func (c *Controller) SessionAttachmentPath(sessionID id.ID, attachmentID string) (string, error) {
-	if sessionID == "" || len(attachmentID) != 24 {
-		return "", fmt.Errorf("invalid attachment reference")
-	}
-	if _, err := hex.DecodeString(attachmentID); err != nil {
-		return "", fmt.Errorf("invalid attachment reference")
-	}
-	dir := attachment.NewManager(c.cfg.StateDir()).SessionDir(sessionID)
-	matches, err := filepath.Glob(filepath.Join(dir, attachmentID+".*"))
-	if err != nil || len(matches) != 1 {
-		return "", fmt.Errorf("attachment not found")
-	}
-	return matches[0], nil
+	return attachment.NewManager(c.cfg.StateDir()).SessionFile(sessionID, attachmentID)
 }
 
 // ResolveOfferedFile loads a live-file download capability.
