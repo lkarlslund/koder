@@ -16,7 +16,7 @@ import (
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
-const mediaParameters = `{"type":"object","properties":{"path":{"type":"string","description":"Relative or absolute local media path, or HTTP(S) media URL"},"title":{"type":"string","description":"Optional short title shown above the media"}},"required":["path"],"additionalProperties":false}`
+const mediaParameters = `{"type":"object","properties":{"path":{"type":"string","description":"For one item: relative or absolute local media path, or HTTP(S) media URL"},"title":{"type":"string","description":"Optional title for one item, or collection heading when items is used"},"items":{"type":"array","minItems":1,"maxItems":20,"description":"For a collection: media items shown together by one tool call","items":{"type":"object","properties":{"path":{"type":"string","description":"Relative or absolute local media path, or HTTP(S) media URL"},"title":{"type":"string","description":"Optional item title"}},"required":["path"],"additionalProperties":false}}},"oneOf":[{"required":["path"]},{"required":["items"]}],"additionalProperties":false}`
 
 type mediaTool struct{}
 type legacyImageTool struct{}
@@ -25,7 +25,7 @@ func init() {
 	tools.Register(mediaTool{}, tools.ToolSpec{
 		Title:       "Show media",
 		Description: "Show a local or remote image, audio, or video to the user and preserve it on the chat timeline.",
-		Usage:       "Show a local file or HTTP(S) media URL in the browser UI. Remote media is downloaded once and all media is copied into durable session attachment storage, so timeline playback does not depend on the original path or URL. This does not load media into model context. Playback requires user interaction and never autoplays. Use view_image when you need to inspect an image yourself.",
+		Usage:       "Show one local file or HTTP(S) media URL with path, or show up to 20 together with items: [{path,title}]. Remote media is downloaded once and all media is copied into durable session attachment storage, so timeline playback does not depend on the original path or URL. This does not load media into model context. Playback requires user interaction and never autoplays. Use view_image when you need to inspect an image yourself.",
 		Parameters:  mediaParameters,
 		ExposeToLLM: true,
 		Legacy:      true,
@@ -46,7 +46,7 @@ func (mediaTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.T
 func (mediaTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	return normalizeArgs(args)
 }
-func (mediaTool) Preview(req tools.Request) string { return req.Args["path"] }
+func (mediaTool) Preview(req tools.Request) string { return mediaPreview(req.Args) }
 func (mediaTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
 	return call(ctx, opts, false)
 }
@@ -59,7 +59,7 @@ func (legacyImageTool) BypassesPermission() bool { return false }
 func (legacyImageTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	return normalizeArgs(args)
 }
-func (legacyImageTool) Preview(req tools.Request) string { return req.Args["path"] }
+func (legacyImageTool) Preview(req tools.Request) string { return mediaPreview(req.Args) }
 func (legacyImageTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
 	return call(ctx, opts, true)
 }
@@ -68,15 +68,18 @@ func (legacyImageTool) SummarizeResult(_ tools.Request, result tools.Result) (st
 }
 
 func normalizeArgs(args map[string]string) (map[string]string, error) {
-	path, err := tools.NormalizePathOrHTTPURL(args["path"])
-	if err != nil {
-		return nil, err
+	return tools.NormalizeMediaArgs(args)
+}
+
+func mediaPreview(args map[string]string) string {
+	if path := strings.TrimSpace(args["path"]); path != "" {
+		return path
 	}
-	out := map[string]string{"path": path}
 	if title := strings.TrimSpace(args["title"]); title != "" {
-		out["title"] = title
+		return title
 	}
-	return out, nil
+	items, _ := tools.MediaInputs(args)
+	return fmt.Sprintf("%d media items", len(items))
 }
 
 func call(ctx context.Context, opts tools.Options, imageOnly bool) (tools.Result, error) {
@@ -84,77 +87,108 @@ func call(ctx context.Context, opts tools.Options, imageOnly bool) (tools.Result
 	if runtime.Attachments == nil || runtime.SessionID == "" {
 		return tools.Result{}, errors.New("session attachment storage is unavailable")
 	}
-	if tools.IsHTTPURL(req.Args["path"]) {
-		return callRemote(ctx, opts, imageOnly)
-	}
-	abs, rel, err := tools.ResolvePath(runtime, req.Args["path"], accesssettings.AccessRead)
+	inputs, err := tools.MediaInputs(req.Args)
 	if err != nil {
 		return tools.Result{}, err
+	}
+	if len(inputs) == 1 && strings.TrimSpace(req.Args["items"]) == "" {
+		item, err := storeMedia(ctx, runtime, inputs[0], imageOnly)
+		if err != nil {
+			return tools.Result{}, err
+		}
+		return singleResult(item), nil
+	}
+	stored := tools.ShowMediaStoredResult{Title: strings.TrimSpace(req.Args["title"])}
+	for index, input := range inputs {
+		item, itemErr := storeMedia(ctx, runtime, input, imageOnly)
+		if itemErr != nil {
+			stored.Errors = append(stored.Errors, fmt.Sprintf("item %d (%s): %v", index+1, input.Path, itemErr))
+			continue
+		}
+		stored.Items = append(stored.Items, item)
+	}
+	if len(stored.Items) == 0 {
+		return tools.Result{}, fmt.Errorf("none of the %d media items could be shown: %s", len(inputs), strings.Join(stored.Errors, "; "))
+	}
+	stored.Summary = fmt.Sprintf("Showed %d media items", len(stored.Items))
+	if len(stored.Errors) > 0 {
+		stored.Summary += fmt.Sprintf("; skipped %d", len(stored.Errors))
+	}
+	meta := map[string]string{
+		"media_count":   fmt.Sprintf("%d", len(stored.Items)),
+		"skipped_count": fmt.Sprintf("%d", len(stored.Errors)),
+	}
+	return tools.Result{Output: stored.Summary, Meta: meta, Stored: stored}, nil
+}
+
+func storeMedia(ctx context.Context, runtime tools.Runtime, input tools.MediaInput, imageOnly bool) (tools.ShowMediaStoredItem, error) {
+	if tools.IsHTTPURL(input.Path) {
+		return storeRemoteMedia(ctx, runtime, input, imageOnly)
+	}
+	abs, rel, err := tools.ResolvePath(runtime, input.Path, accesssettings.AccessRead)
+	if err != nil {
+		return tools.ShowMediaStoredItem{}, err
 	}
 	info, err := os.Stat(abs)
 	if err != nil {
-		return tools.Result{}, err
+		return tools.ShowMediaStoredItem{}, err
 	}
 	if info.IsDir() {
-		return tools.Result{}, fmt.Errorf("%s is a directory", rel)
+		return tools.ShowMediaStoredItem{}, fmt.Errorf("%s is a directory", rel)
 	}
 	mimeType, kind, err := detectMediaMIME(abs)
 	if err != nil {
-		return tools.Result{}, err
+		return tools.ShowMediaStoredItem{}, err
 	}
 	if imageOnly && kind != attachment.KindImage {
-		return tools.Result{}, fmt.Errorf("unsupported image type %q", mimeType)
+		return tools.ShowMediaStoredItem{}, fmt.Errorf("unsupported image type %q", mimeType)
 	}
-	title := strings.TrimSpace(req.Args["title"])
-	label := "Showed " + string(kind) + " " + rel
-	stored := tools.ShowMediaStoredResult{Path: rel, SourcePath: abs, MIMEType: mimeType, MediaKind: string(kind), Title: title, Summary: label}
-	meta, importErr := runtime.Attachments.ImportSessionFile(runtime.SessionID, abs, mimeType, "show_media")
-	if importErr != nil {
-		return tools.Result{}, importErr
+	meta, err := runtime.Attachments.ImportSessionFile(runtime.SessionID, abs, mimeType, "show_media")
+	if err != nil {
+		return tools.ShowMediaStoredItem{}, err
 	}
 	meta.Path, meta.Original = "", ""
-	stored.SessionID = string(runtime.SessionID)
-	stored.Attachment = &meta
-	stored.SourcePath = ""
-	return tools.Result{
-		Output: label,
-		Meta:   map[string]string{"path": rel, "mime_type": mimeType, "media_kind": string(kind), "title": title, "attachment_id": meta.ID},
-		Stored: stored,
-	}, nil
+	return tools.ShowMediaStoredItem{Path: rel, MIMEType: mimeType, MediaKind: string(kind), Title: input.Title, SessionID: string(runtime.SessionID), Attachment: &meta}, nil
 }
 
-func callRemote(ctx context.Context, opts tools.Options, imageOnly bool) (tools.Result, error) {
-	remote, err := tools.FetchRemoteMedia(ctx, opts.Runtime.HTTPClient, opts.Request.Args["path"])
+func storeRemoteMedia(ctx context.Context, runtime tools.Runtime, input tools.MediaInput, imageOnly bool) (tools.ShowMediaStoredItem, error) {
+	remote, err := tools.FetchRemoteMedia(ctx, runtime.HTTPClient, input.Path)
 	if err != nil {
-		return tools.Result{}, err
+		return tools.ShowMediaStoredItem{}, err
 	}
 	mimeType, kind, err := detectMediaData(remote.Data, remote.Name, remote.MIMEType)
 	if err != nil {
-		return tools.Result{}, err
+		return tools.ShowMediaStoredItem{}, err
 	}
 	data := remote.Data
 	if kind == attachment.KindImage {
 		data, mimeType, err = attachment.PrepareImage(data)
 		if err != nil {
-			return tools.Result{}, err
+			return tools.ShowMediaStoredItem{}, err
 		}
 	}
 	if imageOnly && kind != attachment.KindImage {
-		return tools.Result{}, fmt.Errorf("unsupported image type %q", mimeType)
+		return tools.ShowMediaStoredItem{}, fmt.Errorf("unsupported image type %q", mimeType)
 	}
-	meta, err := opts.Runtime.Attachments.ImportSessionData(opts.Runtime.SessionID, data, remote.Name, mimeType, "show_media")
+	meta, err := runtime.Attachments.ImportSessionData(runtime.SessionID, data, remote.Name, mimeType, "show_media")
 	if err != nil {
-		return tools.Result{}, err
+		return tools.ShowMediaStoredItem{}, err
 	}
 	meta.Path, meta.Original = "", ""
-	title := strings.TrimSpace(opts.Request.Args["title"])
-	label := "Showed " + string(kind) + " " + remote.URL
-	stored := tools.ShowMediaStoredResult{Path: remote.URL, MIMEType: mimeType, MediaKind: string(kind), Title: title, SessionID: string(opts.Runtime.SessionID), Attachment: &meta, Summary: label}
+	return tools.ShowMediaStoredItem{Path: remote.URL, MIMEType: mimeType, MediaKind: string(kind), Title: input.Title, SessionID: string(runtime.SessionID), Attachment: &meta}, nil
+}
+
+func singleResult(item tools.ShowMediaStoredItem) tools.Result {
+	label := "Showed " + item.MediaKind + " " + item.Path
+	stored := tools.ShowMediaStoredResult{
+		Path: item.Path, MIMEType: item.MIMEType, MediaKind: item.MediaKind, Title: item.Title,
+		SessionID: item.SessionID, Attachment: item.Attachment, Summary: label,
+	}
 	return tools.Result{
 		Output: label,
-		Meta:   map[string]string{"path": remote.URL, "mime_type": mimeType, "media_kind": string(kind), "title": title, "attachment_id": meta.ID},
+		Meta:   map[string]string{"path": item.Path, "mime_type": item.MIMEType, "media_kind": item.MediaKind, "title": item.Title, "attachment_id": item.Attachment.ID},
 		Stored: stored,
-	}, nil
+	}
 }
 
 func detectMediaMIME(path string) (string, attachment.Kind, error) {

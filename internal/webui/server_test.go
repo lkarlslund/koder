@@ -2341,6 +2341,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `kind === 'show_media' || kind === 'show_image'`) ||
 		!strings.Contains(fullPage, `<audio class="tool-media-audio" controls preload="metadata"`) ||
 		!strings.Contains(fullPage, `<video class="tool-media-video" controls preload="metadata" playsinline`) ||
+		!strings.Contains(fullPage, `function renderShowMediaItem(data)`) ||
+		!strings.Contains(fullPage, `class="tool-media-gallery"`) ||
+		!strings.Contains(fullPage, `.tool-media-gallery { display: grid;`) ||
 		strings.Contains(fullPage, `<video class="tool-media-video" autoplay`) {
 		t.Fatalf("expected user-controlled image, audio, and video rendering")
 	}

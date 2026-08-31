@@ -326,6 +326,19 @@ type ViewImageStoredResult struct {
 }
 
 type ShowMediaStoredResult struct {
+	Path       string                `json:"path"`
+	SourcePath string                `json:"source_path,omitempty"`
+	MIMEType   string                `json:"mime_type"`
+	MediaKind  string                `json:"media_kind,omitempty"`
+	Title      string                `json:"title,omitempty"`
+	SessionID  string                `json:"session_id,omitempty"`
+	Attachment *attachment.Metadata  `json:"attachment,omitempty"`
+	Summary    string                `json:"summary,omitempty"`
+	Items      []ShowMediaStoredItem `json:"items,omitempty"`
+	Errors     []string              `json:"errors,omitempty"`
+}
+
+type ShowMediaStoredItem struct {
 	Path       string               `json:"path"`
 	SourcePath string               `json:"source_path,omitempty"`
 	MIMEType   string               `json:"mime_type"`
@@ -333,7 +346,6 @@ type ShowMediaStoredResult struct {
 	Title      string               `json:"title,omitempty"`
 	SessionID  string               `json:"session_id,omitempty"`
 	Attachment *attachment.Metadata `json:"attachment,omitempty"`
-	Summary    string               `json:"summary,omitempty"`
 }
 
 type OfferFileStoredResult struct {
@@ -676,6 +688,23 @@ func compactViewImageStoredResult(result ViewImageStoredResult) string {
 }
 
 func compactShowMediaStoredResult(result ShowMediaStoredResult) string {
+	if len(result.Items) > 0 {
+		lines := []string{fmt.Sprintf("Showed %d media items; media bytes omitted for text-only compaction.", len(result.Items))}
+		if summary := strings.TrimSpace(result.Summary); summary != "" {
+			lines = append(lines, "summary: "+summary)
+		}
+		for index, item := range result.Items {
+			label := strings.TrimSpace(item.Title)
+			if label == "" {
+				label = strings.TrimSpace(item.Path)
+			}
+			lines = append(lines, fmt.Sprintf("%d. %s (%s)", index+1, label, strings.TrimSpace(item.MIMEType)))
+		}
+		if len(result.Errors) > 0 {
+			lines = append(lines, fmt.Sprintf("skipped: %d", len(result.Errors)))
+		}
+		return strings.TrimSpace(strings.Join(lines, "\n"))
+	}
 	kind := strings.TrimSpace(result.MediaKind)
 	if kind == "" {
 		kind = "image"
@@ -1576,6 +1605,9 @@ func formatViewImageStoredResult(result ViewImageStoredResult) string {
 func formatShowMediaStoredResult(result ShowMediaStoredResult) string {
 	if summary := strings.TrimSpace(result.Summary); summary != "" {
 		return summary
+	}
+	if len(result.Items) > 0 {
+		return fmt.Sprintf("Showed %d media items", len(result.Items))
 	}
 	path := strings.TrimSpace(result.Path)
 	if path == "" {

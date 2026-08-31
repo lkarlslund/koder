@@ -132,3 +132,48 @@ func TestExecuteDownloadsRemoteMediaIntoTimelineAttachment(t *testing.T) {
 		t.Fatalf("remote media was not retained after server closed: %v", err)
 	}
 }
+
+func TestExecuteShowsMediaCollectionWithPartialFailure(t *testing.T) {
+	workspace := t.TempDir()
+	writePNG := func(name string, colorValue color.NRGBA) {
+		t.Helper()
+		var data bytes.Buffer
+		photo := image.NewNRGBA(image.Rect(0, 0, 1, 1))
+		photo.SetNRGBA(0, 0, colorValue)
+		if err := png.Encode(&data, photo); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(workspace, name), data.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writePNG("one.png", color.NRGBA{R: 0xff, A: 0xff})
+	writePNG("two.png", color.NRGBA{B: 0xff, A: 0xff})
+	manager := attachment.NewManager(t.TempDir())
+	args, err := normalizeArgs(map[string]string{
+		"title": "Examples",
+		"items": `[{"path":"one.png","title":"One"},{"path":"missing.png"},{"path":"two.png","title":"Two"}]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := (mediaTool{}).Call(t.Context(), tools.Options{
+		Runtime: tools.Runtime{Workdir: workspace, SessionID: "session-1", Attachments: manager},
+		Request: tools.Request{Args: args},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := result.Stored.(tools.ShowMediaStoredResult)
+	if !ok || stored.Title != "Examples" || len(stored.Items) != 2 || len(stored.Errors) != 1 || result.Meta["media_count"] != "2" || result.Meta["skipped_count"] != "1" {
+		t.Fatalf("media collection result = %#v", result)
+	}
+	for index, item := range stored.Items {
+		if item.Attachment == nil || item.SessionID != "session-1" {
+			t.Fatalf("media item %d = %#v", index, item)
+		}
+		if _, err := manager.SessionFile("session-1", item.Attachment.ID); err != nil {
+			t.Fatalf("resolve media item %d: %v", index, err)
+		}
+	}
+}

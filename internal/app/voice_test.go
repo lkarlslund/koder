@@ -194,8 +194,11 @@ func TestVoicePresentationPartsExtractsGenericArtifacts(t *testing.T) {
 			Content: domain.AssistantMessage{Tools: []domain.ToolCall{{
 				Tool: domain.ToolKindPresent, Args: map[string]string{"action": "media"},
 				Result: &domain.ToolResult{Data: tools.ShowMediaStoredResult{
-					SessionID: "session-1", MIMEType: "image/png", Title: "Current state",
-					Attachment: &attachment.Metadata{ID: "012345678901234567890123", Name: "screen.png", MIME: "image/png"},
+					Title: "Current state",
+					Items: []tools.ShowMediaStoredItem{
+						{SessionID: "session-1", Title: "First", Attachment: &attachment.Metadata{ID: "012345678901234567890123", Name: "screen.png", MIME: "image/png"}},
+						{SessionID: "session-1", Title: "Second", Attachment: &attachment.Metadata{ID: "123456789012345678901234", Name: "detail.png", MIME: "image/png"}},
+					},
 				}},
 			}}},
 		},
@@ -219,17 +222,20 @@ func TestVoicePresentationPartsExtractsGenericArtifacts(t *testing.T) {
 		},
 	}
 	parts := voicePresentationParts(timeline, 0)
-	if len(parts) != 3 {
+	if len(parts) != 4 {
 		t.Fatalf("presentation parts = %#v", parts)
 	}
 	if parts[0].MIMEType != "image/png" || parts[0].URI != "/voice/v1/artifacts/session/session-1/012345678901234567890123" || parts[0].Metadata["name"] != "screen.png" {
 		t.Fatalf("image part = %#v", parts[0])
 	}
-	if parts[1].MIMEType != "text/calendar" || parts[1].URI != "/voice/v1/artifacts/offered/download-token" {
-		t.Fatalf("offered file part = %#v", parts[1])
+	if parts[1].URI != "/voice/v1/artifacts/session/session-1/123456789012345678901234" || parts[1].Metadata["name"] != "detail.png" {
+		t.Fatalf("second image part = %#v", parts[1])
 	}
-	if parts[2].MIMEType != "text/markdown" || parts[2].Data != "| Time | Person |" || parts[2].Metadata["presentation"] != "true" {
-		t.Fatalf("inline presentation part = %#v", parts[2])
+	if parts[2].MIMEType != "text/calendar" || parts[2].URI != "/voice/v1/artifacts/offered/download-token" {
+		t.Fatalf("offered file part = %#v", parts[2])
+	}
+	if parts[3].MIMEType != "text/markdown" || parts[3].Data != "| Time | Person |" || parts[3].Metadata["presentation"] != "true" {
+		t.Fatalf("inline presentation part = %#v", parts[3])
 	}
 }
 

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,12 +14,84 @@ import (
 )
 
 const MaxRemoteMediaBytes = 25 * 1024 * 1024
+const MaxPresentedMediaItems = 20
+
+type MediaInput struct {
+	Path  string `json:"path"`
+	Title string `json:"title,omitempty"`
+}
 
 type RemoteMedia struct {
 	Data     []byte
 	Name     string
 	MIMEType string
 	URL      string
+}
+
+func NormalizeMediaArgs(args map[string]string) (map[string]string, error) {
+	pathValue := strings.TrimSpace(args["path"])
+	itemsValue := strings.TrimSpace(args["items"])
+	if pathValue != "" && itemsValue != "" {
+		return nil, errors.New("media path and items cannot be combined")
+	}
+	out := map[string]string{}
+	if title := strings.TrimSpace(args["title"]); title != "" {
+		out["title"] = title
+	}
+	if pathValue != "" {
+		path, err := NormalizePathOrHTTPURL(pathValue)
+		if err != nil {
+			return nil, err
+		}
+		out["path"] = path
+		return out, nil
+	}
+	items, err := DecodeMediaInputs(itemsValue)
+	if err != nil {
+		return nil, err
+	}
+	for index := range items {
+		items[index].Path, err = NormalizePathOrHTTPURL(items[index].Path)
+		if err != nil {
+			return nil, fmt.Errorf("media item %d: %w", index+1, err)
+		}
+		items[index].Title = strings.TrimSpace(items[index].Title)
+	}
+	encoded, err := json.Marshal(items)
+	if err != nil {
+		return nil, err
+	}
+	out["items"] = string(encoded)
+	return out, nil
+}
+
+func MediaInputs(args map[string]string) ([]MediaInput, error) {
+	if pathValue := strings.TrimSpace(args["path"]); pathValue != "" {
+		return []MediaInput{{Path: pathValue, Title: strings.TrimSpace(args["title"])}}, nil
+	}
+	return DecodeMediaInputs(args["items"])
+}
+
+func DecodeMediaInputs(value string) ([]MediaInput, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, errors.New("media path or items are required")
+	}
+	var items []MediaInput
+	if err := json.Unmarshal([]byte(value), &items); err != nil {
+		return nil, fmt.Errorf("decode media items: %w", err)
+	}
+	if len(items) == 0 {
+		return nil, errors.New("at least one media item is required")
+	}
+	if len(items) > MaxPresentedMediaItems {
+		return nil, fmt.Errorf("media items exceed the limit of %d", MaxPresentedMediaItems)
+	}
+	for index, item := range items {
+		if strings.TrimSpace(item.Path) == "" {
+			return nil, fmt.Errorf("media item %d path is required", index+1)
+		}
+	}
+	return items, nil
 }
 
 func NormalizePathOrHTTPURL(input string) (string, error) {

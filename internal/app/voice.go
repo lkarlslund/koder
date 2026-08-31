@@ -1205,9 +1205,15 @@ func voicePresentationParts(timeline []domain.TimelineItem, sequence int64) []vo
 				}
 			case tools.ShowMediaStoredResult:
 				addAttachment(result.SessionID, result.Attachment, result.Title)
+				for _, media := range result.Items {
+					addAttachment(media.SessionID, media.Attachment, media.Title)
+				}
 			case *tools.ShowMediaStoredResult:
 				if result != nil {
 					addAttachment(result.SessionID, result.Attachment, result.Title)
+					for _, media := range result.Items {
+						addAttachment(media.SessionID, media.Attachment, media.Title)
+					}
 				}
 			case tools.BrowserStoredResult:
 				addAttachment(result.SessionID, result.Attachment, result.Summary)

@@ -765,6 +765,15 @@
         '</div>';
     }
     function renderShowMediaBlock(data, fallbackText) {
+	  const items = firstValue(data, ['items', 'Items']);
+	  if (Array.isArray(items) && items.length) {
+	    const title = firstValue(data, ['title', 'Title']) || firstValue(data, ['summary', 'Summary']) || fallbackText || ('Showed ' + items.length + ' media items');
+	    const errors = firstValue(data, ['errors', 'Errors']);
+	    const skipped = Array.isArray(errors) && errors.length
+	      ? '<details class="tool-media-errors"><summary>' + escapeHTML(errors.length + ' skipped') + '</summary><pre>' + escapeHTML(errors.join('\n')) + '</pre></details>'
+	      : '';
+	    return toolResultHeader(title) + '<div class="tool-result-body tool-media-result"><div class="tool-media-gallery">' + items.map(renderShowMediaItem).join('') + '</div>' + skipped + '</div>';
+	  }
 	  const media = mediaResultSource(data);
 	  const mime = firstValue(data, ['mime_type', 'MIMEType']);
 	  const kind = firstValue(data, ['media_kind', 'MediaKind']) || (String(mime).startsWith('audio/') ? 'audio' : String(mime).startsWith('video/') ? 'video' : 'image');
@@ -777,6 +786,23 @@
 	    ? '<audio class="tool-media-audio" controls preload="metadata" src="' + escapeHTML(media.src) + '"></audio>'
 	    : '<video class="tool-media-video" controls preload="metadata" playsinline src="' + escapeHTML(media.src) + '"></video>';
 	  return toolResultHeader(summary) + '<div class="tool-result-body tool-media-result">' + element + (meta ? '<div class="small text-secondary mt-2">' + escapeHTML(meta) + '</div>' : '') + '</div>';
+    }
+    function renderShowMediaItem(data) {
+	  const media = mediaResultSource(data);
+	  const mime = firstValue(data, ['mime_type', 'MIMEType']);
+	  const kind = firstValue(data, ['media_kind', 'MediaKind']) || (String(mime).startsWith('audio/') ? 'audio' : String(mime).startsWith('video/') ? 'video' : 'image');
+	  const title = firstValue(data, ['title', 'Title']) || media.path || 'Media';
+	  const meta = [media.path, mime].filter(Boolean).join(' · ');
+	  if (!media.src) return '<article class="tool-media-card"><div class="fw-semibold">' + escapeHTML(title) + '</div>' + (meta ? '<div class="small text-secondary">' + escapeHTML(meta) + '</div>' : '') + '</article>';
+	  let element = '';
+	  if (kind === 'image') {
+	    element = '<button type="button" class="tool-image-preview tool-media-gallery-image" data-lightbox-src="' + escapeHTML(media.src) + '" data-lightbox-title="' + escapeHTML(title) + '" data-lightbox-meta="' + escapeHTML(meta) + '" title="Open image preview"><img alt="' + escapeHTML(title) + '" src="' + escapeHTML(media.src) + '"><span class="tool-image-zoom"><i class="bi bi-arrows-fullscreen"></i></span></button>';
+	  } else if (kind === 'audio') {
+	    element = '<audio class="tool-media-audio" controls preload="metadata" src="' + escapeHTML(media.src) + '"></audio>';
+	  } else {
+	    element = '<video class="tool-media-video" controls preload="metadata" playsinline src="' + escapeHTML(media.src) + '"></video>';
+	  }
+	  return '<article class="tool-media-card">' + element + '<div class="tool-media-card-title">' + escapeHTML(title) + '</div>' + (meta ? '<div class="small text-secondary">' + escapeHTML(meta) + '</div>' : '') + '</article>';
     }
     function offeredFileIcon(name, mime) {
       const filename = String(name || '').toLowerCase();

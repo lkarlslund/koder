@@ -3,6 +3,8 @@ package presenttool
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -20,7 +22,7 @@ func TestPresentIsCrossModeResourceAndStoresGenericVisual(t *testing.T) {
 		Attachments: attachment.NewManager(t.TempDir()), OfferedFiles: offeredfile.NewManager(nil),
 	}
 	definition, enabled := tools.DefinitionFor(tools.Present, persisted)
-	if !enabled || !strings.Contains(string(definition.Function.Parameters), "text/markdown") || !strings.Contains(string(definition.Function.Parameters), `"media"`) || !strings.Contains(string(definition.Function.Parameters), `"file"`) {
+	if !enabled || !strings.Contains(string(definition.Function.Parameters), "text/markdown") || !strings.Contains(string(definition.Function.Parameters), `"media"`) || !strings.Contains(string(definition.Function.Parameters), `"file"`) || !strings.Contains(string(definition.Function.Parameters), `"maxItems":20`) {
 		t.Fatalf("definition=%#v enabled=%v", definition, enabled)
 	}
 	if _, enabled := tools.DefinitionFor(tools.PresentContentOld, tools.Runtime{ChatRole: chatrole.Voice}); enabled {
@@ -38,6 +40,32 @@ func TestPresentIsCrossModeResourceAndStoresGenericVisual(t *testing.T) {
 	stored, ok := result.Stored.(tools.PresentationStoredResult)
 	if !ok || stored.Title != "Appointments" || stored.MIMEType != "text/markdown" || !strings.Contains(stored.Content, "Steen") {
 		t.Fatalf("stored result = %#v", result.Stored)
+	}
+}
+
+func TestPresentShowsMultipleMediaItemsInOneCall(t *testing.T) {
+	workspace := t.TempDir()
+	for _, name := range []string{"one.png", "two.png"} {
+		if err := os.WriteFile(filepath.Join(workspace, name), []byte("\x89PNG\r\n\x1a\nfake"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := tools.Call(t.Context(), tools.Options{
+		Runtime: tools.Runtime{
+			Workdir: workspace, SessionID: "session-1", ChatID: "chat-1", ChatRole: chatrole.General,
+			Attachments: attachment.NewManager(t.TempDir()),
+		},
+		Request: tools.Request{Tool: tools.Present, Args: map[string]string{
+			"action": "media", "title": "Two examples",
+			"items": `[{"path":"one.png","title":"One"},{"path":"two.png","title":"Two"}]`,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := result.Stored.(tools.ShowMediaStoredResult)
+	if !ok || stored.Title != "Two examples" || len(stored.Items) != 2 || stored.Items[0].Attachment == nil || stored.Items[1].Attachment == nil {
+		t.Fatalf("multi-media present result = %#v", result.Stored)
 	}
 }
 

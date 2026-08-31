@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,37 @@ func TestNormalizePathOrHTTPURL(t *testing.T) {
 	}
 	if _, err := NormalizePathOrHTTPURL("https:///missing-host.png"); err == nil {
 		t.Fatal("expected missing host rejection")
+	}
+}
+
+func TestNormalizeMediaArgsCollection(t *testing.T) {
+	got, err := NormalizeMediaArgs(map[string]string{
+		"title": " Results ",
+		"items": `[{"path":" https://example.test/one.png ","title":" One "},{"path":"media/two.mp4"}]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := MediaInputs(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["title"] != "Results" || len(items) != 2 || items[0].Path != "https://example.test/one.png" || items[0].Title != "One" || items[1].Path != "media/two.mp4" {
+		t.Fatalf("normalized media collection = %#v, items %#v", got, items)
+	}
+	if _, err := NormalizeMediaArgs(map[string]string{"path": "one.png", "items": `[{"path":"two.png"}]`}); err == nil {
+		t.Fatal("expected path and items combination to be rejected")
+	}
+	tooMany := make([]MediaInput, MaxPresentedMediaItems+1)
+	for index := range tooMany {
+		tooMany[index].Path = "image.png"
+	}
+	encoded, err := json.Marshal(tooMany)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NormalizeMediaArgs(map[string]string{"items": string(encoded)}); err == nil {
+		t.Fatal("expected oversized media collection to be rejected")
 	}
 }
 
@@ -59,5 +91,9 @@ func TestRemoteMediaUsesNetworkAccessPolicy(t *testing.T) {
 	request.Tool = ShowMedia
 	if err := checkRuntimeAccess(Runtime{AccessSettings: accesssettings.LockedDown()}, request); err == nil {
 		t.Fatal("expected network-disabled remote media access to be rejected")
+	}
+	request.Args = map[string]string{"items": `[{"path":"https://example.test/one.png"},{"path":"https://example.test/two.png"}]`}
+	if err := checkRuntimeAccess(Runtime{AccessSettings: accesssettings.LockedDown()}, request); err == nil {
+		t.Fatal("expected network-disabled remote media collection to be rejected")
 	}
 }

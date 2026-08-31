@@ -404,10 +404,28 @@ func checkRuntimeAccess(runtime Runtime, req Request) error {
 	case FileWrite, FileEdit, PhonePhotoTransfer:
 		return checkRequestPath(runtime, req, accesssettings.AccessWrite)
 	case ViewImage, ShowImage, ShowMedia:
-		if IsHTTPURL(req.Args["path"]) {
-			return runtime.CheckNetworkAccess()
+		if req.Tool == ViewImage {
+			if IsHTTPURL(req.Args["path"]) {
+				return runtime.CheckNetworkAccess()
+			}
+			return checkRequestPath(runtime, req, accesssettings.AccessRead)
 		}
-		return checkRequestPath(runtime, req, accesssettings.AccessRead)
+		items, err := MediaInputs(req.Args)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if IsHTTPURL(item.Path) {
+				if err := runtime.CheckNetworkAccess(); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := checkRequestPath(runtime, Request{Tool: req.Tool, Args: map[string]string{"path": item.Path}}, accesssettings.AccessRead); err != nil {
+				return err
+			}
+		}
+		return nil
 	case FileRead, ViewPDF, OfferFile, FileGlob, FileGrep, CodeSearch, Lint:
 		return checkRequestPath(runtime, req, accesssettings.AccessRead)
 	default:

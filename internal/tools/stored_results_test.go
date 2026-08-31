@@ -198,6 +198,25 @@ func TestCompactModelTextForPartOmitsShowMediaBytes(t *testing.T) {
 	}
 }
 
+func TestCompactModelTextForPartSummarizesMediaCollection(t *testing.T) {
+	text, ok := tools.CompactModelTextForPart(toolOutputPart(domain.ToolKindShowMedia, tools.StoredResultStatusOK, "Showed media", tools.ShowMediaStoredResult{
+		Summary: "Showed 2 media items; skipped 1",
+		Items: []tools.ShowMediaStoredItem{
+			{Path: "one.png", Title: "One", MIMEType: "image/png"},
+			{Path: "two.mp4", MIMEType: "video/mp4"},
+		},
+		Errors: []string{"item 3 failed"},
+	}), "", tools.DefaultCompactFormatLimits())
+	if !ok {
+		t.Fatal("expected compact media collection text")
+	}
+	for _, want := range []string{"Showed 2 media items", "1. One (image/png)", "2. two.mp4 (video/mp4)", "skipped: 1"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected %q in %q", want, text)
+		}
+	}
+}
+
 func TestCompactModelTextForPartBoundsReadOutput(t *testing.T) {
 	var readLines []tools.ReadStoredLine
 	for i := 1; i <= 8; i++ {
