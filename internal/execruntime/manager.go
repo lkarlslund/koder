@@ -61,6 +61,8 @@ type StreamSource string
 
 const (
 	StreamSourceOutput StreamSource = "output"
+	StreamSourceStdout StreamSource = "stdout"
+	StreamSourceStderr StreamSource = "stderr"
 	StreamSourceInput  StreamSource = "input"
 )
 
@@ -324,11 +326,11 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 		if err := cmd.Start(); err != nil {
 			return Snapshot{}, err
 		}
-		m.startOutputReader(p, stdout)
-		m.startOutputReader(p, stderr)
+		m.startOutputReader(p, stdout, StreamSourceStdout)
+		m.startOutputReader(p, stderr, StreamSourceStderr)
 	}
 	if req.TTY {
-		m.startOutputReader(p, p.ptyHandle)
+		m.startOutputReader(p, p.ptyHandle, StreamSourceOutput)
 	}
 
 	m.mu.Lock()
@@ -487,14 +489,14 @@ func (m *Manager) Cleanup(_ context.Context, req CleanupRequest) ([]Snapshot, er
 	return snaps, nil
 }
 
-func (m *Manager) readOutput(p *process, r io.Reader) {
+func (m *Manager) readOutput(p *process, r io.Reader, source StreamSource) {
 	reader := bufio.NewReader(r)
 	buf := make([]byte, 4096)
 	for {
 		n, err := reader.Read(buf)
 		if n > 0 {
 			delta := string(buf[:n])
-			p.appendOutput(delta)
+			p.appendOutput(source, delta)
 			m.publish(Event{Kind: EventKindOutput, Snapshot: p.snapshot(defaultPreviewBytes), Delta: delta})
 		}
 		if err != nil {
@@ -503,11 +505,11 @@ func (m *Manager) readOutput(p *process, r io.Reader) {
 	}
 }
 
-func (m *Manager) startOutputReader(p *process, r io.Reader) {
+func (m *Manager) startOutputReader(p *process, r io.Reader, source StreamSource) {
 	p.outputWG.Add(1)
 	go func() {
 		defer p.outputWG.Done()
-		m.readOutput(p, r)
+		m.readOutput(p, r, source)
 	}()
 }
 
@@ -579,13 +581,13 @@ func (m *Manager) publish(evt Event) {
 	m.mu.Unlock()
 }
 
-func (p *process) appendOutput(delta string) {
+func (p *process) appendOutput(source StreamSource, delta string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.output += delta
 	p.drainOutput += delta
 	p.outputBytes += len(delta)
-	p.appendStreamLocked(StreamSourceOutput, delta)
+	p.appendStreamLocked(source, delta)
 	p.output = tailOnLineBoundary(p.output, defaultTailBytes)
 	p.drainOutput = tailOnLineBoundary(p.drainOutput, defaultTailBytes)
 }

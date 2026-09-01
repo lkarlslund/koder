@@ -92,7 +92,7 @@ func TestManagerStartStatusAndWriteStdin(t *testing.T) {
 	if len(status.Stream) != 3 {
 		t.Fatalf("stream = %#v, want output, input, output", status.Stream)
 	}
-	wantSources := []StreamSource{StreamSourceOutput, StreamSourceInput, StreamSourceOutput}
+	wantSources := []StreamSource{StreamSourceStdout, StreamSourceInput, StreamSourceStdout}
 	for i, want := range wantSources {
 		if status.Stream[i].Source != want {
 			t.Fatalf("stream[%d].Source = %q, want %q", i, status.Stream[i].Source, want)
@@ -100,6 +100,27 @@ func TestManagerStartStatusAndWriteStdin(t *testing.T) {
 	}
 	if status.Stream[1].Text != "hello\n" {
 		t.Fatalf("input stream text = %q, want %q", status.Stream[1].Text, "hello\\n")
+	}
+}
+
+func TestManagerStreamDistinguishesStderr(t *testing.T) {
+	mgr := NewManager()
+	snap, err := mgr.Start(context.Background(), StartRequest{
+		SessionID: "session-1",
+		ChatID:    "chat-2",
+		Command:   "printf stdout; printf stderr >&2",
+		Workdir:   t.TempDir(),
+		YieldTime: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	found := map[StreamSource]string{}
+	for _, entry := range snap.Stream {
+		found[entry.Source] += entry.Text
+	}
+	if found[StreamSourceStdout] != "stdout" || found[StreamSourceStderr] != "stderr" {
+		t.Fatalf("stream by source = %#v", found)
 	}
 }
 

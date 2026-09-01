@@ -723,7 +723,7 @@
         <section class="tool-command-output">
           <div class="tool-result-header d-flex align-items-center justify-content-between gap-2">
             <span>Process I/O</span>
-            <span class="exec-process-console-legend"><span class="exec-process-console-input-swatch"></span> Koder input</span>
+            <span class="exec-process-console-legends"><span class="exec-process-console-legend"><span class="exec-process-console-stderr-swatch"></span> stderr</span><span class="exec-process-console-legend"><span class="exec-process-console-input-swatch"></span> Koder input</span></span>
           </div>
           <div class="tool-command-output-body exec-process-console-output"><template x-for="(entry, index) in execProcessModalStream()" :key="index"><span :class="execProcessStreamClass(entry)" :title="execProcessStreamTitle(entry)" x-text="entry.text"></span></template><span x-show="execProcessModalStream().length === 0">No output or input yet</span></div>
         </section>

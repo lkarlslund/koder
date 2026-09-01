@@ -2370,6 +2370,8 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `execProcessStreamClass(entry)`) ||
 		!strings.Contains(fullPage, `Koder input`) ||
 		!strings.Contains(fullPage, `.exec-process-console-input`) ||
+		!strings.Contains(fullPage, `Standard error from process`) ||
+		!strings.Contains(fullPage, `.exec-process-console-stderr`) ||
 		!strings.Contains(fullPage, `copyExecProcessOutput()`) ||
 		!strings.Contains(fullPage, `terminate_exec_process`) ||
 		!strings.Contains(fullPage, `terminateExecProcess(process)`) ||

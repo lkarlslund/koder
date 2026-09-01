@@ -293,8 +293,11 @@
     .tool-command-output-body { margin: 0; max-height: min(38vh, 22rem); overflow: auto; padding: .75rem; background: #0d1117; color: #c9d1d9; font-family: var(--bs-font-monospace); font-size: .82rem; line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
     .exec-process-console-output { max-height: min(56vh, 34rem); user-select: text; }
     .exec-process-console-input { color: #79c0ff; background: rgba(56, 139, 253, .18); border-radius: .15rem; }
+    .exec-process-console-stderr { color: #ff9b93; background: rgba(248, 81, 73, .14); }
+    .exec-process-console-legends { display: inline-flex; align-items: center; gap: .65rem; }
     .exec-process-console-legend { display: inline-flex; align-items: center; gap: .3rem; color: var(--bs-secondary-color); font-size: .72rem; font-weight: 400; }
     .exec-process-console-input-swatch { width: .65rem; height: .65rem; border-radius: .15rem; background: rgba(56, 139, 253, .45); }
+    .exec-process-console-stderr-swatch { width: .65rem; height: .65rem; border-radius: .15rem; background: rgba(248, 81, 73, .45); }
     .tool-image-result { font-family: var(--bs-body-font-family); white-space: normal; }
     .tool-image-preview { position: relative; display: inline-grid; place-items: center; padding: 0; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-tertiary-bg); overflow: hidden; cursor: zoom-in; }
     .tool-image-thumb { width: 5.5rem; height: 5.5rem; }

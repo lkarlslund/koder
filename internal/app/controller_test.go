@@ -613,7 +613,7 @@ func TestExecProcessesFromSnapshotsIncludesOrderedStream(t *testing.T) {
 	processes := execProcessesFromSnapshots([]execruntime.Snapshot{{
 		ProcessID: "exec_1",
 		Stream: []execruntime.StreamEntry{
-			{Source: execruntime.StreamSourceOutput, Text: "prompt: "},
+			{Source: execruntime.StreamSourceStdout, Text: "prompt: "},
 			{Source: execruntime.StreamSourceInput, Text: "answer\n"},
 		},
 	}})

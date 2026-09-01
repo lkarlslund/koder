@@ -4136,10 +4136,15 @@
           return process ? this.execProcessStream(process) : [];
         },
         execProcessStreamClass(entry) {
-          return entry?.source === 'input' ? 'exec-process-console-input' : 'exec-process-console-process';
+          if (entry?.source === 'input') return 'exec-process-console-input';
+          if (entry?.source === 'stderr') return 'exec-process-console-stderr';
+          return 'exec-process-console-process';
         },
         execProcessStreamTitle(entry) {
-          return entry?.source === 'input' ? 'Input sent by Koder' : 'Output from process';
+          if (entry?.source === 'input') return 'Input sent by Koder';
+          if (entry?.source === 'stderr') return 'Standard error from process';
+          if (entry?.source === 'stdout') return 'Standard output from process';
+          return 'Output from terminal process';
         },
         copyExecProcessOutput() {
           const output = this.execProcessModalOutput();
