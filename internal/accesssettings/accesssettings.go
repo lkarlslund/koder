@@ -14,6 +14,8 @@ const (
 	ModeNone      Mode = "none"
 	ModeReadOnly  Mode = "readonly"
 	ModeReadWrite Mode = "readwrite"
+	// ModeDevice grants read-write access to paths containing device nodes.
+	ModeDevice Mode = "device"
 )
 
 type TmpMode string
@@ -138,7 +140,7 @@ func NormalizeMounts(mounts []Mount) []Mount {
 		if filepath.IsAbs(mount.Path) {
 			mount.Path = filepath.Clean(mount.Path)
 		}
-		mount.Mode = normalizeMode(mount.Mode, ModeReadOnly)
+		mount.Mode = normalizeMountMode(mount.Mode)
 		out = append(out, mount)
 	}
 	return out
@@ -293,9 +295,9 @@ func modeAllows(actual Mode, required Mode) bool {
 		return false
 	}
 	if required == ModeReadOnly {
-		return actual == ModeReadOnly || actual == ModeReadWrite
+		return actual == ModeReadOnly || actual == ModeReadWrite || actual == ModeDevice
 	}
-	return actual == ModeReadWrite
+	return actual == ModeReadWrite || actual == ModeDevice
 }
 
 func pathContains(root string, path string) bool {
@@ -329,6 +331,15 @@ func normalizeMode(mode Mode, fallback Mode) Mode {
 		return mode
 	default:
 		return fallback
+	}
+}
+
+func normalizeMountMode(mode Mode) Mode {
+	switch mode {
+	case ModeReadOnly, ModeReadWrite, ModeDevice:
+		return mode
+	default:
+		return ModeReadOnly
 	}
 }
 

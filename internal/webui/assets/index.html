@@ -1013,7 +1013,10 @@
           </div>
         </div>
         <div class="settings-list-header mt-4">
-          <div class="fw-semibold">Extra folders</div>
+          <div>
+            <div class="fw-semibold">Extra folders</div>
+            <div class="small text-secondary">Use device access only for host device nodes such as /dev/bus/usb.</div>
+          </div>
           <button type="button" class="btn btn-sm btn-outline-primary" @click="addAccessMount(accessDraft)"><i class="bi bi-plus-lg"></i></button>
         </div>
         <div class="settings-rule-list">
@@ -1026,6 +1029,7 @@
               <select class="form-select form-select-sm" x-model="mount.mode">
                 <option value="readonly">readonly</option>
                 <option value="readwrite">readwrite</option>
+                <option value="device">device access</option>
               </select>
               <button type="button" class="btn btn-sm btn-outline-danger" title="Delete folder" @click="deleteAccessMount(accessDraft, idx)"><i class="bi bi-trash"></i></button>
             </div>
@@ -1634,7 +1638,7 @@
                 <div class="settings-list-header">
                   <div>
                     <div class="fw-semibold">Folders shared with every session</div>
-                    <div class="small text-secondary">Host folders inherited by existing and new Koder and Codex sandboxes. Prefer read-only unless a cache or tool must write.</div>
+                    <div class="small text-secondary">Host folders inherited by existing and new Koder and Codex sandboxes. Prefer read-only unless a cache or tool must write; use device access for paths such as /dev/bus/usb.</div>
                   </div>
                   <button type="button" class="btn btn-sm btn-outline-primary" title="Add global folder" aria-label="Add global folder" @click="addGlobalAccessMount()"><i class="bi bi-plus-lg"></i></button>
                 </div>
@@ -1648,6 +1652,7 @@
                       <select class="form-select form-select-sm" x-model="mount.mode">
                         <option value="readonly">readonly</option>
                         <option value="readwrite">readwrite</option>
+                        <option value="device">device access</option>
                       </select>
                       <button type="button" class="btn btn-sm btn-outline-danger" title="Delete global folder" @click="deleteGlobalAccessMount(idx)"><i class="bi bi-trash"></i></button>
                     </div>
@@ -1690,6 +1695,7 @@
                           <select class="form-select form-select-sm" x-model="mount.mode">
                             <option value="readonly">readonly</option>
                             <option value="readwrite">readwrite</option>
+                            <option value="device">device access</option>
                           </select>
                           <button type="button" class="btn btn-sm btn-outline-danger" title="Delete folder" @click="deleteAccessMount(settings.access.settings, idx)"><i class="bi bi-trash"></i></button>
                         </div>

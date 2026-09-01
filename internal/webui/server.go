@@ -1754,7 +1754,11 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.SetAccessSettingsForSelection(ctx, s.appSelection(clientID), in); err != nil {
 			return nil, err
 		}
-		return map[string]bool{"updated": true}, nil
+		state, err := s.stateForClient(ctx, clientID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"access": state.Access}, nil
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}

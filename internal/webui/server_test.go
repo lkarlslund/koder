@@ -1603,6 +1603,41 @@ func TestApprovalRPCRequiresToolCallID(t *testing.T) {
 	}
 }
 
+func TestSetAccessSettingsRPCReturnsSavedAccessState(t *testing.T) {
+	ctrl := newTestController(t)
+	state := selectedTestState(t, ctrl)
+	srv := &Server{controller: ctrl, clientSelections: make(map[string]clientSelection)}
+	srv.setClientSelection("client", clientSelection{SessionID: state.Session.ID, ChatID: state.ActiveChatID})
+	mountPath := t.TempDir()
+	params, err := json.Marshal(map[string]any{
+		"network": true,
+		"project": "readwrite",
+		"home":    "none",
+		"root":    "readonly",
+		"tmp":     "session",
+		"mounts": []map[string]string{{
+			"path": mountPath,
+			"mode": "device",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := srv.handleRPC(context.Background(), "client", "set_access_settings", params)
+	if err != nil {
+		t.Fatalf("set access settings: %v", err)
+	}
+	response, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("response = %#v", result)
+	}
+	access, ok := response["access"].(app.AccessState)
+	if !ok || len(access.Settings.Mounts) != 1 || access.Settings.Mounts[0].Path != mountPath || access.Settings.Mounts[0].Mode != "device" {
+		t.Fatalf("returned access state = %#v", response["access"])
+	}
+}
+
 func TestWebSocketChatUpdateIsCompactedToSingleItemDelta(t *testing.T) {
 	item := domain.TimelineItem{
 		ID:     "019aa000-0000-7000-8000-000000000042",
@@ -3007,6 +3042,8 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `addAccessMount(settings.access.settings)`) ||
 		!strings.Contains(fullPage, `cloneAccessSettings(preset.settings)`) ||
 		!strings.Contains(fullPage, `addGlobalAccessMount()`) ||
+		!strings.Contains(fullPage, `value="device"`) ||
+		!strings.Contains(fullPage, `if (result?.access)`) ||
 		!strings.Contains(document, `Folders shared with every session`) ||
 		!strings.Contains(fullPage, `globalAccessMounts()`) {
 		t.Fatalf("expected access settings to use structured controls")

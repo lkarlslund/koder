@@ -1937,6 +1937,8 @@ func TestControllerSetAccessSettingsUpdatesActiveSession(t *testing.T) {
 	selection := controllerSelection(ctrl)
 	sessionID := selection.SessionID
 	settings := accesssettings.AllowAll()
+	mountPath := t.TempDir()
+	settings.Mounts = []accesssettings.Mount{{Path: mountPath, Mode: accesssettings.ModeDevice}}
 	if err := ctrl.SetAccessSettingsForSelection(ctx, selection, settings); err != nil {
 		t.Fatalf("set access settings: %v", err)
 	}
@@ -1947,12 +1949,18 @@ func TestControllerSetAccessSettingsUpdatesActiveSession(t *testing.T) {
 	if session.AccessSettings.Root != accesssettings.ModeReadWrite || !session.AccessSettings.Network {
 		t.Fatalf("expected allow-all access settings, got %#v", session.AccessSettings)
 	}
+	if len(session.AccessSettings.Mounts) != 1 || session.AccessSettings.Mounts[0].Path != mountPath || session.AccessSettings.Mounts[0].Mode != accesssettings.ModeDevice {
+		t.Fatalf("expected device mount to persist, got %#v", session.AccessSettings.Mounts)
+	}
 	state, err := ctrl.StateForSelection(ctx, selection)
 	if err != nil {
 		t.Fatalf("state for selection: %v", err)
 	}
 	if got := state.Access.Settings.Root; got != accesssettings.ModeReadWrite {
 		t.Fatalf("expected root readwrite, got %q", got)
+	}
+	if got := state.Access.Settings.Mounts; len(got) != 1 || got[0].Mode != accesssettings.ModeDevice {
+		t.Fatalf("expected device mount in access state, got %#v", got)
 	}
 }
 

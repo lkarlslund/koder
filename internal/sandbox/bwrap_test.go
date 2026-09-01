@@ -107,6 +107,28 @@ func TestArgsHonorsNetworkAndExtraMounts(t *testing.T) {
 	}
 }
 
+func TestArgsUsesDeviceBindForDeviceMounts(t *testing.T) {
+	devicePath := filepath.Join(t.TempDir(), "device")
+	args, err := Args(Command{
+		Executable: "/bin/sh",
+		Workdir:    t.TempDir(),
+		Settings: accesssettings.Settings{
+			Root:    accesssettings.ModeReadOnly,
+			Project: accesssettings.ModeReadWrite,
+			Mounts: []accesssettings.Mount{{
+				Path: devicePath,
+				Mode: accesssettings.ModeDevice,
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build args: %v", err)
+	}
+	if !strings.Contains(strings.Join(args, "\x00"), "--dev-bind\x00"+devicePath+"\x00"+devicePath) {
+		t.Fatalf("expected device mount to use --dev-bind, got %#v", args)
+	}
+}
+
 func TestArgsRejectsInvalidMountMode(t *testing.T) {
 	_, err := Args(Command{
 		Executable: "/bin/sh",

@@ -71,7 +71,12 @@ func Args(cmd Command) ([]string, error) {
 		if err != nil || path == "" {
 			return nil, fmt.Errorf("invalid mount path %q", mount.Path)
 		}
-		args = appendBind(args, mount.Mode, filepath.Clean(path), filepath.Clean(path))
+		path = filepath.Clean(path)
+		if mount.Mode == accesssettings.ModeDevice {
+			args = append(args, "--dev-bind", path, path)
+		} else {
+			args = appendBind(args, mount.Mode, path, path)
+		}
 	}
 	args = append(args, "--chdir", workdir, "--", executable)
 	args = append(args, cmd.Args...)

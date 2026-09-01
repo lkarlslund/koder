@@ -4950,7 +4950,13 @@
           this.settings.access.global_mounts.splice(index, 1);
         },
         saveAccessSettings() {
-          this.rpc('set_access_settings', this.accessDraft).then(() => { this.closeAccessDialog(); }).catch(err => this.showToast(err.message));
+          this.rpc('set_access_settings', this.accessDraft).then(result => {
+            if (result?.access) {
+              this.state.access = result.access;
+              this.state.Access = result.access;
+            }
+            this.closeAccessDialog();
+          }).catch(err => this.showToast(err.message));
         },
         openModelDialog() {
           this.modelPickerTarget = null;

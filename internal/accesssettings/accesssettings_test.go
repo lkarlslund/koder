@@ -82,6 +82,17 @@ func TestNormalizeMountsExpandsHomeShortcut(t *testing.T) {
 	}
 }
 
+func TestNormalizeMountsPreservesDeviceAccess(t *testing.T) {
+	devicePath := filepath.Join(t.TempDir(), "devices")
+	mounts := NormalizeMounts([]Mount{{Path: devicePath, Mode: ModeDevice}})
+	if len(mounts) != 1 || mounts[0].Mode != ModeDevice {
+		t.Fatalf("normalized device mount = %#v", mounts)
+	}
+	if err := Allows(Settings{Mounts: mounts}, Request{Kind: AccessWrite, Path: filepath.Join(devicePath, "node")}); err != nil {
+		t.Fatalf("device mount should permit writes: %v", err)
+	}
+}
+
 func TestWithInheritedMountsCombinesGlobalAndSessionRules(t *testing.T) {
 	home := t.TempDir()
 	cache := filepath.Join(home, ".cache")
