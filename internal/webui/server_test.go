@@ -2413,7 +2413,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `const timelineMarkdownCache = new Map()`) ||
 		!strings.Contains(fullPage, `timelineMarkdownHTML(item`) ||
 		!strings.Contains(fullPage, `renderTimelineMarkdownElement($el, item`) ||
-		!strings.Contains(fullPage, `transcriptBottomScrollPending`) ||
+		!strings.Contains(fullPage, `transcriptScrollOperation`) ||
 		!strings.Contains(fullPage, `if (this.restoreTranscriptScrollAnchor(scroll)) return`) ||
 		!strings.Contains(fullPage, `scrollTranscriptToBottom()`) ||
 		!strings.Contains(fullPage, `getBoundingClientRect()`) ||
@@ -2424,7 +2424,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if strings.Contains(fullPage, `timelineAverageItemHeight`) || strings.Contains(fullPage, `timelineItemHeights`) ||
 		strings.Contains(fullPage, `measureRenderedTimelineItems`) || strings.Contains(fullPage, `timeline-spacer`) ||
 		strings.Contains(fullPage, `transcriptTailWindowSize`) || strings.Contains(fullPage, `recalculateTimelineRenderWindow`) ||
-		!strings.Contains(fullPage, `overflow-anchor: none`) {
+		!strings.Contains(fullPage, `overflow-anchor: auto`) {
 		t.Fatalf("expected bounded transcript rendering and explicit scroll anchoring to remain stable")
 	}
 	if !strings.Contains(fullPage, `const preserveScrolledBackTail = active && !scroll.stickToBottom && !itemLoaded`) ||
@@ -2520,6 +2520,13 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `mergeTimelinePage(page`) ||
 		!strings.Contains(fullPage, `timelineLoadingActive()`) {
 		t.Fatalf("expected transcript timeline to lazy-load older chunks and handle scroll keys")
+	}
+	if !strings.Contains(fullPage, `scroll: this.transcriptScrollState()`) ||
+		!strings.Contains(fullPage, `return new Promise(resolve =>`) ||
+		!strings.Contains(fullPage, `timeline-load-indicator-anchor`) ||
+		!strings.Contains(fullPage, `timeline-latest-button`) ||
+		!strings.Contains(fullPage, `@click="scrollTranscriptToBottom()"`) {
+		t.Fatalf("expected timeline paging to anchor at insertion time with non-shifting loading and latest controls")
 	}
 	if !strings.Contains(fullPage, `scroll.stickToBottom`) || !strings.Contains(fullPage, `scrollTranscriptToBottom()`) ||
 		!strings.Contains(fullPage, `restoreTranscriptTop(scroll.top)`) || !strings.Contains(fullPage, `ResizeObserver`) ||

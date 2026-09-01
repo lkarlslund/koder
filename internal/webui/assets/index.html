@@ -88,9 +88,17 @@
       <template x-if="error">
         <div class="alert alert-danger" x-text="error"></div>
       </template>
-      <div class="timeline-load-indicator" x-show="timelineLoadingActive()" style="display: none;">
-        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-        <span x-text="timelineHasNewer() ? 'Loading messages' : 'Loading earlier messages'"></span>
+      <div class="timeline-load-indicator-anchor" aria-live="polite">
+        <div class="timeline-load-indicator" x-show="timelineLoadingActive()" style="display: none;">
+          <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+          <span x-text="timelineHasNewer() ? 'Loading messages' : 'Loading earlier messages'"></span>
+        </div>
+      </div>
+      <div class="timeline-latest-anchor">
+        <button type="button" class="btn btn-sm btn-primary timeline-latest-button" x-show="!transcriptStickToBottom || timelineHasNewer()" @click="scrollTranscriptToBottom()" style="display: none;">
+          <i class="bi bi-arrow-down" aria-hidden="true"></i>
+          <span x-text="timelineHasNewer() ? 'New messages' : 'Latest'"></span>
+        </button>
       </div>
       <template x-for="item in renderedTimeline()" :key="item.id || item.ID">
         <section class="transcript-turn mb-4" :data-timeline-item-id="timelineItemID(item)">

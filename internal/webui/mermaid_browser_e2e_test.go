@@ -2,6 +2,7 @@ package webui
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -20,8 +21,24 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 		Width      float64 `json:"width"`
 		Height     float64 `json:"height"`
 	}
+	var interruptedBottomScrollResult struct {
+		Top          float64 `json:"top"`
+		BottomGap    float64 `json:"bottomGap"`
+		Stick        bool    `json:"stick"`
+		LoadingShift float64 `json:"loadingShift"`
+		ScrollHeight float64 `json:"scrollHeight"`
+		ClientHeight float64 `json:"clientHeight"`
+	}
+	var paginationAnchorResult struct {
+		ItemID       string  `json:"itemID"`
+		BeforeOffset float64 `json:"beforeOffset"`
+		AfterOffset  float64 `json:"afterOffset"`
+		Count        int     `json:"count"`
+		LatestShown  bool    `json:"latestShown"`
+	}
 	chromium := memoryBrowserChromium(t)
 	ctrl := newTestController(t)
+	state := selectedTestState(t, ctrl)
 	serverCtx, stopServer := context.WithCancel(context.Background())
 	server := startMemoryBrowserTestServer(t, serverCtx, ctrl)
 	t.Cleanup(func() {
@@ -43,7 +60,7 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 	t.Cleanup(cancelDeadline)
 
 	if err := chromedp.Run(browserCtx,
-		chromedp.Navigate(server.URL()),
+		chromedp.Navigate(server.URL()+"/s/"+string(state.Session.ID)+"/c/"+string(state.ActiveChatID)),
 		chromedp.WaitReady(`.transcript`, chromedp.ByQuery),
 		chromedp.Poll(`document.documentElement._x_dataStack?.[0]?.transcriptEnhancementObserver instanceof MutationObserver`, nil),
 		chromedp.Evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, nil),
@@ -164,6 +181,52 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 			transcript.remove();
 			return result;
 		})()`, &scrollAnchorResult),
+		chromedp.Evaluate(`(() => {
+			const app = document.documentElement._x_dataStack[0];
+			const originalRequestAnimationFrame = window.requestAnimationFrame;
+			const originalTimelineHasNewer = app.timelineHasNewer;
+			const callbacks = [];
+			window.requestAnimationFrame = callback => { callbacks.push(callback); return callbacks.length; };
+			const originalTranscriptElement = app.transcriptElement;
+			const transcript = document.createElement('div');
+			transcript.style.cssText = 'position:fixed;top:0;left:0;width:400px;height:180px;overflow:auto';
+			document.body.append(transcript);
+			app.transcriptElement = () => transcript;
+			app.timelineHasNewer = () => false;
+			for (let index = 0; index < 4; index++) {
+				const row = document.createElement('section');
+				row.style.cssText = 'display:block;height:120px;min-height:120px';
+				row.textContent = 'row ' + index;
+				transcript.append(row);
+			}
+			app.transcriptStickToBottom = true;
+			app.scrollTranscriptToBottom();
+			app.markTranscriptUserScrollIntent();
+			app.setTranscriptStickToBottom(false);
+			transcript.scrollTop = 80;
+			const tail = document.createElement('div');
+			tail.style.cssText = 'display:block;height:120px;min-height:120px;overflow-anchor:none';
+			transcript.append(tail);
+			while (callbacks.length) callbacks.shift()();
+			const loadingAnchor = document.querySelector('.timeline-load-indicator-anchor');
+			const result = {
+				top: transcript.scrollTop,
+				bottomGap: app.transcriptBottomDistance(transcript),
+				stick: app.transcriptStickToBottom,
+				loadingShift: loadingAnchor?.getBoundingClientRect().height || 0,
+				scrollHeight: transcript.scrollHeight,
+				clientHeight: transcript.clientHeight,
+			};
+			if (app.transcriptUserScrollTimer) clearTimeout(app.transcriptUserScrollTimer);
+			app.transcriptUserScrollTimer = null;
+			app.transcriptUserScrollActive = false;
+			app.transcriptElement = originalTranscriptElement;
+			app.timelineHasNewer = originalTimelineHasNewer;
+			app.transcriptStickToBottom = true;
+			window.requestAnimationFrame = originalRequestAnimationFrame;
+			transcript.remove();
+			return result;
+		})()`, &interruptedBottomScrollResult),
 		chromedp.Evaluate(`document.querySelector('.transcript').insertAdjacentHTML('beforeend', '<div id="media-observer-test" class="markdown-body"><img alt="preview" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></div>')`, nil),
 		chromedp.Poll(`document.querySelector('#media-observer-test img')?.closest('.markdown-media-preview')?.querySelector('.media-expand-button') !== null`, nil),
 		chromedp.Evaluate(`document.querySelector('#mermaid-observer-test .media-expand-button').click()`, nil),
@@ -174,13 +237,57 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 			const rect = svg?.getBoundingClientRect();
 			return {htmlLength: app.imageLightbox.html.length, width: rect?.width || 0, height: rect?.height || 0};
 		})()`, &mermaidLightboxResult),
+		chromedp.Evaluate(`(() => {
+			const app = document.documentElement._x_dataStack[0];
+			window.__paginationAnchorResult = null;
+			const chatID = String(app.activeChatID());
+			const makeItem = (prefix, index) => ({
+				id: prefix + '-' + index,
+				chat_id: chatID,
+				kind: 'user',
+				content: {text: prefix + ' row ' + index + '\n\n' + ('content '.repeat(20))},
+			});
+			const current = Array.from({length: 20}, (_, index) => makeItem('current', index));
+			app.storeTimeline(chatID, current);
+			const snapshot = {...app.activeSnapshot(), TimelineHasMore: true, TimelineHasNewer: false};
+			app.state.snapshots = {...(app.state.snapshots || {}), [chatID]: snapshot};
+			app.state.Snapshots = app.state.snapshots;
+			app.state.snapshot = snapshot;
+			app.state.Snapshot = snapshot;
+			app.$nextTick(() => requestAnimationFrame(async () => {
+				const transcript = app.transcriptElement();
+				const row = transcript.querySelector('[data-timeline-item-id="current-5"]');
+				transcript.scrollTop += row.getBoundingClientRect().top - transcript.getBoundingClientRect().top;
+				app.setTranscriptStickToBottom(false);
+				const scroll = app.transcriptScrollState();
+				const beforeOffset = row.getBoundingClientRect().top - transcript.getBoundingClientRect().top;
+				const older = Array.from({length: 10}, (_, index) => makeItem('older', index));
+				await app.mergeTimelinePage({chat_id: chatID, items: older, has_more: false, has_newer: true}, {prepend: true, scroll});
+				const anchored = transcript.querySelector('[data-timeline-item-id="current-5"]');
+				window.__paginationAnchorResult = {
+					itemID: scroll.itemID,
+					beforeOffset,
+					afterOffset: anchored.getBoundingClientRect().top - transcript.getBoundingClientRect().top,
+					count: app.timeline().length,
+					latestShown: document.querySelector('.timeline-latest-button')?.offsetParent !== null,
+				};
+			}));
+		})()`, nil),
+		chromedp.Poll(`window.__paginationAnchorResult !== null`, nil),
+		chromedp.Evaluate(`window.__paginationAnchorResult`, &paginationAnchorResult),
 	); err != nil {
 		t.Fatalf("enhance replacement Markdown media: %v", err)
 	}
 	if scrollAnchorResult.ItemID != "anchor-1" || scrollAnchorResult.Top != 290 || scrollAnchorResult.FallbackTop != 75 || scrollAnchorResult.BottomGap != 0 {
 		t.Fatalf("restore transcript position = %+v, want anchored top 290, fallback top 75, and sticky bottom gap 0", scrollAnchorResult)
 	}
+	if interruptedBottomScrollResult.Top != 80 || interruptedBottomScrollResult.BottomGap <= 0 || interruptedBottomScrollResult.Stick || interruptedBottomScrollResult.LoadingShift != 0 {
+		t.Fatalf("interrupted bottom scroll = %+v, want top 80, detached scroll, and zero-height loading overlay", interruptedBottomScrollResult)
+	}
 	if mermaidLightboxResult.HTMLLength == 0 || mermaidLightboxResult.Width <= 0 || mermaidLightboxResult.Height <= 0 {
 		t.Fatalf("expanded Mermaid dimensions = %+v, want retained SVG with positive width and height", mermaidLightboxResult)
+	}
+	if paginationAnchorResult.ItemID != "current-5" || paginationAnchorResult.Count != 30 || !paginationAnchorResult.LatestShown || math.Abs(paginationAnchorResult.BeforeOffset-paginationAnchorResult.AfterOffset) > 0.5 {
+		t.Fatalf("pagination anchor = %+v, want current-5 at an unchanged offset across a 30-item prepended window", paginationAnchorResult)
 	}
 }

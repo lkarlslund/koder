@@ -62,10 +62,13 @@
     .welcome-session-list { display: grid; gap: .4rem; }
     .welcome-session-row { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .75rem .85rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-body-bg); color: inherit; text-align: left; }
     .welcome-session-row:hover { border-color: var(--bs-primary); background: var(--bs-secondary-bg); }
-    .transcript { min-height: 0; overflow: auto; overflow-anchor: none; position: relative; }
+    .transcript { min-height: 0; overflow: auto; overflow-anchor: auto; position: relative; }
     .chat-switch-overlay { position: sticky; top: .75rem; z-index: 20; display: flex; justify-content: center; pointer-events: none; margin-bottom: .75rem; }
     .chat-switch-panel { max-width: min(28rem, 100%); display: inline-flex; align-items: center; gap: .65rem; padding: .55rem .75rem; border: 1px solid var(--bs-border-color); border-radius: .45rem; background: var(--bs-body-bg); color: var(--bs-body-color); box-shadow: 0 .5rem 1.5rem rgba(0, 0, 0, .22); }
-    .timeline-load-indicator { position: sticky; top: .25rem; z-index: 5; display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .75rem; padding: .2rem .55rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-body-bg); color: var(--bs-secondary-color); font-size: .82rem; box-shadow: 0 .25rem .75rem rgba(0, 0, 0, .12); }
+    .timeline-load-indicator-anchor { position: sticky; top: .25rem; z-index: 5; height: 0; display: flex; justify-content: center; pointer-events: none; overflow: visible; overflow-anchor: none; }
+    .timeline-load-indicator { display: inline-flex; align-items: center; gap: .4rem; padding: .2rem .55rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-body-bg); color: var(--bs-secondary-color); font-size: .82rem; box-shadow: 0 .25rem .75rem rgba(0, 0, 0, .12); }
+    .timeline-latest-anchor { position: sticky; top: calc(100% - 2.75rem); z-index: 6; height: 0; display: flex; justify-content: center; pointer-events: none; overflow: visible; overflow-anchor: none; }
+    .timeline-latest-button { pointer-events: auto; box-shadow: 0 .25rem .9rem rgba(0, 0, 0, .2); }
     .sidebar-resizer { min-height: 0; cursor: col-resize; background: var(--bs-border-color); opacity: .55; touch-action: none; }
     .sidebar-resizer:hover, .sidebar-resizer.resizing { background: var(--bs-primary); opacity: 1; }
     .sidebar { min-height: 0; overflow: auto; border-left: 1px solid var(--bs-border-color); }

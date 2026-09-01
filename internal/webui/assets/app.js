@@ -1195,7 +1195,7 @@
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
 		chatCreator: {open: false, loading: false, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}},
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptBottomScrollPending: false, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptEnhancementObserver: null, transcriptEnhancementFrame: 0, transcriptDOMUpdateScheduled: false, transcriptDOMUpdateCallbacks: [], scrollRestoreSeq: 0, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptScrollOperation: 0, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptEnhancementObserver: null, transcriptEnhancementFrame: 0, transcriptDOMUpdateScheduled: false, transcriptDOMUpdateCallbacks: [], scrollRestoreSeq: 0, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
           this.syncBrowserTabActivity();
@@ -2093,7 +2093,6 @@
         onTranscriptScroll() {
           if (this.transcriptUserScrollActive && !this.transcriptProgrammaticScroll) {
             this.markTranscriptUserScrollIntent();
-            this.scrollRestoreSeq++;
             this.updateTranscriptStickiness();
           }
           const el = this.transcriptElement();
@@ -2102,6 +2101,9 @@
           if (this.transcriptBottomDistance(el) <= 96) this.loadNewerTimeline();
         },
         markTranscriptUserScrollIntent() {
+          this.transcriptScrollOperation++;
+          this.transcriptProgrammaticScroll = false;
+          this.scrollRestoreSeq++;
           this.transcriptUserScrollActive = true;
           if (this.transcriptUserScrollTimer) clearTimeout(this.transcriptUserScrollTimer);
           this.transcriptUserScrollTimer = setTimeout(() => {
@@ -2169,26 +2171,28 @@
             return;
           }
           this.setTranscriptStickToBottom(true);
+          const operation = ++this.transcriptScrollOperation;
           this.transcriptProgrammaticScroll = true;
-          if (this.transcriptBottomScrollPending) return;
-          this.transcriptBottomScrollPending = true;
           el.scrollTop = el.scrollHeight;
           requestAnimationFrame(() => {
-            this.transcriptBottomScrollPending = false;
+            if (operation !== this.transcriptScrollOperation) return;
             const current = this.transcriptElement();
             if (current && this.transcriptStickToBottom) current.scrollTop = current.scrollHeight;
             setTimeout(() => {
-              if (!this.transcriptBottomScrollPending) this.transcriptProgrammaticScroll = false;
+              if (operation === this.transcriptScrollOperation) this.transcriptProgrammaticScroll = false;
             }, 0);
           });
         },
         restoreTranscriptTop(top) {
           const el = this.transcriptElement();
           if (!el) return;
+          const operation = ++this.transcriptScrollOperation;
           this.transcriptProgrammaticScroll = true;
           el.scrollTop = Number(top || 0);
           requestAnimationFrame(() => {
-            setTimeout(() => { this.transcriptProgrammaticScroll = false; }, 0);
+            setTimeout(() => {
+              if (operation === this.transcriptScrollOperation) this.transcriptProgrammaticScroll = false;
+            }, 0);
           });
         },
         timelineHasMore() {
@@ -2222,10 +2226,9 @@
           if (!chatID || this.timelineLoading[chatID] || !this.timelineHasMore()) return;
           const before = this.timelineBefore();
           if (!before) return;
-          const scroll = this.transcriptScrollState();
           this.timelineLoading = {...this.timelineLoading, [chatID]: true};
           this.rpc('load_timeline', {chat_id: chatID, before, limit: timelinePageSize})
-            .then(page => this.mergeTimelinePage(page, {prepend: true, scroll}))
+            .then(page => this.mergeTimelinePage(page, {prepend: true, scroll: this.transcriptScrollState()}))
             .catch(err => this.showToast(err.message))
             .finally(() => {
               const next = {...this.timelineLoading};
@@ -2238,10 +2241,9 @@
           if (!chatID || this.timelineLoading[chatID] || !this.timelineHasNewer()) return;
           const after = this.timelineAfter();
           if (!after) return;
-          const scroll = this.transcriptScrollState();
           this.timelineLoading = {...this.timelineLoading, [chatID]: true};
           this.rpc('load_timeline', {chat_id: chatID, after, limit: timelinePageSize})
-            .then(page => this.mergeTimelinePage(page, {append: true, scroll}))
+            .then(page => this.mergeTimelinePage(page, {append: true, scroll: this.transcriptScrollState()}))
             .catch(err => this.showToast(err.message))
             .finally(() => {
               const next = {...this.timelineLoading};
@@ -2252,9 +2254,14 @@
         loadLatestTimeline() {
           const chatID = this.activeChatID();
           if (!chatID || this.timelineLoading[chatID]) return;
+          const seq = ++this.scrollRestoreSeq;
+          this.setTranscriptStickToBottom(true);
           this.timelineLoading = {...this.timelineLoading, [chatID]: true};
           this.rpc('load_timeline', {chat_id: chatID, limit: timelinePageSize})
-            .then(page => this.mergeTimelinePage(page, {replace: true, scrollToBottom: true}))
+            .then(page => {
+              if (seq !== this.scrollRestoreSeq) return;
+              return this.mergeTimelinePage(page, {replace: true, scrollToBottom: true});
+            })
             .catch(err => this.showToast(err.message))
             .finally(() => {
               const next = {...this.timelineLoading};
@@ -2263,9 +2270,9 @@
             });
         },
         mergeTimelinePage(page, options = {}) {
-          if (!page) return;
+          if (!page) return Promise.resolve();
           const chatID = String(page.chat_id || page.ChatID || '').trim();
-          if (!chatID) return;
+          if (!chatID) return Promise.resolve();
           const items = page.items || page.Items || [];
           const snapshots = {...(this.state.snapshots || this.state.Snapshots || {})};
           const current = snapshots[chatID] || snapshots[String(chatID)] || {};
@@ -2316,18 +2323,24 @@
             this.state.snapshot = next;
             this.state.Snapshot = next;
           }
-          this.afterTranscriptDOMUpdate(() => {
-            const el = this.transcriptElement();
-            if (!el) return;
-            if (options.replace) {
-              if (options.scrollToBottom) this.scrollTranscriptToBottom();
-              else {
-                this.setTranscriptStickToBottom(false);
-                this.restoreTranscriptTop(Number.isFinite(options.scrollTop) ? options.scrollTop : 0);
+          return new Promise(resolve => {
+            this.afterTranscriptDOMUpdate(() => {
+              try {
+                const el = this.transcriptElement();
+                if (!el) return;
+                if (options.replace) {
+                  if (options.scrollToBottom) this.scrollTranscriptToBottom();
+                  else {
+                    this.setTranscriptStickToBottom(false);
+                    this.restoreTranscriptTop(Number.isFinite(options.scrollTop) ? options.scrollTop : 0);
+                  }
+                  return;
+                }
+                if (options.prepend || options.append) this.restoreTranscriptScroll(options.scroll);
+              } finally {
+                resolve();
               }
-              return;
-            }
-            if (options.prepend || options.append) this.restoreTranscriptScroll(options.scroll);
+            });
           });
         },
         transcriptScrollState() {
