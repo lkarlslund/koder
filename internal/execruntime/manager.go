@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/creack/pty"
 
@@ -52,8 +53,21 @@ type EventKind string
 
 const (
 	EventKindOutput EventKind = "output"
+	EventKindInput  EventKind = "input"
 	EventKindState  EventKind = "state"
 )
+
+type StreamSource string
+
+const (
+	StreamSourceOutput StreamSource = "output"
+	StreamSourceInput  StreamSource = "input"
+)
+
+type StreamEntry struct {
+	Source StreamSource
+	Text   string
+}
 
 type Scope string
 
@@ -145,6 +159,7 @@ type Snapshot struct {
 	TimeoutMS   int64
 	Output      string
 	OutputBytes int
+	Stream      []StreamEntry
 	Drained     bool
 	StdinClosed bool
 	Lost        bool
@@ -194,6 +209,7 @@ type process struct {
 	output      string
 	drainOutput string
 	outputBytes int
+	stream      []StreamEntry
 	proc        *exec.Cmd
 	ptyHandle   *os.File
 	stdin       io.WriteCloser
@@ -398,6 +414,7 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteStdinRequest) (Snapsh
 			p.mu.Unlock()
 			return Snapshot{}, err
 		}
+		p.appendStreamLocked(StreamSourceInput, req.Chars)
 	}
 	if req.CloseStdin && !p.stdinClosed {
 		p.stdinClosed = true
@@ -407,6 +424,9 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteStdinRequest) (Snapsh
 		}
 	}
 	p.mu.Unlock()
+	if req.Chars != "" {
+		m.publish(Event{Kind: EventKindInput, Snapshot: p.snapshot(defaultPreviewBytes), Delta: req.Chars})
+	}
 	if err := p.waitForOutput(ctx, normalizeStdinWait(req.YieldTime)); err != nil {
 		return Snapshot{}, err
 	}
@@ -565,8 +585,22 @@ func (p *process) appendOutput(delta string) {
 	p.output += delta
 	p.drainOutput += delta
 	p.outputBytes += len(delta)
+	p.appendStreamLocked(StreamSourceOutput, delta)
 	p.output = tailOnLineBoundary(p.output, defaultTailBytes)
 	p.drainOutput = tailOnLineBoundary(p.drainOutput, defaultTailBytes)
+}
+
+func (p *process) appendStreamLocked(source StreamSource, text string) {
+	if text == "" {
+		return
+	}
+	last := len(p.stream) - 1
+	if last >= 0 && p.stream[last].Source == source {
+		p.stream[last].Text += text
+	} else {
+		p.stream = append(p.stream, StreamEntry{Source: source, Text: text})
+	}
+	p.stream = tailStream(p.stream, defaultTailBytes)
 }
 
 func (p *process) snapshot(maxBytes int) Snapshot {
@@ -593,6 +627,7 @@ func (p *process) snapshot(maxBytes int) Snapshot {
 		TimeoutMS:   p.timeout.Milliseconds(),
 		Output:      output,
 		OutputBytes: p.outputBytes,
+		Stream:      tailStream(p.stream, maxBytes),
 		StdinClosed: p.stdinClosed,
 		Lost:        p.lost,
 	}
@@ -623,10 +658,44 @@ func (p *process) drainSnapshot(maxBytes int) Snapshot {
 		TimeoutMS:   p.timeout.Milliseconds(),
 		Output:      output,
 		OutputBytes: p.outputBytes,
+		Stream:      tailStream(p.stream, maxBytes),
 		Drained:     true,
 		StdinClosed: p.stdinClosed,
 		Lost:        p.lost,
 	}
+}
+
+func tailStream(stream []StreamEntry, maxBytes int) []StreamEntry {
+	if len(stream) == 0 {
+		return nil
+	}
+	if maxBytes <= 0 {
+		maxBytes = defaultPreviewBytes
+	}
+	total := 0
+	start := len(stream)
+	trim := 0
+	for start > 0 {
+		textBytes := len(stream[start-1].Text)
+		if total+textBytes > maxBytes {
+			if remaining := maxBytes - total; remaining > 0 {
+				trim = textBytes - remaining
+				start--
+			}
+			break
+		}
+		total += textBytes
+		start--
+	}
+	out := make([]StreamEntry, len(stream)-start)
+	copy(out, stream[start:])
+	if trim > 0 {
+		for trim < len(out[0].Text) && !utf8.RuneStart(out[0].Text[trim]) {
+			trim++
+		}
+		out[0].Text = out[0].Text[trim:]
+	}
+	return out
 }
 
 func tailOnLineBoundary(output string, maxBytes int) string {

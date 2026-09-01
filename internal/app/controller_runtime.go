@@ -38,6 +38,13 @@ func (c *Controller) snapshotWithExecProcessesLocked(snapshot chat.Snapshot) cha
 func execProcessesFromSnapshots(snapshots []execruntime.Snapshot) []tools.ExecProcess {
 	out := make([]tools.ExecProcess, 0, len(snapshots))
 	for _, snapshot := range snapshots {
+		stream := make([]tools.ExecProcessStreamEntry, 0, len(snapshot.Stream))
+		for _, entry := range snapshot.Stream {
+			stream = append(stream, tools.ExecProcessStreamEntry{
+				Source: string(entry.Source),
+				Text:   entry.Text,
+			})
+		}
 		out = append(out, tools.ExecProcess{
 			ProcessID:   snapshot.ProcessID,
 			Command:     snapshot.Command,
@@ -49,6 +56,7 @@ func execProcessesFromSnapshots(snapshots []execruntime.Snapshot) []tools.ExecPr
 			TimeoutMS:   snapshot.TimeoutMS,
 			Output:      snapshot.Output,
 			OutputBytes: snapshot.OutputBytes,
+			Stream:      stream,
 			StdinClosed: snapshot.StdinClosed,
 			Lost:        snapshot.Lost,
 		})

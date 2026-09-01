@@ -4059,6 +4059,17 @@
           const output = process?.output || process?.Output || '';
           return output || 'No output yet';
         },
+        execProcessStream(process) {
+          const stream = process?.stream || process?.Stream || [];
+          if (Array.isArray(stream) && stream.length > 0) {
+            return stream.map(entry => ({
+              source: String(entry?.source || entry?.Source || 'output').toLowerCase(),
+              text: String(entry?.text ?? entry?.Text ?? ''),
+            })).filter(entry => entry.text !== '');
+          }
+          const output = process?.output || process?.Output || '';
+          return output ? [{source: 'output', text: output}] : [];
+        },
         execProcessTooltip(process) {
           const lines = [];
           lines.push(this.execProcessCommand(process) || this.execProcessID(process));
@@ -4119,6 +4130,16 @@
           const process = this.execProcessModalProcess();
           if (!process) return 'Process is no longer available in this chat snapshot.';
           return this.execProcessOutput(process);
+        },
+        execProcessModalStream() {
+          const process = this.execProcessModalProcess();
+          return process ? this.execProcessStream(process) : [];
+        },
+        execProcessStreamClass(entry) {
+          return entry?.source === 'input' ? 'exec-process-console-input' : 'exec-process-console-process';
+        },
+        execProcessStreamTitle(entry) {
+          return entry?.source === 'input' ? 'Input sent by Koder' : 'Output from process';
         },
         copyExecProcessOutput() {
           const output = this.execProcessModalOutput();

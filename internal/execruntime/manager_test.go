@@ -55,7 +55,7 @@ func TestManagerStartStatusAndWriteStdin(t *testing.T) {
 	snap, err := mgr.Start(context.Background(), StartRequest{
 		SessionID: "session-1",
 		ChatID:    "chat-2",
-		Command:   "read line; printf 'got:%s' \"$line\"",
+		Command:   "printf ready; read line; printf 'got:%s' \"$line\"",
 		Workdir:   t.TempDir(),
 		YieldTime: 100 * time.Millisecond,
 	})
@@ -88,6 +88,18 @@ func TestManagerStartStatusAndWriteStdin(t *testing.T) {
 	}
 	if !strings.Contains(status.Output, "got:hello") {
 		t.Fatalf("expected output tail to contain stdin response, got %q", status.Output)
+	}
+	if len(status.Stream) != 3 {
+		t.Fatalf("stream = %#v, want output, input, output", status.Stream)
+	}
+	wantSources := []StreamSource{StreamSourceOutput, StreamSourceInput, StreamSourceOutput}
+	for i, want := range wantSources {
+		if status.Stream[i].Source != want {
+			t.Fatalf("stream[%d].Source = %q, want %q", i, status.Stream[i].Source, want)
+		}
+	}
+	if status.Stream[1].Text != "hello\n" {
+		t.Fatalf("input stream text = %q, want %q", status.Stream[1].Text, "hello\\n")
 	}
 }
 
@@ -283,6 +295,25 @@ func TestTailOnLineBoundaryDropsPartialAndOversizedSingleLine(t *testing.T) {
 	}
 	if got := tailOnLineBoundary(strings.Repeat("x", 20), 10); got != "" {
 		t.Fatalf("expected oversized single line to be dropped, got %q", got)
+	}
+}
+
+func TestTailStreamPreservesSourcesAndByteLimit(t *testing.T) {
+	stream := []StreamEntry{
+		{Source: StreamSourceOutput, Text: "old"},
+		{Source: StreamSourceInput, Text: "hello\n"},
+		{Source: StreamSourceOutput, Text: "result"},
+	}
+	got := tailStream(stream, 10)
+	if len(got) != 2 || got[0].Source != StreamSourceInput || got[0].Text != "llo\n" || got[1] != stream[2] {
+		t.Fatalf("tail stream = %#v, want trimmed input followed by output", got)
+	}
+	if stream[1].Text != "hello\n" {
+		t.Fatalf("tail stream mutated source: %#v", stream)
+	}
+	got = tailStream(stream, len(stream[2].Text))
+	if len(got) != 1 || got[0] != stream[2] {
+		t.Fatalf("exact tail stream = %#v, want only final output", got)
 	}
 }
 

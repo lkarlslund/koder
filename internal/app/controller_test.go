@@ -609,6 +609,22 @@ func TestControllerStateIncludesCurrentChatExecProcesses(t *testing.T) {
 	}
 }
 
+func TestExecProcessesFromSnapshotsIncludesOrderedStream(t *testing.T) {
+	processes := execProcessesFromSnapshots([]execruntime.Snapshot{{
+		ProcessID: "exec_1",
+		Stream: []execruntime.StreamEntry{
+			{Source: execruntime.StreamSourceOutput, Text: "prompt: "},
+			{Source: execruntime.StreamSourceInput, Text: "answer\n"},
+		},
+	}})
+	if len(processes) != 1 || len(processes[0].Stream) != 2 {
+		t.Fatalf("mapped processes = %#v", processes)
+	}
+	if got := processes[0].Stream[1]; got.Source != "input" || got.Text != "answer\n" {
+		t.Fatalf("mapped input = %#v", got)
+	}
+}
+
 func TestControllerSelectionReceivesExecProcessUpdates(t *testing.T) {
 	ctrl, _, execManager := newTestControllerWithExec(t)
 	ctx := context.Background()

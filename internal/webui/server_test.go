@@ -2366,6 +2366,10 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `openExecProcessConsole(process)`) ||
 		!strings.Contains(fullPage, `Process console`) ||
 		!strings.Contains(fullPage, `execProcessModalOutput()`) ||
+		!strings.Contains(fullPage, `execProcessModalStream()`) ||
+		!strings.Contains(fullPage, `execProcessStreamClass(entry)`) ||
+		!strings.Contains(fullPage, `Koder input`) ||
+		!strings.Contains(fullPage, `.exec-process-console-input`) ||
 		!strings.Contains(fullPage, `copyExecProcessOutput()`) ||
 		!strings.Contains(fullPage, `terminate_exec_process`) ||
 		!strings.Contains(fullPage, `terminateExecProcess(process)`) ||
