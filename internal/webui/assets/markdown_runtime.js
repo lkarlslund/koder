@@ -66,6 +66,43 @@
     return '<button type="button" class="media-expand-button" title="Expand Mermaid diagram"><i class="bi bi-arrows-angle-expand"></i></button>';
   }
 
+  function repairMermaidSource(source) {
+    const text = String(source || '');
+    if (!/^\s*(?:flowchart|graph)\b/im.test(text)) return text;
+    return text.replace(/\b([A-Za-z_][A-Za-z0-9_-]*)\[([^\]\n]+)\]/g, (match, id, label) => {
+      const trimmed = label.trim();
+      if (!/[()]/.test(trimmed) || /^['"]/.test(trimmed) || (/^\(/.test(trimmed) && /\)$/.test(trimmed))) return match;
+      return id + '["' + trimmed.replaceAll('"', '&quot;') + '"]';
+    });
+  }
+
+  function mermaidErrorHTML(err, source) {
+    const message = String(err?.message || err || 'Unknown Mermaid error').trim().slice(0, 2000);
+    return '<div class="mermaid-error"><strong>Mermaid render failed</strong>' +
+      (message ? '<pre class="mermaid-error-detail">' + escapeHTML(message) + '</pre>' : '') +
+      '</div><pre>' + escapeHTML(source) + '</pre>';
+  }
+
+  function removeMermaidErrorArtifact(id) {
+    document.getElementById('d' + id)?.remove();
+  }
+
+  async function renderMermaidSource(id, source) {
+    try {
+      return await mermaid.render(id, source);
+    } catch (originalError) {
+      removeMermaidErrorArtifact(id);
+      const repaired = repairMermaidSource(source);
+      if (repaired === source) throw originalError;
+      try {
+        return await mermaid.render(id + '-repaired', repaired);
+      } catch (_) {
+        removeMermaidErrorArtifact(id + '-repaired');
+        throw originalError;
+      }
+    }
+  }
+
   async function renderMermaidDiagrams(root, options = {}) {
     if (!root || !window.mermaid) return;
     if (options.configure) options.configure();
@@ -77,7 +114,7 @@
       diagram.dataset.mermaidState = 'rendering';
       const id = (options.idPrefix || 'mermaid') + '-' + Math.random().toString(36).slice(2);
       try {
-        const result = await mermaid.render(id, source);
+        const result = await renderMermaidSource(id, source);
         if (!diagram.isConnected) continue;
         diagram.innerHTML = '<div class="mermaid-diagram-content">' + sanitizeMermaidSVG(result.svg || '') + '</div>' + diagramExpandButton();
         diagram.dataset.mermaidState = 'done';
@@ -87,7 +124,7 @@
         diagram.dataset.mermaidState = 'error';
         diagram.innerHTML = options.errorHTML
           ? options.errorHTML(err, source)
-          : '<div class="mermaid-error">Mermaid render failed</div><pre>' + escapeHTML(source) + '</pre>';
+          : mermaidErrorHTML(err, source);
       }
     }
   }
@@ -99,5 +136,6 @@
     highlightMarkdownCode,
     renderMermaidPlaceholders,
     renderMermaidDiagrams,
+    repairMermaidSource,
   });
 })();

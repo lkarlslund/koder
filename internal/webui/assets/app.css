@@ -240,6 +240,7 @@
     .mermaid-diagram-content { min-width: 0; }
     .mermaid-diagram[data-mermaid-state="error"] { border-color: var(--bs-danger-border-subtle); background: var(--bs-danger-bg-subtle); }
     .mermaid-error { color: var(--bs-danger-text-emphasis); font-size: .86rem; font-weight: 600; margin-bottom: .45rem; }
+    .mermaid-error-detail { margin: .45rem 0 0; max-height: 12rem; overflow: auto; white-space: pre-wrap; color: var(--bs-danger-text-emphasis); font-weight: 400; }
     .diagram-stream-placeholder { display: inline-flex; align-items: center; min-height: 2rem; margin: .35rem 0 .75rem; padding: .25rem .55rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; color: var(--bs-secondary-color); background: var(--bs-secondary-bg); font-size: .86rem; }
     .markdown-body blockquote { border-left: 3px solid var(--bs-border-color); color: var(--bs-secondary-color); padding-left: .75rem; margin: .75rem 0; }
     .tool { padding-left: 0; }

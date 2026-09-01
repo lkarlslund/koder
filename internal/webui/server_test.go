@@ -1924,6 +1924,17 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(appJS, `window.KoderMarkdownRuntime`) {
 		t.Fatalf("expected the app to load and consume the shared Markdown runtime")
 	}
+	for _, mermaidRecovery := range []string{
+		`function repairMermaidSource(source)`,
+		`return await mermaid.render(id + '-repaired', repaired)`,
+		`removeMermaidErrorArtifact(id)`,
+		`class="mermaid-error-detail"`,
+		`.mermaid-error-detail {`,
+	} {
+		if !strings.Contains(fullPage, mermaidRecovery) {
+			t.Fatalf("expected Mermaid recovery and diagnostics fragment %q", mermaidRecovery)
+		}
+	}
 	if !strings.Contains(document, `/assets/browser_voice.js`) ||
 		!strings.Contains(fullPage, `browser_voice_ticket`) ||
 		!strings.Contains(fullPage, `voice_chat_presence`) ||
