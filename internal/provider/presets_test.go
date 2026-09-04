@@ -42,7 +42,6 @@ func TestRequestExtraBodyUsesQwen38ThinkingOptions(t *testing.T) {
 		"chat_template_kwargs": map[string]any{
 			"enable_thinking":   true,
 			"preserve_thinking": true,
-			"reasoning_effort":  "xhigh",
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -62,9 +61,11 @@ func TestRequestExtraBodyUsesNinferThinkingOptions(t *testing.T) {
 		ReasoningEffort: "low",
 	})
 	want := map[string]any{
-		"enable_thinking":   true,
 		"preserve_thinking": true,
 		"reasoning_effort":  "low",
+		"chat_template_kwargs": map[string]any{
+			"enable_thinking": true,
+		},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected Ninfer Qwen3.8 body: %#v", got)

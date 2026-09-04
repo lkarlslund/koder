@@ -20,8 +20,7 @@
         {"value": "disabled", "label": "Disabled"}
       ],
       "bindings": [
-        {"path": "chat_template_kwargs.enable_thinking", "transports": ["llama"], "omit_values": ["auto"], "value_map": {"enabled": true, "disabled": false}},
-        {"path": "enable_thinking", "transports": ["ninfer"], "omit_values": ["auto"], "value_map": {"enabled": true, "disabled": false}},
+        {"path": "chat_template_kwargs.enable_thinking", "transports": ["llama", "ninfer"], "omit_values": ["auto"], "value_map": {"enabled": true, "disabled": false}},
         {"path": "enable_thinking", "transports": ["dashscope"], "omit_values": ["auto"], "value_map": {"enabled": true, "disabled": false}}
       ]
     },
