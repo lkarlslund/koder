@@ -527,6 +527,14 @@ func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) 
 func phoneResult(runtime tools.Runtime, result phonedevice.Result) (tools.Result, error) {
 	stored := map[string]any{"data": result.Data}
 	output := strings.TrimSpace(result.Text)
+	if result.Data != nil {
+		if encoded, err := json.Marshal(result.Data); err == nil && string(encoded) != "null" && string(encoded) != "{}" && string(encoded) != "[]" {
+			if output != "" {
+				output += "\n"
+			}
+			output += string(encoded)
+		}
+	}
 	if len(result.Artifacts) != 0 {
 		files, err := materializeArtifacts(runtime, result.Artifacts)
 		if err != nil {

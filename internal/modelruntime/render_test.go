@@ -6,6 +6,8 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -16,8 +18,10 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestBuildConversationAddsEphemeralInstructionsOnlyToRequest(t *testing.T) {
@@ -269,6 +273,55 @@ func TestConversationMessagesForSuccessfulToolDoesNotAddErrorGuidance(t *testing
 	}
 	if !strings.Contains(joined, "ok") {
 		t.Fatalf("expected successful output, got %s", joined)
+	}
+}
+
+func TestConversationMessagesReplayMCPCallWithExposedToolName(t *testing.T) {
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "calendar", Version: "1"}, nil)
+	server.AddTool(&sdkmcp.Tool{
+		Name:        "exchange_events",
+		Description: "Manage calendar events.",
+		InputSchema: map[string]any{"type": "object"},
+	}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{}, nil
+	})
+	handler := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, &sdkmcp.StreamableHTTPOptions{JSONResponse: true})
+	httpServer := httptest.NewServer(handler)
+	t.Cleanup(httpServer.Close)
+	manager, err := mcp.NewManager(map[string]config.MCPServer{"exchange": {URL: httpServer.URL}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	if err := manager.ConnectAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	runtime := New(Config{Config: config.Default().WithStateDir(t.TempDir()), MCP: manager})
+	chat := domain.Chat{ID: "chat-1", SessionID: "session-1"}
+	item := domain.TimelineItem{ID: "assistant-1", ChatID: chat.ID, Content: domain.AssistantMessage{
+		Tools: []domain.ToolCall{{
+			Tool:       domain.ToolKindMCP,
+			ToolCallID: "call-1",
+			Args: map[string]string{
+				"server":        "exchange",
+				"tool":          "exchange_events",
+				"arguments_raw": `{"action":"search","query":"clinic"}`,
+			},
+			Status: domain.ToolStatusDone,
+			Result: &domain.ToolResult{Status: domain.ToolResultStatusOK, Text: `{"events":[]}`},
+		}},
+	}}
+	messages, err := runtime.ConversationMessagesForTimelineItem(domain.Session{ID: "session-1"}, chat, item, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || len(messages[0].ToolCalls) != 1 {
+		t.Fatalf("messages = %#v", messages)
+	}
+	call := messages[0].ToolCalls[0]
+	if call.Function.Name != "exchange_events" || call.Function.Arguments != `{"action":"search","query":"clinic"}` {
+		t.Fatalf("replayed MCP call = %#v", call)
 	}
 }
 

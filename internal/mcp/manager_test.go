@@ -484,6 +484,23 @@ func TestResolveToolNameUsesPlainNameWhenUnique(t *testing.T) {
 	}
 }
 
+func TestExposedToolNameReversesResolution(t *testing.T) {
+	manager := &Manager{
+		state: map[string]*serverState{
+			"docs": {tools: []ToolDescriptor{{ServerID: "docs", Name: "search"}}},
+		},
+	}
+	reserved := []provider.ToolDefinition{{Function: provider.FunctionDefinition{Name: "search"}}}
+	name, ok := manager.ExposedToolName("docs", "search", reserved)
+	if !ok || name != "_docs_search" {
+		t.Fatalf("ExposedToolName() = %q, %v, want _docs_search, true", name, ok)
+	}
+	serverID, toolName, ok := manager.ResolveToolName(name, reserved)
+	if !ok || serverID != "docs" || toolName != "search" {
+		t.Fatalf("ResolveToolName(%q) = %q, %q, %v", name, serverID, toolName, ok)
+	}
+}
+
 func TestToolDefinitionsFallbackOnCollision(t *testing.T) {
 	manager := &Manager{
 		state: map[string]*serverState{

@@ -459,6 +459,27 @@ func (m *Manager) ResolveToolName(name string, reserved []provider.ToolDefinitio
 	return "", "", false
 }
 
+// ExposedToolName returns the provider-facing name currently assigned to one
+// MCP tool. It uses the same collision rules as ToolDefinitionsWithReserved so
+// persisted MCP calls can be replayed under the name the model can call.
+func (m *Manager) ExposedToolName(serverID, toolName string, reserved []provider.ToolDefinition) (string, bool) {
+	serverID = strings.TrimSpace(serverID)
+	toolName = strings.TrimSpace(toolName)
+	if serverID == "" || toolName == "" {
+		return "", false
+	}
+	descriptors := m.ListTools()
+	key := toolKey(serverID, toolName)
+	for _, desc := range descriptors {
+		if toolKey(desc.ServerID, desc.Name) != key {
+			continue
+		}
+		name := buildToolNameMap(descriptors, reservedToolNames(reserved))[key]
+		return name, name != ""
+	}
+	return "", false
+}
+
 func (m *Manager) ExecuteTool(ctx context.Context, serverID, toolName string, args map[string]any) (tools.Result, error) {
 	serverID = strings.TrimSpace(serverID)
 	toolName = strings.TrimSpace(toolName)

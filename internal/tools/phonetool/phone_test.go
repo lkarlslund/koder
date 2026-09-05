@@ -127,6 +127,21 @@ func TestPhoneDefinitionIsDynamicAndVoiceOnly(t *testing.T) {
 	}
 }
 
+func TestPhoneResultIncludesStructuredDataInModelOutput(t *testing.T) {
+	result, err := phoneResult(tools.Runtime{}, phonedevice.Result{
+		Text: "Phone status read",
+		Data: map[string]any{"time_zone": "Europe/Copenhagen", "online": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Phone status read", `"time_zone":"Europe/Copenhagen"`, `"online":true`} {
+		if !strings.Contains(result.Output, want) {
+			t.Fatalf("phone result output %q does not contain %q", result.Output, want)
+		}
+	}
+}
+
 func TestPhoneResourceValidationAndFixedActions(t *testing.T) {
 	cases := []struct {
 		name string
@@ -234,7 +249,7 @@ func TestPhoneToolCallsInjectedControl(t *testing.T) {
 		Runtime: tools.Runtime{ChatRole: chatrole.Voice, Services: RuntimeService(control)},
 		Request: tools.Request{Tool: tools.PhoneContacts, Args: map[string]string{"action": " search ", "query": " Steen "}},
 	})
-	if err != nil || result.Output != "Steen: +45 1234" || control.action != phonedevice.SearchContacts || control.args["query"] != "Steen" {
+	if err != nil || !strings.Contains(result.Output, "Steen: +45 1234") || !strings.Contains(result.Output, `"count":1`) || control.action != phonedevice.SearchContacts || control.args["query"] != "Steen" {
 		t.Fatalf("result=%#v action=%q args=%v err=%v", result, control.action, control.args, err)
 	}
 }

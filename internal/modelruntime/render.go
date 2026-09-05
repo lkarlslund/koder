@@ -212,11 +212,12 @@ func (r *Runtime) ConversationMessagesForTimelineItem(session domain.Session, ch
 			if strings.TrimSpace(string(tool.ToolCallID)) == "" {
 				return nil, fmt.Errorf("assistant item %s has tool call without id", item.ID)
 			}
-			toolCalls = append(toolCalls, tools.ToolCall(tools.CanonicalRequest(tools.Request{
+			req := tools.CanonicalRequest(tools.Request{
 				Tool:       tool.Tool,
 				ToolCallID: string(tool.ToolCallID),
 				Args:       tool.Args,
-			})))
+			})
+			toolCalls = append(toolCalls, r.providerToolCall(session, chat, req))
 		}
 		textChunks := []string{}
 		reasoningChunks := []string{}
@@ -272,6 +273,34 @@ func (r *Runtime) ConversationMessagesForTimelineItem(session domain.Session, ch
 		return []provider.Message{{Role: provider.RoleUser, Content: "Post-edit diagnostics:\n" + body}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported timeline item %s content %T", item.ID, item.Content)
+	}
+}
+
+func (r *Runtime) providerToolCall(session domain.Session, chat domain.Chat, req tools.Request) provider.ToolCall {
+	if req.Tool != domain.ToolKindMCP || r.mcp == nil {
+		return tools.ToolCall(req)
+	}
+	serverID := strings.TrimSpace(req.Args["server"])
+	toolName := strings.TrimSpace(req.Args["tool"])
+	localDefs := tools.Definitions(tools.Runtime{})
+	if r.tools != nil {
+		localDefs = tools.Definitions(r.tools.Runtime(session, chat))
+	}
+	exposedName, ok := r.mcp.ExposedToolName(serverID, toolName, localDefs)
+	if !ok {
+		return tools.ToolCall(req)
+	}
+	rawArgs := strings.TrimSpace(req.Args["arguments_raw"])
+	if rawArgs == "" {
+		rawArgs = "{}"
+	}
+	return provider.ToolCall{
+		ID:   req.ToolCallID,
+		Type: "function",
+		Function: provider.FunctionCall{
+			Name:      exposedName,
+			Arguments: rawArgs,
+		},
 	}
 }
 
