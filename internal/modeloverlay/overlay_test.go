@@ -31,7 +31,7 @@ func TestBuiltinsResolveQwen38AndApplyBindings(t *testing.T) {
 		"reasoning_effort": "medium",
 		"chat_template_kwargs": map[string]any{
 			"enable_thinking":   true,
-			"preserve_thinking": false,
+			"preserve_thinking": true,
 		},
 	}
 	if !reflect.DeepEqual(body, want) {
