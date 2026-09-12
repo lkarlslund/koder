@@ -41,7 +41,7 @@ func TestRequestExtraBodyUsesQwen38ThinkingOptions(t *testing.T) {
 		"return_progress":  true,
 		"chat_template_kwargs": map[string]any{
 			"enable_thinking":   true,
-			"preserve_thinking": true,
+			"preserve_thinking": false,
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -61,7 +61,7 @@ func TestRequestExtraBodyUsesNinferThinkingOptions(t *testing.T) {
 		ReasoningEffort: "low",
 	})
 	want := map[string]any{
-		"preserve_thinking": true,
+		"preserve_thinking": false,
 		"reasoning_effort":  "low",
 		"chat_template_kwargs": map[string]any{
 			"enable_thinking": true,
@@ -93,7 +93,7 @@ func TestRequestExtraBodyUsesDashScopeShape(t *testing.T) {
 	got := requestExtraBody(t, config.Provider{BaseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"}, config.ModelConfig{ModelID: "qwen3.6-plus", ModelPreset: ModelPresetQwen36PreserveThinking})
 	want := map[string]any{
 		"enable_thinking":   false,
-		"preserve_thinking": true,
+		"preserve_thinking": false,
 		"return_progress":   true,
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -106,7 +106,7 @@ func TestRequestExtraBodyUsesCompatibleChatTemplateKwargs(t *testing.T) {
 	want := map[string]any{
 		"chat_template_kwargs": map[string]any{
 			"enable_thinking":   false,
-			"preserve_thinking": true,
+			"preserve_thinking": false,
 		},
 		"return_progress": true,
 	}
@@ -173,7 +173,7 @@ func TestRequestExtraBodyIncludesExplicitModelOptions(t *testing.T) {
 		"return_progress": true,
 		"chat_template_kwargs": map[string]any{
 			"enable_thinking":   true,
-			"preserve_thinking": true,
+			"preserve_thinking": false,
 		},
 	}
 	if !reflect.DeepEqual(got, want) {

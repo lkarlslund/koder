@@ -29,7 +29,7 @@
       "label": "Preserve thinking",
       "help": "Send prior reasoning back to the model on later turns.",
       "type": "select",
-      "default": "enabled",
+      "default": "disabled",
       "choices": [
         {"value": "enabled", "label": "Enabled"},
         {"value": "disabled", "label": "Disabled"}
