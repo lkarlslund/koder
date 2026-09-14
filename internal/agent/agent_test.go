@@ -5339,7 +5339,7 @@ func TestValidateCompactionResponseRejectsUnsafeResults(t *testing.T) {
 		after  int
 		want   string
 	}{
-		{name: "length limit", resp: provider.ChatResponse{Text: "partial", FinishReason: "length"}, before: 100_000, after: 10_000, want: "output limit"},
+		{name: "length limit", resp: provider.ChatResponse{Text: "partial", FinishReason: "length"}, before: 100_000, after: 10_000, want: "generation limit"},
 		{name: "byte limit", resp: provider.ChatResponse{Text: strings.Repeat("x", compactionMaxBytes+1)}, before: 100_000, after: 10_000, want: "exceeded"},
 		{name: "no reduction", resp: provider.ChatResponse{Text: "summary"}, before: 100_000, after: 100_000, want: "did not reduce"},
 	}
@@ -5378,6 +5378,43 @@ func TestCompleteCompactionChatStopsOversizedStream(t *testing.T) {
 	_, err = engine.completeCompactionChat(context.Background(), domain.Chat{ProviderID: "test"}, client, provider.ChatRequest{Model: "test", Stream: true}, nil)
 	if err == nil || !strings.Contains(err.Error(), "exceeded 64 KB") {
 		t.Fatalf("error = %v, want oversized compaction error", err)
+	}
+}
+
+func TestCompleteCompactionChatDoesNotCountReasoningAgainstSummaryLimit(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, delta := range []map[string]any{
+			{"reasoning": strings.Repeat("r", compactionMaxBytes+1)},
+			{"content": "short summary"},
+		} {
+			payload, err := json.Marshal(map[string]any{
+				"choices": []any{map[string]any{"delta": delta}},
+			})
+			if err != nil {
+				t.Errorf("marshal stream payload: %v", err)
+				return
+			}
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+		}
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	client, err := provider.New("test", config.Provider{BaseURL: server.URL, Timeout: time.Second}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := New(testConfig(t), nil, nil)
+	resp, err := engine.completeCompactionChat(context.Background(), domain.Chat{ProviderID: "test"}, client, provider.ChatRequest{Model: "test", Stream: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Text != "short summary" {
+		t.Fatalf("summary = %q, want short summary", resp.Text)
 	}
 }
 

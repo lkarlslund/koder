@@ -112,7 +112,9 @@ func (e *Engine) MemoryService() *memoryService.Service {
 }
 
 const (
-	compactionMaxTokens = 8 * 1024
+	// The request limit includes reasoning tokens. Leave room for thinking while
+	// bounding the summary itself separately below.
+	compactionMaxTokens = 32 * 1024
 	compactionMaxBytes  = 64 * 1024
 )
 
@@ -2230,27 +2232,29 @@ func compactTextForCompaction(text string, label string) string {
 
 func (e *Engine) completeCompactionChat(ctx context.Context, chat domain.Chat, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {
 	promptProgressPending := e.promptProgressProbePending(chat.ProviderID) && provider.RequestsPromptProgress(req)
-	streamedBytes := 0
+	summaryBytes := 0
 	streamLimitExceeded := false
 	streamCtx, cancelStream := context.WithCancel(ctx)
 	defer cancelStream()
 	onEvent := func(evt domain.Event) {
 		switch evt.Kind {
 		case domain.EventKindMessageDelta, domain.EventKindReasoning:
-			streamedBytes += len(evt.Text)
-			if streamedBytes > compactionMaxBytes && !streamLimitExceeded {
+			if evt.Kind == domain.EventKindMessageDelta {
+				summaryBytes += len(evt.Text)
+			}
+			if summaryBytes > compactionMaxBytes && !streamLimitExceeded {
 				streamLimitExceeded = true
 				cancelStream()
 			}
 			if out == nil {
 				return
 			}
-			if streamedBytes <= 0 {
+			if summaryBytes <= 0 {
 				return
 			}
 			out <- domain.Event{
 				Kind: domain.EventKindStatus,
-				Text: fmt.Sprintf("Streaming compacted results (%s)", formatCompactionBytes(streamedBytes)),
+				Text: fmt.Sprintf("Streaming compacted results (%s)", formatCompactionBytes(summaryBytes)),
 				Meta: map[string]string{"compaction": "streaming"},
 			}
 		case domain.EventKindStatus:
@@ -2301,7 +2305,7 @@ func (e *Engine) completeCompactionChat(ctx context.Context, chat domain.Chat, c
 
 func validateCompactionResponse(resp provider.ChatResponse, beforeContextTokens, afterContextTokens int) (string, error) {
 	if strings.EqualFold(strings.TrimSpace(resp.FinishReason), "length") {
-		return "", fmt.Errorf("compaction reached its %d-token output limit", compactionMaxTokens)
+		return "", fmt.Errorf("compaction reached its %d-token total generation limit (including thinking)", compactionMaxTokens)
 	}
 	summary := strings.TrimSpace(resp.Text)
 	if summary == "" {
