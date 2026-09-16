@@ -3076,6 +3076,24 @@ func TestRuntimeShowsStreamedToolCallDeltaStatus(t *testing.T) {
 	}
 }
 
+func TestRuntimeShowsWithheldToolCallProgressStatus(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	rt := newTestChat(t, st, session, chat, &runtimeFakeRunner{})
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	rt.inbox <- streamEventCmd{event: domain.Event{
+		Kind: domain.EventKindToolCallDelta,
+		Meta: map[string]string{"argument_bytes": "1536"},
+	}}
+
+	update := waitForToolCallDeltaUpdate(t, updates, 2*time.Second)
+	if update.StatusText != "Receiving tool call (1.5 KB arguments)" {
+		t.Fatalf("status text = %q", update.StatusText)
+	}
+}
+
 func TestRuntimeDebouncesStreamedToolCallDeltaStatus(t *testing.T) {
 	st := openTestStore(t)
 	session, chat, _ := createSessionWithPlan(t, st)

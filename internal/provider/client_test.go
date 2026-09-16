@@ -755,6 +755,7 @@ func TestStreamChatResponseAggregatesToolCallsAndDeltas(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hel\",\"reasoning\":\"trace-\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"pri\"}}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{}}],\"tool_call_progress\":{\"bytes\":1536}}\n\n"))
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"lo\",\"reasoning\":\"ace\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"arguments\":\"ntf hello\\\"}\"}}]}}],\"usage\":{\"total_tokens\":3}}\n\n"))
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
@@ -770,11 +771,16 @@ func TestStreamChatResponseAggregatesToolCallsAndDeltas(t *testing.T) {
 	var deltas []string
 	var sawDone bool
 	var toolDeltas []domain.Event
+	var toolProgress domain.Event
 	resp, err := client.StreamChatResponse(context.Background(), ChatRequest{Model: "test"}, func(evt domain.Event) {
 		switch evt.Kind {
 		case domain.EventKindMessageDelta:
 			deltas = append(deltas, evt.Text)
 		case domain.EventKindToolCallDelta:
+			if evt.Meta["argument_bytes"] != "" {
+				toolProgress = evt
+				break
+			}
 			toolDeltas = append(toolDeltas, evt)
 			if !strings.Contains(evt.RawJSON, "\"tool_calls\"") {
 				t.Fatalf("expected raw tool call payload, got %q", evt.RawJSON)
@@ -809,6 +815,9 @@ func TestStreamChatResponseAggregatesToolCallsAndDeltas(t *testing.T) {
 	}
 	if len(toolDeltas) != 2 {
 		t.Fatal("expected streamed tool call delta event")
+	}
+	if toolProgress.Meta["argument_bytes"] != "1536" {
+		t.Fatalf("expected streamed tool-call progress, got %#v", toolProgress)
 	}
 	if toolDeltas[0].Tool != domain.ToolKindBash || toolDeltas[0].ToolCallID != "call_1" || !strings.Contains(toolDeltas[0].Meta["arguments"], "pri") {
 		t.Fatalf("expected first streamed tool call details, got %#v", toolDeltas[0])

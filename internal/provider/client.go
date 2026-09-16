@@ -387,8 +387,11 @@ type chatChunk struct {
 		} `json:"input_tokens_details"`
 		TotalTokens int `json:"total_tokens"`
 	} `json:"usage"`
-	PromptProgress chatPromptProgress `json:"prompt_progress"`
-	Timings        chatTimings        `json:"timings"`
+	PromptProgress   chatPromptProgress `json:"prompt_progress"`
+	ToolCallProgress struct {
+		Bytes int `json:"bytes"`
+	} `json:"tool_call_progress"`
+	Timings chatTimings `json:"timings"`
 }
 
 type chatPromptProgress struct {
@@ -1578,6 +1581,14 @@ func (c *Client) emitChunk(emit func(domain.Event), chunk chatChunk, raw string,
 			"time_ms":                      strconv.FormatInt(chunk.PromptProgress.TimeMS, 10),
 		}
 		emit(domain.Event{Kind: domain.EventKindStatus, Text: text, Meta: meta, RawJSON: raw})
+	}
+	if chunk.ToolCallProgress.Bytes > 0 {
+		emit(domain.Event{
+			Kind:    domain.EventKindToolCallDelta,
+			Text:    "provider tool call progress",
+			Meta:    map[string]string{"argument_bytes": strconv.Itoa(chunk.ToolCallProgress.Bytes)},
+			RawJSON: raw,
+		})
 	}
 }
 

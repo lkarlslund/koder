@@ -3739,6 +3739,9 @@ func toolCallDeltaStatusText(evt domain.Event) string {
 	if args := evt.Meta["arguments"]; args != "" {
 		return fmt.Sprintf("Receiving %s call (%s arguments)", toolName, formatBytes(len(args)))
 	}
+	if size, err := strconv.Atoi(evt.Meta["argument_bytes"]); err == nil && size > 0 {
+		return fmt.Sprintf("Receiving %s call (%s arguments)", toolName, formatBytes(size))
+	}
 	return fmt.Sprintf("Receiving %s call...", toolName)
 }
 
