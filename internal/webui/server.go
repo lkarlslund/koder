@@ -1294,11 +1294,17 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		}
 		return s.stateForClient(ctx, clientID)
 	case "browse_project_folder":
-		path, err := browseProjectFolder()
+		var in struct {
+			Path string `json:"path"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		listing, err := browseProjectFolder(in.Path)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]string{"project_root": path}, nil
+		return listing, nil
 	case "archive_chat":
 		var in struct {
 			ChatID   id.ID `json:"chat_id"`
@@ -2291,27 +2297,55 @@ func stateDeltaFromState(state app.State) stateDelta {
 	}
 }
 
-func browseProjectFolder() (string, error) {
-	var candidates [][]string
-	switch runtime.GOOS {
-	case "darwin":
-		candidates = append(candidates, []string{"osascript", "-e", `POSIX path of (choose folder with prompt "Choose project folder")`})
-	case "windows":
-		candidates = append(candidates, []string{"powershell", "-NoProfile", "-Command", `Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPath }`})
-	default:
-		candidates = append(candidates,
-			[]string{"zenity", "--file-selection", "--directory", "--title=Choose project folder"},
-			[]string{"kdialog", "--getexistingdirectory", ".", "Choose project folder"},
-		)
+type projectFolderListing struct {
+	Path    string   `json:"path"`
+	Parent  string   `json:"parent,omitempty"`
+	Folders []string `json:"folders"`
+}
+
+func browseProjectFolder(path string) (projectFolderListing, error) {
+	path = strings.TrimSpace(path)
+	if path == "" || path == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return projectFolderListing{}, fmt.Errorf("resolve server home directory: %w", err)
+		}
+		path = home
+	} else if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return projectFolderListing{}, fmt.Errorf("resolve server home directory: %w", err)
+		}
+		path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
 	}
-	for _, args := range candidates {
-		out, err := exec.Command(args[0], args[1:]...).Output()
-		path := strings.TrimSpace(string(out))
-		if err == nil && path != "" {
-			return path, nil
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return projectFolderListing{}, fmt.Errorf("resolve project folder %q: %w", path, err)
+	}
+	absPath = filepath.Clean(absPath)
+	entries, err := os.ReadDir(absPath)
+	if err != nil {
+		return projectFolderListing{}, fmt.Errorf("browse project folder %q: %w", absPath, err)
+	}
+	folders := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		isDir := entry.IsDir()
+		if !isDir && entry.Type()&os.ModeSymlink != 0 {
+			info, statErr := os.Stat(filepath.Join(absPath, entry.Name()))
+			isDir = statErr == nil && info.IsDir()
+		}
+		if isDir {
+			folders = append(folders, entry.Name())
 		}
 	}
-	return "", fmt.Errorf("no supported folder picker is available")
+	slices.SortFunc(folders, func(a, b string) int {
+		return strings.Compare(strings.ToLower(a), strings.ToLower(b))
+	})
+	parent := filepath.Dir(absPath)
+	if parent == absPath {
+		parent = ""
+	}
+	return projectFolderListing{Path: absPath, Parent: parent, Folders: folders}, nil
 }
 
 func rpcEstablishesSnapshotBaseline(method string, result any) bool {

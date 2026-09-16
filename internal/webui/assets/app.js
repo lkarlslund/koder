@@ -1179,7 +1179,7 @@
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
 		showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'overview', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', settingsHealth: {issue_count: 0, needs_setup: false, issues: []}, showBrowserEditor: false, showCodexEditor: false, showObservability: false,
 		showPhoneBinding: false, phoneBinding: null, phoneBindingLoading: false, phoneBindingError: '', voiceDevices: [], voiceDevicesLoading: false, voiceDevicesError: '',
-        showSessions: false, sessionTab: 'sessions', sessionFilter: 'active', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
+        showSessions: false, sessionTab: 'sessions', sessionFilter: 'active', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, folderPicker: {open: false, target: '', path: '', parent: '', folders: [], loading: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         confirmationDialog: {open: false, title: '', message: '', confirmLabel: 'Confirm', danger: false}, confirmationResolver: null,
 		providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
 		showModelDetails: false, modelDetails: null, settingsModelQuery: '', showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
@@ -5460,9 +5460,7 @@
           this.showQuickPromotion = false;
         },
         browsePromotionFolder() {
-          this.rpc('browse_project_folder', {}).then(result => {
-            if (result?.project_root) this.quickPromotion.projectRoot = result.project_root;
-          }).catch(err => this.showToast(err.message));
+          this.openFolderPicker('promotion', this.quickPromotion.projectRoot);
         },
         promoteQuickChat() {
           const draft = this.quickPromotion;
@@ -5494,14 +5492,44 @@
           this.sessionDraft = {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''};
         },
         browseProjectFolder() {
-          this.rpc('browse_project_folder', {}).then(result => {
-            if (result && result.project_root) {
-              this.sessionDraft.projectRoot = result.project_root;
-              this.sessionDraft.createProjectRoot = false;
-              this.sessionDraft.missingProjectRoot = '';
-              this.sessionDraft.error = '';
-            }
-          }).catch(err => this.showToast(err.message));
+          this.openFolderPicker('session', this.sessionDraft.projectRoot);
+        },
+        openFolderPicker(target, path) {
+          this.folderPicker = {open: true, target, path: String(path || '').trim(), parent: '', folders: [], loading: false, error: ''};
+          this.loadFolderPicker(this.folderPicker.path);
+        },
+        closeFolderPicker() {
+          this.folderPicker.open = false;
+        },
+        loadFolderPicker(path) {
+          if (this.folderPicker.loading) return;
+          this.folderPicker.loading = true;
+          this.folderPicker.error = '';
+          this.rpc('browse_project_folder', {path: String(path || '').trim()}).then(result => {
+            this.folderPicker.path = String(result?.path || '');
+            this.folderPicker.parent = String(result?.parent || '');
+            this.folderPicker.folders = Array.isArray(result?.folders) ? result.folders : [];
+          }).catch(err => {
+            this.folderPicker.error = err.message || 'Unable to browse this folder';
+          }).finally(() => { this.folderPicker.loading = false; });
+        },
+        openFolderPickerChild(name) {
+          const base = String(this.folderPicker.path || '').replace(/[\\/]$/, '');
+          const separator = base.includes('\\') && !base.includes('/') ? '\\' : '/';
+          this.loadFolderPicker(base + separator + name);
+        },
+        chooseFolderPickerPath() {
+          const path = String(this.folderPicker.path || '').trim();
+          if (!path) return;
+          if (this.folderPicker.target === 'promotion') {
+            this.quickPromotion.projectRoot = path;
+          } else {
+            this.sessionDraft.projectRoot = path;
+            this.sessionDraft.createProjectRoot = false;
+            this.sessionDraft.missingProjectRoot = '';
+            this.sessionDraft.error = '';
+          }
+          this.closeFolderPicker();
         },
         saveSessionEditor() {
           let title = String(this.sessionDraft.title || '').trim();

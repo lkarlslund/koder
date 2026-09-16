@@ -2968,6 +2968,9 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `showSessionEditor`) ||
 		!strings.Contains(fullPage, `browse_project_folder`) ||
+		!strings.Contains(fullPage, `folderPicker.open`) ||
+		!strings.Contains(fullPage, `Folders on the machine running Koder`) ||
+		!strings.Contains(fullPage, `chooseFolderPickerPath()`) ||
 		!strings.Contains(fullPage, `Create folder and save`) ||
 		!strings.Contains(fullPage, `create_project_root`) ||
 		!strings.Contains(fullPage, `sessionProjectRoot(session)`) ||
@@ -3087,6 +3090,35 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(document, `title="Save provider"`) ||
 		!strings.Contains(document, `title="Save session"`) {
 		t.Fatalf("expected modals to use header icon actions instead of footer Save/Cancel buttons")
+	}
+}
+
+func TestBrowseProjectFolderListsServerDirectories(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	for _, name := range []string{"Zulu", "alpha"} {
+		if err := os.Mkdir(filepath.Join(root, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "not-a-folder.txt"), []byte("file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	listing, err := browseProjectFolder(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listing.Path != root {
+		t.Fatalf("path = %q, want %q", listing.Path, root)
+	}
+	if listing.Parent != filepath.Dir(root) {
+		t.Fatalf("parent = %q, want %q", listing.Parent, filepath.Dir(root))
+	}
+	want := []string{"alpha", "Zulu"}
+	if !slices.Equal(listing.Folders, want) {
+		t.Fatalf("folders = %#v, want %#v", listing.Folders, want)
 	}
 }
 
