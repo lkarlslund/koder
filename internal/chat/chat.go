@@ -114,6 +114,7 @@ type Snapshot struct {
 	TimelineAfter     id.ID
 	Approvals         []Approval
 	PendingUserInput  int
+	PendingInputCalls []domain.ToolCall
 	QueuedInputs      []domain.QueuedInput
 	ExecProcesses     []tools.ExecProcess
 	Turn              Turn
@@ -1566,6 +1567,7 @@ func (r *Chat) snapshot(includeTimeline bool) Snapshot {
 		TimelineLoadedAll: r.timelineLoaded && !r.timelineHasOlder,
 		Approvals:         r.state.Approvals(),
 		PendingUserInput:  pendingUserInputCount(r.state.SnapshotTimeline()),
+		PendingInputCalls: pendingUserInputCalls(r.state.SnapshotTimeline()),
 		QueuedInputs:      visibleQueuedInputs(r.queue),
 		Turn:              turnForStatus(r.status, r.active, r.cancelState),
 		Status:            r.status,

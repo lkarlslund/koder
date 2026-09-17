@@ -1680,6 +1680,30 @@ func TestWebSocketChatUpdateIsCompactedToSingleItemDelta(t *testing.T) {
 	}
 }
 
+func TestChatDeltaCarriesPendingInputOutsideTimeline(t *testing.T) {
+	call := domain.ToolCall{
+		Tool:       domain.ToolKindRequestUserInput,
+		ToolCallID: "call-question",
+		Status:     domain.ToolStatusAwaitingInput,
+		Args:       map[string]string{"questions": `[{"id":"choice","question":"Which?"}]`},
+	}
+	delta := chatDeltaFromUpdate(chat.Update{Snapshot: chat.Snapshot{
+		Chat:              domain.Chat{ID: "chat-1"},
+		PendingUserInput:  1,
+		PendingInputCalls: []domain.ToolCall{call},
+	}})
+	if len(delta.PendingInputCalls) != 1 || delta.PendingInputCalls[0].ToolCallID != call.ToolCallID {
+		t.Fatalf("pending input calls = %#v, want %#v", delta.PendingInputCalls, call)
+	}
+	data, err := json.Marshal(delta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(data, []byte(`"pending_input_calls"`)) || !bytes.Contains(data, []byte(`"call-question"`)) {
+		t.Fatalf("pending input call missing from delta: %s", data)
+	}
+}
+
 func TestWebSocketChatUpdateCanReplaceTimeline(t *testing.T) {
 	item := domain.TimelineItem{
 		ID:      "019aa000-0000-7000-8000-000000000042",

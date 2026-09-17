@@ -1939,6 +1939,7 @@
           if (delta.chat) next.Chat = delta.chat;
           if (delta.approvals !== undefined) next.Approvals = delta.approvals;
           if (delta.pending_user_input !== undefined) next.PendingUserInput = delta.pending_user_input;
+          if (delta.pending_input_calls !== undefined) next.PendingInputCalls = delta.pending_input_calls;
           if (delta.queue !== undefined) {
             const queue = Array.isArray(delta.queue) ? delta.queue : [];
             next.QueuedInputs = queue;
@@ -2721,15 +2722,19 @@
           return this.timelineForChat(id, this.activeSnapshot());
         },
         userInputQuestions() {
-          const timeline = this.timeline();
-          let calls = [];
-          for (let idx = timeline.length - 1; idx >= 0; idx--) {
-            const item = timeline[idx] || {};
-            if (String(item.kind || item.Kind || '').toLowerCase() !== 'assistant') continue;
-            const content = item.content || item.Content || {};
-            const tools = content.tools || content.Tools || [];
-            calls = tools.filter(tool => String(tool.tool || tool.Tool || '') === 'request_user_input' && toolStatus(tool) === 'awaiting_input');
-            break;
+          const snapshot = this.activeSnapshot();
+          let calls = snapshot.PendingInputCalls || snapshot.pending_input_calls;
+          if (!Array.isArray(calls)) {
+            const timeline = this.timeline();
+            calls = [];
+            for (let idx = timeline.length - 1; idx >= 0; idx--) {
+              const item = timeline[idx] || {};
+              if (String(item.kind || item.Kind || '').toLowerCase() !== 'assistant') continue;
+              const content = item.content || item.Content || {};
+              const tools = content.tools || content.Tools || [];
+              calls = tools.filter(tool => String(tool.tool || tool.Tool || '') === 'request_user_input' && toolStatus(tool) === 'awaiting_input');
+              break;
+            }
           }
           const questions = [];
           for (const call of calls) {

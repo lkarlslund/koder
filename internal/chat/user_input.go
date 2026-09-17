@@ -15,20 +15,24 @@ func hasPendingUserInput(timeline []domain.TimelineItem) bool {
 }
 
 func pendingUserInputCount(timeline []domain.TimelineItem) int {
+	return len(pendingUserInputCalls(timeline))
+}
+
+func pendingUserInputCalls(timeline []domain.TimelineItem) []domain.ToolCall {
 	for idx := len(timeline) - 1; idx >= 0; idx-- {
 		assistant, ok := timeline[idx].Content.(domain.AssistantMessage)
 		if !ok {
 			continue
 		}
-		count := 0
+		var calls []domain.ToolCall
 		for _, call := range assistant.Tools {
 			if call.Status == domain.ToolStatusAwaitingInput {
-				count++
+				calls = append(calls, call)
 			}
 		}
-		return count
+		return calls
 	}
-	return 0
+	return []domain.ToolCall{}
 }
 
 func (r *Chat) AttachToolAwaitingInput(ctx context.Context, toolCallID string) (domain.TimelineItem, error) {
@@ -49,21 +53,7 @@ func (r *Chat) pendingUserInputCalls() ([]domain.ToolCall, error) {
 	if r.state == nil {
 		return nil, nil
 	}
-	items := r.state.SnapshotTimeline()
-	for idx := len(items) - 1; idx >= 0; idx-- {
-		assistant, ok := items[idx].Content.(domain.AssistantMessage)
-		if !ok {
-			continue
-		}
-		var calls []domain.ToolCall
-		for _, call := range assistant.Tools {
-			if call.Status == domain.ToolStatusAwaitingInput {
-				calls = append(calls, call)
-			}
-		}
-		return calls, nil
-	}
-	return nil, nil
+	return pendingUserInputCalls(r.state.SnapshotTimeline()), nil
 }
 
 func validateUserInputAnswers(calls []domain.ToolCall, submitted []tools.UserInputAnswer) (map[string][]tools.UserInputAnswer, error) {

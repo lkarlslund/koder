@@ -36,6 +36,9 @@ func TestLoadWithPendingUserInputStartsWaitingForInput(t *testing.T) {
 	if snapshot.PendingUserInput != 1 {
 		t.Fatalf("pending user input = %d, want 1", snapshot.PendingUserInput)
 	}
+	if len(snapshot.PendingInputCalls) != 1 || snapshot.PendingInputCalls[0].ToolCallID != "call-1" {
+		t.Fatalf("pending input calls = %#v, want call-1", snapshot.PendingInputCalls)
+	}
 }
 
 func TestPendingUserInputCountUsesLatestAssistantTurn(t *testing.T) {

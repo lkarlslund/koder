@@ -2038,22 +2038,23 @@ type stateDelta struct {
 }
 
 type chatDelta struct {
-	ChatID           id.ID                 `json:"chat_id"`
-	Chat             any                   `json:"chat,omitempty"`
-	Item             *domain.TimelineItem  `json:"item,omitempty"`
-	ItemAppend       *assistantAppendDelta `json:"item_append,omitempty"`
-	Timeline         []domain.TimelineItem `json:"timeline,omitempty"`
-	Approvals        any                   `json:"approvals,omitempty"`
-	PendingUserInput *int                  `json:"pending_user_input"`
-	Queue            any                   `json:"queue,omitempty"`
-	ExecProcesses    any                   `json:"exec_processes,omitempty"`
-	Context          any                   `json:"context,omitempty"`
-	TokenUsage       any                   `json:"token_usage,omitempty"`
-	Status           string                `json:"status,omitempty"`
-	StatusText       string                `json:"status_text,omitempty"`
-	Active           bool                  `json:"active"`
-	ReplaceTimeline  bool                  `json:"replace_timeline,omitempty"`
-	Error            string                `json:"error,omitempty"`
+	ChatID            id.ID                 `json:"chat_id"`
+	Chat              any                   `json:"chat,omitempty"`
+	Item              *domain.TimelineItem  `json:"item,omitempty"`
+	ItemAppend        *assistantAppendDelta `json:"item_append,omitempty"`
+	Timeline          []domain.TimelineItem `json:"timeline,omitempty"`
+	Approvals         any                   `json:"approvals,omitempty"`
+	PendingUserInput  *int                  `json:"pending_user_input"`
+	PendingInputCalls []domain.ToolCall     `json:"pending_input_calls"`
+	Queue             any                   `json:"queue,omitempty"`
+	ExecProcesses     any                   `json:"exec_processes,omitempty"`
+	Context           any                   `json:"context,omitempty"`
+	TokenUsage        any                   `json:"token_usage,omitempty"`
+	Status            string                `json:"status,omitempty"`
+	StatusText        string                `json:"status_text,omitempty"`
+	Active            bool                  `json:"active"`
+	ReplaceTimeline   bool                  `json:"replace_timeline,omitempty"`
+	Error             string                `json:"error,omitempty"`
 }
 
 type assistantAppendDelta struct {
@@ -2178,12 +2179,13 @@ func chatDeltaFromUpdate(update chat.Update) chatDelta {
 	snapshot := update.Snapshot
 	pendingUserInput := snapshot.PendingUserInput
 	delta := chatDelta{
-		ChatID:           snapshot.Chat.ID,
-		PendingUserInput: &pendingUserInput,
-		Status:           string(snapshot.Status),
-		StatusText:       snapshot.StatusText,
-		Active:           snapshot.Active,
-		ReplaceTimeline:  update.ReplaceTimeline,
+		ChatID:            snapshot.Chat.ID,
+		PendingUserInput:  &pendingUserInput,
+		PendingInputCalls: snapshot.PendingInputCalls,
+		Status:            string(snapshot.Status),
+		StatusText:        snapshot.StatusText,
+		Active:            snapshot.Active,
+		ReplaceTimeline:   update.ReplaceTimeline,
 	}
 	if delta.Status == "" && update.Status != "" {
 		delta.Status = string(update.Status)
