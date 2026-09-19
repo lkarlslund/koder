@@ -19,20 +19,19 @@ func pendingUserInputCount(timeline []domain.TimelineItem) int {
 }
 
 func pendingUserInputCalls(timeline []domain.TimelineItem) []domain.ToolCall {
-	for idx := len(timeline) - 1; idx >= 0; idx-- {
-		assistant, ok := timeline[idx].Content.(domain.AssistantMessage)
+	var calls []domain.ToolCall
+	for _, item := range timeline {
+		assistant, ok := item.Content.(domain.AssistantMessage)
 		if !ok {
 			continue
 		}
-		var calls []domain.ToolCall
 		for _, call := range assistant.Tools {
 			if call.Status == domain.ToolStatusAwaitingInput {
 				calls = append(calls, call)
 			}
 		}
-		return calls
 	}
-	return []domain.ToolCall{}
+	return calls
 }
 
 func (r *Chat) AttachToolAwaitingInput(ctx context.Context, toolCallID string) (domain.TimelineItem, error) {

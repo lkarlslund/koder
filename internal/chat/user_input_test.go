@@ -41,10 +41,11 @@ func TestLoadWithPendingUserInputStartsWaitingForInput(t *testing.T) {
 	}
 }
 
-func TestPendingUserInputCountUsesLatestAssistantTurn(t *testing.T) {
+func TestPendingUserInputSurvivesLaterTimelineItems(t *testing.T) {
 	timeline := []domain.TimelineItem{
 		{Content: domain.AssistantMessage{Tools: []domain.ToolCall{pendingInputCall()}}},
 		{Content: domain.UserMessage{Text: "later"}},
+		{Content: domain.AssistantMessage{Text: "temporary follow-up"}},
 	}
 	if got := pendingUserInputCount(timeline); got != 1 {
 		t.Fatalf("pending count = %d, want 1", got)
