@@ -52,6 +52,16 @@ func TestPendingUserInputSurvivesLaterTimelineItems(t *testing.T) {
 	}
 }
 
+func TestPendingRequestUserInputIsRecoverableAfterHydration(t *testing.T) {
+	call := pendingInputCall()
+	call.Status = domain.ToolStatusPending
+	timeline := []domain.TimelineItem{{Content: domain.AssistantMessage{Tools: []domain.ToolCall{call}}}}
+	got := pendingUserInputCalls(timeline)
+	if len(got) != 1 || got[0].ToolCallID != call.ToolCallID {
+		t.Fatalf("pending calls = %#v, want recoverable request_user_input", got)
+	}
+}
+
 func TestValidateUserInputAnswers(t *testing.T) {
 	answers := []tools.UserInputAnswer{{ToolCallID: "call-1", QuestionID: "choice", Selected: "A", Comment: "because"}}
 	grouped, err := validateUserInputAnswers([]domain.ToolCall{pendingInputCall()}, answers)

@@ -26,7 +26,8 @@ func pendingUserInputCalls(timeline []domain.TimelineItem) []domain.ToolCall {
 			continue
 		}
 		for _, call := range assistant.Tools {
-			if call.Status == domain.ToolStatusAwaitingInput {
+			if call.Tool == domain.ToolKindRequestUserInput &&
+				(call.Status == domain.ToolStatusPending || call.Status == domain.ToolStatusAwaitingInput) {
 				calls = append(calls, call)
 			}
 		}
