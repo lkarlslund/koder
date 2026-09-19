@@ -2058,12 +2058,14 @@ type chatDelta struct {
 }
 
 type assistantAppendDelta struct {
-	ItemID    id.ID     `json:"item_id"`
-	Seq       int64     `json:"seq,omitempty"`
-	CreatedAt time.Time `json:"created_at,omitzero"`
-	UpdatedAt time.Time `json:"updated_at,omitzero"`
-	Text      string    `json:"text,omitempty"`
-	Reasoning string    `json:"reasoning,omitempty"`
+	ItemID         id.ID     `json:"item_id"`
+	Seq            int64     `json:"seq,omitempty"`
+	CreatedAt      time.Time `json:"created_at,omitzero"`
+	UpdatedAt      time.Time `json:"updated_at,omitzero"`
+	Text           string    `json:"text,omitempty"`
+	Reasoning      string    `json:"reasoning,omitempty"`
+	TextBytes      int       `json:"text_bytes,omitempty"`
+	ReasoningBytes int       `json:"reasoning_bytes,omitempty"`
 }
 
 type websocketStreamCoalescer struct {
@@ -2237,6 +2239,10 @@ func assistantAppendFromUpdate(update chat.Update) (assistantAppendDelta, bool) 
 	}
 	delta := assistantAppendDelta{
 		ItemID: item.ID, Seq: item.Seq, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+	}
+	if assistant, ok := item.Content.(domain.AssistantMessage); ok {
+		delta.TextBytes = len(assistant.Text)
+		delta.ReasoningBytes = len(assistant.Reasoning.Text)
 	}
 	if update.Event.Kind == domain.EventKindReasoning {
 		delta.Reasoning = update.Event.Text

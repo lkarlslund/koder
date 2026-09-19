@@ -1767,6 +1767,9 @@ func TestWebSocketStreamingDeltaUsesAppendAndFinalItemReconciliation(t *testing.
 	if delta.ItemAppend.Text != "partial stream" || delta.ItemAppend.Reasoning != "" {
 		t.Fatalf("unexpected assistant append delta: %#v", delta.ItemAppend)
 	}
+	if delta.ItemAppend.TextBytes != len("partial stream") || delta.ItemAppend.ReasoningBytes != 0 {
+		t.Fatalf("append byte totals = text %d reasoning %d", delta.ItemAppend.TextBytes, delta.ItemAppend.ReasoningBytes)
+	}
 	data, err := json.Marshal(delta)
 	if err != nil {
 		t.Fatal(err)
@@ -1782,11 +1785,15 @@ func TestWebSocketStreamingDeltaUsesAppendAndFinalItemReconciliation(t *testing.
 }
 
 func TestWebSocketStreamCoalescerLimitsAppendRate(t *testing.T) {
+	textBytes, reasoningBytes := 0, 0
 	streamEvent := func(text, reasoning string) app.Event {
+		textBytes += len(text)
+		reasoningBytes += len(reasoning)
 		return app.Event{Type: "chat_delta", Payload: chatDelta{
 			ChatID: "chat-7",
 			ItemAppend: &assistantAppendDelta{
 				ItemID: "item-1", Text: text, Reasoning: reasoning,
+				TextBytes: textBytes, ReasoningBytes: reasoningBytes,
 			},
 		}}
 	}
@@ -1813,6 +1820,9 @@ func TestWebSocketStreamCoalescerLimitsAppendRate(t *testing.T) {
 	delta := flushed.Payload.(chatDelta)
 	if delta.ItemAppend.Text != "b" || delta.ItemAppend.Reasoning != "reasoning" {
 		t.Fatalf("unexpected coalesced append: %#v", delta.ItemAppend)
+	}
+	if delta.ItemAppend.TextBytes != len("ab") || delta.ItemAppend.ReasoningBytes != len("reasoning") {
+		t.Fatalf("coalesced append did not retain the latest authoritative totals: %#v", delta.ItemAppend)
 	}
 }
 
@@ -2411,6 +2421,7 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `applyChatDelta(delta)`) || !strings.Contains(fullPage, `patchTimelineItem`) ||
 		!strings.Contains(fullPage, `patchTimelineItemAppend`) || !strings.Contains(fullPage, `delta.item || delta.item_append`) ||
+		!strings.Contains(fullPage, `repairTimelineAfterDeltaMismatch`) || !strings.Contains(fullPage, `byteCount(nextText)`) ||
 		!strings.Contains(fullPage, `msg.type === 'chat_delta'`) {
 		t.Fatalf("expected browser to patch compact chat deltas")
 	}

@@ -1195,7 +1195,7 @@
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
 		chatCreator: {open: false, loading: false, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}},
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptScrollOperation: 0, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptEnhancementObserver: null, transcriptEnhancementFrame: 0, transcriptDOMUpdateScheduled: false, transcriptDOMUpdateCallbacks: [], scrollRestoreSeq: 0, timelineLoading: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptScrollOperation: 0, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptEnhancementObserver: null, transcriptEnhancementFrame: 0, transcriptDOMUpdateScheduled: false, transcriptDOMUpdateCallbacks: [], scrollRestoreSeq: 0, timelineLoading: {}, timelineRepairing: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
           this.syncBrowserTabActivity();
@@ -1969,10 +1969,14 @@
               const patched = delta.item
                 ? this.patchTimelineItem(currentTimeline, delta.item)
                 : this.patchTimelineItemAppend(currentTimeline, id, delta.item_append);
-              const stored = this.storeTimeline(id, patched);
-              if (patched.length > stored.length) next.TimelineHasMore = true;
-              next.TimelineBefore = stored.length ? this.timelineItemID(stored[0]) : '';
-              next.TimelineAfter = stored.length ? this.timelineItemID(stored[stored.length - 1]) : '';
+              if (!patched) {
+                this.repairTimelineAfterDeltaMismatch(id);
+              } else {
+                const stored = this.storeTimeline(id, patched);
+                if (patched.length > stored.length) next.TimelineHasMore = true;
+                next.TimelineBefore = stored.length ? this.timelineItemID(stored[0]) : '';
+                next.TimelineAfter = stored.length ? this.timelineItemID(stored[stored.length - 1]) : '';
+              }
             } else {
               next.TimelineHasNewer = true;
               next.TimelineLoadedAll = false;
@@ -2016,10 +2020,16 @@
           if (!itemID) throw new Error('timeline append missing item id');
           const existing = (Array.isArray(timeline) ? timeline : []).find(item => this.timelineItemID(item) === itemID);
           const content = {...(existing?.content || {})};
-          if (append.text) content.text = String(content.text || '') + append.text;
+          if (append.text) {
+            const nextText = String(content.text || '') + append.text;
+            if (Number(append.text_bytes || 0) > 0 && byteCount(nextText) !== Number(append.text_bytes)) return null;
+            content.text = nextText;
+          }
           if (append.reasoning) {
             const reasoning = {...(content.reasoning || {})};
-            reasoning.text = String(reasoning.text || '') + append.reasoning;
+            const nextReasoning = String(reasoning.text || '') + append.reasoning;
+            if (Number(append.reasoning_bytes || 0) > 0 && byteCount(nextReasoning) !== Number(append.reasoning_bytes)) return null;
+            reasoning.text = nextReasoning;
             content.reasoning = reasoning;
           }
           const item = {
@@ -2033,6 +2043,19 @@
             updated_at: append.updated_at || existing?.updated_at || '',
           };
           return this.patchTimelineItem(timeline, item);
+        },
+        repairTimelineAfterDeltaMismatch(chatID) {
+          const id = String(chatID || '').trim();
+          if (!id || this.timelineRepairing[id]) return;
+          this.timelineRepairing = {...this.timelineRepairing, [id]: true};
+          this.rpc('load_timeline', {chat_id: id, limit: timelinePageSize})
+            .then(page => this.mergeTimelinePage(page, {replace: true, scroll: id === this.activeChatID() ? this.transcriptScrollState() : null}))
+            .catch(err => this.showToast(err.message))
+            .finally(() => {
+              const next = {...this.timelineRepairing};
+              delete next[id];
+              this.timelineRepairing = next;
+            });
         },
         patchChatList(chat) {
           const id = this.chatID(chat);
