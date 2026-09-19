@@ -19,6 +19,11 @@ func pendingUserInputCount(timeline []domain.TimelineItem) int {
 }
 
 func pendingUserInputCalls(timeline []domain.TimelineItem) []domain.ToolCall {
+	return PendingUserInputCalls(timeline)
+}
+
+// PendingUserInputCalls returns unresolved interactive questions in a timeline.
+func PendingUserInputCalls(timeline []domain.TimelineItem) []domain.ToolCall {
 	var calls []domain.ToolCall
 	for _, item := range timeline {
 		assistant, ok := item.Content.(domain.AssistantMessage)

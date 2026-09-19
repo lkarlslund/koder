@@ -1907,15 +1907,36 @@ func (s *Server) fillActiveTimelineForClient(ctx context.Context, state app.Stat
 	if err != nil {
 		return app.State{}, err
 	}
+	snapshot = snapshotWithTimelinePage(snapshot, page)
+	if snapshot.PendingUserInput > 0 {
+		snapshot.Status = chat.StatusWaitingInput
+		snapshot.StatusText = "Waiting for input"
+		for index := range state.ChatStatuses {
+			if state.ChatStatuses[index].ChatID != chatID {
+				continue
+			}
+			state.ChatStatuses[index].Status = string(chat.StatusWaitingInput)
+			state.ChatStatuses[index].StatusText = snapshot.StatusText
+			state.ChatStatuses[index].Busy = true
+			state.ChatStatuses[index].PendingUserInput = snapshot.PendingUserInput
+			break
+		}
+	}
+	state.Snapshots[chatID] = snapshot
+	state.Snapshot = snapshot
+	return state, nil
+}
+
+func snapshotWithTimelinePage(snapshot chat.Snapshot, page chat.TimelinePage) chat.Snapshot {
 	snapshot.Timeline = page.Items
 	snapshot.TimelineHasMore = page.HasMore
 	snapshot.TimelineHasNewer = page.HasNewer
 	snapshot.TimelineLoadedAll = page.LoadedAll
 	snapshot.TimelineBefore = page.Before
 	snapshot.TimelineAfter = page.After
-	state.Snapshots[chatID] = snapshot
-	state.Snapshot = snapshot
-	return state, nil
+	snapshot.PendingInputCalls = chat.PendingUserInputCalls(snapshot.Timeline)
+	snapshot.PendingUserInput = len(snapshot.PendingInputCalls)
+	return snapshot
 }
 
 func trimSnapshotTimeline(snapshot chat.Snapshot, limit int) chat.Snapshot {

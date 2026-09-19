@@ -1012,6 +1012,20 @@ func TestTrimStateTimelinesPreservesPagedTailMetadataAtLimit(t *testing.T) {
 	}
 }
 
+func TestTimelineHydrationRestoresPendingUserInput(t *testing.T) {
+	call := domain.ToolCall{
+		ToolCallID: "call-question",
+		Tool:       domain.ToolKindRequestUserInput,
+		Status:     domain.ToolStatusPending,
+		Args:       map[string]string{"questions": `[{"id":"choice","question":"Which?"}]`},
+	}
+	item := domain.TimelineItem{ID: "item-question", ChatID: "chat-1", Seq: 1, Content: domain.AssistantMessage{Tools: []domain.ToolCall{call}}}
+	snapshot := snapshotWithTimelinePage(chat.Snapshot{Chat: domain.Chat{ID: "chat-1"}}, chat.TimelinePage{Items: []domain.TimelineItem{item}, LoadedAll: true})
+	if snapshot.PendingUserInput != 1 || len(snapshot.PendingInputCalls) != 1 {
+		t.Fatalf("hydrated pending input = %d, calls %#v", snapshot.PendingUserInput, snapshot.PendingInputCalls)
+	}
+}
+
 func TestChatDeltaUsesChangedItemWithoutTimeline(t *testing.T) {
 	changed := domain.TimelineItem{
 		ID:      "item-2",
