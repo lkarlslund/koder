@@ -381,6 +381,9 @@ type NativeBrowserPreferences struct {
 	OperationTimeout int    `json:"operation_timeout_seconds"`
 	MaxTabsPerChat   int    `json:"max_tabs_per_chat"`
 	MaxTabsGlobal    int    `json:"max_tabs_global"`
+	TaskEngine       string `json:"task_engine"`
+	TaskDecisionURL  string `json:"task_decision_url"`
+	TaskMaxSteps     int    `json:"task_max_steps"`
 }
 
 type CodexPreferences struct {

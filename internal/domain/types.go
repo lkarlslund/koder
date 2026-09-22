@@ -123,6 +123,7 @@ const (
 	ToolKindMemory              ToolKind = "memory"
 	ToolKindMCP                 ToolKind = "mcp"
 	ToolKindBrowserStatus       ToolKind = "browser_status"
+	ToolKindBrowserTask         ToolKind = "browser_task"
 	ToolKindBrowserTabs         ToolKind = "browser_tabs"
 	ToolKindBrowserNavigation   ToolKind = "browser_navigation"
 	ToolKindBrowserPage         ToolKind = "browser_page"
@@ -249,7 +250,7 @@ var builtinToolKinds = []ToolKind{
 	ToolKindWebSearch,
 	ToolKindMemory,
 	ToolKindMCP,
-	ToolKindBrowserStatus, ToolKindBrowserTabs, ToolKindBrowserNavigation, ToolKindBrowserPage,
+	ToolKindBrowserStatus, ToolKindBrowserTask, ToolKindBrowserTabs, ToolKindBrowserNavigation, ToolKindBrowserPage,
 	ToolKindBrowserInteract, ToolKindBrowserCapture, ToolKindBrowserNetwork,
 	ToolKindBrowserTabList, ToolKindBrowserTabNew, ToolKindBrowserTabClaim,
 	ToolKindBrowserTabSelect, ToolKindBrowserTabClose, ToolKindBrowserNavigate, ToolKindBrowserBack,

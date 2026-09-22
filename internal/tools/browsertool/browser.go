@@ -27,6 +27,7 @@ type tool struct {
 
 var specs = []tool{
 	{tools.BrowserStatus, "Browser status", "Inspect the managed browser's health and this chat's tab count.", object(saveToFileProperty)},
+	{tools.BrowserTask, "Browser task", "Complete a bounded browser goal using the lightweight automation backend first and transparently continue in the managed browser when full compatibility is required. Use this for outcome-level requests such as finding and downloading a product manual, rather than narrating individual navigation and interaction steps.", required(object(`"goal":{"type":"string","description":"The concrete outcome to complete."},"start_url":{"type":"string","description":"Absolute HTTP or HTTPS URL where the task starts."},`+saveToFileProperty), "goal", "start_url")},
 	{tools.BrowserTabList, "List browser pages", "List this chat's browser pages, including tabs and popup windows, plus unowned manual pages without starting Chrome. Pages owned by other chats are hidden.", object(saveToFileProperty)},
 	{tools.BrowserTabNew, "New browser tab", "Create and select a browser tab owned by this chat.", object(`"url":{"type":"string"}`)},
 	{tools.BrowserTabClaim, "Claim browser page", "Atomically claim an unowned manual browser page by its returned opaque ID.", required(object(tabIDProperty), "tab_id")},
@@ -74,7 +75,7 @@ func init() {
 
 func legacyBrowserOperation(kind tools.ID) bool {
 	switch kind {
-	case tools.BrowserStatus, tools.BrowserConsole, tools.BrowserEvaluate:
+	case tools.BrowserStatus, tools.BrowserTask, tools.BrowserConsole, tools.BrowserEvaluate:
 		return false
 	default:
 		return true
@@ -122,6 +123,10 @@ func registerActionTool(kind tools.ID, title, description, parameters string, ro
 func (t tool) ID() tools.ID             { return t.id }
 func (t tool) BypassesPermission() bool { return false }
 func (t tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	if t.id == tools.BrowserTask {
+		_, ok := runtime.Browser.(browserapi.TaskService)
+		return spec, ok
+	}
 	return spec, runtime.Browser != nil
 }
 
@@ -155,11 +160,17 @@ func (t tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 			return nil, fmt.Errorf("target: %w", err)
 		}
 	}
-	if t.id == tools.BrowserNavigate || t.id == tools.BrowserTabNew {
+	if t.id == tools.BrowserNavigate || t.id == tools.BrowserTabNew || t.id == tools.BrowserTask {
 		if raw := out["url"]; raw != "" {
 			parsed, err := url.Parse(raw)
 			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https" && parsed.Scheme != "about" && parsed.Scheme != "file") {
 				return nil, errors.New("url must use http, https, about, or file")
+			}
+		}
+		if raw := out["start_url"]; raw != "" {
+			parsed, err := url.Parse(raw)
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+				return nil, errors.New("start_url must be an absolute HTTP or HTTPS URL")
 			}
 		}
 	}
@@ -192,7 +203,7 @@ func (t tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 }
 
 func (t tool) Preview(req tools.Request) string {
-	for _, key := range []string{"url", "query", "target", "source", "tab_id", "expression", "request_id", "download_id"} {
+	for _, key := range []string{"goal", "start_url", "url", "query", "target", "source", "tab_id", "expression", "request_id", "download_id"} {
 		if value := strings.TrimSpace(req.Args[key]); value != "" {
 			return value
 		}
@@ -208,10 +219,17 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 	chat := browserapi.Chat{SessionID: opts.Runtime.SessionID, ChatID: opts.Runtime.ChatID}
 	args := opts.Request.Args
 	var err error
-	if t.id == tools.BrowserNavigate || t.id == tools.BrowserTabNew {
+	if t.id == tools.BrowserNavigate || t.id == tools.BrowserTabNew || t.id == tools.BrowserTask {
 		if args["url"] != "" {
 			args = maps.Clone(args)
 			args["url"], err = permittedBrowserURL(opts.Runtime, args["url"])
+			if err != nil {
+				return tools.Result{}, err
+			}
+		}
+		if args["start_url"] != "" {
+			args = maps.Clone(args)
+			args["start_url"], err = permittedBrowserURL(opts.Runtime, args["start_url"])
 			if err != nil {
 				return tools.Result{}, err
 			}
@@ -222,6 +240,25 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 	switch t.id {
 	case tools.BrowserStatus:
 		value = service.Status(ctx, chat)
+	case tools.BrowserTask:
+		taskService, ok := service.(browserapi.TaskService)
+		if !ok {
+			return tools.Result{}, errors.New("browser task automation is unavailable")
+		}
+		taskResult, taskErr := taskService.Task(ctx, chat, browserapi.TaskRequest{Goal: args["goal"], StartURL: args["start_url"]})
+		if taskErr != nil {
+			return tools.Result{}, taskErr
+		}
+		if taskResult.File != nil {
+			result, binaryErr := binaryResult(opts, t.id.String(), args["save_to_file"], *taskResult.File, nil)
+			if binaryErr != nil {
+				return tools.Result{}, binaryErr
+			}
+			result.Meta["backend"] = taskResult.Backend
+			result.Meta["source_url"] = taskResult.SourceURL
+			return result, nil
+		}
+		value = taskResult
 	case tools.BrowserTabList:
 		value, err = service.Tabs(ctx, chat)
 	case tools.BrowserTabNew:
@@ -502,6 +539,8 @@ func locatorFromArgs(args map[string]string, prefix string, required bool) (brow
 
 func requiredArgs(kind tools.ID) []string {
 	switch kind {
+	case tools.BrowserTask:
+		return []string{"goal", "start_url"}
 	case tools.BrowserTabClaim, tools.BrowserTabSelect, tools.BrowserTabClose:
 		return []string{"tab_id"}
 	case tools.BrowserNavigate:

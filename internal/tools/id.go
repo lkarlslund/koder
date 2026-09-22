@@ -87,6 +87,7 @@ const (
 	Memory              ID = domain.ToolKindMemory
 	MCP                 ID = domain.ToolKindMCP
 	BrowserStatus       ID = domain.ToolKindBrowserStatus
+	BrowserTask         ID = domain.ToolKindBrowserTask
 	BrowserTabs         ID = domain.ToolKindBrowserTabs
 	BrowserNavigation   ID = domain.ToolKindBrowserNavigation
 	BrowserPage         ID = domain.ToolKindBrowserPage

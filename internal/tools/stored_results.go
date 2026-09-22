@@ -554,7 +554,7 @@ func compactStoredResultForPart(env storedResultEnvelope, diff string, limits Co
 		default:
 			return decodeAndFormat[PresentationStoredResult](env.Payload, formatPresentationStoredResult)
 		}
-	case BrowserStatus, BrowserTabs, BrowserNavigation, BrowserPage, BrowserInteract, BrowserCapture, BrowserNetwork,
+	case BrowserStatus, BrowserTask, BrowserTabs, BrowserNavigation, BrowserPage, BrowserInteract, BrowserCapture, BrowserNetwork,
 		BrowserTabList, BrowserTabNew, BrowserTabClaim, BrowserTabSelect, BrowserTabClose,
 		BrowserNavigate, BrowserBack, BrowserForward, BrowserReload, BrowserSnapshot, BrowserFind,
 		BrowserClick, BrowserFill, BrowserType, BrowserPress, BrowserSelect, BrowserCheck, BrowserUncheck,
@@ -1072,7 +1072,7 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		default:
 			return decodeAndFormat[PresentationStoredResult](env.Payload, formatPresentationStoredResult)
 		}
-	case BrowserStatus, BrowserTabs, BrowserNavigation, BrowserPage, BrowserInteract, BrowserCapture, BrowserNetwork,
+	case BrowserStatus, BrowserTask, BrowserTabs, BrowserNavigation, BrowserPage, BrowserInteract, BrowserCapture, BrowserNetwork,
 		BrowserTabList, BrowserTabNew, BrowserTabClaim, BrowserTabSelect, BrowserTabClose,
 		BrowserNavigate, BrowserBack, BrowserForward, BrowserReload, BrowserSnapshot, BrowserFind,
 		BrowserClick, BrowserFill, BrowserType, BrowserPress, BrowserSelect, BrowserCheck, BrowserUncheck,

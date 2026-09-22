@@ -123,6 +123,19 @@ type DownloadRecord struct {
 	Total    int64  `json:"total_bytes,omitempty"`
 }
 
+type TaskRequest struct {
+	Goal     string
+	StartURL string
+}
+
+type TaskResult struct {
+	Status    string   `json:"status"`
+	Backend   string   `json:"backend"`
+	SourceURL string   `json:"source_url,omitempty"`
+	Trace     []string `json:"trace,omitempty"`
+	File      *Binary  `json:"-"`
+}
+
 type Service interface {
 	Status(context.Context, Chat) Status
 	Start(context.Context) error
@@ -155,4 +168,8 @@ type Service interface {
 	Download(context.Context, Chat, string) (Binary, error)
 	CleanupChat(context.Context, id.ID)
 	CleanupSession(context.Context, id.ID)
+}
+
+type TaskService interface {
+	Task(context.Context, Chat, TaskRequest) (TaskResult, error)
 }

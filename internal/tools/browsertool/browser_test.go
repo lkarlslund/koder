@@ -84,6 +84,25 @@ func TestBrowserDefinitionsRequireRuntimeService(t *testing.T) {
 	if _, enabled := tools.DefinitionFor(tools.BrowserStatus, tools.Runtime{Browser: fakeBrowser{}}); !enabled {
 		t.Fatal("browser definition should be exposed with browser service")
 	}
+	if _, enabled := tools.DefinitionFor(tools.BrowserTask, tools.Runtime{Browser: fakeBrowser{}}); enabled {
+		t.Fatal("browser task should be hidden when the browser lacks task capability")
+	}
+	if _, enabled := tools.DefinitionFor(tools.BrowserTask, tools.Runtime{Browser: taskBrowser{}}); !enabled {
+		t.Fatal("browser task should be exposed with task capability")
+	}
+}
+
+func TestBrowserTaskRequiresGoalAndAbsoluteStartURL(t *testing.T) {
+	task := tool{id: tools.BrowserTask}
+	if _, err := task.NormalizeArgs(map[string]string{"start_url": "https://example.com"}); err == nil {
+		t.Fatal("browser task accepted an empty goal")
+	}
+	if _, err := task.NormalizeArgs(map[string]string{"goal": "find manual", "start_url": "/support"}); err == nil {
+		t.Fatal("browser task accepted a relative start URL")
+	}
+	if _, err := task.NormalizeArgs(map[string]string{"goal": "find manual", "start_url": "https://example.com/support"}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestBrowserDefinitionsExposeResourceTools(t *testing.T) {
@@ -373,6 +392,12 @@ func (savingBrowser) ResponseBody(context.Context, browserapi.Chat, string) (bro
 }
 
 type fakeBrowser struct{}
+
+type taskBrowser struct{ fakeBrowser }
+
+func (taskBrowser) Task(context.Context, browserapi.Chat, browserapi.TaskRequest) (browserapi.TaskResult, error) {
+	return browserapi.TaskResult{Status: "needs_browser", Backend: "chrome"}, nil
+}
 
 func (fakeBrowser) Status(context.Context, browserapi.Chat) browserapi.Status {
 	return browserapi.Status{}

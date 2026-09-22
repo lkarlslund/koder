@@ -20,6 +20,12 @@ or an MCP browser server.
 
 ## Workflow
 
+For a concrete multi-step outcome, prefer one `browser_task` call with a goal and
+starting URL. Examples include finding and downloading a product manual. Koder
+selects its lightweight or full browser backend internally. Use the lower-level
+workflow below when the task needs user-visible interaction, the task tool hands
+off an incompatible page, or individual browser state must be diagnosed.
+
 1. Use `browser_tabs` with `action=list`, then create, claim, or select a tab through the same tool.
 2. Navigate with `browser_navigation` and `action=goto`.
 3. Use `browser_page` with `action=snapshot` or `action=find` when an informational view of the

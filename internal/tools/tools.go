@@ -386,7 +386,7 @@ func checkRuntimeAccess(runtime Runtime, req Request) error {
 		BrowserClick, BrowserFill, BrowserType, BrowserPress, BrowserSelect, BrowserCheck, BrowserUncheck,
 		BrowserHover, BrowserDrag, BrowserScroll:
 		return runtime.CheckNetworkAccess()
-	case BrowserStatus, BrowserTabList, BrowserSnapshot, BrowserFind, BrowserWait, BrowserEvaluate, BrowserScreenshot, BrowserImage,
+	case BrowserStatus, BrowserTask, BrowserTabList, BrowserSnapshot, BrowserFind, BrowserWait, BrowserEvaluate, BrowserScreenshot, BrowserImage,
 		BrowserPDF, BrowserConsole, BrowserRequests, BrowserRequest, BrowserResponseBody, BrowserDownloads,
 		BrowserDownload:
 		if err := runtime.CheckNetworkAccess(); err != nil {

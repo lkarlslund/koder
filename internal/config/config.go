@@ -111,6 +111,9 @@ type Browser struct {
 	OperationTimeout time.Duration `toml:"operation_timeout"`
 	MaxTabsPerChat   int           `toml:"max_tabs_per_chat"`
 	MaxTabsGlobal    int           `toml:"max_tabs_global"`
+	TaskEngine       string        `toml:"task_engine"`
+	TaskDecisionURL  string        `toml:"task_decision_url"`
+	TaskMaxSteps     int           `toml:"task_max_steps"`
 }
 
 // Codex configures the per-chat Codex app-server turn backend. Authentication
@@ -236,6 +239,7 @@ const defaultCavemanParallelism = 1
 const defaultBrowserTimeout = 30 * time.Second
 const defaultBrowserTabsPerChat = 8
 const defaultBrowserTabsGlobal = 32
+const defaultBrowserTaskMaxSteps = 8
 const DefaultCavemanMinTokens = 64
 const maxCompactionKeepToolCalls = 10
 const oldDefaultCavemanThinkingPrompt = "Rewrite the following model thinking as concise caveman talk. Remove unnecessary filler words. Keep only useful intent, constraints, and decisions. Return only the rewritten thinking.\n\nThinking:\n{{thinking}}"
@@ -343,6 +347,9 @@ func Default() Config {
 			OperationTimeout: defaultBrowserTimeout,
 			MaxTabsPerChat:   defaultBrowserTabsPerChat,
 			MaxTabsGlobal:    defaultBrowserTabsGlobal,
+			TaskEngine:       "obscura",
+			TaskDecisionURL:  "http://127.0.0.1:8004/v1/systemone",
+			TaskMaxSteps:     defaultBrowserTaskMaxSteps,
 		},
 		Codex:      Codex{Enabled: true, Executable: "codex"},
 		Providers:  map[string]Provider{},
@@ -423,6 +430,20 @@ func (c *Config) applyDefaults() {
 		c.MaxChildChats = def.MaxChildChats
 	}
 	c.Browser.Executable = strings.TrimSpace(c.Browser.Executable)
+	c.Browser.TaskEngine = strings.TrimSpace(c.Browser.TaskEngine)
+	if c.Browser.TaskEngine == "" {
+		c.Browser.TaskEngine = def.Browser.TaskEngine
+	}
+	c.Browser.TaskDecisionURL = strings.TrimSpace(c.Browser.TaskDecisionURL)
+	if c.Browser.TaskDecisionURL == "" {
+		c.Browser.TaskDecisionURL = def.Browser.TaskDecisionURL
+	}
+	if c.Browser.TaskMaxSteps <= 0 {
+		c.Browser.TaskMaxSteps = def.Browser.TaskMaxSteps
+	}
+	if c.Browser.TaskMaxSteps > 32 {
+		c.Browser.TaskMaxSteps = 32
+	}
 	if c.Browser.OperationTimeout <= 0 {
 		c.Browser.OperationTimeout = def.Browser.OperationTimeout
 	}

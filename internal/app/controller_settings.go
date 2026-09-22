@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1310,7 +1311,7 @@ func applyCodexPreferences(cfg *config.Config, prefs CodexPreferences) error {
 }
 
 func nativeBrowserPreferencesFromConfig(cfg config.Browser) NativeBrowserPreferences {
-	return NativeBrowserPreferences{Enabled: cfg.Enabled, Executable: cfg.Executable, Headed: cfg.Headed, OperationTimeout: int(cfg.OperationTimeout / time.Second), MaxTabsPerChat: cfg.MaxTabsPerChat, MaxTabsGlobal: cfg.MaxTabsGlobal}
+	return NativeBrowserPreferences{Enabled: cfg.Enabled, Executable: cfg.Executable, Headed: cfg.Headed, OperationTimeout: int(cfg.OperationTimeout / time.Second), MaxTabsPerChat: cfg.MaxTabsPerChat, MaxTabsGlobal: cfg.MaxTabsGlobal, TaskEngine: cfg.TaskEngine, TaskDecisionURL: cfg.TaskDecisionURL, TaskMaxSteps: cfg.TaskMaxSteps}
 }
 
 func nativeBrowserRuntimeState(engine *agent.Engine) browserapi.Status {
@@ -1330,7 +1331,28 @@ func applyNativeBrowserPreferences(cfg *config.Config, prefs NativeBrowserPrefer
 	if prefs.MaxTabsPerChat < 1 || prefs.MaxTabsGlobal < prefs.MaxTabsPerChat {
 		return fmt.Errorf("browser global tab limit must be at least the per-chat limit")
 	}
-	cfg.Browser = config.Browser{Enabled: prefs.Enabled, Executable: strings.TrimSpace(prefs.Executable), Headed: prefs.Headed, OperationTimeout: time.Duration(prefs.OperationTimeout) * time.Second, MaxTabsPerChat: prefs.MaxTabsPerChat, MaxTabsGlobal: prefs.MaxTabsGlobal}
+	if prefs.TaskMaxSteps == 0 {
+		prefs.TaskMaxSteps = cfg.Browser.TaskMaxSteps
+	}
+	if prefs.TaskMaxSteps < 1 || prefs.TaskMaxSteps > 32 {
+		return fmt.Errorf("browser task step limit must be between 1 and 32")
+	}
+	taskEngine := strings.TrimSpace(prefs.TaskEngine)
+	if taskEngine == "" {
+		taskEngine = cfg.Browser.TaskEngine
+	}
+	if taskEngine != "obscura" && taskEngine != "chrome" {
+		return fmt.Errorf("browser task engine must be obscura or chrome")
+	}
+	taskDecisionURL := strings.TrimSpace(prefs.TaskDecisionURL)
+	if taskDecisionURL == "" {
+		taskDecisionURL = cfg.Browser.TaskDecisionURL
+	}
+	parsedDecisionURL, err := url.Parse(taskDecisionURL)
+	if err != nil || parsedDecisionURL.Host == "" || (parsedDecisionURL.Scheme != "http" && parsedDecisionURL.Scheme != "https") {
+		return fmt.Errorf("browser task decision URL must be an absolute HTTP or HTTPS URL")
+	}
+	cfg.Browser = config.Browser{Enabled: prefs.Enabled, Executable: strings.TrimSpace(prefs.Executable), Headed: prefs.Headed, OperationTimeout: time.Duration(prefs.OperationTimeout) * time.Second, MaxTabsPerChat: prefs.MaxTabsPerChat, MaxTabsGlobal: prefs.MaxTabsGlobal, TaskEngine: taskEngine, TaskDecisionURL: taskDecisionURL, TaskMaxSteps: prefs.TaskMaxSteps}
 	return nil
 }
 
@@ -2309,7 +2331,7 @@ func toolDefaultGroup(kind tools.ID) (string, string) {
 		return "task", "Task"
 	case tools.ViewImage, tools.ViewPDF, tools.ShowImage, tools.ShowMedia, tools.Present:
 		return "image", "Image"
-	case tools.BrowserStatus, tools.BrowserTabs, tools.BrowserNavigation, tools.BrowserPage, tools.BrowserInteract, tools.BrowserCapture, tools.BrowserConsole, tools.BrowserEvaluate, tools.BrowserNetwork, tools.BrowserDownloads:
+	case tools.BrowserStatus, tools.BrowserTask, tools.BrowserTabs, tools.BrowserNavigation, tools.BrowserPage, tools.BrowserInteract, tools.BrowserCapture, tools.BrowserConsole, tools.BrowserEvaluate, tools.BrowserNetwork, tools.BrowserDownloads:
 		return "browser", "Browser"
 	case tools.PhoneDevice, tools.PhoneLocation, tools.PhoneContacts, tools.PhoneCalendar, tools.PhoneMessages, tools.PhoneCalls, tools.PhoneNotifications, tools.PhoneClock, tools.PhoneClipboard, tools.PhoneApps, tools.PhoneMedia, tools.PhoneShare, tools.PhoneOpen, tools.PhonePhotos:
 		return "phone", "Phone"

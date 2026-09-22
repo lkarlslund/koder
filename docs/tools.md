@@ -5,8 +5,8 @@ operations use a stable resource name plus an `action` argument. Operations with
 materially different domains remain separate resources even when one client
 implements all of them.
 
-The normal Koder chat surface is 29 built-in names when the browser is available.
-The stock ceiling is 44 when every browser and connected-phone resource is
+The normal Koder chat surface is 30 built-in names when the browser is available.
+The stock ceiling is 45 when every browser and connected-phone resource is
 counted. A particular request receives only the subset allowed by its workflow
 role, interaction mode, session settings, and live runtime capabilities.
 
@@ -22,6 +22,7 @@ runtime resource:
 | `chats` | `list`, `start`, `send`, `cancel`, `archive`, `restore`, `rename`, `cleanup` |
 | `exec_session` | `list`, `status`, `wait`, `send_input`, `resize`, `terminate`, `cleanup` |
 | `browser_tabs` | `list`, `create`, `claim`, `select`, `close` |
+| `browser_task` | Complete one bounded outcome using lightweight automation with managed-browser fallback |
 | `browser_navigation` | `goto`, `back`, `forward`, `reload` |
 | `browser_page` | `snapshot`, `find`, `wait` |
 | `browser_interact` | `click`, `fill`, `type`, `press`, `select`, `check`, `uncheck`, `hover`, `drag`, `scroll`, `upload` |
@@ -52,6 +53,8 @@ Some operations intentionally remain first-class tools:
   user-facing.
 - `chat_status` describes the current chat and is independent of chat lifecycle
   state.
+- `browser_task` owns a complete bounded workflow and a verified file result;
+  it is not an action on a page resource. Koder selects its browser backend.
 
 `view_pdf` is advertised only when Poppler's `pdfinfo` and `pdftoppm` commands
 are installed. On Debian-derived systems they are provided by `poppler-utils`.
