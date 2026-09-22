@@ -41,6 +41,11 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 		Stick     bool    `json:"stick"`
 		Count     int     `json:"count"`
 	}
+	var stickyStreamResult struct {
+		BottomGap        float64 `json:"bottomGap"`
+		Stick            bool    `json:"stick"`
+		UserScrollActive bool    `json:"userScrollActive"`
+	}
 	var markdownTableResult struct {
 		ClientWidth    float64 `json:"clientWidth"`
 		ScrollWidth    float64 `json:"scrollWidth"`
@@ -176,11 +181,11 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 			const anchoredItemID = anchor.itemID;
 			const first = transcript.querySelector('[data-timeline-item-id="anchor-0"]');
 			first.style.height = '320px';
-			app.restoreTranscriptScroll(anchor);
+			app.reconcileTranscriptScroll(anchor);
 			const anchoredTop = transcript.scrollTop;
 			anchor.itemID = 'missing-anchor';
 			anchor.top = 75;
-			app.restoreTranscriptScroll(anchor);
+			app.reconcileTranscriptScroll(anchor);
 			const fallbackTop = transcript.scrollTop;
 			app.transcriptStickToBottom = true;
 			transcript.scrollTop = transcript.scrollHeight;
@@ -190,7 +195,7 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 			tail.dataset.timelineItemId = 'anchor-tail';
 			tail.style.cssText = 'display:block;height:120px;min-height:120px';
 			transcript.append(tail);
-			app.restoreTranscriptScroll(sticky);
+			app.reconcileTranscriptScroll(sticky);
 			const result = {
 				itemID: anchoredItemID,
 				top: anchoredTop,
@@ -315,8 +320,9 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 			app.state.Snapshot = snapshot;
 			app.$nextTick(() => requestAnimationFrame(async () => {
 				const transcript = app.transcriptElement();
-				transcript.scrollTop = transcript.scrollHeight;
 				app.setTranscriptStickToBottom(false);
+				transcript.scrollTop = transcript.scrollHeight;
+				app.updateTranscriptStickiness();
 				const scroll = app.transcriptScrollState();
 				const newer = Array.from({length: 10}, (_, index) => makeItem('tail-newer', index));
 				await app.mergeTimelinePage({chat_id: chatID, items: newer, has_more: true, has_newer: false}, {append: true, scroll});
@@ -329,6 +335,34 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 		})()`, nil),
 		chromedp.Poll(`window.__paginationTailResult !== null`, nil),
 		chromedp.Evaluate(`window.__paginationTailResult`, &paginationTailResult),
+		chromedp.Evaluate(`(() => {
+			const app = document.documentElement._x_dataStack[0];
+			window.__stickyStreamResult = null;
+			const originalTimelineHasNewer = app.timelineHasNewer;
+			app.timelineHasNewer = () => false;
+			app.transcriptUserScrollActive = false;
+			const button = document.querySelector('.timeline-latest-button');
+			button.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true}));
+			app.setTranscriptStickToBottom(true);
+			app.reconcileTranscriptScroll(null, {mode: 'bottom'});
+			requestAnimationFrame(() => requestAnimationFrame(async () => {
+				const transcript = app.transcriptElement();
+				const tail = transcript.querySelector('.transcript-turn:last-of-type');
+				for (let index = 0; index < 3; index++) {
+					tail.style.minHeight = (tail.getBoundingClientRect().height + 100) + 'px';
+					app.reconcileTranscriptScroll(null, {mode: 'bottom'});
+					await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+				}
+				window.__stickyStreamResult = {
+					bottomGap: app.transcriptBottomDistance(transcript),
+					stick: app.transcriptStickToBottom,
+					userScrollActive: app.transcriptUserScrollActive,
+				};
+				app.timelineHasNewer = originalTimelineHasNewer;
+			}));
+		})()`, nil),
+		chromedp.Poll(`window.__stickyStreamResult !== null`, nil),
+		chromedp.Evaluate(`window.__stickyStreamResult`, &stickyStreamResult),
 	); err != nil {
 		t.Fatalf("enhance replacement Markdown media: %v", err)
 	}
@@ -349,5 +383,8 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 	}
 	if paginationTailResult.BottomGap != 0 || !paginationTailResult.Stick || paginationTailResult.Count != 20 {
 		t.Fatalf("pagination tail = %+v, want appended final page pinned to the bottom with sticky scrolling restored", paginationTailResult)
+	}
+	if stickyStreamResult.BottomGap != 0 || !stickyStreamResult.Stick || stickyStreamResult.UserScrollActive {
+		t.Fatalf("sticky stream = %+v, want latest-button clicks and repeated tail growth to remain pinned without fake user scrolling", stickyStreamResult)
 	}
 }

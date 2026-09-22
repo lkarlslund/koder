@@ -75,7 +75,7 @@
       </section>
     </main>
 
-    <main class="transcript p-3" x-show="sessionLoadedMode()" x-ref="transcript" tabindex="0" @scroll.passive="onTranscriptScroll()" @wheel.passive="onTranscriptWheel($event)" @pointerdown="markTranscriptUserScrollIntent()" @keydown="onTranscriptKeydown($event)">
+    <main class="transcript p-3" x-show="sessionLoadedMode()" x-ref="transcript" tabindex="0" @scroll.passive="onTranscriptScroll()" @wheel.passive="onTranscriptWheel($event)" @pointerdown.self="markTranscriptUserScrollIntent()" @keydown="onTranscriptKeydown($event)">
       <div class="chat-switch-overlay" x-show="switchingChatMode()" x-transition.opacity style="display: none;" aria-live="polite">
         <div class="chat-switch-panel">
           <span class="spinner-border spinner-border-sm text-primary" aria-hidden="true"></span>

@@ -2476,7 +2476,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `timelineMarkdownHTML(item`) ||
 		!strings.Contains(fullPage, `renderTimelineMarkdownElement($el, item`) ||
 		!strings.Contains(fullPage, `transcriptScrollOperation`) ||
-		!strings.Contains(fullPage, `if (this.restoreTranscriptScrollAnchor(scroll)) return`) ||
+		!strings.Contains(fullPage, `transcriptScrollAnchorTop(scroll)`) ||
 		!strings.Contains(fullPage, `scrollTranscriptToBottom()`) ||
 		!strings.Contains(fullPage, `getBoundingClientRect()`) ||
 		!strings.Contains(fullPage, `return this.timeline();`) ||
@@ -2591,8 +2591,8 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `@click="scrollTranscriptToBottom()"`) {
 		t.Fatalf("expected timeline paging to anchor at insertion time with non-shifting loading and latest controls")
 	}
-	if !strings.Contains(fullPage, `scroll.stickToBottom`) || !strings.Contains(fullPage, `scrollTranscriptToBottom()`) ||
-		!strings.Contains(fullPage, `restoreTranscriptTop(scroll.top)`) || !strings.Contains(fullPage, `ResizeObserver`) ||
+	if !strings.Contains(fullPage, `scroll?.stickToBottom`) || !strings.Contains(fullPage, `scrollTranscriptToBottom()`) ||
+		!strings.Contains(fullPage, `reconcileTranscriptScroll(scroll`) || !strings.Contains(fullPage, `ResizeObserver`) ||
 		!strings.Contains(fullPage, `observeLastTranscriptItem()`) {
 		t.Fatalf("expected transcript to follow only with bottom intent and monitor last-item height")
 	}
@@ -2611,7 +2611,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `const callbacks = this.transcriptDOMUpdateCallbacks.splice(0);`) ||
 		!strings.Contains(fullPage, `scheduleTranscriptEnhancement`) ||
 		!strings.Contains(fullPage, `captureTranscriptScrollAnchor`) ||
-		!strings.Contains(fullPage, `restoreTranscriptScrollAnchor`) ||
+		!strings.Contains(fullPage, `transcriptScrollAnchorTop`) ||
 		!strings.Contains(fullPage, `return renderMermaidDiagrams(root, {configure: configureMermaid}).then`) {
 		t.Fatalf("expected transcript updates to batch media enhancement independently from scroll restoration")
 	}

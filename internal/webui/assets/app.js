@@ -1820,7 +1820,7 @@
           this.error = this.state.error || '';
           this.syncInterruptArmed();
           this.afterTranscriptDOMUpdate(() => {
-            if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
+            if (seq === this.scrollRestoreSeq) this.reconcileTranscriptScroll(scroll);
           });
           this.reportClientStateSoon();
         },
@@ -1999,7 +1999,7 @@
           this.syncInterruptArmed();
           if (active) {
             this.afterTranscriptDOMUpdate(() => {
-              if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
+              if (seq === this.scrollRestoreSeq) this.reconcileTranscriptScroll(scroll);
             });
           }
           this.reportClientStateSoon();
@@ -2152,7 +2152,7 @@
             event.preventDefault();
             this.scrollRestoreSeq++;
             this.setTranscriptStickToBottom(false);
-            this.restoreTranscriptTop(0);
+            this.reconcileTranscriptScroll(null, {mode: 'top', top: 0});
             this.loadOlderTimeline();
             return;
           }
@@ -2184,40 +2184,22 @@
             this.reportClientStateSoon();
             return true;
           }
-          this.setTranscriptStickToBottom(!this.timelineHasNewer() && this.transcriptNearBottom(el));
+          this.setTranscriptStickToBottom(this.transcriptNearBottom(el));
           return this.transcriptStickToBottom;
         },
         scrollTranscriptToBottom() {
           const el = this.transcriptElement();
           if (!el) return;
+          this.transcriptUserScrollActive = false;
+          if (this.transcriptUserScrollTimer) clearTimeout(this.transcriptUserScrollTimer);
+          this.transcriptUserScrollTimer = null;
+          this.scrollRestoreSeq++;
+          this.setTranscriptStickToBottom(true);
           if (this.timelineHasNewer()) {
             this.loadLatestTimeline();
             return;
           }
-          this.setTranscriptStickToBottom(true);
-          const operation = ++this.transcriptScrollOperation;
-          this.transcriptProgrammaticScroll = true;
-          el.scrollTop = el.scrollHeight;
-          requestAnimationFrame(() => {
-            if (operation !== this.transcriptScrollOperation) return;
-            const current = this.transcriptElement();
-            if (current && this.transcriptStickToBottom) current.scrollTop = current.scrollHeight;
-            setTimeout(() => {
-              if (operation === this.transcriptScrollOperation) this.transcriptProgrammaticScroll = false;
-            }, 0);
-          });
-        },
-        restoreTranscriptTop(top) {
-          const el = this.transcriptElement();
-          if (!el) return;
-          const operation = ++this.transcriptScrollOperation;
-          this.transcriptProgrammaticScroll = true;
-          el.scrollTop = Number(top || 0);
-          requestAnimationFrame(() => {
-            setTimeout(() => {
-              if (operation === this.transcriptScrollOperation) this.transcriptProgrammaticScroll = false;
-            }, 0);
-          });
+          this.reconcileTranscriptScroll(null, {mode: 'bottom'});
         },
         timelineHasMore() {
           const snapshot = this.activeSnapshot();
@@ -2353,22 +2335,15 @@
                 const el = this.transcriptElement();
                 if (!el) return;
                 if (options.replace) {
-                  if (options.scrollToBottom) this.scrollTranscriptToBottom();
-                  else {
-                    this.setTranscriptStickToBottom(false);
-                    this.restoreTranscriptTop(Number.isFinite(options.scrollTop) ? options.scrollTop : 0);
+                  if (options.scrollToBottom) {
+                    this.setTranscriptStickToBottom(true);
+                    this.reconcileTranscriptScroll(null, {mode: 'bottom'});
                   }
+                  else this.reconcileTranscriptScroll(options.scroll);
                   return;
                 }
-                if (options.append && options.scroll?.nearBottom) {
-                  if (this.timelineHasNewer()) {
-                    this.setTranscriptStickToBottom(false);
-                    this.restoreTranscriptTop(el.scrollHeight);
-                  } else {
-                    this.scrollTranscriptToBottom();
-                  }
-                } else if (options.prepend || options.append) {
-                  this.restoreTranscriptScroll(options.scroll);
+                if (options.prepend || options.append) {
+                  this.reconcileTranscriptScroll(options.scroll);
                 }
               } finally {
                 resolve();
@@ -2417,7 +2392,7 @@
             const anchor = this.captureTranscriptScrollAnchor();
             Promise.resolve(this.enhanceTranscript()).then(() => {
               this.observeLastTranscriptItem();
-              this.afterTranscriptDOMUpdate(() => this.restoreTranscriptScrollAnchor(anchor));
+              this.afterTranscriptDOMUpdate(() => this.reconcileTranscriptScroll(anchor));
             });
           });
         },
@@ -2439,16 +2414,15 @@
           anchor.offset = row.getBoundingClientRect().top - viewportTop;
           return anchor;
         },
-        restoreTranscriptScrollAnchor(anchor) {
+        transcriptScrollAnchorTop(anchor) {
           const el = this.transcriptElement();
-          if (!el || !anchor || anchor.stickToBottom || anchor.seq !== this.scrollRestoreSeq || this.transcriptStickToBottom) return false;
+          if (!el || !anchor || anchor.stickToBottom || anchor.seq !== this.scrollRestoreSeq || this.transcriptStickToBottom) return null;
           const escapedID = window.CSS?.escape ? CSS.escape(anchor.itemID) : String(anchor.itemID || '').replace(/["\\]/g, '\\$&');
           const row = escapedID ? el.querySelector('.transcript-turn[data-timeline-item-id="' + escapedID + '"]') : null;
-          if (!row) return false;
+          if (!row) return null;
           const offset = row.getBoundingClientRect().top - el.getBoundingClientRect().top;
           const delta = offset - Number(anchor.offset || 0);
-          if (Math.abs(delta) >= 1) this.restoreTranscriptTop(el.scrollTop + delta);
-          return true;
+          return Math.abs(delta) >= 1 ? el.scrollTop + delta : el.scrollTop;
         },
         lastTranscriptItemElement() {
           const root = this.transcriptElement();
@@ -2476,7 +2450,7 @@
             const nextHeight = this.transcriptItemHeight(row);
             if (nextHeight === this.transcriptObservedLastItemHeight) return;
             this.transcriptObservedLastItemHeight = nextHeight;
-            if (this.transcriptStickToBottom) this.scrollTranscriptToBottom();
+            if (this.transcriptStickToBottom) this.reconcileTranscriptScroll(null, {mode: 'bottom'});
           });
           this.transcriptLastItemObserver.observe(row);
         },
@@ -2535,15 +2509,31 @@
             wrapper.appendChild(button);
           });
         },
-        restoreTranscriptScroll(scroll, options = {}) {
+        reconcileTranscriptScroll(scroll, options = {}) {
           const el = this.transcriptElement();
-          if (!el || !scroll || (scroll.seq !== undefined && scroll.seq !== this.scrollRestoreSeq)) return;
-          if (options.scrollToBottom || scroll.stickToBottom) {
-            this.scrollTranscriptToBottom();
-            return;
+          if (!el) return;
+          const mode = options.mode || (this.transcriptStickToBottom || options.scrollToBottom || scroll?.stickToBottom ? 'bottom' : 'anchor');
+          if (mode === 'anchor' && (!scroll || (scroll.seq !== undefined && scroll.seq !== this.scrollRestoreSeq))) return;
+          let top;
+          if (mode === 'bottom') {
+            top = el.scrollHeight;
+          } else if (mode === 'top') {
+            top = Number(options.top || 0);
+          } else {
+            top = this.transcriptScrollAnchorTop(scroll);
+            if (top === null) top = Number(scroll.top || 0);
           }
-          if (this.restoreTranscriptScrollAnchor(scroll)) return;
-          this.restoreTranscriptTop(scroll.top);
+          const operation = ++this.transcriptScrollOperation;
+          this.transcriptProgrammaticScroll = true;
+          el.scrollTop = top;
+          requestAnimationFrame(() => {
+            if (operation !== this.transcriptScrollOperation) return;
+            const current = this.transcriptElement();
+            if (current && mode === 'bottom' && this.transcriptStickToBottom) current.scrollTop = current.scrollHeight;
+            setTimeout(() => {
+              if (operation === this.transcriptScrollOperation) this.transcriptProgrammaticScroll = false;
+            }, 0);
+          });
         },
         applyState(s, options = {}) {
           const seq = ++this.scrollRestoreSeq;
@@ -2578,7 +2568,7 @@
           if (!this.restoreSelectedChat()) this.writeSelectedChat();
           this.restoreComposerDraftForActiveChat();
           this.afterTranscriptDOMUpdate(() => {
-            if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll, options);
+            if (seq === this.scrollRestoreSeq) this.reconcileTranscriptScroll(scroll, options);
           });
           this.reportClientStateSoon();
         },
