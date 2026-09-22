@@ -225,6 +225,8 @@ func TestServerServesSessionFileBrowserRoute(t *testing.T) {
 		`image-lightbox-img`,
 		`Download file`,
 		`downloadFileURL(file.path)`,
+		`file-browser-resizer`,
+		`startTreeResize($event)`,
 		currentAssetHash,
 	} {
 		if !strings.Contains(text, want) {
@@ -235,8 +237,9 @@ func TestServerServesSessionFileBrowserRoute(t *testing.T) {
 	fileBrowserJS := getAssetBody(t, srv, "/assets/file_browser.js")
 	if !strings.Contains(markdownRuntimeJS, `window.KoderMarkdownRuntime`) ||
 		!strings.Contains(fileBrowserJS, `window.KoderMarkdownRuntime`) ||
-		!strings.Contains(fileBrowserJS, `return renderMermaidDiagrams(root, {`) {
-		t.Fatalf("expected the file browser to consume the shared Markdown runtime")
+		!strings.Contains(fileBrowserJS, `return renderMermaidDiagrams(root, {`) ||
+		!strings.Contains(fileBrowserJS, `writeFileBrowserPreference('fileTreeRatio'`) {
+		t.Fatalf("expected the file browser to consume shared Markdown rendering and persist its tree split")
 	}
 }
 

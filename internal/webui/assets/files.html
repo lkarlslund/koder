@@ -39,7 +39,7 @@
       </div>
     </nav>
 
-    <div class="file-browser-layout">
+    <div class="file-browser-layout" :style="fileBrowserLayoutStyle()">
       <aside class="file-browser-tree-pane">
         <div class="file-browser-tree-header">
           <span class="small text-secondary">Files</span>
@@ -57,6 +57,8 @@
           </template>
         </div>
       </aside>
+
+      <div class="file-browser-resizer" :class="{resizing: resizingTree}" role="separator" aria-orientation="vertical" aria-label="Resize file tree" @pointerdown="startTreeResize($event)"></div>
 
       <main class="file-browser-main">
         <template x-if="!selectedPath && !fileLoading">

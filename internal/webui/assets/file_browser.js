@@ -8,6 +8,14 @@
     return (value / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
+  function readFileBrowserPreference(name, fallback) {
+    try { return localStorage.getItem('koder.' + name) ?? fallback; } catch (_) { return fallback; }
+  }
+
+  function writeFileBrowserPreference(name, value) {
+    try { localStorage.setItem('koder.' + name, String(value)); } catch (_) {}
+  }
+
   function isExternalResourceURL(value) {
     const src = String(value || '').trim();
     return !src || src.startsWith('#') || src.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(src);
@@ -87,6 +95,8 @@
       sendStatusKind: 'secondary',
       sendBusy: false,
       viewMode: 'preview',
+      treeRatio: Number(readFileBrowserPreference('fileTreeRatio', '0.26')),
+      resizingTree: false,
       childrenByPath: {},
       expanded: {},
       imageLightbox: {open: false, kind: 'svg', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
@@ -111,6 +121,42 @@
           }
         });
         document.addEventListener('click', event => this.handleMediaPreviewClick(event));
+        this.clampTreeRatio();
+      },
+
+      fileBrowserLayoutStyle() {
+        const width = window.innerWidth || 1440;
+        const treeWidth = Math.round(Math.max(240, Math.min(720, width * this.treeRatio)));
+        return '--file-tree-width: ' + treeWidth + 'px;';
+      },
+
+      clampTreeRatio() {
+        if (!Number.isFinite(this.treeRatio)) this.treeRatio = 0.26;
+        this.treeRatio = Math.max(0.15, Math.min(0.55, this.treeRatio));
+      },
+
+      startTreeResize(event) {
+        if ((window.innerWidth || 0) <= 760) return;
+        event.preventDefault();
+        this.resizingTree = true;
+        const layout = event.currentTarget?.parentElement;
+        const move = pointerEvent => {
+          const rect = layout?.getBoundingClientRect();
+          if (!rect || rect.width <= 0) return;
+          this.treeRatio = Math.max(0.15, Math.min(0.55, (pointerEvent.clientX - rect.left) / rect.width));
+        };
+        const stop = () => {
+          this.resizingTree = false;
+          this.clampTreeRatio();
+          writeFileBrowserPreference('fileTreeRatio', this.treeRatio.toFixed(4));
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', stop);
+          window.removeEventListener('pointercancel', stop);
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', stop);
+        window.addEventListener('pointercancel', stop);
+        move(event);
       },
 
       sessionURL() {

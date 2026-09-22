@@ -17,7 +17,7 @@ html, body {
 
 .file-browser-layout {
   display: grid;
-  grid-template-columns: minmax(16rem, 24rem) minmax(0, 1fr);
+  grid-template-columns: var(--file-tree-width, 24rem) 6px minmax(0, 1fr);
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -27,8 +27,21 @@ html, body {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  border-right: 1px solid var(--bs-border-color);
   background: var(--bs-tertiary-bg);
+}
+
+.file-browser-resizer {
+  min-height: 0;
+  cursor: col-resize;
+  background: var(--bs-border-color);
+  opacity: .55;
+  touch-action: none;
+}
+
+.file-browser-resizer:hover,
+.file-browser-resizer.resizing {
+  background: var(--bs-primary);
+  opacity: 1;
 }
 
 .file-browser-tree-header {
@@ -197,6 +210,10 @@ html, body {
   .file-browser-layout {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(12rem, 38vh) minmax(0, 1fr);
+  }
+
+  .file-browser-resizer {
+    display: none;
   }
 
   .file-browser-tree-pane {
