@@ -2237,6 +2237,10 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `.markdown-body code { color: #c9d1d9; background: #0d1117;`) {
 		t.Fatalf("expected inline markdown code to use GitHub dark colors")
 	}
+	if !strings.Contains(fullPage, `.markdown-body table { display: block; width: max-content; min-width: 100%; max-width: 100%; overflow-x: auto;`) ||
+		!strings.Contains(fullPage, `overflow-wrap: normal; word-break: normal;`) {
+		t.Fatalf("expected wide Markdown tables to scroll without collapsing cell words")
+	}
 	if !strings.Contains(fullPage, `katex.renderToString`) ||
 		!strings.Contains(fullPage, `renderMathInHTML(html)`) ||
 		!strings.Contains(fullPage, `containsMarkdownMath`) ||

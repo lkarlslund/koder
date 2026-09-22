@@ -211,8 +211,8 @@
     .markdown-body p, .markdown-body ul, .markdown-body ol, .markdown-body table, .markdown-body pre { margin-bottom: .75rem; }
     .markdown-body ul, .markdown-body ol { padding-left: 1.4rem; }
     .markdown-body li + li { margin-top: .2rem; }
-    .markdown-body table { width: 100%; border-collapse: collapse; display: block; overflow-x: auto; }
-    .markdown-body th, .markdown-body td { border: 1px solid var(--bs-border-color); padding: .35rem .5rem; vertical-align: top; }
+    .markdown-body table { display: block; width: max-content; min-width: 100%; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+    .markdown-body th, .markdown-body td { border: 1px solid var(--bs-border-color); padding: .35rem .5rem; vertical-align: top; overflow-wrap: normal; word-break: normal; }
     .markdown-body th { background: var(--bs-secondary-bg); font-weight: 600; }
     .markdown-body code { color: #c9d1d9; background: #0d1117; border-radius: .25rem; padding: .1rem .25rem; }
     .markdown-body pre { background: #0d1117; color: #c9d1d9; border-radius: .45rem; padding: .75rem; overflow: auto; white-space: pre; }

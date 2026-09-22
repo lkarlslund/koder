@@ -36,6 +36,11 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 		Count        int     `json:"count"`
 		LatestShown  bool    `json:"latestShown"`
 	}
+	var markdownTableResult struct {
+		ClientWidth    float64 `json:"clientWidth"`
+		ScrollWidth    float64 `json:"scrollWidth"`
+		FirstCellWidth float64 `json:"firstCellWidth"`
+	}
 	chromium := memoryBrowserChromium(t)
 	ctrl := newTestController(t)
 	state := selectedTestState(t, ctrl)
@@ -64,6 +69,17 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 		chromedp.WaitReady(`.transcript`, chromedp.ByQuery),
 		chromedp.Poll(`document.documentElement._x_dataStack?.[0]?.transcriptEnhancementObserver instanceof MutationObserver`, nil),
 		chromedp.Evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, nil),
+		chromedp.Evaluate(`(() => {
+			const preview = document.createElement('div');
+			preview.className = 'markdown-body';
+			preview.style.cssText = 'position:fixed;left:-10000px;width:300px';
+			preview.innerHTML = '<table><thead><tr><th>Identifier</th><th>Description heading</th><th>Owner heading</th><th>Status heading</th></tr></thead><tbody><tr><td>first-item</td><td>A description containing several readable words</td><td>Example owner</td><td>In progress</td></tr></tbody></table>';
+			document.body.append(preview);
+			const table = preview.querySelector('table');
+			const result = {clientWidth: table.clientWidth, scrollWidth: table.scrollWidth, firstCellWidth: table.querySelector('th').getBoundingClientRect().width};
+			preview.remove();
+			return result;
+		})()`, &markdownTableResult),
 		chromedp.Evaluate(`(() => {
 			const app = document.documentElement._x_dataStack[0];
 			window.__transcriptCallbackCount = 0;
@@ -280,6 +296,9 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 	}
 	if scrollAnchorResult.ItemID != "anchor-1" || scrollAnchorResult.Top != 290 || scrollAnchorResult.FallbackTop != 75 || scrollAnchorResult.BottomGap != 0 {
 		t.Fatalf("restore transcript position = %+v, want anchored top 290, fallback top 75, and sticky bottom gap 0", scrollAnchorResult)
+	}
+	if markdownTableResult.ScrollWidth <= markdownTableResult.ClientWidth || markdownTableResult.FirstCellWidth < 60 {
+		t.Fatalf("wide Markdown table geometry = %+v, want horizontal overflow without a collapsed first column", markdownTableResult)
 	}
 	if interruptedBottomScrollResult.Top != 80 || interruptedBottomScrollResult.BottomGap <= 0 || interruptedBottomScrollResult.Stick || interruptedBottomScrollResult.LoadingShift != 0 {
 		t.Fatalf("interrupted bottom scroll = %+v, want top 80, detached scroll, and zero-height loading overlay", interruptedBottomScrollResult)
