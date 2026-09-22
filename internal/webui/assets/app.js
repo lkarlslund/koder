@@ -2133,7 +2133,7 @@
           this.transcriptUserScrollTimer = setTimeout(() => {
             this.transcriptUserScrollActive = false;
             this.transcriptUserScrollTimer = null;
-          }, 250);
+          }, 1500);
         },
         onTranscriptWheel(event) {
           this.markTranscriptUserScrollIntent();

@@ -2565,7 +2565,7 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `transcriptStickToBottom`) || !strings.Contains(fullPage, `setTranscriptStickToBottom`) ||
 		!strings.Contains(fullPage, `onTranscriptWheel($event)`) || !strings.Contains(fullPage, `onTranscriptKeydown($event)`) ||
-		!strings.Contains(fullPage, `event.key === 'End'`) {
+		!strings.Contains(fullPage, `event.key === 'End'`) || !strings.Contains(fullPage, `}, 1500);`) {
 		t.Fatalf("expected transcript sticky-bottom intent to be tracked from explicit user scroll actions")
 	}
 	if !strings.Contains(fullPage, `@scroll.passive="onTranscriptScroll()"`) ||
@@ -2580,6 +2580,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `return new Promise(resolve =>`) ||
 		!strings.Contains(fullPage, `timeline-load-indicator-anchor`) ||
 		!strings.Contains(fullPage, `timeline-latest-button`) ||
+		!strings.Contains(fullPage, `top: calc(100% - 4rem)`) ||
 		!strings.Contains(fullPage, `@click="scrollTranscriptToBottom()"`) {
 		t.Fatalf("expected timeline paging to anchor at insertion time with non-shifting loading and latest controls")
 	}
