@@ -36,6 +36,11 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 		Count        int     `json:"count"`
 		LatestShown  bool    `json:"latestShown"`
 	}
+	var paginationTailResult struct {
+		BottomGap float64 `json:"bottomGap"`
+		Stick     bool    `json:"stick"`
+		Count     int     `json:"count"`
+	}
 	var markdownTableResult struct {
 		ClientWidth    float64 `json:"clientWidth"`
 		ScrollWidth    float64 `json:"scrollWidth"`
@@ -291,6 +296,39 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 		})()`, nil),
 		chromedp.Poll(`window.__paginationAnchorResult !== null`, nil),
 		chromedp.Evaluate(`window.__paginationAnchorResult`, &paginationAnchorResult),
+		chromedp.Evaluate(`(() => {
+			const app = document.documentElement._x_dataStack[0];
+			window.__paginationTailResult = null;
+			const chatID = String(app.activeChatID());
+			const makeItem = (prefix, index) => ({
+				id: prefix + '-' + index,
+				chat_id: chatID,
+				kind: 'user',
+				content: {text: prefix + ' row ' + index + '\n\n' + ('content '.repeat(20))},
+			});
+			const current = Array.from({length: 10}, (_, index) => makeItem('tail-current', index));
+			app.storeTimeline(chatID, current);
+			const snapshot = {...app.activeSnapshot(), TimelineHasMore: true, TimelineHasNewer: true};
+			app.state.snapshots = {...(app.state.snapshots || {}), [chatID]: snapshot};
+			app.state.Snapshots = app.state.snapshots;
+			app.state.snapshot = snapshot;
+			app.state.Snapshot = snapshot;
+			app.$nextTick(() => requestAnimationFrame(async () => {
+				const transcript = app.transcriptElement();
+				transcript.scrollTop = transcript.scrollHeight;
+				app.setTranscriptStickToBottom(false);
+				const scroll = app.transcriptScrollState();
+				const newer = Array.from({length: 10}, (_, index) => makeItem('tail-newer', index));
+				await app.mergeTimelinePage({chat_id: chatID, items: newer, has_more: true, has_newer: false}, {append: true, scroll});
+				window.__paginationTailResult = {
+					bottomGap: app.transcriptBottomDistance(transcript),
+					stick: app.transcriptStickToBottom,
+					count: app.timeline().length,
+				};
+			}));
+		})()`, nil),
+		chromedp.Poll(`window.__paginationTailResult !== null`, nil),
+		chromedp.Evaluate(`window.__paginationTailResult`, &paginationTailResult),
 	); err != nil {
 		t.Fatalf("enhance replacement Markdown media: %v", err)
 	}
@@ -308,5 +346,8 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 	}
 	if paginationAnchorResult.ItemID != "current-5" || paginationAnchorResult.Count != 30 || !paginationAnchorResult.LatestShown || math.Abs(paginationAnchorResult.BeforeOffset-paginationAnchorResult.AfterOffset) > 0.5 {
 		t.Fatalf("pagination anchor = %+v, want current-5 at an unchanged offset across a 30-item prepended window", paginationAnchorResult)
+	}
+	if paginationTailResult.BottomGap != 0 || !paginationTailResult.Stick || paginationTailResult.Count != 20 {
+		t.Fatalf("pagination tail = %+v, want appended final page pinned to the bottom with sticky scrolling restored", paginationTailResult)
 	}
 }

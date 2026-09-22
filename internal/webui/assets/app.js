@@ -2360,7 +2360,16 @@
                   }
                   return;
                 }
-                if (options.prepend || options.append) this.restoreTranscriptScroll(options.scroll);
+                if (options.append && options.scroll?.nearBottom) {
+                  if (this.timelineHasNewer()) {
+                    this.setTranscriptStickToBottom(false);
+                    this.restoreTranscriptTop(el.scrollHeight);
+                  } else {
+                    this.scrollTranscriptToBottom();
+                  }
+                } else if (options.prepend || options.append) {
+                  this.restoreTranscriptScroll(options.scroll);
+                }
               } finally {
                 resolve();
               }
