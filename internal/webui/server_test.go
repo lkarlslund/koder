@@ -2041,7 +2041,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `welcome-view`) ||
 		!strings.Contains(fullPage, `.welcome-view { position: fixed; inset: 0;`) ||
 		!strings.Contains(fullPage, `.session-selector-home .session-dialog { width: 100%; height: 100%; max-height: none; border: 0 !important;`) ||
-		!strings.Contains(fullPage, `.session-selector-home .session-list { min-height: 0; flex: 1 1 auto; }`) ||
+		!strings.Contains(fullPage, `.session-selector-home .session-results { min-height: 0; flex: 1 1 auto; }`) ||
 		!strings.Contains(fullPage, `beginCreateSessionFromWelcome()`) ||
 		!strings.Contains(fullPage, `allowSessionURLSync`) ||
 		!strings.Contains(fullPage, `syncActiveChatURL()`) {
@@ -2051,17 +2051,19 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `@auxclick.stop.prevent="newQuickChat($event)"`) ||
 		!strings.Contains(fullPage, `window.open('', '_blank')`) ||
 		!strings.Contains(fullPage, `Sessions &amp; Chats`) ||
-		!strings.Contains(fullPage, `sessionTab === 'chats'`) ||
+		!strings.Contains(fullPage, `sessionTypeFilters.chats`) ||
 		!strings.Contains(fullPage, `rpc('close_quick_chat'`) ||
 		!strings.Contains(fullPage, `rpc('promote_quick_chat'`) {
 		t.Fatalf("expected one-click Quick Chat creation, new-tab handling, and management")
 	}
 	if !strings.Contains(document, `x-show="welcomeMode() || showSessions"`) ||
-		!strings.Contains(document, `sessionTab === 'sessions'`) ||
-		!strings.Contains(document, `sessionTab === 'chats'`) ||
-		!strings.Contains(document, `sessionTab === 'voice'`) ||
+		!strings.Contains(document, `toggleSessionTypeFilter(filter.id)`) ||
+		!strings.Contains(document, `toggleSessionStatusFilter(filter.id)`) ||
+		!strings.Contains(document, `Search session titles, chat titles, and chat contents`) ||
+		!strings.Contains(appJS, `rpc('search_sessions', {query})`) ||
+		!strings.Contains(appJS, `setTimeout(run, 300)`) ||
 		!strings.Contains(appJS, `refreshSessionSelector()`) {
-		t.Fatalf("expected homepage and popup to share one session, quick-chat, and voice selector")
+		t.Fatalf("expected homepage and popup to share one filterable, debounced session selector")
 	}
 	if !strings.Contains(document, `x-show="confirmationDialog.open"`) ||
 		!strings.Contains(appJS, `requestConfirmation(options = {})`) ||
@@ -2080,7 +2082,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `sessionRows().length`) ||
 		!strings.Contains(fullPage, `quickChatRows().length`) ||
 		!strings.Contains(fullPage, `voiceSessionRows().length`) ||
-		!strings.Contains(fullPage, `sessionTab === 'voice'`) ||
+		!strings.Contains(fullPage, `sessionTypeFilters.voice`) ||
 		strings.Contains(fullPage, `newVoiceChat()`) ||
 		strings.Contains(fullPage, `new_voice_chat`) {
 		t.Fatalf("expected counted session tabs and voice-chat rendering without browser creation controls")
@@ -3036,7 +3038,7 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `rename_session`) || !strings.Contains(fullPage, `update_session`) || !strings.Contains(fullPage, `delete_session`) ||
 		!strings.Contains(fullPage, `toggleSessionFavorite(session)`) || !strings.Contains(fullPage, `archiveSession(session)`) ||
-		!strings.Contains(fullPage, `restoreSession(session)`) || !strings.Contains(fullPage, `sessionFilter === 'starred'`) {
+		!strings.Contains(fullPage, `restoreSession(session)`) || !strings.Contains(fullPage, `sessionStatusFilters.starred`) {
 		t.Fatalf("expected session dialog to rename, star, archive, restore, filter, and delete sessions")
 	}
 	if !strings.Contains(fullPage, `test_provider`) {
@@ -3871,6 +3873,24 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 	}
 	if !foundRenamed {
 		t.Fatalf("expected renamed session in response: %#v", renameResp.Result.Sessions)
+	}
+
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":30,"method":"search_sessions","params":{"query":"renamed"}}`)); err != nil {
+		t.Fatalf("write search_sessions: %v", err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 30)
+	var searchResp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			SessionIDs []id.ID `json:"session_ids"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &searchResp); err != nil {
+		t.Fatalf("decode search response: %v", err)
+	}
+	if !searchResp.OK || len(searchResp.Result.SessionIDs) != 1 || searchResp.Result.SessionIDs[0] != newID {
+		t.Fatalf("expected renamed session search result %s, got %#v, error=%s", newID, searchResp.Result.SessionIDs, searchResp.Error)
 	}
 
 	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":4,"method":"switch_session","params":{"session_id":"%s"}}`, initialID))); err != nil {

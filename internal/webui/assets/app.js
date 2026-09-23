@@ -1179,7 +1179,7 @@
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
 		showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'overview', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', settingsHealth: {issue_count: 0, needs_setup: false, issues: []}, showBrowserEditor: false, showCodexEditor: false, showObservability: false,
 		showPhoneBinding: false, phoneBinding: null, phoneBindingLoading: false, phoneBindingError: '', voiceDevices: [], voiceDevicesLoading: false, voiceDevicesError: '',
-        showSessions: false, sessionTab: 'sessions', sessionFilter: 'active', showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, folderPicker: {open: false, target: '', path: '', parent: '', folders: [], loading: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
+        showSessions: false, sessionTypeFilters: {sessions: true, chats: true, voice: true}, sessionStatusFilters: {active: true, starred: false, archived: false}, sessionSearchQuery: '', sessionSearchIDs: null, sessionSearchTimer: null, sessionSearchSeq: 0, sessionSearching: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, folderPicker: {open: false, target: '', path: '', parent: '', folders: [], loading: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         confirmationDialog: {open: false, title: '', message: '', confirmLabel: 'Confirm', danger: false}, confirmationResolver: null,
 		providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
 		showModelDetails: false, modelDetails: null, settingsModelQuery: '', showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
@@ -5338,8 +5338,6 @@
           }).catch(err => { this.modelSettingsStatus = err.message; this.modelSettingsStatusKind = 'danger'; }).finally(() => { this.modelSettingsSaving = false; });
         },
         openSessionDialog() {
-          this.sessionTab = this.quickChatMode() ? 'chats' : (this.legacyVoiceSessionMode() ? 'voice' : 'sessions');
-          this.sessionFilter = 'active';
           this.showSessions = true; this.closeSessionEditor();
           this.reportClientStateSoon();
           this.refreshSessionSelector();
@@ -5356,6 +5354,7 @@
             this.state.QuickChats = this.state.quick_chats;
             this.state.project_root = this.sessionState.project_root || this.state.project_root || '';
             this.state.ProjectRoot = this.state.project_root;
+            if (this.sessionSearchQuery.trim()) this.scheduleSessionSearch(true);
           }).catch(err => this.showToast(err.message)).finally(() => { this.sessionLoading = false; });
         },
         loadWelcomeSessions() { return this.refreshSessionSelector(); },
@@ -5370,30 +5369,84 @@
           };
         },
         sessionRows() {
+          if (!this.sessionTypeFilters.sessions) return [];
           return this.filterManagedSessions(this.allSessionRows().filter(session => !this.isVoiceSession(session)));
         },
         voiceSessionRows() {
+          if (!this.sessionTypeFilters.voice) return [];
           return this.filterManagedSessions(this.allSessionRows().filter(session => this.isVoiceSession(session)));
         },
+        visibleSessionCount() {
+          return this.sessionRows().length + this.quickChatRows().length + this.voiceSessionRows().length;
+        },
         filterManagedSessions(rows) {
-          if (!this.showSessions && !this.welcomeMode()) return rows.filter(session => !this.sessionArchived(session));
-          if (this.sessionFilter === 'archived') return rows.filter(session => this.sessionArchived(session));
-          if (this.sessionFilter === 'starred') return rows.filter(session => this.sessionFavorite(session) && !this.sessionArchived(session));
-          return rows.filter(session => !this.sessionArchived(session));
+          return rows.filter(session => this.sessionMatchesStatus(session) && this.sessionMatchesSearch(session));
+        },
+        sessionMatchesStatus(session) {
+          if (this.sessionArchived(session)) return !!this.sessionStatusFilters.archived;
+          if (this.sessionFavorite(session) && this.sessionStatusFilters.starred) return true;
+          return !!this.sessionStatusFilters.active;
+        },
+        sessionMatchesSearch(session) {
+          return !Array.isArray(this.sessionSearchIDs) || this.sessionSearchIDs.includes(this.sessionID(session));
+        },
+        toggleSessionTypeFilter(filter) {
+          this.sessionTypeFilters = {...this.sessionTypeFilters, [filter]: !this.sessionTypeFilters[filter]};
+        },
+        toggleSessionStatusFilter(filter) {
+          this.sessionStatusFilters = {...this.sessionStatusFilters, [filter]: !this.sessionStatusFilters[filter]};
+        },
+        sessionTypeCount(filter) {
+          if (filter === 'chats') return this.filterManagedSessions(this.allQuickChatRows()).length;
+          const rows = this.allSessionRows().filter(session => filter === 'voice' ? this.isVoiceSession(session) : !this.isVoiceSession(session));
+          return this.filterManagedSessions(rows).length;
         },
         sessionFilterCount(filter) {
-          const rows = this.allSessionRows().filter(session => this.sessionTab === 'voice' ? this.isVoiceSession(session) : !this.isVoiceSession(session));
+          const rows = [...this.allSessionRows(), ...this.allQuickChatRows()].filter(session => this.sessionMatchesType(session) && this.sessionMatchesSearch(session));
           if (filter === 'archived') return rows.filter(session => this.sessionArchived(session)).length;
           if (filter === 'starred') return rows.filter(session => this.sessionFavorite(session) && !this.sessionArchived(session)).length;
           return rows.filter(session => !this.sessionArchived(session)).length;
+        },
+        sessionMatchesType(session) {
+          if (this.isQuickSession(session)) return !!this.sessionTypeFilters.chats;
+          if (this.isVoiceSession(session)) return !!this.sessionTypeFilters.voice;
+          return !!this.sessionTypeFilters.sessions;
+        },
+        scheduleSessionSearch(immediate = false) {
+          if (this.sessionSearchTimer) clearTimeout(this.sessionSearchTimer);
+          const query = this.sessionSearchQuery.trim();
+          const seq = ++this.sessionSearchSeq;
+          if (!query) {
+            this.sessionSearchIDs = null;
+            this.sessionSearching = false;
+            this.sessionSearchTimer = null;
+            return;
+          }
+          const run = () => {
+            this.sessionSearchTimer = null;
+            this.sessionSearching = true;
+            this.rpc('search_sessions', {query}).then(result => {
+              if (seq !== this.sessionSearchSeq) return;
+              this.sessionSearchIDs = Array.isArray(result?.session_ids) ? result.session_ids : [];
+            }).catch(err => {
+              if (seq === this.sessionSearchSeq) this.showToast(err.message);
+            }).finally(() => {
+              if (seq === this.sessionSearchSeq) this.sessionSearching = false;
+            });
+          };
+          if (immediate) run(); else this.sessionSearchTimer = setTimeout(run, 300);
         },
         allSessionRows() {
           if (this.showSessions && Array.isArray(this.sessionState.sessions)) return this.sessionState.sessions;
           return this.normalizeSessionState(this.state).sessions || this.sessionState.sessions || [];
         },
-        quickChatRows() {
+        allQuickChatRows() {
           if (this.showSessions && Array.isArray(this.sessionState.quick_chats)) return this.sessionState.quick_chats;
           return this.normalizeSessionState(this.state).quick_chats || this.sessionState.quick_chats || [];
+        },
+        quickChatRows() {
+          if (!this.sessionTypeFilters.chats) return [];
+          return this.filterManagedSessions(this.allQuickChatRows());
         },
         activeSessionID() { return this.currentSessionID(); },
         currentSession() { return this.state.session || this.state.Session || {}; },
@@ -5411,7 +5464,7 @@
         beginHydratingSession(id) {
           id = String(id || '').trim();
           if (!id) return;
-          const session = [...this.allSessionRows(), ...this.quickChatRows()].find(row => this.sessionID(row) === id) || {};
+          const session = [...this.allSessionRows(), ...this.allQuickChatRows()].find(row => this.sessionID(row) === id) || {};
           this.hydratingSession = {active: true, id, title: this.sessionTitle(session), error: ''};
           this.showSessions = false;
           this.closeSessionEditor();
@@ -5496,7 +5549,7 @@
           this.rpc('promote_quick_chat', {
             session_id: draft.sessionID, mode: draft.mode, project_root: String(draft.projectRoot || '').trim(), discard_generated_files: !!draft.discardGeneratedFiles,
           }).then(state => {
-            this.applyState(state); this.showQuickPromotion = false; this.sessionTab = 'sessions';
+            this.applyState(state); this.showQuickPromotion = false;
             return this.rpc('list_sessions', {});
           }).then(result => { if (result) this.sessionState = this.normalizeSessionState(result); }).catch(err => { draft.error = err.message; }).finally(() => { draft.busy = false; });
         },

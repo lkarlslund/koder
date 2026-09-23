@@ -1167,6 +1167,14 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return s.stateForClient(ctx, clientID)
 	case "list_sessions":
 		return s.controller.ManageableSessions(ctx)
+	case "search_sessions":
+		var in struct {
+			Query string `json:"query"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.SearchSessions(ctx, in.Query)
 	case "switch_session":
 		var in struct {
 			SessionID id.ID `json:"session_id"`

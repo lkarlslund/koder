@@ -1085,29 +1085,42 @@
       <template x-if="welcomeMessage()">
         <div class="alert alert-warning rounded-0 border-start-0 border-end-0 mb-0" x-text="welcomeMessage()"></div>
       </template>
-      <div class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
-        <ul class="nav nav-tabs border-0">
-          <li class="nav-item"><button type="button" class="nav-link" :class="{'active': sessionTab === 'sessions'}" @click="sessionTab = 'sessions'">Sessions <span class="badge text-bg-secondary" x-text="sessionRows().length"></span></button></li>
-          <li class="nav-item"><button type="button" class="nav-link" :class="{'active': sessionTab === 'chats'}" @click="sessionTab = 'chats'">Ad-hoc Chats <span class="badge text-bg-secondary" x-text="quickChatRows().length"></span></button></li>
-          <li class="nav-item"><button type="button" class="nav-link" :class="{'active': sessionTab === 'voice'}" @click="sessionTab = 'voice'">Voice Chats <span class="badge text-bg-secondary" x-text="voiceSessionRows().length"></span></button></li>
-        </ul>
-        <button class="btn btn-primary" type="button" x-show="sessionTab === 'sessions'" @click="beginCreateSession()"><i class="bi bi-plus-lg"></i> New Session</button>
-        <button class="btn btn-success" type="button" x-show="sessionTab === 'chats'" :disabled="quickChatCreating" @click="newQuickChat($event)" @auxclick.stop.prevent="newQuickChat($event)"><i class="bi bi-lightning-charge"></i> Quick Chat</button>
+      <div class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom flex-wrap">
+        <div class="d-flex gap-2 flex-wrap" aria-label="Session type filters">
+          <template x-for="filter in [{id: 'sessions', label: 'Sessions'}, {id: 'chats', label: 'Ad-hoc Chats'}, {id: 'voice', label: 'Voice Chats'}]" :key="filter.id">
+            <button type="button" class="btn btn-sm" :class="sessionTypeFilters[filter.id] ? 'btn-primary' : 'btn-outline-secondary'" :aria-pressed="sessionTypeFilters[filter.id]" @click="toggleSessionTypeFilter(filter.id)">
+              <span x-text="filter.label"></span> <span class="badge text-bg-secondary" x-text="sessionTypeCount(filter.id)"></span>
+            </button>
+          </template>
+        </div>
+        <div class="d-flex gap-2 flex-shrink-0">
+          <button class="btn btn-primary" type="button" @click="beginCreateSession()"><i class="bi bi-plus-lg"></i> New Session</button>
+          <button class="btn btn-success" type="button" :disabled="quickChatCreating" @click="newQuickChat($event)" @auxclick.stop.prevent="newQuickChat($event)"><i class="bi bi-lightning-charge"></i> Quick Chat</button>
+        </div>
       </div>
-      <div class="d-flex gap-2 px-3 py-2 border-bottom" x-show="sessionTab !== 'chats'">
+      <div class="session-selector-filters px-3 py-2 border-bottom">
+        <div class="d-flex gap-2 flex-wrap" aria-label="Session status filters">
         <template x-for="filter in [{id: 'active', label: 'Active'}, {id: 'starred', label: 'Starred'}, {id: 'archived', label: 'Archived'}]" :key="filter.id">
-          <button type="button" class="btn btn-sm" :class="sessionFilter === filter.id ? 'btn-primary' : 'btn-outline-secondary'" @click="sessionFilter = filter.id">
+          <button type="button" class="btn btn-sm" :class="sessionStatusFilters[filter.id] ? 'btn-primary' : 'btn-outline-secondary'" :aria-pressed="sessionStatusFilters[filter.id]" @click="toggleSessionStatusFilter(filter.id)">
             <span x-text="filter.label"></span> <span class="badge text-bg-secondary" x-text="sessionFilterCount(filter.id)"></span>
           </button>
         </template>
+        </div>
+        <div class="input-group input-group-sm session-search-box">
+          <span class="input-group-text"><i class="bi bi-search"></i></span>
+          <input type="search" class="form-control" placeholder="Search session titles, chat titles, and chat contents" aria-label="Search sessions and chats" x-model="sessionSearchQuery" @input="scheduleSessionSearch()">
+          <span class="input-group-text" x-show="sessionSearching" style="display: none;"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span></span>
+          <button type="button" class="btn btn-outline-secondary" title="Clear search" x-show="sessionSearchQuery" @click="sessionSearchQuery = ''; scheduleSessionSearch()" style="display: none;"><i class="bi bi-x-lg"></i></button>
+        </div>
       </div>
-      <div class="session-list list-group list-group-flush" x-show="sessionTab === 'sessions'">
-        <template x-if="sessionLoading">
-          <div class="list-group-item text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading sessions</div>
-        </template>
-        <template x-if="!sessionLoading && sessionRows().length === 0">
-          <div class="list-group-item text-secondary">No sessions in this workspace</div>
-        </template>
+      <div class="session-results">
+      <template x-if="sessionLoading">
+        <div class="list-group-item text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading sessions</div>
+      </template>
+      <template x-if="!sessionLoading && visibleSessionCount() === 0">
+        <div class="list-group-item text-secondary" x-text="sessionSearchQuery.trim() ? 'No matching sessions or chats' : 'No sessions match these filters'"></div>
+      </template>
+      <div class="session-list list-group list-group-flush" x-show="sessionRows().length > 0">
         <template x-for="session in sessionRows()" :key="sessionID(session)">
           <div class="session-selector-row list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" x-transition.opacity.duration.200ms :class="{'active': sessionID(session) === activeSessionID()}">
             <button type="button" class="btn btn-link text-start p-0 flex-grow-1 text-decoration-none" :class="sessionID(session) === activeSessionID() ? 'text-white' : 'text-body'" @click="switchSession(sessionID(session), $event)" @auxclick.stop.prevent="switchSession(sessionID(session), $event)">
@@ -1128,13 +1141,7 @@
           </div>
         </template>
       </div>
-      <div class="session-list list-group list-group-flush" x-show="sessionTab === 'chats'">
-        <template x-if="sessionLoading">
-          <div class="list-group-item text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading chats</div>
-        </template>
-        <template x-if="!sessionLoading && quickChatRows().length === 0">
-          <div class="list-group-item text-secondary">No Quick Chats</div>
-        </template>
+      <div class="session-list list-group list-group-flush" x-show="quickChatRows().length > 0">
         <template x-for="session in quickChatRows()" :key="sessionID(session)">
           <div class="session-selector-row list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" x-transition.opacity.duration.200ms :class="{'active': sessionID(session) === activeSessionID()}">
             <button type="button" class="btn btn-link text-start p-0 flex-grow-1 text-decoration-none" :class="sessionID(session) === activeSessionID() ? 'text-white' : 'text-body'" @click="switchSession(sessionID(session), $event)" @auxclick.stop.prevent="switchSession(sessionID(session), $event)">
@@ -1150,13 +1157,7 @@
           </div>
         </template>
       </div>
-      <div class="session-list list-group list-group-flush" x-show="sessionTab === 'voice'">
-        <template x-if="sessionLoading">
-          <div class="list-group-item text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading voice chats</div>
-        </template>
-        <template x-if="!sessionLoading && voiceSessionRows().length === 0">
-          <div class="list-group-item text-secondary">No Voice Chats</div>
-        </template>
+      <div class="session-list list-group list-group-flush" x-show="voiceSessionRows().length > 0">
         <template x-for="session in voiceSessionRows()" :key="sessionID(session)">
           <div class="session-selector-row list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" x-transition.opacity.duration.200ms :class="{'active': sessionID(session) === activeSessionID()}">
             <button type="button" class="btn btn-link text-start p-0 flex-grow-1 text-decoration-none" :class="sessionID(session) === activeSessionID() ? 'text-white' : 'text-body'" @click="switchSession(sessionID(session), $event)" @auxclick.stop.prevent="switchSession(sessionID(session), $event)">
@@ -1173,6 +1174,7 @@
             </div>
           </div>
         </template>
+      </div>
       </div>
     </section>
   </main>
