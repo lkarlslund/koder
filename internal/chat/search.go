@@ -136,12 +136,24 @@ func searchChatIndex(ctx context.Context, st *store.Store, chatRecord domain.Cha
 }
 
 func chatSearchFingerprint(ctx context.Context, st *store.Store, chatRecord domain.Chat) (chatSearchIndex, error) {
-	if err := ensureTimelineSequenceIndex(ctx, st, chatRecord.ID); err != nil {
-		return chatSearchIndex{}, err
-	}
 	latestItems, err := timelineCollection(st).TailIndex(ctx, "chat-seq", string(chatRecord.ID), 1)
 	if err != nil {
 		return chatSearchIndex{}, fmt.Errorf("fingerprint chat search index %s: %w", chatRecord.ID, err)
+	}
+	if len(latestItems) == 0 {
+		legacyItems, err := timelineCollection(st).TailIndex(ctx, "chat", string(chatRecord.ID), 1)
+		if err != nil {
+			return chatSearchIndex{}, fmt.Errorf("probe legacy timeline index %s: %w", chatRecord.ID, err)
+		}
+		if len(legacyItems) > 0 {
+			if err := ensureTimelineSequenceIndex(ctx, st, chatRecord.ID); err != nil {
+				return chatSearchIndex{}, err
+			}
+			latestItems, err = timelineCollection(st).TailIndex(ctx, "chat-seq", string(chatRecord.ID), 1)
+			if err != nil {
+				return chatSearchIndex{}, fmt.Errorf("fingerprint repaired chat search index %s: %w", chatRecord.ID, err)
+			}
+		}
 	}
 	fingerprint := chatSearchIndex{ChatID: chatRecord.ID, ChatUpdatedAt: chatRecord.UpdatedAt}
 	if len(latestItems) > 0 {
