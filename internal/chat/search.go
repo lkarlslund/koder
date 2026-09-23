@@ -85,7 +85,11 @@ func (s *Source) SearchSessions(ctx context.Context, sessionIDs []id.ID, query s
 	if err != nil {
 		return nil, fmt.Errorf("list persisted chats for search: %w", err)
 	}
-	grouped := make(map[id.ID][]domain.Chat)
+	type searchJob struct {
+		sessionID id.ID
+		chat      domain.Chat
+	}
+	searchJobs := make([]searchJob, 0, len(chats))
 	for _, chatRecord := range chats {
 		sessionID := id.ID(chatRecord.SessionID)
 		if _, ok := wanted[sessionID]; !ok {
@@ -95,32 +99,31 @@ func (s *Source) SearchSessions(ctx context.Context, sessionIDs []id.ID, query s
 			matches[sessionID] = true
 			continue
 		}
-		grouped[sessionID] = append(grouped[sessionID], chatRecord)
+		searchJobs = append(searchJobs, searchJob{sessionID: sessionID, chat: chatRecord})
 	}
 	type searchResult struct {
 		sessionID id.ID
 		matched   bool
 		err       error
 	}
-	jobs := make(chan id.ID)
-	results := make(chan searchResult, len(grouped))
-	workerCount := min(8, len(grouped))
+	jobs := make(chan searchJob)
+	results := make(chan searchResult, len(searchJobs))
+	workerCount := min(8, len(searchJobs))
+	var matchedSessions sync.Map
+	for sessionID := range matches {
+		matchedSessions.Store(sessionID, true)
+	}
 	var workers sync.WaitGroup
 	for range workerCount {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			for sessionID := range jobs {
-				result := searchResult{sessionID: sessionID}
-				for _, chatRecord := range grouped[sessionID] {
-					matched, err := searchChatIndex(ctx, deps.Store, chatRecord, query)
-					if err != nil {
-						result.err = err
-						break
-					}
-					if matched {
-						result.matched = true
-						break
+			for job := range jobs {
+				result := searchResult{sessionID: job.sessionID}
+				if _, found := matchedSessions.Load(job.sessionID); !found {
+					result.matched, result.err = searchChatIndex(ctx, deps.Store, job.chat, query)
+					if result.matched {
+						matchedSessions.Store(job.sessionID, true)
 					}
 				}
 				results <- result
@@ -128,9 +131,9 @@ func (s *Source) SearchSessions(ctx context.Context, sessionIDs []id.ID, query s
 		}()
 	}
 	go func() {
-		for sessionID := range grouped {
-			if !matches[sessionID] {
-				jobs <- sessionID
+		for _, job := range searchJobs {
+			if _, found := matchedSessions.Load(job.sessionID); !found {
+				jobs <- job
 			}
 		}
 		close(jobs)
