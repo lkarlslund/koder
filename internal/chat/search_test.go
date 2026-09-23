@@ -7,6 +7,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/store"
 )
 
 func TestSessionMatchesSearchesPersistedTitlesAndPagedContent(t *testing.T) {
@@ -43,5 +44,29 @@ func TestSessionMatchesSearchesPersistedTitlesAndPagedContent(t *testing.T) {
 		if got != test.want {
 			t.Fatalf("search %q = %t, want %t", test.query, got, test.want)
 		}
+	}
+	indexes, err := chatSearchIndexCollection(st).List(ctx, store.ByIndex[chatSearchIndex]("chat", string(chatRecord.ID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(indexes) != 1 || indexes[0].TimelineCount != 66 {
+		t.Fatalf("expected one lazy per-chat index, got %#v", indexes)
+	}
+	if _, err := appendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "freshly appended searchable text"}); err != nil {
+		t.Fatal(err)
+	}
+	matched, err := source.SessionMatches(ctx, sessionID, "freshly appended")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matched {
+		t.Fatal("expected stale chat index to rebuild after append")
+	}
+	indexes, err = chatSearchIndexCollection(st).List(ctx, store.ByIndex[chatSearchIndex]("chat", string(chatRecord.ID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(indexes) != 1 || indexes[0].TimelineCount != 67 {
+		t.Fatalf("expected rebuilt per-chat index, got %#v", indexes)
 	}
 }

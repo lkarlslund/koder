@@ -141,34 +141,6 @@ func (b *Backend) List(ctx context.Context, namespace string, lookup *driver.Ind
 	return out, nil
 }
 
-func (b *Backend) Scan(ctx context.Context, namespace string, visit func([]byte) error) error {
-	if err := driver.EnsureContext(ctx); err != nil {
-		return err
-	}
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	paths, err := b.listRecordPaths(namespace, nil)
-	if err != nil {
-		return err
-	}
-	for _, path := range paths {
-		if err := driver.EnsureContext(ctx); err != nil {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if err := visit(data); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (b *Backend) ListIndexPage(ctx context.Context, namespace string, req driver.IndexPageRequest) (driver.IndexPage, error) {
 	if err := driver.EnsureContext(ctx); err != nil {
 		return driver.IndexPage{}, err

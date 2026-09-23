@@ -186,32 +186,6 @@ func (b *Backend) List(ctx context.Context, namespace string, lookup *driver.Ind
 	return b.listByPrefix(driver.RecordPrefix(namespace))
 }
 
-func (b *Backend) Scan(ctx context.Context, namespace string, visit func([]byte) error) error {
-	if err := driver.EnsureContext(ctx); err != nil {
-		return err
-	}
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	if b.closed {
-		return pebble.ErrClosed
-	}
-	prefix := []byte(driver.RecordPrefix(namespace))
-	iter, err := b.db.NewIter(&pebble.IterOptions{LowerBound: prefix, UpperBound: nextPrefix(prefix)})
-	if err != nil {
-		return err
-	}
-	defer func() { _ = iter.Close() }()
-	for ok := iter.First(); ok; ok = iter.Next() {
-		if err := driver.EnsureContext(ctx); err != nil {
-			return err
-		}
-		if err := visit(iter.Value()); err != nil {
-			return err
-		}
-	}
-	return iter.Error()
-}
-
 func (b *Backend) ListIndexPage(ctx context.Context, namespace string, req driver.IndexPageRequest) (driver.IndexPage, error) {
 	if err := driver.EnsureContext(ctx); err != nil {
 		return driver.IndexPage{}, err
