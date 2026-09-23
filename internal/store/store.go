@@ -1,13 +1,21 @@
 package store
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"sync"
 
+	"github.com/cockroachdb/pebble"
 	"github.com/lkarlslund/koder/internal/store/driver"
 	"github.com/lkarlslund/koder/internal/store/driver/jsonfsdriver"
 	"github.com/lkarlslund/koder/internal/store/driver/pebbledriver"
 )
+
+// IsNotFound reports whether a backend lookup did not find its record.
+func IsNotFound(err error) bool {
+	return errors.Is(err, pebble.ErrNotFound) || errors.Is(err, os.ErrNotExist)
+}
 
 var timelineMutationMu sync.Mutex
 

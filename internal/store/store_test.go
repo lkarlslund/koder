@@ -67,6 +67,9 @@ func TestCollectionRoundTripAndIndex(t *testing.T) {
 			if err := notes.Delete(context.Background(), second.ID); err != nil {
 				t.Fatal(err)
 			}
+			if _, err := notes.Get(context.Background(), second.ID); !IsNotFound(err) {
+				t.Fatalf("deleted get error = %v, want not found", err)
+			}
 			reloaded, err := notes.List(context.Background(), All[testNote]())
 			if err != nil {
 				t.Fatal(err)
