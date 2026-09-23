@@ -52,7 +52,7 @@ func TestSessionMatchesSearchesPersistedTitlesAndPagedContent(t *testing.T) {
 	if len(indexes) != 1 || len(indexes[0].Bloom) != chatSearchBloomBytes {
 		t.Fatalf("expected one lazy per-chat index, got %#v", indexes)
 	}
-	firstLatest := indexes[0].LatestTimeline
+	firstRevision := indexes[0].SourceRevision
 	if _, err := appendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "freshly appended searchable text"}); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestSessionMatchesSearchesPersistedTitlesAndPagedContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(indexes) != 1 || indexes[0].LatestTimeline == firstLatest {
+	if len(indexes) != 1 || !indexes[0].SourceRevision.After(firstRevision) {
 		t.Fatalf("expected rebuilt per-chat index, got %#v", indexes)
 	}
 }

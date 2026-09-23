@@ -15,16 +15,19 @@ import (
 const chatSearchIndexPageSize = 256
 
 type chatSearchIndex struct {
-	ChatID          id.ID
-	ChatUpdatedAt   time.Time
-	LatestTimeline  id.ID
-	LatestUpdatedAt time.Time
-	Bloom           []byte
+	ChatID         id.ID
+	SourceRevision time.Time
+	Bloom          []byte
 }
 
 type chatSearchDocument struct {
 	ChatID id.ID
 	Text   string
+}
+
+type chatSearchSourceRevision struct {
+	ChatID    id.ID
+	UpdatedAt time.Time
 }
 
 func chatSearchIndexCollection(st *store.Store) store.Collection[chatSearchIndex] {
@@ -43,6 +46,17 @@ func chatSearchDocumentCollection(st *store.Store) store.Collection[chatSearchDo
 		Namespace: "chat-search-document-v2",
 		GetID:     func(value chatSearchDocument) string { return value.ChatID },
 		SetID:     func(value *chatSearchDocument, recordID string) { value.ChatID = id.ID(recordID) },
+	})
+}
+
+func chatSearchSourceRevisionCollection(st *store.Store) store.Collection[chatSearchSourceRevision] {
+	return store.NewCollection(st, store.CollectionSpec[chatSearchSourceRevision]{
+		Namespace: "chat-search-source-revision",
+		GetID:     func(value chatSearchSourceRevision) string { return value.ChatID },
+		SetID:     func(value *chatSearchSourceRevision, recordID string) { value.ChatID = id.ID(recordID) },
+		Indexes: []store.IndexSpec[chatSearchSourceRevision]{
+			{Name: "chat", Value: func(value chatSearchSourceRevision) string { return value.ChatID }},
+		},
 	})
 }
 
@@ -136,32 +150,40 @@ func searchChatIndex(ctx context.Context, st *store.Store, chatRecord domain.Cha
 }
 
 func chatSearchFingerprint(ctx context.Context, st *store.Store, chatRecord domain.Chat) (chatSearchIndex, error) {
-	latestItems, err := timelineCollection(st).TailIndex(ctx, "chat-seq", string(chatRecord.ID), 1)
+	revisions, err := chatSearchSourceRevisionCollection(st).List(ctx, store.ByIndex[chatSearchSourceRevision]("chat", string(chatRecord.ID)))
 	if err != nil {
-		return chatSearchIndex{}, fmt.Errorf("fingerprint chat search index %s: %w", chatRecord.ID, err)
+		return chatSearchIndex{}, fmt.Errorf("load chat search source revision %s: %w", chatRecord.ID, err)
 	}
-	if len(latestItems) == 0 {
-		legacyItems, err := timelineCollection(st).TailIndex(ctx, "chat", string(chatRecord.ID), 1)
+	if len(revisions) == 0 {
+		latestItems, err := timelineCollection(st).TailIndex(ctx, "chat-seq", string(chatRecord.ID), 1)
 		if err != nil {
-			return chatSearchIndex{}, fmt.Errorf("probe legacy timeline index %s: %w", chatRecord.ID, err)
+			return chatSearchIndex{}, fmt.Errorf("initialize chat search source revision %s: %w", chatRecord.ID, err)
 		}
-		if len(legacyItems) > 0 {
-			if err := ensureTimelineSequenceIndex(ctx, st, chatRecord.ID); err != nil {
-				return chatSearchIndex{}, err
-			}
-			latestItems, err = timelineCollection(st).TailIndex(ctx, "chat-seq", string(chatRecord.ID), 1)
+		if len(latestItems) == 0 {
+			legacyItems, err := timelineCollection(st).TailIndex(ctx, "chat", string(chatRecord.ID), 1)
 			if err != nil {
-				return chatSearchIndex{}, fmt.Errorf("fingerprint repaired chat search index %s: %w", chatRecord.ID, err)
+				return chatSearchIndex{}, fmt.Errorf("probe legacy timeline index %s: %w", chatRecord.ID, err)
+			}
+			if len(legacyItems) > 0 {
+				if err := ensureTimelineSequenceIndex(ctx, st, chatRecord.ID); err != nil {
+					return chatSearchIndex{}, err
+				}
+				latestItems, err = timelineCollection(st).TailIndex(ctx, "chat-seq", string(chatRecord.ID), 1)
+				if err != nil {
+					return chatSearchIndex{}, fmt.Errorf("fingerprint repaired chat search index %s: %w", chatRecord.ID, err)
+				}
 			}
 		}
+		revision := chatSearchSourceRevision{ChatID: chatRecord.ID, UpdatedAt: chatRecord.UpdatedAt}
+		if len(latestItems) > 0 {
+			revision.UpdatedAt = latestItems[len(latestItems)-1].UpdatedAt
+		}
+		if err := chatSearchSourceRevisionCollection(st).Put(ctx, revision); err != nil {
+			return chatSearchIndex{}, fmt.Errorf("initialize chat search source revision %s: %w", chatRecord.ID, err)
+		}
+		revisions = []chatSearchSourceRevision{revision}
 	}
-	fingerprint := chatSearchIndex{ChatID: chatRecord.ID, ChatUpdatedAt: chatRecord.UpdatedAt}
-	if len(latestItems) > 0 {
-		latest := latestItems[len(latestItems)-1]
-		fingerprint.LatestTimeline = latest.ID
-		fingerprint.LatestUpdatedAt = latest.UpdatedAt
-	}
-	return fingerprint, nil
+	return chatSearchIndex{ChatID: chatRecord.ID, SourceRevision: revisions[0].UpdatedAt}, nil
 }
 
 func buildChatSearchIndex(ctx context.Context, st *store.Store, index chatSearchIndex) (chatSearchIndex, chatSearchDocument, error) {
@@ -192,9 +214,11 @@ func buildChatSearchIndex(ctx context.Context, st *store.Store, index chatSearch
 
 func (index chatSearchIndex) sameSource(other chatSearchIndex) bool {
 	return index.ChatID == other.ChatID &&
-		index.ChatUpdatedAt.Equal(other.ChatUpdatedAt) &&
-		index.LatestTimeline == other.LatestTimeline &&
-		index.LatestUpdatedAt.Equal(other.LatestUpdatedAt)
+		index.SourceRevision.Equal(other.SourceRevision)
+}
+
+func markChatSearchSourceChanged(ctx context.Context, st *store.Store, chatID id.ID) error {
+	return chatSearchSourceRevisionCollection(st).Put(ctx, chatSearchSourceRevision{ChatID: chatID, UpdatedAt: time.Now().UTC()})
 }
 
 const chatSearchBloomBytes = 32 * 1024

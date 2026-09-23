@@ -739,11 +739,21 @@ func sortTimeline(items []domain.TimelineItem) {
 }
 
 func putTimelineItem(ctx context.Context, st *store.Store, item domain.TimelineItem) error {
-	return timelineCollection(st).Put(ctx, item)
+	if err := timelineCollection(st).Put(ctx, item); err != nil {
+		return err
+	}
+	return markChatSearchSourceChanged(ctx, st, item.ChatID)
 }
 
 func deleteTimelineItem(ctx context.Context, st *store.Store, itemID id.ID) error {
-	return timelineCollection(st).Delete(ctx, itemID)
+	item, err := timelineCollection(st).Get(ctx, itemID)
+	if err != nil {
+		return err
+	}
+	if err := timelineCollection(st).Delete(ctx, itemID); err != nil {
+		return err
+	}
+	return markChatSearchSourceChanged(ctx, st, item.ChatID)
 }
 
 func DeletePersistedData(ctx context.Context, st *store.Store, chatID id.ID) error {
@@ -772,7 +782,14 @@ func DeletePersistedData(ctx context.Context, st *store.Store, chatID id.ID) err
 }
 
 func insertTimelineItem(ctx context.Context, st *store.Store, item domain.TimelineItem) (domain.TimelineItem, error) {
-	return timelineCollection(st).Insert(ctx, item)
+	inserted, err := timelineCollection(st).Insert(ctx, item)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	if err := markChatSearchSourceChanged(ctx, st, inserted.ChatID); err != nil {
+		return domain.TimelineItem{}, err
+	}
+	return inserted, nil
 }
 
 func appendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
