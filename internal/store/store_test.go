@@ -57,6 +57,13 @@ func TestCollectionRoundTripAndIndex(t *testing.T) {
 			if len(indexed) != 1 || indexed[0].ID != first.ID {
 				t.Fatalf("indexed = %#v", indexed)
 			}
+			tail, err := notes.TailIndex(context.Background(), "chat", "chat-7", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(tail) != 1 || tail[0].ID != first.ID {
+				t.Fatalf("tail = %#v", tail)
+			}
 			if err := notes.Delete(context.Background(), second.ID); err != nil {
 				t.Fatal(err)
 			}

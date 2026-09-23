@@ -141,6 +141,34 @@ func (b *Backend) List(ctx context.Context, namespace string, lookup *driver.Ind
 	return out, nil
 }
 
+func (b *Backend) TailIndex(ctx context.Context, namespace, name, value string, limit int) ([][]byte, error) {
+	if err := driver.EnsureContext(ctx); err != nil {
+		return nil, err
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	entries, err := sortedIndexEntryPaths(b.indexDir(namespace, name, value))
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) > limit {
+		entries = entries[len(entries)-limit:]
+	}
+	out := make([][]byte, 0, len(entries))
+	for _, indexPath := range entries {
+		itemID := driver.IDFromIndexCursor(filepath.Base(indexPath))
+		data, err := os.ReadFile(filepath.Join(b.root, "collections", namespace, itemID+".json"))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, data)
+	}
+	return out, nil
+}
+
 func (b *Backend) ListIndexPage(ctx context.Context, namespace string, req driver.IndexPageRequest) (driver.IndexPage, error) {
 	if err := driver.EnsureContext(ctx); err != nil {
 		return driver.IndexPage{}, err

@@ -49,9 +49,10 @@ func TestSessionMatchesSearchesPersistedTitlesAndPagedContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(indexes) != 1 || indexes[0].TimelineCount != 66 {
+	if len(indexes) != 1 || len(indexes[0].Bloom) != chatSearchBloomBytes {
 		t.Fatalf("expected one lazy per-chat index, got %#v", indexes)
 	}
+	firstLatest := indexes[0].LatestTimeline
 	if _, err := appendTimeline(ctx, st, chatRecord.ID, domain.UserMessage{Text: "freshly appended searchable text"}); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +67,17 @@ func TestSessionMatchesSearchesPersistedTitlesAndPagedContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(indexes) != 1 || indexes[0].TimelineCount != 67 {
+	if len(indexes) != 1 || indexes[0].LatestTimeline == firstLatest {
 		t.Fatalf("expected rebuilt per-chat index, got %#v", indexes)
+	}
+}
+
+func TestChatSearchBloomRejectsMissingTrigrams(t *testing.T) {
+	bloom := buildChatSearchBloom("the quick brown fox")
+	if !chatSearchBloomMayContain(bloom, "quick brown") {
+		t.Fatal("expected bloom to retain present phrase")
+	}
+	if chatSearchBloomMayContain(bloom, "zzzzzunlikely") {
+		t.Fatal("expected bloom to reject absent phrase")
 	}
 }

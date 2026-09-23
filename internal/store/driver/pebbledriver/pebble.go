@@ -186,6 +186,48 @@ func (b *Backend) List(ctx context.Context, namespace string, lookup *driver.Ind
 	return b.listByPrefix(driver.RecordPrefix(namespace))
 }
 
+func (b *Backend) TailIndex(ctx context.Context, namespace, name, value string, limit int) ([][]byte, error) {
+	if err := driver.EnsureContext(ctx); err != nil {
+		return nil, err
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.closed {
+		return nil, pebble.ErrClosed
+	}
+	prefix := driver.IndexPrefix(namespace, name, value)
+	iter, err := b.db.NewIter(&pebble.IterOptions{LowerBound: []byte(prefix), UpperBound: nextPrefix([]byte(prefix))})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = iter.Close() }()
+	ids := make([]string, 0, limit)
+	for ok := iter.Last(); ok && len(ids) < limit; ok = iter.Prev() {
+		if err := driver.EnsureContext(ctx); err != nil {
+			return nil, err
+		}
+		ids = append(ids, driver.IDFromIndexCursor(strings.TrimPrefix(string(iter.Key()), prefix)))
+	}
+	if err := iter.Error(); err != nil {
+		return nil, err
+	}
+	out := make([][]byte, 0, len(ids))
+	for index := len(ids) - 1; index >= 0; index-- {
+		data, closer, err := b.db.Get([]byte(driver.RecordKey(namespace, ids[index])))
+		if errors.Is(err, pebble.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, driver.CloneBytes(data))
+		if err := closer.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 func (b *Backend) ListIndexPage(ctx context.Context, namespace string, req driver.IndexPageRequest) (driver.IndexPage, error) {
 	if err := driver.EnsureContext(ctx); err != nil {
 		return driver.IndexPage{}, err

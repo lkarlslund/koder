@@ -220,6 +220,29 @@ func (c Collection[T]) ListIndexPage(ctx context.Context, name, value, before, a
 	return out, nil
 }
 
+// TailIndex returns the newest records from an ordered exact-value index
+// without counting or scanning older entries.
+func (c Collection[T]) TailIndex(ctx context.Context, name, value string, limit int) ([]T, error) {
+	if name == "" || value == "" || limit <= 0 {
+		return nil, fmt.Errorf("tail %s: index name, value, and positive limit are required", c.spec.Namespace)
+	}
+	rawItems, err := c.store.backend.TailIndex(ctx, c.spec.Namespace, name, value, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]T, 0, len(rawItems))
+	for _, raw := range rawItems {
+		var item T
+		if err := json.Unmarshal(raw, &item); err != nil {
+			return nil, fmt.Errorf("decode %s tail item: %w", c.spec.Namespace, err)
+		}
+		if c.matchesIndex(item, name, value) {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
 func (c Collection[T]) put(ctx context.Context, value T) error {
 	data, err := json.Marshal(value)
 	if err != nil {
