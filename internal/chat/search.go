@@ -114,7 +114,13 @@ func searchChatIndex(ctx context.Context, st *store.Store, chatRecord domain.Cha
 		return false, fmt.Errorf("load chat search index %s: %w", chatRecord.ID, err)
 	}
 	var index chatSearchIndex
-	if len(stored) == 1 && stored[0].sameSource(fingerprint) {
+	if len(stored) == 1 && stored[0].SourceRevision.IsZero() {
+		index = stored[0]
+		index.SourceRevision = fingerprint.SourceRevision
+		if err := chatSearchIndexCollection(st).Put(ctx, index); err != nil {
+			return false, fmt.Errorf("migrate chat search source revision %s: %w", chatRecord.ID, err)
+		}
+	} else if len(stored) == 1 && stored[0].sameSource(fingerprint) {
 		index = stored[0]
 		if len(index.Bloom) != chatSearchBloomBytes {
 			document, err := chatSearchDocumentCollection(st).Get(ctx, chatRecord.ID)
