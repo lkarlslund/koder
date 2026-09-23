@@ -102,6 +102,16 @@ func searchChatIndex(ctx context.Context, st *store.Store, chatRecord domain.Cha
 	var index chatSearchIndex
 	if len(stored) == 1 && stored[0].sameSource(fingerprint) {
 		index = stored[0]
+		if len(index.Bloom) != chatSearchBloomBytes {
+			document, err := chatSearchDocumentCollection(st).Get(ctx, chatRecord.ID)
+			if err != nil {
+				return false, fmt.Errorf("load chat search document %s for index migration: %w", chatRecord.ID, err)
+			}
+			index.Bloom = buildChatSearchBloom(document.Text)
+			if err := chatSearchIndexCollection(st).Put(ctx, index); err != nil {
+				return false, fmt.Errorf("migrate chat search index %s: %w", chatRecord.ID, err)
+			}
+		}
 	} else {
 		var document chatSearchDocument
 		index, document, err = buildChatSearchIndex(ctx, st, fingerprint)
@@ -175,7 +185,7 @@ func (index chatSearchIndex) sameSource(other chatSearchIndex) bool {
 		index.LatestUpdatedAt.Equal(other.LatestUpdatedAt)
 }
 
-const chatSearchBloomBytes = 256 * 1024
+const chatSearchBloomBytes = 32 * 1024
 
 func buildChatSearchBloom(text string) []byte {
 	bloom := make([]byte, chatSearchBloomBytes)
