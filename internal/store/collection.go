@@ -183,6 +183,20 @@ func (c Collection[T]) List(ctx context.Context, query Query[T]) ([]T, error) {
 	return out, nil
 }
 
+// Scan visits records one at a time without retaining the collection in memory.
+func (c Collection[T]) Scan(ctx context.Context, visit func(T) error) error {
+	if visit == nil {
+		return fmt.Errorf("scan %s: visitor is required", c.spec.Namespace)
+	}
+	return c.store.backend.Scan(ctx, c.spec.Namespace, func(raw []byte) error {
+		var value T
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return fmt.Errorf("decode %s scan item: %w", c.spec.Namespace, err)
+		}
+		return visit(value)
+	})
+}
+
 // ListIndexPage returns one bounded page for an exact secondary-index value.
 // Cursors are exclusive durable record IDs.
 func (c Collection[T]) ListIndexPage(ctx context.Context, name, value, before, after string, limit int, tail bool) (Page[T], error) {

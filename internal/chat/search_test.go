@@ -17,7 +17,7 @@ func TestSessionMatchesSearchesPersistedTitlesAndPagedContent(t *testing.T) {
 	if err := putChat(ctx, st, chatRecord); err != nil {
 		t.Fatal(err)
 	}
-	for index := 0; index < persistedSearchPageSize+2; index++ {
+	for index := 0; index < 66; index++ {
 		text := fmt.Sprintf("ordinary message %d", index)
 		if index == 0 {
 			text = "The distant persisted needle"

@@ -3,49 +3,78 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 )
 
-const persistedSearchPageSize = 64
+var errSearchComplete = errors.New("session search complete")
 
-// SessionMatches reports whether a persisted chat title or timeline item in a
-// session contains query. It reads bounded pages and does not hydrate runtimes.
-func (s *Source) SessionMatches(ctx context.Context, sessionID id.ID, query string) (bool, error) {
+// SearchSessions reports which sessions have a persisted chat title or
+// timeline item containing query. Collections are streamed once so memory use
+// is bounded and chat runtimes are never hydrated.
+func (s *Source) SearchSessions(ctx context.Context, sessionIDs []id.ID, query string) (map[id.ID]bool, error) {
 	query = strings.ToLower(strings.TrimSpace(query))
+	wanted := make(map[id.ID]struct{}, len(sessionIDs))
+	for _, sessionID := range sessionIDs {
+		wanted[sessionID] = struct{}{}
+	}
+	matches := make(map[id.ID]bool)
 	if query == "" {
-		return true, nil
+		for sessionID := range wanted {
+			matches[sessionID] = true
+		}
+		return matches, nil
 	}
-	chats, err := s.ListRecordsForSession(ctx, sessionID)
+	deps, err := s.currentDeps()
 	if err != nil {
-		return false, fmt.Errorf("list persisted chats: %w", err)
+		return nil, err
 	}
-	for _, chatRecord := range chats {
+	chatSessions := make(map[id.ID]id.ID)
+	if err := chatCollection(deps.Store).Scan(ctx, func(chatRecord domain.Chat) error {
+		sessionID := id.ID(chatRecord.SessionID)
+		if _, ok := wanted[sessionID]; !ok {
+			return nil
+		}
+		chatSessions[id.ID(chatRecord.ID)] = sessionID
 		if strings.Contains(strings.ToLower(chatRecord.Title), query) {
-			return true, nil
+			matches[sessionID] = true
 		}
-		before := id.ID("")
-		for {
-			page, err := s.TimelinePage(ctx, chatRecord.ID, before, persistedSearchPageSize, false)
-			if err != nil {
-				return false, fmt.Errorf("search persisted chat %s: %w", chatRecord.ID, err)
-			}
-			for _, item := range page.Items {
-				content, err := json.Marshal(item.Content)
-				if err != nil {
-					return false, fmt.Errorf("encode timeline item %s: %w", item.ID, err)
-				}
-				if strings.Contains(strings.ToLower(string(content)), query) {
-					return true, nil
-				}
-			}
-			if !page.HasMore || len(page.Items) == 0 {
-				break
-			}
-			before = page.Before
-		}
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("scan persisted chats: %w", err)
 	}
-	return false, nil
+	if len(matches) == len(wanted) {
+		return matches, nil
+	}
+	err = timelineCollection(deps.Store).Scan(ctx, func(item domain.TimelineItem) error {
+		sessionID, ok := chatSessions[id.ID(item.ChatID)]
+		if !ok || matches[sessionID] {
+			return nil
+		}
+		content, err := json.Marshal(item.Content)
+		if err != nil {
+			return fmt.Errorf("encode timeline item %s: %w", item.ID, err)
+		}
+		if strings.Contains(strings.ToLower(string(content)), query) {
+			matches[sessionID] = true
+			if len(matches) == len(wanted) {
+				return errSearchComplete
+			}
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, errSearchComplete) {
+		return nil, fmt.Errorf("scan persisted timelines: %w", err)
+	}
+	return matches, nil
+}
+
+// SessionMatches is the single-session form of SearchSessions.
+func (s *Source) SessionMatches(ctx context.Context, sessionID id.ID, query string) (bool, error) {
+	matches, err := s.SearchSessions(ctx, []id.ID{sessionID}, query)
+	return matches[sessionID], err
 }

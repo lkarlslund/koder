@@ -9,6 +9,7 @@ type Backend interface {
 	Put(context.Context, string, string, []byte, map[string]IndexValue) error
 	Delete(context.Context, string, string) error
 	List(context.Context, string, *IndexLookup) ([][]byte, error)
+	Scan(context.Context, string, func([]byte) error) error
 	ListIndexPage(context.Context, string, IndexPageRequest) (IndexPage, error)
 	AddIndexEntries(context.Context, string, string, string, []OrderedIndexEntry) error
 }

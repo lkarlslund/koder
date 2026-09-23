@@ -67,6 +67,16 @@ func TestCollectionRoundTripAndIndex(t *testing.T) {
 			if len(reloaded) != 1 || reloaded[0].ID != first.ID {
 				t.Fatalf("reloaded = %#v", reloaded)
 			}
+			var scanned []testNote
+			if err := notes.Scan(context.Background(), func(note testNote) error {
+				scanned = append(scanned, note)
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if len(scanned) != 1 || scanned[0].ID != first.ID || scanned[0].Body != "updated" {
+				t.Fatalf("scanned = %#v", scanned)
+			}
 		})
 	}
 }

@@ -7,9 +7,9 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 )
 
-// PersistedSessionMatches searches chat metadata and transcript storage without
-// loading the session or any chat runtime.
-func (e *Engine) PersistedSessionMatches(ctx context.Context, sessionID id.ID, query string) (bool, error) {
+// SearchPersistedSessions searches chat metadata and transcript storage without
+// loading sessions or chat runtimes.
+func (e *Engine) SearchPersistedSessions(ctx context.Context, sessionIDs []id.ID, query string) (map[id.ID]bool, error) {
 	source := chatpkg.NewSource(func() chatpkg.Deps { return chatpkg.Deps{Store: e.store} })
-	return source.SessionMatches(ctx, sessionID, query)
+	return source.SearchSessions(ctx, sessionIDs, query)
 }

@@ -27,28 +27,27 @@ func (c *Controller) SearchSessions(ctx context.Context, query string) (SessionS
 		return SessionSearchResult{}, err
 	}
 	result := SessionSearchResult{SessionIDs: make([]id.ID, 0)}
-	search := func(session domain.Session) error {
+	unmatched := make([]id.ID, 0, len(state.Sessions)+len(state.QuickChats))
+	searchTitle := func(session domain.Session) {
 		if strings.Contains(strings.ToLower(session.Title), query) {
 			result.SessionIDs = append(result.SessionIDs, session.ID)
-			return nil
+			return
 		}
-		matched, err := c.agent.PersistedSessionMatches(ctx, session.ID, query)
-		if err != nil {
-			return err
-		}
-		if matched {
-			result.SessionIDs = append(result.SessionIDs, session.ID)
-		}
-		return nil
+		unmatched = append(unmatched, session.ID)
 	}
 	for _, session := range state.Sessions {
-		if err := search(session); err != nil {
-			return SessionSearchResult{}, err
-		}
+		searchTitle(session)
 	}
 	for _, session := range state.QuickChats {
-		if err := search(session); err != nil {
-			return SessionSearchResult{}, err
+		searchTitle(session)
+	}
+	matches, err := c.agent.SearchPersistedSessions(ctx, unmatched, query)
+	if err != nil {
+		return SessionSearchResult{}, err
+	}
+	for _, sessionID := range unmatched {
+		if matches[sessionID] {
+			result.SessionIDs = append(result.SessionIDs, sessionID)
 		}
 	}
 	return result, nil
