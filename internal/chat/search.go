@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -84,21 +85,64 @@ func (s *Source) SearchSessions(ctx context.Context, sessionIDs []id.ID, query s
 	if err != nil {
 		return nil, fmt.Errorf("list persisted chats for search: %w", err)
 	}
+	grouped := make(map[id.ID][]domain.Chat)
 	for _, chatRecord := range chats {
 		sessionID := id.ID(chatRecord.SessionID)
-		if _, ok := wanted[sessionID]; !ok || matches[sessionID] {
+		if _, ok := wanted[sessionID]; !ok {
 			continue
 		}
 		if strings.Contains(strings.ToLower(chatRecord.Title), query) {
 			matches[sessionID] = true
 			continue
 		}
-		matched, err := searchChatIndex(ctx, deps.Store, chatRecord, query)
-		if err != nil {
-			return nil, err
+		grouped[sessionID] = append(grouped[sessionID], chatRecord)
+	}
+	type searchResult struct {
+		sessionID id.ID
+		matched   bool
+		err       error
+	}
+	jobs := make(chan id.ID)
+	results := make(chan searchResult, len(grouped))
+	workerCount := min(8, len(grouped))
+	var workers sync.WaitGroup
+	for range workerCount {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for sessionID := range jobs {
+				result := searchResult{sessionID: sessionID}
+				for _, chatRecord := range grouped[sessionID] {
+					matched, err := searchChatIndex(ctx, deps.Store, chatRecord, query)
+					if err != nil {
+						result.err = err
+						break
+					}
+					if matched {
+						result.matched = true
+						break
+					}
+				}
+				results <- result
+			}
+		}()
+	}
+	go func() {
+		for sessionID := range grouped {
+			if !matches[sessionID] {
+				jobs <- sessionID
+			}
 		}
-		if matched {
-			matches[sessionID] = true
+		close(jobs)
+		workers.Wait()
+		close(results)
+	}()
+	for result := range results {
+		if result.err != nil {
+			return nil, result.err
+		}
+		if result.matched {
+			matches[result.sessionID] = true
 		}
 	}
 	return matches, nil
