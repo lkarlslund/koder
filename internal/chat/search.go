@@ -227,7 +227,7 @@ func markChatSearchSourceChanged(ctx context.Context, st *store.Store, chatID id
 	return chatSearchSourceRevisionCollection(st).Put(ctx, chatSearchSourceRevision{ChatID: chatID, UpdatedAt: time.Now().UTC()})
 }
 
-const chatSearchBloomBytes = 32 * 1024
+const chatSearchBloomBytes = 128 * 1024
 
 func buildChatSearchBloom(text string) []byte {
 	bloom := make([]byte, chatSearchBloomBytes)
