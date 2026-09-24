@@ -112,10 +112,10 @@ func (e *Engine) MemoryService() *memoryService.Service {
 }
 
 const (
-	// The request limit includes reasoning tokens. Leave room for thinking while
-	// bounding the summary itself separately below.
-	compactionMaxTokens = 32 * 1024
-	compactionMaxBytes  = 64 * 1024
+	// Bound only the visible summary. Provider generation limits commonly include
+	// hidden reasoning, so compaction requests deliberately do not set one.
+	compactionMaxBytes                = 64 * 1024
+	compactionReductionCheckMinTokens = 32 * 1024
 )
 
 func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManagers ...*mcp.Manager) *Engine {
@@ -1698,7 +1698,7 @@ func (e *Engine) compactChatRuntime(ctx context.Context, session domain.Session,
 			Meta: map[string]string{"refresh": "details", "compaction": "started"},
 		}
 	}
-	resp, err := e.completeCompactionChat(ctx, compactionChat, compactionClient, req, out)
+	resp, err := e.completeCompactionChatWithContextRetry(ctx, compactionChat, compactionClient, req, out)
 	if err != nil {
 		_ = updateCompactionState("", "failed", 0)
 		return err
@@ -1788,7 +1788,7 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 			Meta: map[string]string{"refresh": "details", "compaction": "started"},
 		}
 	}
-	resp, err := e.completeCompactionChat(ctx, compactionChat, compactionClient, req, out)
+	resp, err := e.completeCompactionChatWithContextRetry(ctx, compactionChat, compactionClient, req, out)
 	if err != nil {
 		_ = updateCompactionState("", "failed", 0)
 		return err
@@ -1859,15 +1859,10 @@ func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, chat 
 }
 
 func (e *Engine) compactionChatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, instructions string, stream bool) provider.ChatRequest {
-	req := e.chatRequest(session, chat, append(messages, provider.Message{
+	return e.chatRequest(session, chat, append(messages, provider.Message{
 		Role:    provider.RoleUser,
 		Content: e.compactPromptWithInstructions(instructions),
 	}), stream)
-	if req.ExtraBody == nil {
-		req.ExtraBody = map[string]any{}
-	}
-	req.ExtraBody["max_tokens"] = compactionMaxTokens
-	return req
 }
 
 func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) ([]provider.Message, string, error) {
@@ -1944,7 +1939,7 @@ func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session
 			}
 			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(compacted.Summary))
 			if segmentStart < idx {
-				preserved, err := e.compactionMessagesForCompactionTail(session, timeline[segmentStart:idx], compacted.FirstKeptItemID, e.preserveThinkingEnabled(chat))
+				preserved, err := e.compactionMessagesForCompactionTail(session, timeline[segmentStart:idx], compacted.FirstKeptItemID, false)
 				if err != nil {
 					return provider.PromptEnvelope{}, err
 				}
@@ -1953,7 +1948,7 @@ func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session
 			segmentStart = idx + 1
 			continue
 		}
-		messages, err := e.compactionMessagesForTimelineItem(session, item, e.preserveThinkingEnabled(chat))
+		messages, err := e.compactionMessagesForTimelineItem(session, item, false)
 		if err != nil {
 			return provider.PromptEnvelope{}, err
 		}
@@ -1971,7 +1966,7 @@ func (e *Engine) buildCompactionPromptEnvelopeForTimelineRange(session domain.Se
 		if _, ok := item.Content.(domain.Compaction); ok {
 			continue
 		}
-		messages, err := e.compactionMessagesForTimelineItem(session, item, e.preserveThinkingEnabled(chat))
+		messages, err := e.compactionMessagesForTimelineItem(session, item, false)
 		if err != nil {
 			return provider.PromptEnvelope{}, err
 		}
@@ -2303,9 +2298,40 @@ func (e *Engine) completeCompactionChat(ctx context.Context, chat domain.Chat, c
 	return resp, err
 }
 
+func (e *Engine) completeCompactionChatWithContextRetry(ctx context.Context, chat domain.Chat, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {
+	for {
+		resp, err := e.completeCompactionChat(ctx, chat, client, req, out)
+		if err == nil || !provider.IsContextWindowExceeded(err) || !dropOldestCompactionMessage(&req) {
+			return resp, err
+		}
+		if out != nil {
+			out <- domain.Event{
+				Kind: domain.EventKindStatus,
+				Text: "Compaction prompt exceeded the context window; retrying without its oldest item",
+				Meta: map[string]string{"compaction": "progress"},
+			}
+		}
+	}
+}
+
+func dropOldestCompactionMessage(req *provider.ChatRequest) bool {
+	if req == nil || len(req.Messages) < 2 {
+		return false
+	}
+	last := len(req.Messages) - 1 // Preserve the final compaction instruction.
+	for index := 0; index < last; index++ {
+		if req.Messages[index].Role == provider.RoleSystem {
+			continue
+		}
+		req.Messages = append(req.Messages[:index], req.Messages[index+1:]...)
+		return true
+	}
+	return false
+}
+
 func validateCompactionResponse(resp provider.ChatResponse, beforeContextTokens, afterContextTokens int) (string, error) {
 	if strings.EqualFold(strings.TrimSpace(resp.FinishReason), "length") {
-		return "", fmt.Errorf("compaction reached its %d-token total generation limit (including thinking)", compactionMaxTokens)
+		return "", fmt.Errorf("provider stopped compaction at its output limit before completing the summary")
 	}
 	summary := strings.TrimSpace(resp.Text)
 	if summary == "" {
@@ -2317,7 +2343,7 @@ func validateCompactionResponse(resp provider.ChatResponse, beforeContextTokens,
 	if len(summary) > compactionMaxBytes {
 		return "", fmt.Errorf("compaction output exceeded %s", formatCompactionBytes(compactionMaxBytes))
 	}
-	if beforeContextTokens > compactionMaxTokens && (afterContextTokens <= 0 || afterContextTokens >= beforeContextTokens) {
+	if beforeContextTokens > compactionReductionCheckMinTokens && (afterContextTokens <= 0 || afterContextTokens >= beforeContextTokens) {
 		return "", fmt.Errorf("compaction did not reduce context (%d tokens before, %d after)", beforeContextTokens, afterContextTokens)
 	}
 	return summary, nil

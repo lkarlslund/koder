@@ -5218,7 +5218,7 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 	t.Parallel()
 
 	var requests int
-	var maxTokens int
+	var sentMaxTokens bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
 			http.NotFound(w, r)
@@ -5230,7 +5230,7 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 			t.Errorf("decode compaction request: %v", err)
 			return
 		}
-		maxTokens = int(body["max_tokens"].(float64))
+		_, sentMaxTokens = body["max_tokens"]
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"short compact summary"}}],"usage":{"prompt_tokens":1200,"completion_tokens":300}}`))
 	}))
 	defer server.Close()
@@ -5324,8 +5324,8 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 	if requests != 1 {
 		t.Fatalf("expected one compaction request, got %d", requests)
 	}
-	if maxTokens != compactionMaxTokens {
-		t.Fatalf("compaction max_tokens = %d, want %d", maxTokens, compactionMaxTokens)
+	if sentMaxTokens {
+		t.Fatal("compaction request must not cap total generation tokens")
 	}
 }
 
@@ -5339,7 +5339,7 @@ func TestValidateCompactionResponseRejectsUnsafeResults(t *testing.T) {
 		after  int
 		want   string
 	}{
-		{name: "length limit", resp: provider.ChatResponse{Text: "partial", FinishReason: "length"}, before: 100_000, after: 10_000, want: "generation limit"},
+		{name: "length limit", resp: provider.ChatResponse{Text: "partial", FinishReason: "length"}, before: 100_000, after: 10_000, want: "provider stopped"},
 		{name: "byte limit", resp: provider.ChatResponse{Text: strings.Repeat("x", compactionMaxBytes+1)}, before: 100_000, after: 10_000, want: "exceeded"},
 		{name: "no reduction", resp: provider.ChatResponse{Text: "summary"}, before: 100_000, after: 100_000, want: "did not reduce"},
 	}
@@ -5415,6 +5415,86 @@ func TestCompleteCompactionChatDoesNotCountReasoningAgainstSummaryLimit(t *testi
 	}
 	if resp.Text != "short summary" {
 		t.Fatalf("summary = %q, want short summary", resp.Text)
+	}
+}
+
+func TestCompleteCompactionChatRetriesContextOverflowWithoutOldestHistory(t *testing.T) {
+	t.Parallel()
+
+	var requests [][]provider.Message
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []provider.Message `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		requests = append(requests, body.Messages)
+		if len(requests) == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"code":"context_length_exceeded"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"summary"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+
+	client, err := provider.New("test", config.Provider{BaseURL: server.URL, Timeout: time.Second}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := New(testConfig(t), nil, nil)
+	req := provider.ChatRequest{Model: "test", Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "system"},
+		{Role: provider.RoleUser, Content: "oldest history"},
+		{Role: provider.RoleAssistant, Content: "newer history"},
+		{Role: provider.RoleUser, Content: "compact now"},
+	}}
+	resp, err := engine.completeCompactionChatWithContextRetry(context.Background(), domain.Chat{ProviderID: "test"}, client, req, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Text != "summary" || len(requests) != 2 {
+		t.Fatalf("response = %#v, requests = %d", resp, len(requests))
+	}
+	if got := requests[1]; len(got) != 3 || got[0].Content != "system" || got[1].Content != "newer history" || got[2].Content != "compact now" {
+		t.Fatalf("retried messages = %#v", got)
+	}
+}
+
+func TestBuildCompactionConversationOmitsHistoricalReasoning(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig(t)
+	cfg.SetModelConfig(config.ModelConfig{
+		ProviderID:  "test",
+		ModelID:     "Qwen/Qwen3.8-Flash",
+		ModelPreset: provider.ModelPresetQwen38PreserveThinking,
+	})
+	engine := New(cfg, nil, nil)
+	timeline := []domain.TimelineItem{{
+		ID:  "assistant-1",
+		Seq: 1,
+		Content: domain.AssistantMessage{
+			Text:      "visible result",
+			Reasoning: domain.ReasoningContent{Text: "private historical reasoning"},
+		},
+	}}
+	messages, _, err := engine.buildCompactionConversationForTimeline(
+		domain.Session{},
+		domain.Chat{ProviderID: "test", ModelID: "Qwen/Qwen3.8-Flash"},
+		timeline,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "private historical reasoning") || !strings.Contains(string(raw), "visible result") {
+		t.Fatalf("compaction messages = %s", raw)
 	}
 }
 
