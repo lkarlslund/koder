@@ -741,6 +741,19 @@ func CanonicalRequest(req Request) Request {
 	if canonical, ok := canonicalPhoneRequest(req); ok {
 		return canonical
 	}
+	if req.Tool == ChatSend {
+		canonical := req
+		canonical.Tool = Chats
+		canonical.Args = maps.Clone(req.Args)
+		if strings.EqualFold(strings.TrimSpace(canonical.Args["steer"]), "true") {
+			canonical.Args["action"] = "steer"
+		} else {
+			canonical.Args["action"] = "queue"
+		}
+		delete(canonical.Args, "steer")
+		delete(canonical.Args, "wait")
+		return canonical
+	}
 	if req.Tool == Bash {
 		canonical := req
 		canonical.Tool = ExecCommand

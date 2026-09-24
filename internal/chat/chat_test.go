@@ -2122,6 +2122,55 @@ func TestRuntimeAbortAndSendQueueItemNowResolvesPendingInputBeforeDispatch(t *te
 	}
 }
 
+func TestRuntimeInterruptAndEnqueueWaitsForActiveWorkerToClose(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	firstStream := make(chan domain.Event)
+	secondStream := make(chan domain.Event)
+	close(secondStream)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{firstStream, secondStream}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "first"})
+	deadline := time.After(2 * time.Second)
+	for runner.promptCallCount() < 1 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for first prompt")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	rt.InterruptAndEnqueue(QueueItem{Kind: QueueKindUser, Source: domain.UserMessageSourceSubchat, Text: "urgent"})
+	deadline = time.After(2 * time.Second)
+	for len(rt.Snapshot().QueuedInputs) == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for interrupted message to be queued")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if got := runner.promptCallCount(); got != 1 {
+		t.Fatalf("replacement prompt started before old worker closed: calls=%d", got)
+	}
+
+	close(firstStream)
+	deadline = time.After(2 * time.Second)
+	for runner.promptCallCount() < 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for replacement prompt; snapshot=%#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if got := runner.promptAt(1); got != "urgent" {
+		t.Fatalf("replacement prompt = %q, want urgent", got)
+	}
+}
+
 func TestDrainAndCloseDoesNotDispatchQueuedWork(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)

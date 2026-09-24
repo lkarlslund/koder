@@ -3182,13 +3182,13 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 		requestsMu.Unlock()
 		switch {
 		case strings.Contains(requestBody, "voice orchestrator") && strings.Contains(requestBody, `"role":"tool"`):
-			if !strings.Contains(requestBody, "The laptop now boots normally after the firmware fix.") {
-				t.Errorf("voice continuation omitted delegated chat response: %s", requestBody)
+			if !strings.Contains(requestBody, "Your message is being processed by the chat.") {
+				t.Errorf("voice continuation omitted chat delivery result: %s", requestBody)
 			}
-			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"We found that the laptop now boots normally."},"finish_reason":"stop"}],"usage":{"total_tokens":2}}`)
+			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"I asked the laptop chat to check it."},"finish_reason":"stop"}],"usage":{"total_tokens":2}}`)
 		case strings.Contains(requestBody, "voice orchestrator"):
-			arguments := fmt.Sprintf(`{"chat_id":%q,"message":"Check whether the laptop fix still works","wait":true}`, targetChatID)
-			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"send-1","type":"function","function":{"name":"chat_send","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, arguments)
+			arguments := fmt.Sprintf(`{"action":"queue","chat_id":%q,"message":"Check whether the laptop fix still works"}`, targetChatID)
+			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"send-1","type":"function","function":{"name":"chats","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, arguments)
 		default:
 			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"The laptop now boots normally after the firmware fix."},"finish_reason":"stop"}],"usage":{"total_tokens":2}}`)
 		}
@@ -3244,7 +3244,7 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if message.SpokenText != "We found that the laptop now boots normally." {
+	if message.SpokenText != "I asked the laptop chat to check it." {
 		t.Fatalf("voice response = %#v", message)
 	}
 	if message.TranscriptID == "" {
@@ -3262,8 +3262,8 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	if voiceIndex < 0 || afterTurn.Chats[voiceIndex].Title != "Phone assistant" || !afterTurn.Chats[voiceIndex].TitleUserDefined {
 		t.Fatalf("voice turn changed user-defined chat title: %#v", afterTurn.Chats)
 	}
-	if working.ID != targetChatID || working.Kind != "chat" {
-		t.Fatalf("working target = %#v", working)
+	if working.ID != "" {
+		t.Fatalf("non-blocking chat delivery unexpectedly reported a working target: %#v", working)
 	}
 	voiceChats, err := ctrl.ListVoiceSessions(ctx)
 	if err != nil {
@@ -3296,11 +3296,11 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 	if userTurns != 1 {
 		t.Fatalf("voice transcript has %d user turns: %#v", userTurns, timeline)
 	}
-	searchResults, err := ctrl.SearchVoiceChatHistory(ctx, string(target.ID), voiceChat.ID, "boots normally", 20)
+	searchResults, err := ctrl.SearchVoiceChatHistory(ctx, string(target.ID), voiceChat.ID, "asked the laptop", 20)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(searchResults) != 1 || !strings.Contains(searchResults[0].Match.Text, "boots normally") || len(searchResults[0].Context) < 2 {
+	if len(searchResults) != 1 || !strings.Contains(searchResults[0].Match.Text, "asked the laptop") || len(searchResults[0].Context) < 2 {
 		t.Fatalf("voice transcript search = %#v", searchResults)
 	}
 	requestsMu.Lock()

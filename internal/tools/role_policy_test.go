@@ -289,6 +289,8 @@ func TestCanonicalRequestTranslatesLegacyOperations(t *testing.T) {
 		{name: "browser", request: tools.Request{Tool: tools.BrowserTabClose, Args: map[string]string{"tab_id": "tab-1"}}, wantTool: tools.BrowserTabs, wantAction: "close"},
 		{name: "milestone restore", request: tools.Request{Tool: tools.MilestoneArchive, Args: map[string]string{"milestone_key": "M001", "archived": "false"}}, wantTool: tools.Milestones, wantAction: "restore", absentArg: "archived"},
 		{name: "chat archive", request: tools.Request{Tool: tools.ChatArchive, Args: map[string]string{"chat_id": "child", "archived": "true"}}, wantTool: tools.Chats, wantAction: "archive", absentArg: "archived"},
+		{name: "chat send", request: tools.Request{Tool: tools.ChatSend, Args: map[string]string{"chat_id": "child", "message": "continue"}}, wantTool: tools.Chats, wantAction: "queue", absentArg: "wait"},
+		{name: "chat steer", request: tools.Request{Tool: tools.ChatSend, Args: map[string]string{"chat_id": "child", "message": "adjust", "steer": "true"}}, wantTool: tools.Chats, wantAction: "steer", absentArg: "steer"},
 		{name: "phone media", request: tools.Request{Tool: tools.Phone, Args: map[string]string{"action": "media_control", "media_action": "pause"}}, wantTool: tools.PhoneMedia, wantAction: "pause", absentArg: "media_action"},
 		{name: "present default", request: tools.Request{Tool: tools.Present, Args: map[string]string{"content": "hello"}}, wantTool: tools.Present, wantAction: "content"},
 	}
@@ -333,7 +335,6 @@ func executionForbiddenChatTools() []tools.ID {
 	return []tools.ID{
 		domain.ToolKindChatList,
 		domain.ToolKindChatStart,
-		domain.ToolKindChatSend,
 		domain.ToolKindChatCancel,
 		domain.ToolKindChatArchive,
 		domain.ToolKindChatRename,

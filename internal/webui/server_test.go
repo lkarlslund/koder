@@ -2289,7 +2289,7 @@ func TestIndexServesHTML(t *testing.T) {
 		`kind === 'present' && toolAction(tool) === 'media'`,
 		`kind === 'present' && toolAction(tool) === 'file'`,
 		`kind === 'browser_capture' && (toolAction(tool) === 'screenshot'`,
-		`kind === 'chats' && toolAction(tool) === 'send'`,
+		`kind === 'chats' && ['queue', 'steer', 'interrupt'].includes(toolAction(tool))`,
 	} {
 		if !strings.Contains(fullPage, canonicalRenderer) {
 			t.Fatalf("expected canonical action renderer %q", canonicalRenderer)

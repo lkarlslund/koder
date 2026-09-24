@@ -668,7 +668,7 @@ func ensureTaskUpdateAllowed(runtime tools.Runtime, milestone planning.Milestone
 	if key == "" {
 		key = string(task.ID)
 	}
-	return fmt.Errorf("task %s is in_progress in milestone %q owned by chat %s; use chats with action=send to steer the worker instead of mutating the running task", key, planning.MilestoneKey(milestone), *milestone.OwnerChatID)
+	return fmt.Errorf("task %s is in_progress in milestone %q owned by chat %s; use chats with action=steer for the worker instead of mutating the running task", key, planning.MilestoneKey(milestone), *milestone.OwnerChatID)
 }
 
 func persistedTaskBucket(ctx context.Context, control tools.SessionControl, sessionID id.ID, ref string) (planning.Plan, []planning.Task, string, error) {

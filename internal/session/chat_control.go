@@ -89,7 +89,7 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 			return chattool.Status{}, fmt.Errorf("milestone %q not found", milestoneKey)
 		}
 		if milestone.OwnerChatID != nil {
-			return chattool.Status{}, fmt.Errorf("milestone %q is owned by chat %s; use chats with action=send to steer that child chat instead of starting another one", milestoneKey, *milestone.OwnerChatID)
+			return chattool.Status{}, fmt.Errorf("milestone %q is owned by chat %s; use chats with action=steer for that child chat instead of starting another one", milestoneKey, *milestone.OwnerChatID)
 		}
 	}
 	if taskRef != "" {
@@ -114,12 +114,12 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 	}
 	if role == chatrole.Execution && milestoneKey != "" {
 		if existing := directChildForMilestone(snapshot.Chats, parentChatID, milestoneKey); existing.ID != "" {
-			return chattool.Status{}, fmt.Errorf("milestone %q already has child chat %s; use chats with action=send to steer it instead of starting another one", milestoneKey, existing.ID)
+			return chattool.Status{}, fmt.Errorf("milestone %q already has child chat %s; use chats with action=steer instead of starting another one", milestoneKey, existing.ID)
 		}
 	}
 	if taskRef != "" {
 		if existing := directChildForTask(snapshot.Chats, parentChatID, taskRef); existing.ID != "" {
-			return chattool.Status{}, fmt.Errorf("task %q already has child chat %s; use chats with action=send to steer it instead of starting another one", taskRef, existing.ID)
+			return chattool.Status{}, fmt.Errorf("task %q already has child chat %s; use chats with action=steer instead of starting another one", taskRef, existing.ID)
 		}
 	}
 	if err := c.session.ensureCanStartChild(ctx, parentChatID, snapshot.Chats); err != nil {
@@ -246,41 +246,45 @@ func (c chatControl) UpdateChat(ctx context.Context, sessionID, ownerChatID, cha
 		}
 	}
 	if strings.TrimSpace(update.Message) != "" && target.ID == ownerChatID {
-		return chattool.Status{}, fmt.Errorf("chats action=send cannot message its own chat; target a direct child chat instead")
+		return chattool.Status{}, fmt.Errorf("chats message actions cannot target their own chat; target a direct child chat instead")
 	}
-	var waitStart int64
-	var updates <-chan chatpkg.Update
-	var unsubscribe func()
+	deliveryNotice := ""
 	if strings.TrimSpace(update.Message) != "" || update.Interrupt {
 		rt, err := c.session.Chat(ctx, chatID)
 		if err != nil {
 			return chattool.Status{}, err
 		}
 		if strings.TrimSpace(update.Message) != "" {
-			if update.Wait {
-				if err := rt.EnsureTimeline(ctx); err != nil {
-					return chattool.Status{}, err
-				}
-				waitStart = latestChatSequence(rt.SnapshotTimeline())
-				updates, unsubscribe = rt.Subscribe()
-				defer unsubscribe()
+			before, err := c.session.ChatStatus(ctx, chatID)
+			if err != nil {
+				return chattool.Status{}, err
 			}
-			kind := chatpkg.QueueKindUser
-			if update.Steer {
-				kind = chatpkg.QueueKindSteer
-			}
-			rt.Enqueue(chatpkg.QueueItem{Kind: kind, Source: domain.UserMessageSourceSubchat, Text: update.Message})
-			if update.Wait {
-				response, err := waitForChatResponse(ctx, rt, updates, waitStart, update.Message)
-				if err != nil {
-					return chattool.Status{}, err
+			item := chatpkg.QueueItem{Kind: chatpkg.QueueKindUser, Source: domain.UserMessageSourceSubchat, Text: update.Message}
+			switch update.Delivery {
+			case chattool.DeliveryQueue:
+				rt.Enqueue(item)
+				if before.Busy {
+					deliveryNotice = "Your message was queued for the chat."
+				} else {
+					deliveryNotice = "Your message is being processed by the chat."
 				}
-				status, err := c.session.ChatStatus(ctx, chatID)
-				if err != nil {
-					return chattool.Status{}, err
+			case chattool.DeliverySteer:
+				item.Kind = chatpkg.QueueKindSteer
+				rt.Enqueue(item)
+				if before.Busy {
+					deliveryNotice = "Your message will be delivered at the chat's next turn boundary."
+				} else {
+					deliveryNotice = "Your message is being processed by the chat."
 				}
-				status.Response = response
-				return status, nil
+			case chattool.DeliveryInterrupt:
+				rt.InterruptAndEnqueue(item)
+				if before.Busy || before.State == chattool.RunStateWaitingApproval {
+					deliveryNotice = "The chat was interrupted to get your message."
+				} else {
+					deliveryNotice = "Your message is being processed by the chat."
+				}
+			default:
+				return chattool.Status{}, fmt.Errorf("unsupported chat message delivery %q", update.Delivery)
 			}
 		}
 		if update.Interrupt {
@@ -292,83 +296,13 @@ func (c chatControl) UpdateChat(ctx context.Context, sessionID, ownerChatID, cha
 		}
 	}
 	if update.Archived == nil && strings.TrimSpace(update.Title) == "" {
-		return c.session.ChatStatus(ctx, chatID)
+		status, err := c.session.ChatStatus(ctx, chatID)
+		status.DeliveryNotice = deliveryNotice
+		return status, err
 	}
 	status, _, err := c.session.UpdateChat(ctx, chatID, update)
+	status.DeliveryNotice = deliveryNotice
 	return status, err
-}
-
-func waitForChatResponse(ctx context.Context, runtime *chatpkg.Chat, updates <-chan chatpkg.Update, after int64, requestText string) (string, error) {
-	started := false
-	requestSequence := int64(0)
-	for {
-		select {
-		case <-ctx.Done():
-			return "", fmt.Errorf("wait for chat response: %w", ctx.Err())
-		case update, ok := <-updates:
-			if !ok {
-				return "", fmt.Errorf("chat closed before replying")
-			}
-			if update.Active || update.Status == chatpkg.StatusWaitingLLM || update.Status == chatpkg.StatusRunningTools {
-				started = true
-				continue
-			}
-			switch update.Status {
-			case chatpkg.StatusWaitingApproval:
-				return "", fmt.Errorf("chat %s needs approval", update.Snapshot.Chat.ID)
-			case chatpkg.StatusWaitingInput:
-				return "", fmt.Errorf("chat %s needs user input", update.Snapshot.Chat.ID)
-			case chatpkg.StatusErrored:
-				return "", fmt.Errorf("chat %s stopped with an error", update.Snapshot.Chat.ID)
-			}
-			timeline := runtime.SnapshotTimeline()
-			if requestSequence == 0 {
-				requestSequence = chatRequestSequence(timeline, after, requestText)
-			}
-			if requestSequence != 0 {
-				if response := latestChatResponse(timeline, requestSequence); response != "" {
-					return response, nil
-				}
-			}
-			if !started {
-				continue
-			}
-		}
-	}
-}
-
-func chatRequestSequence(timeline []domain.TimelineItem, after int64, requestText string) int64 {
-	for _, item := range timeline {
-		if item.Seq <= after {
-			continue
-		}
-		message, ok := item.Content.(domain.UserMessage)
-		if ok && message.Source == domain.UserMessageSourceSubchat && strings.TrimSpace(message.Text) == strings.TrimSpace(requestText) {
-			return item.Seq
-		}
-	}
-	return 0
-}
-
-func latestChatSequence(timeline []domain.TimelineItem) int64 {
-	if len(timeline) == 0 {
-		return 0
-	}
-	return timeline[len(timeline)-1].Seq
-}
-
-func latestChatResponse(timeline []domain.TimelineItem, after int64) string {
-	for index := len(timeline) - 1; index >= 0; index-- {
-		item := timeline[index]
-		if item.Seq <= after {
-			break
-		}
-		message, ok := item.Content.(domain.AssistantMessage)
-		if ok && strings.TrimSpace(message.Text) != "" {
-			return strings.TrimSpace(message.Text)
-		}
-	}
-	return ""
 }
 
 func (s *Session) startPreparedChat(ctx context.Context, chatID id.ID, milestone planning.Milestone, scopedTask *planning.Task, role domain.WorkflowRole, objective string) (chattool.Status, error) {
@@ -600,7 +534,7 @@ func (s *Session) ensureCanStartChild(ctx context.Context, parentChatID id.ID, c
 		}
 		parts = append(parts, fmt.Sprintf("%s (%s)", status.ID, ref))
 	}
-	return fmt.Errorf("cannot start child chat: %d non-idle child chat(s) already active, limit is %d; use chats with action=send to steer existing child chat(s): %s", len(active), limit, strings.Join(parts, ", "))
+	return fmt.Errorf("cannot start child chat: %d non-idle child chat(s) already active, limit is %d; use chats with action=steer for existing child chat(s): %s", len(active), limit, strings.Join(parts, ", "))
 }
 
 func (s *Session) maxChildChats() int {

@@ -1011,7 +1011,7 @@
         }
         case 'chats': {
           const action = toolAction(tool);
-          if (action === 'send') return 'Message chat ' + (firstValue(args, ['chat_id', 'ChatID']) || '');
+          if (['queue', 'steer', 'interrupt'].includes(action)) return actionLabel(action) + ' chat ' + (firstValue(args, ['chat_id', 'ChatID']) || '');
           return actionLabel(action) + ' chat';
         }
         case 'milestones': return actionLabel(toolAction(tool)) + ' milestone';
@@ -1047,7 +1047,7 @@
       if (String((tool && tool.tool) || '') === 'file_read') return '';
       if (String((tool && tool.tool) || '') === 'bash' && (toolStatus(tool) === 'done' || toolStatus(tool) === 'errored')) return '';
       if (String((tool && tool.tool) || '') === 'chat_send') return chatSendMessage(args);
-      if (String((tool && tool.tool) || '') === 'chats' && toolAction(tool) === 'send') return chatSendMessage(args);
+      if (String((tool && tool.tool) || '') === 'chats' && ['queue', 'steer', 'interrupt'].includes(toolAction(tool))) return chatSendMessage(args);
       if (String((tool && tool.tool) || '') === 'exec_command' && args.comment) return '';
       const values = [];
       if (args.command) values.push(compactCommandLabel(args.command));
@@ -1141,7 +1141,7 @@
         return renderCompactBlock('Search results', items.length ? items.map((item, idx) => (idx + 1) + '. ' + (item.title || item.Title || item.url || item.URL || '')) : toolResultText(tool));
       }
       if (kind === 'chat_send') return renderCompactBlock('Sent message', chatSendMessage(args) || toolResultText(tool));
-      if (kind === 'chats' && toolAction(tool) === 'send') return renderCompactBlock('Sent message', chatSendMessage(args) || toolResultText(tool));
+      if (kind === 'chats' && ['queue', 'steer', 'interrupt'].includes(toolAction(tool))) return renderCompactBlock(({queue: 'Queued', steer: 'Steered', interrupt: 'Interrupted'})[toolAction(tool)] + ' message', chatSendMessage(args) || toolResultText(tool));
       if (kind === 'memory') return renderMemoryBlock(toolAction(tool), data, args, toolResultText(tool));
       if (kind === 'mcp') return renderCompactBlock(toolTitleText(tool), toolResultText(tool));
       if (kind === 'view_image') {

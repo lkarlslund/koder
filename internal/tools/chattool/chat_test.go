@@ -90,14 +90,14 @@ func TestNormalizeArgs(t *testing.T) {
 		t.Fatalf("expected objective error, got %v", err)
 	}
 
-	sendArgs, err := (sendTool{}).NormalizeArgs(map[string]string{"chat_id": " #child ", "message": " continue this ", "steer": "true"})
+	sendArgs, err := (messageTool{}).NormalizeArgs(map[string]string{"chat_id": " #child ", "message": " continue this ", "delivery": "steer"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sendArgs["chat_id"] != "child" || sendArgs["message"] != "continue this" || sendArgs["steer"] != "true" {
+	if sendArgs["chat_id"] != "child" || sendArgs["message"] != "continue this" || sendArgs["delivery"] != "steer" {
 		t.Fatalf("unexpected send args: %#v", sendArgs)
 	}
-	if _, err := (sendTool{}).NormalizeArgs(map[string]string{"chat_id": "child"}); err == nil || !strings.Contains(err.Error(), "message") {
+	if _, err := (messageTool{}).NormalizeArgs(map[string]string{"chat_id": "child", "delivery": "queue"}); err == nil || !strings.Contains(err.Error(), "message") {
 		t.Fatalf("expected message error, got %v", err)
 	}
 
@@ -142,8 +142,20 @@ func TestChatsResourceIsModelFacingAndDispatches(t *testing.T) {
 	if !enabled || !strings.Contains(string(definition.Function.Parameters), `"restore"`) {
 		t.Fatalf("expected chats resource actions, got enabled=%v definition=%#v", enabled, definition)
 	}
+	parameters := string(definition.Function.Parameters)
+	for _, action := range []string{`"queue"`, `"steer"`, `"interrupt"`} {
+		if !strings.Contains(parameters, action) {
+			t.Fatalf("expected delivery action %s in %s", action, parameters)
+		}
+	}
+	if strings.Contains(parameters, `"send"`) || strings.Contains(parameters, `"wait"`) {
+		t.Fatalf("obsolete send/wait API remained in schema: %s", parameters)
+	}
 	if _, enabled := tools.DefinitionFor(tools.ChatList, runtime); enabled {
 		t.Fatal("legacy chat_list remained model-visible")
+	}
+	if _, exists := tools.Lookup(tools.ChatSend); exists {
+		t.Fatal("obsolete chat_send tool remained registered")
 	}
 	result, err := tools.Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{
 		Tool: tools.Chats,
@@ -161,6 +173,16 @@ func TestChatsResourceIsModelFacingAndDispatches(t *testing.T) {
 	}
 }
 
+func TestChatResultIncludesDeliveryNotice(t *testing.T) {
+	result, err := chatResult(tools.Chats, Status{ID: "child", DeliveryNotice: "The chat was interrupted to get your message."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "The chat was interrupted to get your message.") {
+		t.Fatalf("delivery notice missing from result: %q", result.Output)
+	}
+}
+
 func TestChatsResourceRespectsExecutionRole(t *testing.T) {
 	runtime := testRuntime(&fakeChatControl{})
 	runtime.ChatRole = chatrole.Execution
@@ -171,13 +193,13 @@ func TestChatsResourceRespectsExecutionRole(t *testing.T) {
 
 func TestChatsResourceFiltersDisabledFamilyAndAction(t *testing.T) {
 	runtime := testRuntime(&fakeChatControl{})
-	runtime.AllowedTools = map[tools.ID]bool{tools.ChatSend: false}
+	runtime.AllowedTools = map[tools.ID]bool{chatMessage: false}
 	definition, enabled := tools.DefinitionFor(tools.Chats, runtime)
 	if !enabled {
 		t.Fatal("disabling one action hid the whole chats resource")
 	}
 	params := string(definition.Function.Parameters)
-	if strings.Contains(params, `"send"`) || !strings.Contains(params, `"start"`) {
+	if strings.Contains(params, `"queue"`) || strings.Contains(params, `"steer"`) || strings.Contains(params, `"interrupt"`) || !strings.Contains(params, `"start"`) {
 		t.Fatalf("disabled action was not filtered: %s", params)
 	}
 	runtime.AllowedTools[tools.Chats] = false
@@ -267,10 +289,11 @@ func TestStartDefinitionOnlyAllowsOrchestrationRoles(t *testing.T) {
 	}
 }
 
-func TestSendPreviewIncludesMessage(t *testing.T) {
-	got := (sendTool{}).Preview(tools.Request{Args: map[string]string{
-		"chat_id": "child-chat",
-		"message": "Use jadx output",
+func TestMessagePreviewIncludesDeliveryAndMessage(t *testing.T) {
+	got := (messageTool{}).Preview(tools.Request{Args: map[string]string{
+		"chat_id":  "child-chat",
+		"message":  "Use jadx output",
+		"delivery": "steer",
 	}})
 	if !strings.Contains(got, "child-chat") || !strings.Contains(got, "Use jadx output") {
 		t.Fatalf("expected chat id and message in preview, got %q", got)
@@ -287,22 +310,21 @@ func TestSendCancelArchiveRenameUseControl(t *testing.T) {
 		Response:   "The child found the firmware gate.",
 	}}}
 
-	result, err := (sendTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
-		Tool: domain.ToolKindChatSend,
-		Args: map[string]string{"chat_id": "child-chat", "message": "Use jadx output", "steer": "true"},
+	result, err := (messageTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
+		Tool: chatMessage,
+		Args: map[string]string{"chat_id": "child-chat", "message": "Use jadx output", "delivery": "steer"},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if control.lastOwnerChatID != "chat-20" || control.lastChatID != "child-chat" || control.lastUpdate.Message != "Use jadx output" || !control.lastUpdate.Steer {
+	if control.lastOwnerChatID != "chat-20" || control.lastChatID != "child-chat" || control.lastUpdate.Message != "Use jadx output" || control.lastUpdate.Delivery != DeliverySteer {
 		t.Fatalf("unexpected send request: %#v", control)
 	}
 	if strings.Count(result.Output, "Target chat response:") != 1 || !strings.Contains(result.Output, "The child found the firmware gate.") {
 		t.Fatalf("sealed child response missing or duplicated: %q", result.Output)
 	}
-	stored, ok := result.Stored.(tools.ChatListStoredResult)
-	if !ok || len(stored.Items) != 1 || stored.Items[0].Response != "The child found the firmware gate." {
-		t.Fatalf("sealed child response missing from stored result: %#v", result.Stored)
+	if result.Stored != nil {
+		t.Fatalf("delivery acknowledgement should remain textual, got stored result %#v", result.Stored)
 	}
 
 	_, err = (cancelTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{

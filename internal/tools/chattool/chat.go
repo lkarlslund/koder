@@ -19,7 +19,9 @@ func init() {
 		Routes: []tools.ActionRoute{
 			{Action: "list", Tool: tools.ChatList},
 			{Action: "start", Tool: tools.ChatStart},
-			{Action: "send", Tool: tools.ChatSend},
+			{Action: "queue", Tool: chatMessage, FixedArgs: map[string]string{"delivery": "queue"}},
+			{Action: "steer", Tool: chatMessage, FixedArgs: map[string]string{"delivery": "steer"}},
+			{Action: "interrupt", Tool: chatMessage, FixedArgs: map[string]string{"delivery": "interrupt"}},
 			{Action: "cancel", Tool: tools.ChatCancel},
 			{Action: "archive", Tool: tools.ChatArchive, FixedArgs: map[string]string{"archived": "true"}},
 			{Action: "restore", Tool: tools.ChatArchive, FixedArgs: map[string]string{"archived": "false"}},
@@ -30,8 +32,8 @@ func init() {
 	}, tools.ToolSpec{
 		Title:       "Chats",
 		Description: "List, create, coordinate, rename, archive, restore, and cancel chats in this session.",
-		Usage:       "Use list to discover chats. Use start for a new child, send to give a direct child work, and cancel to stop work. Archive only idle direct children; restore makes an archived child visible again. Cleanup archives eligible idle execution children. Child chats report back automatically, so do not poll them.",
-		Parameters:  `{"type":"object","properties":{"action":{"type":"string"},"archived":{"type":"boolean","description":"For list, include archived chats"},"profile":{"type":"string","description":"Registered chat profile"},"objective":{"type":"string"},"title":{"type":"string"},"backend":{"type":"string","enum":["koder","codex"]},"interaction_mode":{"type":"string","enum":["text","voice"]},"model_id":{"type":"string"},"permission_profile":{"type":"string"},"milestone_key":{"type":"string"},"task_ref":{"type":"string"},"disabled_tools":{"type":"string"},"chat_id":{"type":"string"},"message":{"type":"string"},"steer":{"type":"boolean"},"wait":{"type":"boolean"},"hard":{"type":"boolean"}},"required":["action"],"additionalProperties":false}`,
+		Usage:       "Use list to discover chats. Use queue to add work after a child's current turn, steer to deliver guidance at its next turn boundary, or interrupt when it must stop its current turn and handle the message immediately. Use cancel to stop without sending a message. Child chats report back automatically, so do not poll them.",
+		Parameters:  `{"type":"object","properties":{"action":{"type":"string"},"archived":{"type":"boolean","description":"For list, include archived chats"},"profile":{"type":"string","description":"Registered chat profile"},"objective":{"type":"string"},"title":{"type":"string"},"backend":{"type":"string","enum":["koder","codex"]},"interaction_mode":{"type":"string","enum":["text","voice"]},"model_id":{"type":"string"},"permission_profile":{"type":"string"},"milestone_key":{"type":"string"},"task_ref":{"type":"string"},"disabled_tools":{"type":"string"},"chat_id":{"type":"string"},"message":{"type":"string"},"hard":{"type":"boolean"}},"required":["action"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(listTool{}, tools.ToolSpec{
@@ -44,16 +46,14 @@ func init() {
 	tools.Register(startTool{}, tools.ToolSpec{
 		Title:       "Start chat",
 		Description: "Start a background child chat using a registered chat profile.",
-		Usage:       "Start a background child chat using a registered chat profile and either the Koder or Codex backend. Omit backend to use the current chat's backend. A child may be scoped to one milestone or one task. If an existing child owns that scope, use chat_send instead. After starting a child, go idle unless you have unrelated work; it reports back automatically. Do not poll child chats.",
+		Usage:       "Start a background child chat using a registered chat profile and either the Koder or Codex backend. Omit backend to use the current chat's backend. A child may be scoped to one milestone or one task. If an existing child owns that scope, use chats action=steer instead. After starting a child, go idle unless you have unrelated work; it reports back automatically. Do not poll child chats.",
 		Parameters:  `{"type":"object","properties":{"profile":{"type":"string","description":"Registered chat profile such as orchestrator, planning, or execution"},"objective":{"type":"string","description":"Specific objective for the child chat"},"title":{"type":"string","description":"Optional chat title"},"backend":{"type":"string","enum":["koder","codex"],"description":"Optional turn backend; defaults to the current chat's backend"},"interaction_mode":{"type":"string","enum":["text","voice"],"description":"Optional interaction mode; defaults to text"},"model_id":{"type":"string","description":"Optional backend model id"},"permission_profile":{"type":"string","description":"Optional Koder permission profile"},"milestone_key":{"type":"string","description":"Optional milestone scope; mutually exclusive with task_ref"},"task_ref":{"type":"string","description":"Optional single task scope; mutually exclusive with milestone_key"},"disabled_tools":{"type":"string","description":"Optional comma-separated Koder tool ids to disable for this chat"}},"required":["profile","objective"],"additionalProperties":false}`,
 		ExposeToLLM: true, Legacy: true,
 	})
-	tools.Register(sendTool{}, tools.ToolSpec{
-		Title:       "Send chat message",
-		Description: "Send a message to a direct child chat.",
-		Usage:       "Send work instructions to a chat you may coordinate. Do not message the current chat with this tool. Pass steer=true when the message should be delivered at a turn boundary to a busy chat; otherwise it is queued as the next user turn. Pass wait=true when the current response needs the target chat's sealed answer; voice chats wait by default.",
-		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Chat UUID to message"},"message":{"type":"string","description":"Message to queue for the chat"},"steer":{"type":"boolean","description":"Deliver as a turn-boundary steer instead of the next user turn"},"wait":{"type":"boolean","description":"Wait for and return the target chat's next sealed answer"}},"required":["chat_id","message"],"additionalProperties":false}`,
-		ExposeToLLM: true, Legacy: true,
+	tools.Register(messageTool{}, tools.ToolSpec{
+		Title:      "Deliver chat message",
+		Parameters: `{"type":"object","properties":{"chat_id":{"type":"string"},"message":{"type":"string"},"delivery":{"type":"string"}},"required":["chat_id","message","delivery"],"additionalProperties":false}`,
+		Legacy:     true,
 	})
 	tools.Register(cancelTool{}, tools.ToolSpec{
 		Title:       "Cancel chat",
@@ -87,7 +87,7 @@ func init() {
 
 type listTool struct{}
 type startTool struct{}
-type sendTool struct{}
+type messageTool struct{}
 type cancelTool struct{}
 type archiveTool struct{}
 type cleanupTool struct{}
@@ -126,6 +126,7 @@ type Status struct {
 	LastError          string
 	StatusText         string
 	Response           string
+	DeliveryNotice     string
 }
 
 type StartRequest struct {
@@ -145,11 +146,20 @@ type UpdateRequest struct {
 	Archived  *bool
 	Title     string
 	Message   string
-	Steer     bool
-	Wait      bool
+	Delivery  Delivery
 	Interrupt bool
 	Hard      bool
 }
+
+type Delivery string
+
+const (
+	DeliveryQueue     Delivery = "queue"
+	DeliverySteer     Delivery = "steer"
+	DeliveryInterrupt Delivery = "interrupt"
+)
+
+const chatMessage tools.ID = "chat_message"
 
 type Control interface {
 	ListChats(context.Context, id.ID) ([]Status, error)
@@ -193,7 +203,7 @@ func storedResult(statuses []Status) tools.ChatListStoredResult {
 
 func (listTool) ID() tools.ID    { return tools.ChatList }
 func (startTool) ID() tools.ID   { return tools.ChatStart }
-func (sendTool) ID() tools.ID    { return tools.ChatSend }
+func (messageTool) ID() tools.ID { return chatMessage }
 func (cancelTool) ID() tools.ID  { return tools.ChatCancel }
 func (archiveTool) ID() tools.ID { return tools.ChatArchive }
 func (cleanupTool) ID() tools.ID { return tools.ChatCleanup }
@@ -201,7 +211,7 @@ func (renameTool) ID() tools.ID  { return tools.ChatRename }
 
 func (listTool) BypassesPermission() bool    { return true }
 func (startTool) BypassesPermission() bool   { return true }
-func (sendTool) BypassesPermission() bool    { return true }
+func (messageTool) BypassesPermission() bool { return true }
 func (cancelTool) BypassesPermission() bool  { return true }
 func (archiveTool) BypassesPermission() bool { return true }
 func (cleanupTool) BypassesPermission() bool { return true }
@@ -277,7 +287,7 @@ func (startTool) NormalizeArgs(args map[string]string) (map[string]string, error
 	return out, nil
 }
 
-func (sendTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+func (messageTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	chatID := requiredChatID(args)
 	if chatID == "" {
 		return nil, errors.New("chat_id is required")
@@ -287,19 +297,12 @@ func (sendTool) NormalizeArgs(args map[string]string) (map[string]string, error)
 		return nil, errors.New("message is required")
 	}
 	out := map[string]string{"chat_id": chatID, "message": message}
-	if steer := strings.TrimSpace(args["steer"]); steer != "" {
-		value, err := strconv.ParseBool(steer)
-		if err != nil {
-			return nil, fmt.Errorf("steer: %w", err)
-		}
-		out["steer"] = strconv.FormatBool(value)
-	}
-	if wait := strings.TrimSpace(args["wait"]); wait != "" {
-		value, err := strconv.ParseBool(wait)
-		if err != nil {
-			return nil, fmt.Errorf("wait: %w", err)
-		}
-		out["wait"] = strconv.FormatBool(value)
+	delivery := Delivery(strings.TrimSpace(args["delivery"]))
+	switch delivery {
+	case DeliveryQueue, DeliverySteer, DeliveryInterrupt:
+		out["delivery"] = string(delivery)
+	default:
+		return nil, fmt.Errorf("unsupported chat message delivery %q", delivery)
 	}
 	return out, nil
 }
@@ -374,12 +377,12 @@ func normalizeOptionalBool(args map[string]string, key string) (map[string]strin
 
 func (listTool) Preview(tools.Request) string      { return "List chats" }
 func (startTool) Preview(req tools.Request) string { return "Start " + req.Args["profile"] + " chat" }
-func (sendTool) Preview(req tools.Request) string {
+func (messageTool) Preview(req tools.Request) string {
 	message := strings.TrimSpace(req.Args["message"])
 	if message == "" {
 		return "Message chat " + req.Args["chat_id"]
 	}
-	return "Message chat " + req.Args["chat_id"] + ": " + message
+	return strings.ToUpper(req.Args["delivery"][:1]) + req.Args["delivery"][1:] + " chat " + req.Args["chat_id"] + ": " + message
 }
 func (cancelTool) Preview(req tools.Request) string {
 	return targetPreview("Cancel", req.Args["chat_id"])
@@ -474,17 +477,21 @@ func childReportGuidance(output string) string {
 	return strings.TrimSpace(output + "\nThe child chat will report back automatically when it becomes idle, including task or milestone progress. Do not poll it.")
 }
 
-func (sendTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+func (messageTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
 	status, err := updateChat(ctx, runtime, req, UpdateRequest{
-		Message: req.Args["message"],
-		Steer:   req.Args["steer"] == "true",
-		Wait:    req.Args["wait"] == "true" || runtime.VoiceInteraction(),
+		Message:  req.Args["message"],
+		Delivery: Delivery(req.Args["delivery"]),
 	})
 	if err != nil {
 		return tools.Result{}, err
 	}
-	return chatResult(req.Tool, status)
+	result, err := chatResult(tools.Chats, status)
+	// Delivery acknowledgements are transient control results, not chat-list
+	// snapshots. Keeping Stored nil ensures the model receives the notice in
+	// Output instead of the generic stored-result formatter replacing it.
+	result.Stored = nil
+	return result, err
 }
 
 func (cancelTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
@@ -606,6 +613,9 @@ func updateChat(ctx context.Context, runtime tools.Runtime, req tools.Request, u
 func chatResult(tool tools.ID, status Status) (tools.Result, error) {
 	stored := storedResult([]Status{status})
 	output := tools.DisplayTextForStored(tool, stored)
+	if notice := strings.TrimSpace(status.DeliveryNotice); notice != "" {
+		output = strings.TrimSpace(notice + "\n" + output)
+	}
 	return tools.Result{
 		Output: output,
 		Stored: stored,
@@ -620,8 +630,8 @@ func (startTool) SummarizeResult(_ tools.Request, result tools.Result) (string, 
 	return "Started chat", result.Output
 }
 
-func (sendTool) SummarizeResult(_ tools.Request, result tools.Result) (string, string) {
-	return "Sent chat message", result.Output
+func (messageTool) SummarizeResult(_ tools.Request, result tools.Result) (string, string) {
+	return "Delivered chat message", result.Output
 }
 
 func (cancelTool) SummarizeResult(_ tools.Request, result tools.Result) (string, string) {

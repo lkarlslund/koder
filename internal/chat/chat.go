@@ -235,6 +235,10 @@ type enqueueCmd struct {
 	item QueueItem
 }
 
+type interruptAndEnqueueCmd struct {
+	item QueueItem
+}
+
 type replaceQueueCmd struct {
 	items []domain.QueuedInput
 }
@@ -1024,6 +1028,15 @@ func (r *Chat) Enqueue(item QueueItem) {
 	}
 	slog.Info("chat queue item received", "chat_id", chatID, "session_id", sessionID, "kind", item.Kind, "text_bytes", len(item.Text), "attachments", len(item.Attachments))
 	r.inbox <- enqueueCmd{item: item}
+}
+
+// InterruptAndEnqueue cancels the active turn and dispatches item only after
+// the old worker has closed, preventing concurrent turns in one chat.
+func (r *Chat) InterruptAndEnqueue(item QueueItem) {
+	if r == nil {
+		return
+	}
+	r.inbox <- interruptAndEnqueueCmd{item: item}
 }
 
 // Kick asks the chat loop to dispatch queued work if it is idle.
@@ -2316,6 +2329,8 @@ func (r *Chat) loop() {
 		switch typed := cmd.(type) {
 		case enqueueCmd:
 			r.handleEnqueue(typed.item)
+		case interruptAndEnqueueCmd:
+			r.handleInterruptAndEnqueue(typed.item)
 		case replaceQueueCmd:
 			r.handleReplaceQueue(typed.items)
 		case reorderQueueCmd:
@@ -2551,6 +2566,48 @@ func (r *Chat) handleAbortAndSendQueueItemNow(id id.ID) {
 	}
 	remaining := append(slices.Clone(r.queue[:idx]), r.queue[idx+1:]...)
 	r.queue = append([]domain.QueuedInput{item}, remaining...)
+	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
+	if r.state != nil {
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.QueuedInputs = cloneQueuedInputs(r.queue)
+		})
+	}
+	cancel := r.cancel
+	interruptedTurn := r.turnSeq
+	waitForClose := r.active && cancel != nil
+	wasActive := r.active || r.status == StatusWaitingApproval || r.status == StatusWaitingInput
+	if wasActive {
+		if r.state != nil {
+			r.state.DiscardActiveAssistant()
+		}
+		r.abortActiveTurnLocked()
+		r.cancelState = CancelStateCancelling
+		if waitForClose {
+			r.abortDispatchTurn = interruptedTurn
+		}
+	}
+	r.mu.Unlock()
+	if cancel != nil && wasActive {
+		cancel()
+	}
+	if wasActive {
+		evt := domain.Event{Kind: domain.EventKindStatus, Text: "Interrupted"}
+		r.broadcast(r.snapshotUpdateFlags(&evt, true, true, true, true, false))
+	} else {
+		r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
+	}
+	_ = r.persistQueue()
+	if wasActive && !waitForClose {
+		r.finishAbortAndSendQueueItemNow()
+	} else if !wasActive {
+		r.maybeDispatchNext()
+	}
+}
+
+func (r *Chat) handleInterruptAndEnqueue(item QueueItem) {
+	queued := queuedInputFromItem(item)
+	r.mu.Lock()
+	r.queue = append([]domain.QueuedInput{queued}, r.queue...)
 	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
 	if r.state != nil {
 		r.state.UpdateChat(func(chat *domain.Chat) {
