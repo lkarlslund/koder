@@ -163,6 +163,7 @@ type Chat struct {
 	cancelState       CancelState
 	running           map[string]struct{}
 	turnSeq           uint64
+	abortDispatchTurn uint64
 	draining          bool
 	drainReason       CancelReason
 	closed            bool
@@ -2183,6 +2184,9 @@ func (r *Chat) finalizeToolCallsMatching(ctx context.Context, message, code stri
 		revision := r.state.MarkTimelineItemDirty(record.Item.ID)
 		changed = append(changed, dirtyTimelineItem{Item: record.Item, Revision: revision})
 	}
+	if count > 0 {
+		r.state.RefreshApprovals(r.chat)
+	}
 	chatRecord := r.chat
 	r.mu.Unlock()
 	if count == 0 {
@@ -2554,6 +2558,8 @@ func (r *Chat) handleAbortAndSendQueueItemNow(id id.ID) {
 		})
 	}
 	cancel := r.cancel
+	interruptedTurn := r.turnSeq
+	waitForClose := r.active && cancel != nil
 	wasActive := r.active || r.status == StatusWaitingApproval || r.status == StatusWaitingInput
 	if wasActive {
 		if r.state != nil {
@@ -2561,6 +2567,9 @@ func (r *Chat) handleAbortAndSendQueueItemNow(id id.ID) {
 		}
 		r.abortActiveTurnLocked()
 		r.cancelState = CancelStateCancelling
+		if waitForClose {
+			r.abortDispatchTurn = interruptedTurn
+		}
 	}
 	r.mu.Unlock()
 	if cancel != nil && wasActive {
@@ -2573,6 +2582,25 @@ func (r *Chat) handleAbortAndSendQueueItemNow(id id.ID) {
 		r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
 	}
 	_ = r.persistQueue()
+	if wasActive && !waitForClose {
+		r.finishAbortAndSendQueueItemNow()
+	} else if !wasActive {
+		r.maybeDispatchNext()
+	}
+}
+
+func (r *Chat) finishAbortAndSendQueueItemNow() {
+	if _, err := r.cancelInterruptedToolCalls(
+		context.Background(),
+		"Tool call canceled because the user sent a queued message immediately.",
+		domain.NoticeReasonUserInterrupted,
+	); err != nil {
+		_ = r.markPersistError(err)
+		return
+	}
+	r.mu.Lock()
+	r.cancelState = CancelStateNone
+	r.mu.Unlock()
 	r.maybeDispatchNext()
 }
 
@@ -3322,7 +3350,14 @@ func timelineItemSummary(item domain.TimelineItem) string {
 func (r *Chat) handleStreamClosedForTurn(turn uint64) {
 	r.mu.Lock()
 	if turn != 0 && turn != r.turnSeq {
+		finishAbortAndSend := turn == r.abortDispatchTurn
+		if finishAbortAndSend {
+			r.abortDispatchTurn = 0
+		}
 		r.mu.Unlock()
+		if finishAbortAndSend {
+			r.finishAbortAndSendQueueItemNow()
+		}
 		return
 	}
 	if r.cancel != nil {

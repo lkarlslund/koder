@@ -2003,6 +2003,19 @@ func TestRuntimeAbortAndSendQueueItemNowCancelsActiveTurnAndDispatchesSelectedIt
 	}
 
 	rt.AbortAndSendQueueItemNow(thirdID)
+	assistantID := NewTimelineID(time.Now().UTC())
+	firstStream <- domain.Event{
+		Kind: domain.EventKindMessageDelta,
+		Text: "stale first response",
+		Item: domain.TimelineItem{
+			ID:        assistantID,
+			ChatID:    chatRecord.ID,
+			Content:   domain.AssistantMessage{},
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+		},
+	}
+	close(firstStream)
 	deadline = time.After(2 * time.Second)
 	for runner.promptCallCount() < 2 {
 		select {
@@ -2029,20 +2042,6 @@ func TestRuntimeAbortAndSendQueueItemNowCancelsActiveTurnAndDispatchesSelectedIt
 		}
 	}
 
-	assistantID := NewTimelineID(time.Now().UTC())
-	firstStream <- domain.Event{
-		Kind: domain.EventKindMessageDelta,
-		Text: "stale first response",
-		Item: domain.TimelineItem{
-			ID:        assistantID,
-			ChatID:    chatRecord.ID,
-			Content:   domain.AssistantMessage{},
-			CreatedAt: time.Now().UTC(),
-			UpdatedAt: time.Now().UTC(),
-		},
-	}
-	close(firstStream)
-
 	deadline = time.After(2 * time.Second)
 	for rt.Snapshot().Active {
 		select {
@@ -2054,6 +2053,72 @@ func TestRuntimeAbortAndSendQueueItemNowCancelsActiveTurnAndDispatchesSelectedIt
 	}
 	if assistantTextInSnapshot(rt.Snapshot(), "stale first response") {
 		t.Fatalf("stale stream event from aborted turn reached snapshot: %#v", rt.Snapshot().Timeline)
+	}
+}
+
+func TestRuntimeAbortAndSendQueueItemNowResolvesPendingInputBeforeDispatch(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	if _, err := appendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{pendingInputCall()}, "", domain.Usage{}); err != nil {
+		t.Fatal(err)
+	}
+	stream := make(chan domain.Event)
+	close(stream)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{stream}}
+	rt, err := Load(context.Background(), session, chatRecord, depsForFake(st, runner), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Close)
+
+	queuedID := id.NewAt(time.Now().UTC())
+	rt.ReplaceQueue([]domain.QueuedInput{{
+		ID:        queuedID,
+		Kind:      domain.QueuedInputKindQueued,
+		Delivery:  domain.QueuedInputDeliveryNextTurn,
+		Origin:    domain.QueuedInputOriginUser,
+		Text:      "new direction",
+		Held:      true,
+		CreatedAt: time.Now().UTC(),
+	}})
+	deadline := time.After(2 * time.Second)
+	for len(rt.Snapshot().QueuedInputs) != 1 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for queued input: %#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	rt.AbortAndSendQueueItemNow(queuedID)
+	deadline = time.After(2 * time.Second)
+	for runner.promptCallCount() < 1 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for forced prompt; snapshot=%#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if got := runner.promptAt(0); got != "new direction" {
+		t.Fatalf("forced prompt = %q, want new direction", got)
+	}
+
+	snapshot := rt.Snapshot()
+	if snapshot.PendingUserInput != 0 {
+		t.Fatalf("pending user input = %d, want 0", snapshot.PendingUserInput)
+	}
+	for _, item := range snapshot.Timeline {
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		for _, call := range assistant.Tools {
+			if call.ToolCallID == "call-1" && call.Status != domain.ToolStatusCanceled {
+				t.Fatalf("interrupted input status = %q, want canceled", call.Status)
+			}
+		}
 	}
 }
 

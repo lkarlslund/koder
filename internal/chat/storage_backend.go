@@ -831,7 +831,10 @@ func latestTimelineSequence(ctx context.Context, st *store.Store, chatID id.ID) 
 }
 
 func interruptedToolStatus(status domain.ToolStatus) bool {
-	return status == domain.ToolStatusPending || status == domain.ToolStatusRunning
+	return status == domain.ToolStatusPending ||
+		status == domain.ToolStatusRunning ||
+		status == domain.ToolStatusAwaitingApproval ||
+		status == domain.ToolStatusAwaitingInput
 }
 
 func appendAssistantToolCalls(ctx context.Context, st *store.Store, chatID id.ID, calls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
