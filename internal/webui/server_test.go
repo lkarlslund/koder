@@ -37,16 +37,11 @@ import (
 
 func TestServerDoesNotOpenBrowserWhenWebSocketConnects(t *testing.T) {
 	ctrl := newTestController(t)
-	opened := make(chan string, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	srv, err := Start(ctx, ctrl, Options{
-		Bind:      "127.0.0.1:0",
-		OpenDelay: 30 * time.Millisecond,
-		OpenBrowser: func(url string) error {
-			opened <- url
-			return nil
-		},
+		Bind:          "127.0.0.1:0",
+		NoOpenBrowser: true,
 	})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
@@ -59,9 +54,24 @@ func TestServerDoesNotOpenBrowserWhenWebSocketConnects(t *testing.T) {
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	select {
-	case url := <-opened:
-		t.Fatalf("expected no browser open after websocket connect, got %s", url)
-	case <-time.After(80 * time.Millisecond):
+	case <-srv.connected:
+	case <-time.After(2 * time.Second):
+		t.Fatal("websocket connection was not recorded")
+	}
+	// Exercise the opening policy after the real WebSocket has connected,
+	// rather than racing connection setup against a short wall-clock timer.
+	opener := &Server{connected: srv.connected, options: Options{
+		OpenDelay: time.Hour,
+		OpenBrowser: func(url string) error {
+			t.Errorf("expected no browser open after websocket connect, got %s", url)
+			return nil
+		},
+	}}
+	waitCtx, stop := context.WithTimeout(ctx, 2*time.Second)
+	defer stop()
+	opener.openBrowserIfNeeded(waitCtx)
+	if waitCtx.Err() != nil {
+		t.Fatal("browser-opening policy did not return on connection")
 	}
 }
 
