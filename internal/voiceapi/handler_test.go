@@ -1597,7 +1597,7 @@ func TestHandlerBindsPerDeviceTokenAndRevokesIt(t *testing.T) {
 	if len(devices) != 1 || devices[0].AppVersion != "0.1.1" {
 		t.Fatalf("registered devices = %#v", devices)
 	}
-	if _, err := registry.Revoke(bound.Binding.Device.ID); err != nil {
+	if _, err := registry.Delete(bound.Binding.Device.ID); err != nil {
 		t.Fatal(err)
 	}
 	request, _ = http.NewRequest(http.MethodGet, server.URL+"/voice/v1/sessions", nil)
@@ -1608,11 +1608,11 @@ func TestHandlerBindsPerDeviceTokenAndRevokesIt(t *testing.T) {
 	}
 	_ = response.Body.Close()
 	if response.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("revoked device token status = %d", response.StatusCode)
+		t.Fatalf("deleted device token status = %d", response.StatusCode)
 	}
 }
 
-func TestMigratedDeviceRevocationOverridesConfiguredLegacyToken(t *testing.T) {
+func TestMigratedDeviceDeletionOverridesConfiguredLegacyToken(t *testing.T) {
 	registry, err := deviceauth.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1642,11 +1642,11 @@ func TestMigratedDeviceRevocationOverridesConfiguredLegacyToken(t *testing.T) {
 	if got := request(); got != http.StatusOK {
 		t.Fatalf("migrated token status = %d", got)
 	}
-	if _, err := registry.Revoke(device.ID); err != nil {
+	if _, err := registry.Delete(device.ID); err != nil {
 		t.Fatal(err)
 	}
 	if got := request(); got != http.StatusUnauthorized {
-		t.Fatalf("revoked migrated token status = %d", got)
+		t.Fatalf("deleted migrated token status = %d", got)
 	}
 }
 

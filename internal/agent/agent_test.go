@@ -1223,7 +1223,7 @@ func TestUpdateChatCanMessageOwnedChildAndRejectSibling(t *testing.T) {
 		t.Fatal(err)
 	}
 	control := owner.ChatToolControl(parent.ID)
-	status, err := control.UpdateChat(context.Background(), session.ID, parent.ID, child.ID, chattool.UpdateRequest{Message: "use jadx output", Steer: true})
+	status, err := control.UpdateChat(context.Background(), session.ID, parent.ID, child.ID, chattool.UpdateRequest{Message: "use jadx output", Delivery: chattool.DeliverySteer})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1266,7 +1266,7 @@ func TestUpdateChatCanMessageOwnedChildAndRejectSibling(t *testing.T) {
 	if _, err := control.UpdateChat(context.Background(), session.ID, parent.ID, sibling.ID, chattool.UpdateRequest{Message: "not yours"}); err == nil || !strings.Contains(err.Error(), "not owned") {
 		t.Fatalf("expected ownership error, got %v", err)
 	}
-	if _, err := control.UpdateChat(context.Background(), session.ID, parent.ID, parent.ID, chattool.UpdateRequest{Message: "message self"}); err == nil || !strings.Contains(err.Error(), "cannot message its own chat") {
+	if _, err := control.UpdateChat(context.Background(), session.ID, parent.ID, parent.ID, chattool.UpdateRequest{Message: "message self"}); err == nil || !strings.Contains(err.Error(), "cannot target their own chat") {
 		t.Fatalf("expected self-message error, got %v", err)
 	}
 }

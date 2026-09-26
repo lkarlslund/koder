@@ -714,6 +714,9 @@ func (f *runtimeFakeRunner) turnTimelineLenAt(i int) int {
 func (f *runtimeFakeRunner) promptTimelineAt(i int) []domain.TimelineItem {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if i >= len(f.promptTimeline) {
+		return nil
+	}
 	return slices.Clone(f.promptTimeline[i])
 }
 
@@ -1616,7 +1619,7 @@ func TestRuntimeDispatchesQueuedUserAfterPreviousAssistant(t *testing.T) {
 	close(firstEvents)
 
 	deadline = time.After(2 * time.Second)
-	for runner.promptCallCount() < 2 {
+	for len(runner.promptTimelineAt(1)) == 0 {
 		select {
 		case <-deadline:
 			t.Fatalf("timed out waiting for queued prompt dispatch: %#v", rt.Snapshot())
