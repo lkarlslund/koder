@@ -26,6 +26,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf16"
 
 	"github.com/coder/websocket"
 	qrcode "github.com/skip2/go-qrcode"
@@ -1436,7 +1437,14 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			selection.SessionID = in.SessionID
 			selection.ChatID = in.ChatID
 		}
-		return s.controller.CompleteComposerForSelection(ctx, selection, in.Text, in.Cursor)
+		// Textarea selection offsets use UTF-16 units; the controller uses bytes.
+		result, err := s.controller.CompleteComposerForSelection(ctx, selection, in.Text, composerByteOffset(in.Text, in.Cursor))
+		if err != nil {
+			return nil, err
+		}
+		result.Start = len(utf16.Encode([]rune(in.Text[:result.Start])))
+		result.End = len(utf16.Encode([]rune(in.Text[:result.End])))
+		return result, nil
 	case "voice_device_list":
 		if s.devices == nil {
 			return nil, errors.New("voice device registry is unavailable")

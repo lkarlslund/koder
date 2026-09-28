@@ -2440,7 +2440,7 @@ func composerCommandQuery(value string, cursor int) (query string, start int, en
 	for start < len(prefix) && isComposerWhitespace(rune(prefix[start])) {
 		start++
 	}
-	if start >= len(value) || value[start] != '/' {
+	if start >= cursor || value[start] != '/' {
 		return "", 0, 0, false
 	}
 	if strings.ContainsAny(prefix[start:cursor], "\n\t") {
@@ -2471,7 +2471,7 @@ func composerSkillQuery(value string, cursor int) (query string, start int, ok b
 		return "", 0, false
 	}
 	start, _ = composerTokenBounds(value, cursor)
-	if start >= len(value) || value[start] != '$' {
+	if start >= cursor || value[start] != '$' {
 		return "", 0, false
 	}
 	for _, r := range value[start+1 : cursor] {
@@ -2490,7 +2490,7 @@ func composerMentionQuery(value string, cursor int) (query string, start int, en
 		return "", 0, 0, false, false
 	}
 	start, end = composerTokenBounds(value, cursor)
-	if start >= len(value) || value[start] != '@' {
+	if start >= cursor || value[start] != '@' {
 		return "", 0, 0, false, false
 	}
 	token := value[start:cursor]

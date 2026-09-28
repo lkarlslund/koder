@@ -4456,6 +4456,43 @@ func TestWebSocketComposerCompletionsReturnsCommandsSkillsAndReferences(t *testi
 	if refResp.Result.Kind != "reference" || refResp.Result.Start != 5 || refResp.Result.End != 9 || len(refResp.Result.Items) == 0 || refResp.Result.Items[0].InsertText != "@README.md" || refResp.Result.Items[0].Path != "README.md" {
 		t.Fatalf("unexpected reference completions: %#v", refResp.Result)
 	}
+
+	// All requests share a connection: boundary cases must not disconnect it.
+	for i, tc := range []struct {
+		text, kind, insert string
+		cursor, start, end int
+	}{
+		{"Læs $", "skill", "", 5, 4, 5},
+		{"Læs $rev", "skill", "$review", 8, 4, 8},
+		{"😀 $rev", "skill", "$review", 7, 3, 7},
+		{"Læs 😀 @REA", "reference", "@README.md", 11, 7, 11},
+		{"Use $rev", "", "", 4, 0, 0},
+		{"Læs $rev", "", "", 4, 0, 0},
+		{"Use @REA", "", "", 4, 0, 0},
+		{" /pro", "", "", 1, 0, 0},
+		{"/pro", "command", "/providers", 4, 0, 4},
+	} {
+		t.Run(fmt.Sprintf("cursor%d_%s", tc.cursor, tc.text), func(t *testing.T) {
+			requestID := 10 + i
+			payload := fmt.Sprintf(`{"id":%d,"method":"composer_completions","params":{"text":%q,"cursor":%d}}`, requestID, tc.text, tc.cursor)
+			if err := conn.Write(ctx, websocket.MessageText, []byte(payload)); err != nil {
+				t.Fatal(err)
+			}
+			var resp struct {
+				OK     bool                    `json:"ok"`
+				Result app.ComposerCompletions `json:"result"`
+			}
+			if err := json.Unmarshal(readRPCResponse(t, ctx, conn, float64(requestID)), &resp); err != nil {
+				t.Fatal(err)
+			}
+			if !resp.OK || resp.Result.Kind != tc.kind || resp.Result.Start != tc.start || resp.Result.End != tc.end {
+				t.Fatalf("unexpected response: %+v", resp)
+			}
+			if tc.insert != "" && (len(resp.Result.Items) == 0 || resp.Result.Items[0].InsertText != tc.insert) {
+				t.Fatalf("missing completion %q: %+v", tc.insert, resp.Result)
+			}
+		})
+	}
 }
 
 func TestWebSocketComposerCompletionsUseExplicitSelection(t *testing.T) {
