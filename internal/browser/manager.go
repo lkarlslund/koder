@@ -161,15 +161,21 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.state = stateStarting
 	m.startWait = make(chan struct{})
 	m.lastErr = ""
+	cfg := m.cfg
 	m.mu.Unlock()
 
-	executable, err := detectExecutable(m.cfg.Executable)
+	executable, err := detectExecutable(cfg.Executable)
 	if err != nil {
 		m.setError(err)
 		return err
 	}
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		err = errors.New("browser sandbox requires bubblewrap (bwrap)")
+		m.setError(err)
+		return err
+	}
+	display, err := resolveDisplay(ctx, cfg.Headed)
+	if err != nil {
 		m.setError(err)
 		return err
 	}
@@ -200,15 +206,18 @@ func (m *Manager) Start(ctx context.Context) error {
 		chromedp.ExecPath(executable),
 		chromedp.UserDataDir("/tmp/koder/profile"),
 		chromedp.WindowSize(browserWindowWidth, browserWindowHeight),
-		chromedp.Flag("headless", !m.cfg.Headed),
+		chromedp.Flag("headless", !cfg.Headed),
 		chromedp.Flag("no-first-run", true),
 		chromedp.Flag("no-default-browser-check", true),
 		chromedp.Flag("disable-features", "Translate,PasswordManagerOnboarding,PasswordManagerEnabled,InfiniteSessionRestore"),
 		chromedp.Flag("hide-crash-restore-bubble", true),
 		chromedp.Flag("password-store", "basic"),
 		chromedp.Flag("restore-last-session", false),
-		chromedp.ModifyCmdFunc(func(cmd *exec.Cmd) { sandboxCommand(cmd, m.profileDir, runtimeDir) }),
+		chromedp.ModifyCmdFunc(func(cmd *exec.Cmd) { sandboxCommand(cmd, m.profileDir, runtimeDir, display) }),
 	)
+	if display.platform != "" {
+		opts = append(opts, chromedp.Flag("ozone-platform", display.platform))
+	}
 	allocCtx, allocStop := chromedp.NewExecAllocator(base, opts...)
 	browserCtx, stop := chromedp.NewContext(allocCtx)
 	err = chromedp.Run(browserCtx)
@@ -1935,7 +1944,7 @@ func browserVersion(ctx context.Context, executable string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func sandboxCommand(cmd *exec.Cmd, profileDir, runtimeDir string) {
+func sandboxCommand(cmd *exec.Cmd, profileDir, runtimeDir string, display displaySession) {
 	chromePath := cmd.Path
 	chromeArgs := append([]string(nil), cmd.Args[1:]...)
 	bwrap, err := exec.LookPath("bwrap")
@@ -1943,18 +1952,7 @@ func sandboxCommand(cmd *exec.Cmd, profileDir, runtimeDir string) {
 		return
 	}
 	args := []string{"bwrap", "--die-with-parent", "--new-session", "--ro-bind", "/", "/", "--tmpfs", "/home", "--tmpfs", "/root", "--tmpfs", "/tmp", "--dir", "/tmp/koder", "--proc", "/proc", "--dev", "/dev", "--share-net", "--bind", profileDir, "/tmp/koder/profile", "--bind", runtimeDir, "/tmp/koder/run", "--setenv", "HOME", "/tmp/koder", "--setenv", "XDG_RUNTIME_DIR", "/tmp/koder/run", "--setenv", "TMPDIR", "/tmp/koder/run"}
-	if _, err := os.Stat("/tmp/.X11-unix"); err == nil {
-		args = append(args, "--ro-bind", "/tmp/.X11-unix", "/tmp/.X11-unix")
-	}
-	if waylandDisplay := strings.TrimSpace(os.Getenv("WAYLAND_DISPLAY")); waylandDisplay != "" {
-		hostRuntime := strings.TrimSpace(os.Getenv("XDG_RUNTIME_DIR"))
-		if hostRuntime != "" {
-			socket := filepath.Join(hostRuntime, waylandDisplay)
-			if _, err := os.Stat(socket); err == nil {
-				args = append(args, "--ro-bind", socket, filepath.Join("/tmp/koder/run", waylandDisplay))
-			}
-		}
-	}
+	args = append(args, display.sandboxArgs()...)
 	if _, err := os.Stat("/dev/dri"); err == nil {
 		args = append(args, "--dev-bind-try", "/dev/dri", "/dev/dri")
 	}

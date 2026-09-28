@@ -93,6 +93,19 @@ com.lkarlslund.koder.voice.VoiceConnectionInstrumentedTest
 Prefer a class or single test selector during development. Use the three-device
 compatibility group only for layout, API-level, or device-compatibility risks.
 
+For managed-browser launch or sandbox changes, run the local Chromium flow:
+
+```sh
+KODER_BROWSER_TEST=1 go test ./internal/browser -count=1
+```
+
+On a logged-in Linux desktop, also set `KODER_BROWSER_HEADED_TEST=1` to test
+launching without inherited display variables (as with a service started before
+login), plus inherited X11 when available. These tests use temporary profiles.
+Headed launches discover an available inherited display first, then the current
+systemd user-manager environment; no desktop means a retryable error, not a
+silent switch to headless mode.
+
 ### T4: full release and nightly verification
 
 Use for releases, dependency/toolchain upgrades, broad refactors, shared
