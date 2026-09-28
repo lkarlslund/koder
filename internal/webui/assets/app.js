@@ -4448,8 +4448,12 @@
         endQueueDrag() { this.dragQueueID = ''; },
         onComposerKeydown(ev) {
           if (this.completion.items.length > 0) {
-            if (ev.key === 'ArrowDown') { ev.preventDefault(); this.completion.selected = Math.min(this.completion.items.length - 1, this.completion.selected + 1); return; }
-            if (ev.key === 'ArrowUp') { ev.preventDefault(); this.completion.selected = Math.max(0, this.completion.selected - 1); return; }
+            if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+              ev.preventDefault();
+              this.completion.selected = Math.max(0, Math.min(this.completion.items.length - 1, this.completion.selected + (ev.key === 'ArrowDown' ? 1 : -1)));
+              this.scrollCompletionIntoView();
+              return;
+            }
             if (ev.key === 'Tab' || ev.key === 'Enter') { ev.preventDefault(); this.acceptCompletion(this.completion.selected); return; }
             if (ev.key === 'Escape') { ev.preventDefault(); this.clearCompletions(); return; }
           }
@@ -4459,6 +4463,20 @@
         onComposerKeyup(ev) {
           if (['ArrowDown', 'ArrowUp', 'Tab', 'Enter', 'Escape'].includes(ev.key)) return;
           this.updateCompletions();
+        },
+        scrollCompletionIntoView() {
+          this.$nextTick(() => {
+            const menu = this.$refs.completionMenu;
+            const item = menu?.querySelector('.active');
+            if (!item) return;
+            const bounds = menu.getBoundingClientRect();
+            const row = item.getBoundingClientRect();
+            const top = bounds.top + menu.clientTop;
+            const bottom = top + menu.clientHeight;
+            // Move only the popup, not the transcript or the page.
+            if (row.top < top) menu.scrollTop -= top - row.top;
+            else if (row.bottom > bottom) menu.scrollTop += row.bottom - bottom;
+          });
         },
         updateCompletions() {
           const el = this.$refs.composerInput; if (!el) return;
@@ -4473,6 +4491,7 @@
             if (seq !== this.completionSeq) return;
             const items = result.items || [];
             this.completion = {kind: result.kind || '', query: result.query || '', start: result.start || 0, end: result.end || cursor, items, selected: 0};
+            this.$nextTick(() => { if (this.$refs.completionMenu) this.$refs.completionMenu.scrollTop = 0; });
           }).catch(() => this.clearCompletions());
         },
         clearCompletions() { this.completion = {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}; },

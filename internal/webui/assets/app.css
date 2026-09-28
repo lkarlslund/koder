@@ -180,7 +180,7 @@
     .queue-actions .btn { padding: .12rem .42rem; line-height: 1.2; }
     .composer-attachments, .attachment-strip { display: flex; flex-wrap: wrap; gap: .35rem; min-width: 0; }
     .attachment-chip { display: inline-flex; align-items: center; gap: .35rem; max-width: min(18rem, 100%); padding: .14rem .45rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-tertiary-bg); font-size: .82rem; line-height: 1.2; }
-    .composer-menu { max-height: 32vh; overflow: auto; }
+    .composer-menu { max-height: min(50vh, 36rem); overflow: auto; overscroll-behavior: contain; }
     .transcript-turn { width: 100%; max-width: none; }
     .turn { width: 100%; }
     .turn-header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; min-width: 0; margin-bottom: .35rem; }

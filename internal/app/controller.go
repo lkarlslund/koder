@@ -2388,11 +2388,11 @@ func (c *Controller) CompleteComposerForSelection(ctx context.Context, selection
 		var matches []reference.Entry
 		var err error
 		if pathMode {
-			matches, err = reference.PathCompletions(projectRoot, query, 8)
+			matches, err = reference.PathCompletions(projectRoot, query, 50)
 		} else {
 			var catalog []reference.Entry
 			catalog, err = reference.Entries(projectRoot)
-			matches = reference.Search(catalog, query, 8)
+			matches = reference.Search(catalog, query, 50)
 		}
 		if err != nil {
 			return ComposerCompletions{}, err
