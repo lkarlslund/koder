@@ -23,6 +23,24 @@ Author's current setup: Linux, local `llama.cpp`, Qwen 3.6 27B Q8 for 256K-token
 
 ![Koder chat rendering a Mermaid architecture diagram](docs/screenshots/koder-demo-chat-mermaid.png)
 
+## Remote File Management
+
+Open a session's file browser to manage files on the machine running Koder:
+
+- Select a folder (or **Project root**) and use **Upload**, or drop local files
+  onto a folder. Multiple files are supported, up to 256 MB each.
+- Drag a file or folder onto another folder or **Project root** to move it.
+  **Rename / move** also accepts a project-relative destination path.
+- Use **New folder** to organize files, and **Delete** to remove the selected
+  file or folder. Deletion requires confirmation and is permanent; deleting a
+  folder removes its contents too.
+
+Uploads and moves never overwrite existing names. Failed uploads are cleaned
+up without publishing partial files. Operations stay inside the session's
+project folder and use the server account's filesystem permissions; these are
+human UI actions, separate from the agent's sandbox permissions. Moves across
+different filesystems are not supported.
+
 ## Quick Start
 
 Download the latest Linux x64 or Linux arm64 build from GitHub Releases:

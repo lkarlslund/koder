@@ -34,13 +34,27 @@
         <span class="text-secondary small text-truncate" :title="projectRoot" x-text="projectRoot"></span>
       </div>
       <div class="d-flex align-items-center gap-2">
-        <button class="btn btn-sm btn-outline-secondary" type="button" title="Refresh tree" @click="refresh()"><i class="bi bi-arrow-clockwise"></i></button>
+        <button class="btn btn-sm btn-outline-secondary" type="button" title="Refresh tree" :disabled="mutationBusy" @click="refresh()"><i class="bi bi-arrow-clockwise"></i></button>
         <a class="btn btn-sm btn-outline-secondary" :href="sessionURL()" title="Open session"><i class="bi bi-chat-left-text"></i></a>
       </div>
     </nav>
 
+    <div class="file-browser-actions border-bottom p-2 d-flex align-items-center gap-2 flex-wrap">
+      <input type="file" multiple hidden x-ref="uploadInput" data-file-upload @change="uploadFiles($event.target.files); $event.target.value = ''">
+      <button type="button" class="btn btn-sm btn-outline-primary" :disabled="mutationBusy" @click="$refs.uploadInput.click()"><i class="bi bi-upload"></i> Upload</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="mutationBusy" @click="beginFileDialog('mkdir')" data-file-mkdir><i class="bi bi-folder-plus"></i> New folder</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="mutationBusy || !selectedNode" @click="beginFileDialog('move')" data-file-move><i class="bi bi-arrows-move"></i> Rename / move</button>
+      <button type="button" class="btn btn-sm btn-outline-danger" :disabled="mutationBusy || !selectedNode" @click="beginFileDialog('delete')" data-file-delete><i class="bi bi-trash"></i> Delete</button>
+      <span class="small text-secondary text-truncate" :title="currentDir || 'Project root'" x-text="'Upload to: ' + (currentDir || 'Project root')"></span>
+    </div>
+    <div class="file-browser-operation-status px-3 py-2 small border-bottom" role="status" aria-live="polite" x-show="mutationStatus || mutationError" style="display:none">
+      <span class="spinner-border spinner-border-sm me-2" x-show="mutationBusy"></span>
+      <span x-text="mutationStatus"></span>
+      <div class="text-danger" x-text="mutationError" style="white-space: pre-wrap"></div>
+    </div>
+
     <div class="file-browser-layout" :style="fileBrowserLayoutStyle()">
-      <aside class="file-browser-tree-pane">
+      <aside class="file-browser-tree-pane" @dragover="fileDragOver($event, currentDir)" @drop="dropFiles($event, currentDir)">
         <div class="file-browser-tree-header">
           <span class="small text-secondary">Files</span>
           <span class="spinner-border spinner-border-sm text-secondary" x-show="treeLoading" style="display: none;"></span>
@@ -49,8 +63,15 @@
           <div class="alert alert-danger m-2 py-2 small" x-text="treeError"></div>
         </template>
         <div class="file-browser-tree" role="tree">
+          <button type="button" class="file-browser-node file-browser-root" :class="{active: !selectedNode, 'drop-target': dropTarget === ''}" @click="selectRoot()" @dragover="fileDragOver($event, '')" @drop="dropFiles($event, '')" data-file-root title="Select project root; drop files here to upload or move to root">
+            <i class="bi bi-folder2"></i><span>Project root</span>
+          </button>
           <template x-for="node in visibleNodes()" :key="node.path || '/'">
-            <button type="button" class="file-browser-node" :class="{active: selectedPath === node.path}" :style="nodeIndent(node.depth)" @click="openNode(node)" role="treeitem">
+            <button type="button" class="file-browser-node" :class="{active: selectedNode?.path === node.path, 'drop-target': node.dir && dropTarget === node.path}" :style="nodeIndent(node.depth)" @click="openNode(node)" role="treeitem"
+              :data-file-path="node.path" :aria-selected="selectedNode?.path === node.path" :aria-expanded="node.dir ? !!expanded[node.path] : null" :title="node.path"
+              :draggable="!mutationBusy" @dragstart="startFileDrag($event, node)" @dragend="dragPath = null; dropTarget = null"
+              @dragover="fileDragOver($event, node.dir ? node.path : parentPath(node.path))" @drop="dropFiles($event, node.dir ? node.path : parentPath(node.path))"
+              @dragleave="if (!$el.contains($event.relatedTarget)) dropTarget = null">
               <i class="bi" :class="nodeIcon(node)"></i>
               <span class="text-truncate" x-text="node.name"></span>
             </button>
@@ -134,6 +155,24 @@
           </section>
         </template>
       </main>
+    </div>
+
+    <div class="modal-backdrop-lite" x-show="fileDialog" style="display:none" @click.self="if (!mutationBusy) fileDialog = null" @keydown.escape.window="if (!mutationBusy) fileDialog = null">
+      <form class="file-browser-dialog bg-body border rounded shadow p-3" role="dialog" aria-modal="true" aria-labelledby="file-dialog-title" @submit.prevent="submitFileDialog()">
+        <h5 id="file-dialog-title" x-text="fileDialog?.action === 'delete' ? 'Delete ' + (fileDialog?.dir ? 'folder' : 'file') : fileDialog?.action === 'mkdir' ? 'New folder' : 'Rename / move'"></h5>
+        <p class="text-break" x-show="fileDialog?.action !== 'mkdir'" x-text="fileDialog?.path"></p>
+        <p class="text-danger" x-show="fileDialog?.action === 'delete'" x-text="fileDialog?.dir ? 'Permanently delete this folder and everything inside it? This cannot be undone.' : 'Permanently delete this file? This cannot be undone.'"></p>
+        <div x-show="fileDialog?.action !== 'delete'">
+          <label for="file-dialog-path" class="form-label">Path relative to project root</label>
+          <input id="file-dialog-path" class="form-control" x-ref="fileDialogInput" :value="fileDialog?.value || ''" @input="if (fileDialog) fileDialog.value = $event.target.value" :disabled="mutationBusy" autocomplete="off">
+          <div class="form-text">Existing files are never overwritten. The destination parent folder must exist.</div>
+        </div>
+        <div class="text-danger mt-2 text-break" role="alert" x-text="fileDialog?.error"></div>
+        <div class="d-flex justify-content-end gap-2 mt-3">
+          <button type="button" class="btn btn-secondary" x-ref="fileDialogCancel" @click="fileDialog = null" :disabled="mutationBusy">Cancel</button>
+          <button type="submit" class="btn" :class="fileDialog?.action === 'delete' ? 'btn-danger' : 'btn-primary'" :disabled="mutationBusy" data-file-confirm x-text="fileDialog?.action === 'delete' ? 'Delete permanently' : fileDialog?.action === 'mkdir' ? 'Create folder' : 'Move'"></button>
+        </div>
+      </form>
     </div>
 
     <div class="modal-backdrop-lite image-lightbox" x-show="imageLightbox.open" x-transition @click.self="closeImageLightbox()" @keydown.escape.window="closeImageLightbox()" style="display: none;">

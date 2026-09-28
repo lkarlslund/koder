@@ -88,6 +88,15 @@
       treeLoading: false,
       treeError: '',
       selectedPath: '',
+      selectedNode: null,
+      currentDir: '',
+      mutationBusy: false,
+      mutationStatus: '',
+      mutationError: '',
+      fileRequest: 0,
+      dropTarget: null,
+      dragPath: null,
+      fileDialog: null,
       file: null,
       fileLoading: false,
       fileError: '',
@@ -115,12 +124,24 @@
           if (path) {
             this.openPathFromURL(path, {replaceURL: true});
           } else {
+            this.fileRequest++;
             this.selectedPath = '';
+            this.selectedNode = null;
+            this.currentDir = '';
             this.file = null;
             this.fileError = '';
+            this.fileLoading = false;
           }
         });
         document.addEventListener('click', event => this.handleMediaPreviewClick(event));
+        // Dropping a local file outside a target must not navigate away.
+        window.addEventListener('dragover', event => {
+          if (Array.from(event.dataTransfer?.types || []).includes('Files')) event.preventDefault();
+        });
+        window.addEventListener('drop', event => {
+          if (Array.from(event.dataTransfer?.types || []).includes('Files')) event.preventDefault();
+          this.dropTarget = null;
+        });
         this.clampTreeRatio();
       },
 
@@ -259,14 +280,164 @@
         return output;
       },
 
-      refresh() {
+      async refresh() {
+        const open = Object.keys(this.expanded).filter(key => this.expanded[key]).sort((a, b) => a.split('/').length - b.split('/').length);
         this.childrenByPath = {};
-        this.expanded = {};
-        this.loadTree('');
+        await this.loadTree('');
+        for (const key of open) {
+          if (this.visibleNodes().some(node => node.path === key && node.dir)) await this.loadTree(key);
+          else delete this.expanded[key];
+        }
+      },
+
+      parentPath(path) {
+        const index = path.lastIndexOf('/');
+        return index < 0 ? '' : path.slice(0, index);
+      },
+
+      selectRoot() {
+        if (this.mutationBusy) return;
+        this.currentDir = '';
+        this.selectedNode = null;
+      },
+
+      beginFileDialog(action) {
+        if (this.mutationBusy || (action !== 'mkdir' && !this.selectedNode)) return;
+        this.fileDialog = {
+          action, path: this.selectedNode?.path || '', dir: !!this.selectedNode?.dir,
+          value: action === 'mkdir' ? (this.currentDir ? this.currentDir + '/' : '') : this.selectedNode.path,
+          error: ''
+        };
+        this.$nextTick(() => {
+          const input = this.$refs.fileDialogInput;
+          if (action !== 'delete' && input) { input.focus(); input.select(); }
+          else this.$refs.fileDialogCancel?.focus();
+        });
+      },
+
+      async submitFileDialog() {
+        const dialog = this.fileDialog;
+        if (!dialog || this.mutationBusy) return;
+        const payload = dialog.action === 'mkdir' ? {path: dialog.value}
+          : {path: dialog.path, destination: dialog.value, recursive: dialog.dir};
+        if (await this.changeFile(dialog.action, payload)) this.fileDialog = null;
+        else dialog.error = this.mutationError;
+      },
+
+      async changeFile(action, payload) {
+        if (this.mutationBusy) return false;
+        this.mutationBusy = true;
+        this.mutationError = '';
+        this.mutationStatus = '';
+        try {
+          const response = await fetch('/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/' + action, {
+            method: 'POST', headers: {'Content-Type': 'application/json', 'X-Koder-File-Action': '1'}, body: JSON.stringify(payload)
+          });
+          if (!response.ok) throw new Error(await response.text());
+          const affects = value => value === payload.path || value.startsWith(payload.path + '/');
+          if (action === 'move' || action === 'delete') {
+            for (const key of Object.keys(this.expanded)) if (affects(key)) delete this.expanded[key];
+            if (affects(this.currentDir)) this.currentDir = action === 'move' ? payload.destination + this.currentDir.slice(payload.path.length) : this.parentPath(payload.path);
+            if (this.selectedNode && affects(this.selectedNode.path)) {
+              const next = payload.destination + this.selectedNode.path.slice(payload.path.length);
+              this.selectedNode = action === 'move' ? {...this.selectedNode, path: next, name: next.split('/').pop()} : null;
+            }
+            if (affects(this.selectedPath)) {
+              const next = action === 'move' ? payload.destination + this.selectedPath.slice(payload.path.length) : '';
+              this.fileRequest++;
+              this.selectedPath = next;
+              this.file = null;
+              this.fileError = '';
+              this.fileLoading = false;
+              this.setFileURL(next, {replaceURL: true});
+            }
+          }
+          await this.refresh();
+          if (action === 'move') await this.expandParents(payload.destination);
+          if (this.selectedPath && !this.file) await this.loadFile(this.selectedPath, {replaceURL: true});
+          this.mutationStatus = action === 'delete' ? 'Deleted ' + payload.path : action === 'move' ? 'Moved to ' + payload.destination : 'Created ' + payload.path;
+          return true;
+        } catch (err) {
+          this.mutationError = String(err.message || err).trim();
+          return false;
+        } finally {
+          this.mutationBusy = false;
+        }
+      },
+
+      async uploadFiles(files, directory = this.currentDir) {
+        files = Array.from(files || []);
+        if (!files.length || this.mutationBusy) return;
+        this.mutationBusy = true;
+        this.mutationError = '';
+        let completed = 0;
+        const failures = [];
+        try {
+          for (const file of files) {
+            const path = (directory ? directory + '/' : '') + file.name;
+            this.mutationStatus = 'Uploading ' + (completed + failures.length + 1) + '/' + files.length + ': ' + file.name;
+            try {
+              if (file.size > 256 * 1024 * 1024) throw new Error('maximum size is 256 MB per file');
+              const response = await fetch('/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/upload?path=' + encodeURIComponent(path), {
+                method: 'POST', headers: {'Content-Type': 'application/octet-stream', 'X-Koder-File-Action': '1'}, body: file
+              });
+              if (!response.ok) throw new Error(await response.text());
+              completed++;
+            } catch (err) { failures.push(file.name + ': ' + String(err.message || err).trim()); }
+          }
+          if (directory) {
+            await this.expandParents(directory + '/_');
+            this.expanded[directory] = true;
+          }
+          await this.refresh();
+          this.mutationStatus = 'Uploaded ' + completed + '/' + files.length + ' files to ' + (directory || 'project root');
+          this.mutationError = failures.join('\n');
+        } finally { this.mutationBusy = false; }
+      },
+
+      startFileDrag(event, node) {
+        if (this.mutationBusy) { event.preventDefault(); return; }
+        this.dragPath = node.path;
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('application/x-koder-file', JSON.stringify({session: this.sessionID, path: node.path}));
+      },
+
+      fileDragOver(event, directory) {
+        const types = Array.from(event.dataTransfer?.types || []);
+        if (this.mutationBusy || (!types.includes('Files') && !types.includes('application/x-koder-file'))) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const invalid = this.dragPath !== null && (directory === this.dragPath || directory.startsWith(this.dragPath + '/') || directory === this.parentPath(this.dragPath));
+        event.dataTransfer.dropEffect = invalid ? 'none' : types.includes('Files') ? 'copy' : 'move';
+        this.dropTarget = invalid ? null : directory;
+      },
+
+      async dropFiles(event, directory) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.dropTarget = null;
+        if (this.mutationBusy) return;
+        const transfer = event.dataTransfer;
+        if (Array.from(transfer.types).includes('Files')) {
+          if (Array.from(transfer.items || []).some(item => item.webkitGetAsEntry?.()?.isDirectory)) {
+            this.mutationError = 'Drop files, not folders. You can create a folder first using New folder.';
+            return;
+          }
+          await this.uploadFiles(transfer.files, directory);
+          return;
+        }
+        try {
+          const data = JSON.parse(transfer.getData('application/x-koder-file'));
+          if (data.session !== this.sessionID || typeof data.path !== 'string') throw new Error('Move files within the same session.');
+          if (directory === this.parentPath(data.path)) return;
+          await this.changeFile('move', {path: data.path, destination: (directory ? directory + '/' : '') + data.path.split('/').pop()});
+        } catch (err) { this.mutationError = String(err.message || err); }
       },
 
       async openNode(node) {
-        if (!node) return;
+        if (!node || this.mutationBusy) return;
+        this.selectedNode = node;
+        this.currentDir = node.dir ? node.path : this.parentPath(node.path);
         if (node.dir) {
           const key = node.path || '';
           this.expanded[key] = !this.expanded[key];
@@ -312,7 +483,10 @@
 
       async loadFile(path, options = {}) {
         if (!this.sessionID || !path) return;
+        const request = ++this.fileRequest;
         this.selectedPath = path;
+        this.selectedNode = {path, name: path.split('/').pop(), dir: false};
+        this.currentDir = this.parentPath(path);
         this.fileLoading = true;
         this.fileError = '';
         this.file = null;
@@ -320,13 +494,15 @@
         try {
           const response = await fetch('/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/read?path=' + encodeURIComponent(path), {cache: 'no-store'});
           if (!response.ok) throw new Error(await response.text() || 'file load failed');
-          this.file = await response.json();
+          const file = await response.json();
+          if (request !== this.fileRequest) return;
+          this.file = file;
           this.projectRoot = this.file.project_root || this.projectRoot;
           this.viewMode = this.file.markdown ? 'preview' : 'source';
         } catch (err) {
-          this.fileError = err.message || String(err);
+          if (request === this.fileRequest) this.fileError = err.message || String(err);
         } finally {
-          this.fileLoading = false;
+          if (request === this.fileRequest) this.fileLoading = false;
         }
       },
 

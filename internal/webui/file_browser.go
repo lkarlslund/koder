@@ -85,6 +85,8 @@ func (s *Server) handleSessionFilesAPI(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	switch parts[0] {
+	case "upload", "move", "delete", "mkdir":
+		s.handleSessionFileMutation(w, r, sessionID, parts[0])
 	case "tree":
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
