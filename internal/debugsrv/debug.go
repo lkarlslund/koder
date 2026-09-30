@@ -1090,6 +1090,23 @@ func (s *Server) debugSessions(ctx context.Context) ([]SessionDebug, error) {
 	return source.DebugSessions(ctx, s.recorder.Runtime())
 }
 
+// serveSessionJSON answers a session-scoped debug endpoint with
+// {"session_id": ..., key: fetch(...)}: 503 without a debug source, 404 when
+// the fetch fails.
+func serveSessionJSON[T any](s *Server, w http.ResponseWriter, r *http.Request, sessionID id.ID, key string, fetch func(Source, context.Context, id.ID) (T, error)) {
+	source, err := s.sourceRequired()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, err)
+		return
+	}
+	value, err := fetch(source, r.Context(), sessionID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"session_id": sessionID, key: value})
+}
+
 func (s *Server) sourceRequired() (Source, error) {
 	if s == nil || s.source == nil {
 		return nil, fmt.Errorf("debug source is unavailable")
@@ -1256,13 +1273,13 @@ func (s *Server) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	case "analysis":
 		s.handleAnalysis(w, r, sessionID)
 	case "approvals":
-		s.handleApprovals(w, r, sessionID)
+		serveSessionJSON(s, w, r, sessionID, "approvals", Source.SessionApprovals)
 	case "milestones":
-		s.handleMilestones(w, r, sessionID)
+		serveSessionJSON(s, w, r, sessionID, "plan", Source.Milestones)
 	case "tasks":
-		s.handleTasks(w, r, sessionID)
+		serveSessionJSON(s, w, r, sessionID, "tasks", Source.Tasks)
 	case "legacy-tasks":
-		s.handleLegacyTasks(w, r, sessionID)
+		serveSessionJSON(s, w, r, sessionID, "legacy_tasks", Source.LegacyTasks)
 	default:
 		http.NotFound(w, r)
 	}
@@ -1567,74 +1584,6 @@ func (s *Server) handleGlobalEvents(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": "",
 		"events":     s.recorder.Events(""),
-	})
-}
-
-func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
-	source, sourceErr := s.sourceRequired()
-	if sourceErr != nil {
-		writeError(w, http.StatusServiceUnavailable, sourceErr)
-		return
-	}
-	approvals, err := source.SessionApprovals(r.Context(), sessionID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id": sessionID,
-		"approvals":  approvals,
-	})
-}
-
-func (s *Server) handleLegacyTasks(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
-	source, sourceErr := s.sourceRequired()
-	if sourceErr != nil {
-		writeError(w, http.StatusServiceUnavailable, sourceErr)
-		return
-	}
-	tasks, err := source.LegacyTasks(r.Context(), sessionID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id":   sessionID,
-		"legacy_tasks": tasks,
-	})
-}
-
-func (s *Server) handleMilestones(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
-	source, sourceErr := s.sourceRequired()
-	if sourceErr != nil {
-		writeError(w, http.StatusServiceUnavailable, sourceErr)
-		return
-	}
-	plan, err := source.Milestones(r.Context(), sessionID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id": sessionID,
-		"plan":       plan,
-	})
-}
-
-func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
-	source, sourceErr := s.sourceRequired()
-	if sourceErr != nil {
-		writeError(w, http.StatusServiceUnavailable, sourceErr)
-		return
-	}
-	tasks, err := source.Tasks(r.Context(), sessionID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id": sessionID,
-		"tasks":      tasks,
 	})
 }
 

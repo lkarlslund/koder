@@ -13,6 +13,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"mime"
 	"net"
 	"net/http"
@@ -1555,15 +1556,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err != nil {
 			return nil, err
 		}
-		preferences, err := s.controller.Preferences(ctx)
-		if err != nil {
-			return nil, err
-		}
-		state, err := s.stateForClient(ctx, clientID)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"runtime": runtime, "preferences": preferences, "state": state}, nil
+		return s.preferencesAndState(ctx, clientID, map[string]any{"runtime": runtime})
 	case "set_mcp_server_enabled":
 		var in struct {
 			ServerID string `json:"server_id"`
@@ -1575,15 +1568,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.SetMCPServerEnabled(ctx, in.ServerID, in.Enabled); err != nil {
 			return nil, err
 		}
-		preferences, err := s.controller.Preferences(ctx)
-		if err != nil {
-			return nil, err
-		}
-		state, err := s.stateForClient(ctx, clientID)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"preferences": preferences, "state": state}, nil
+		return s.preferencesAndState(ctx, clientID, nil)
 	case "delete_mcp_server":
 		var in struct {
 			ServerID string `json:"server_id"`
@@ -1594,15 +1579,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := s.controller.DeleteMCPServer(ctx, in.ServerID); err != nil {
 			return nil, err
 		}
-		preferences, err := s.controller.Preferences(ctx)
-		if err != nil {
-			return nil, err
-		}
-		state, err := s.stateForClient(ctx, clientID)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"preferences": preferences, "state": state}, nil
+		return s.preferencesAndState(ctx, clientID, nil)
 	case "reset_prompt":
 		var in struct {
 			Target string `json:"target"`
@@ -1718,15 +1695,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err != nil {
 			return nil, err
 		}
-		preferences, err := s.controller.Preferences(ctx)
-		if err != nil {
-			return nil, err
-		}
-		state, err := s.stateForClient(ctx, clientID)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"providers": providers, "preferences": preferences, "state": state}, nil
+		return s.preferencesAndState(ctx, clientID, map[string]any{"providers": providers})
 	case "delete_provider":
 		var in struct {
 			ProviderID string `json:"provider_id"`
@@ -1738,15 +1707,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err != nil {
 			return nil, err
 		}
-		preferences, err := s.controller.Preferences(ctx)
-		if err != nil {
-			return nil, err
-		}
-		state, err := s.stateForClient(ctx, clientID)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"providers": providers, "preferences": preferences, "state": state}, nil
+		return s.preferencesAndState(ctx, clientID, map[string]any{"providers": providers})
 	case "set_provider_enabled":
 		var in struct {
 			ProviderID string `json:"provider_id"`
@@ -1759,15 +1720,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err != nil {
 			return nil, err
 		}
-		preferences, err := s.controller.Preferences(ctx)
-		if err != nil {
-			return nil, err
-		}
-		state, err := s.stateForClient(ctx, clientID)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"providers": providers, "preferences": preferences, "state": state}, nil
+		return s.preferencesAndState(ctx, clientID, map[string]any{"providers": providers})
 	case "set_access_settings":
 		var in accesssettings.Settings
 		if err := decodeParams(params, &in); err != nil {
@@ -1834,6 +1787,22 @@ func (s *Server) requestProcessRestart() error {
 		}
 	})
 	return nil
+}
+
+// preferencesAndState is the reply to a settings mutation: the saved
+// preferences and the client's refreshed state, plus any extra fields.
+func (s *Server) preferencesAndState(ctx context.Context, clientID string, extra map[string]any) (map[string]any, error) {
+	preferences, err := s.controller.Preferences(ctx)
+	if err != nil {
+		return nil, err
+	}
+	state, err := s.stateForClient(ctx, clientID)
+	if err != nil {
+		return nil, err
+	}
+	reply := map[string]any{"preferences": preferences, "state": state}
+	maps.Copy(reply, extra)
+	return reply, nil
 }
 
 func (s *Server) stateForClient(ctx context.Context, clientID string) (app.State, error) {
