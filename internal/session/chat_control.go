@@ -134,25 +134,23 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 	if backend == "" {
 		backend = parentChat.EffectiveBackend()
 	}
-	if backend != domain.ChatBackendKoder && backend != domain.ChatBackendCodex {
-		return chattool.Status{}, fmt.Errorf("chat backend %q is not supported", backend)
+	if err := backend.Validate(); err != nil {
+		return chattool.Status{}, err
+	}
+	if err := c.session.requireBackendAvailable(backend); err != nil {
+		return chattool.Status{}, err
 	}
 	config := c.session.configSnapshot()
-	if available := config.BackendAvailable; available != nil {
-		if err := available(backend); err != nil {
-			return chattool.Status{}, err
-		}
-	}
 	interactionMode := req.InteractionMode
 	if interactionMode == "" {
 		interactionMode = domain.InteractionModeText
 	}
-	if interactionMode != domain.InteractionModeText && interactionMode != domain.InteractionModeVoice {
-		return chattool.Status{}, fmt.Errorf("interaction mode %q is not supported", interactionMode)
+	if err := interactionMode.Validate(); err != nil {
+		return chattool.Status{}, err
 	}
 	modelID := strings.TrimSpace(req.ModelID)
 	providerID := ""
-	if backend == domain.ChatBackendKoder && modelID == "" && config.FollowForNewChats {
+	if backend.UsesKoderModels() && modelID == "" && config.FollowForNewChats {
 		providerID = domain.DefaultModelReference
 		modelID = domain.DefaultModelReference
 	} else if backend == parentChat.EffectiveBackend() {
@@ -162,7 +160,7 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 		} else if parentChat.UsesDefaultModel() {
 			providerID = strings.TrimSpace(config.DefaultProvider)
 		}
-	} else if backend == domain.ChatBackendKoder {
+	} else if backend.UsesKoderModels() {
 		providerID = strings.TrimSpace(config.DefaultProvider)
 		if modelID == "" {
 			modelID = strings.TrimSpace(config.DefaultModel)

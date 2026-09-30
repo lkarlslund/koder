@@ -199,11 +199,16 @@ func (r *Registry) CreateQuickWithSpec(ctx context.Context, sessionID id.ID, pro
 	if _, ok := chatrole.DefaultRegistry().Lookup(chatrole.Role(spec.WorkflowRole)); !ok {
 		return nil, fmt.Errorf("profile %q is not registered", spec.WorkflowRole)
 	}
-	if spec.Backend != domain.ChatBackendKoder && spec.Backend != domain.ChatBackendCodex {
-		return nil, fmt.Errorf("chat backend %q is not supported", spec.Backend)
+	if err := spec.Backend.Validate(); err != nil {
+		return nil, err
 	}
-	if spec.InteractionMode != domain.InteractionModeText && spec.InteractionMode != domain.InteractionModeVoice {
-		return nil, fmt.Errorf("interaction mode %q is not supported", spec.InteractionMode)
+	if available := r.currentConfig().BackendAvailable; available != nil {
+		if err := available(spec.Backend.OrDefault()); err != nil {
+			return nil, err
+		}
+	}
+	if err := spec.InteractionMode.Validate(); err != nil {
+		return nil, err
 	}
 	if spec.MilestoneKey != "" && spec.TaskRef != "" {
 		return nil, fmt.Errorf("chat scope may select a milestone or a task, not both")
@@ -287,7 +292,7 @@ func (r *Registry) createWithSpec(ctx context.Context, title, projectRoot string
 	if strings.TrimSpace(spec.ModelID) != "" {
 		modelID = strings.TrimSpace(spec.ModelID)
 	}
-	if spec.Backend == domain.ChatBackendCodex {
+	if !spec.Backend.UsesKoderModels() {
 		modelID = spec.ModelID
 		providerID = ""
 	} else if spec.ModelID != "" {

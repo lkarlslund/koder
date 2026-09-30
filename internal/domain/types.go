@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -440,6 +441,32 @@ const (
 
 func (b ChatBackend) String() string { return string(b) }
 
+// OrDefault returns b, or the Koder backend for records saved before chats
+// had a backend.
+func (b ChatBackend) OrDefault() ChatBackend {
+	if b == "" {
+		return ChatBackendKoder
+	}
+	return b
+}
+
+// Validate rejects backends Koder cannot run. An empty backend means Koder.
+func (b ChatBackend) Validate() error {
+	switch b.OrDefault() {
+	case ChatBackendKoder, ChatBackendCodex:
+		return nil
+	default:
+		return fmt.Errorf("chat backend %q is not supported", b)
+	}
+}
+
+// UsesKoderModels reports whether chats on this backend run on Koder's
+// configured providers and models. Codex picks its own model and has no
+// Koder provider.
+func (b ChatBackend) UsesKoderModels() bool {
+	return b.OrDefault() == ChatBackendKoder
+}
+
 // InteractionMode describes how a chat is presented to and controlled by the
 // user. Voice remains a durable chat; only its input/output adaptation differs.
 type InteractionMode string
@@ -448,6 +475,16 @@ const (
 	InteractionModeText  InteractionMode = "text"
 	InteractionModeVoice InteractionMode = "voice"
 )
+
+// Validate rejects unknown interaction modes. An empty mode means text.
+func (m InteractionMode) Validate() error {
+	switch m {
+	case "", InteractionModeText, InteractionModeVoice:
+		return nil
+	default:
+		return fmt.Errorf("interaction mode %q is not supported", m)
+	}
+}
 
 // ChatCreateSpec is the shared creation contract used by the web UI, voice
 // clients, and orchestration tools. Backend, workflow role, and interaction
@@ -533,10 +570,7 @@ func (c Chat) UsesDefaultModel() bool {
 
 // EffectiveBackend returns the backend used by old and new chat records.
 func (c Chat) EffectiveBackend() ChatBackend {
-	if c.Backend == "" {
-		return ChatBackendKoder
-	}
-	return c.Backend
+	return c.Backend.OrDefault()
 }
 
 // EffectiveInteractionMode preserves compatibility with legacy voice-role

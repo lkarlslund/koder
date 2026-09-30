@@ -3697,3 +3697,17 @@ func firstToolCall(t *testing.T, st *store.Store, chatID id.ID) domain.ToolCall 
 	t.Fatalf("chat %s has no tool calls", chatID)
 	return domain.ToolCall{}
 }
+
+func TestCodexChatsRejectedWhileCodexDisabled(t *testing.T) {
+	ctrl, _ := newPersistentTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Codex.Enabled = false
+	})
+	ctx := context.Background()
+	spec := domain.ChatCreateSpec{Title: "codex", Backend: domain.ChatBackendCodex, ModelID: "gpt-5.4"}
+	if _, err := ctrl.CreateChatForSelection(ctx, controllerSelection(ctrl), spec); err == nil || !strings.Contains(err.Error(), "codex backend is disabled") {
+		t.Fatalf("CreateChatForSelection error = %v, want codex disabled", err)
+	}
+	if _, _, err := ctrl.CreateTemporaryVoiceChat(ctx, spec); err == nil || !strings.Contains(err.Error(), "codex backend is disabled") {
+		t.Fatalf("CreateTemporaryVoiceChat error = %v, want codex disabled", err)
+	}
+}

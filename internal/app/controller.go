@@ -768,7 +768,7 @@ func (c *Controller) ChatBackends(ctx context.Context) []ChatBackendState {
 }
 
 func (c *Controller) validateChatModelAvailable(ctx context.Context, chatRecord domain.Chat) error {
-	if chatRecord.EffectiveBackend() != domain.ChatBackendKoder {
+	if !chatRecord.Backend.UsesKoderModels() {
 		return nil
 	}
 	providerID := strings.TrimSpace(chatRecord.ProviderID)
@@ -805,7 +805,7 @@ func (c *Controller) validateChatModelAvailable(ctx context.Context, chatRecord 
 
 func (c *Controller) prepareKoderCreateSpec(ctx context.Context, spec domain.ChatCreateSpec, template domain.Chat) (domain.ChatCreateSpec, error) {
 	spec = spec.Normalized()
-	if spec.Backend != domain.ChatBackendKoder {
+	if !spec.Backend.UsesKoderModels() {
 		return spec, nil
 	}
 	if spec.ProviderID == "" && spec.ModelID == "" {
@@ -817,10 +817,10 @@ func (c *Controller) prepareKoderCreateSpec(ctx context.Context, spec domain.Cha
 			spec.ModelID = domain.DefaultModelReference
 		}
 	}
-	if spec.ProviderID == "" && template.EffectiveBackend() == domain.ChatBackendKoder {
+	if spec.ProviderID == "" && template.Backend.UsesKoderModels() {
 		spec.ProviderID = strings.TrimSpace(template.ProviderID)
 	}
-	if spec.ModelID == "" && template.EffectiveBackend() == domain.ChatBackendKoder {
+	if spec.ModelID == "" && template.Backend.UsesKoderModels() {
 		spec.ModelID = strings.TrimSpace(template.ModelID)
 	}
 	if spec.ProviderID == "" || spec.ModelID == "" {
@@ -1712,9 +1712,6 @@ func (c *Controller) CreateChatForSelection(ctx context.Context, selection Selec
 	spec, err = c.prepareKoderCreateSpec(ctx, spec, parent)
 	if err != nil {
 		return domain.Chat{}, err
-	}
-	if spec.Backend == domain.ChatBackendCodex && (c == nil || !c.cfg.Codex.Enabled) {
-		return domain.Chat{}, fmt.Errorf("codex backend is disabled")
 	}
 	var parentID *id.ID
 	if spec.InteractionMode != domain.InteractionModeVoice && spec.WorkflowRole != domain.WorkflowRoleStandalone {

@@ -99,3 +99,23 @@ func TestUsageContextTokens(t *testing.T) {
 		})
 	}
 }
+
+func TestChatBackendHelpers(t *testing.T) {
+	if ChatBackend("").OrDefault() != ChatBackendKoder || !ChatBackend("").UsesKoderModels() {
+		t.Fatal("empty backend should mean Koder")
+	}
+	if ChatBackendCodex.UsesKoderModels() {
+		t.Fatal("codex does not use Koder models")
+	}
+	for _, backend := range []ChatBackend{"", ChatBackendKoder, ChatBackendCodex} {
+		if err := backend.Validate(); err != nil {
+			t.Fatalf("Validate(%q) = %v", backend, err)
+		}
+	}
+	if ChatBackend("claude").Validate() == nil {
+		t.Fatal("unknown backend accepted")
+	}
+	if InteractionMode("video").Validate() == nil || InteractionModeVoice.Validate() != nil {
+		t.Fatal("interaction mode validation wrong")
+	}
+}

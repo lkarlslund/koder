@@ -252,9 +252,6 @@ func (c *Controller) CreateVoiceChatInSession(ctx context.Context, sessionID str
 		return voice.Chat{}, err
 	}
 	spec.Title = truncateVoiceText(spec.Title, 80)
-	if spec.Backend == domain.ChatBackendCodex && (c == nil || !c.cfg.Codex.Enabled) {
-		return voice.Chat{}, fmt.Errorf("codex backend is disabled")
-	}
 	runtime, err := owner.NewChatWithSpec(ctx, nil, spec)
 	if err != nil {
 		return voice.Chat{}, err
@@ -278,9 +275,6 @@ func (c *Controller) CreateTemporaryVoiceChat(ctx context.Context, spec domain.C
 	spec, err = c.prepareKoderCreateSpec(ctx, spec, domain.Chat{})
 	if err != nil {
 		return voice.Session{}, voice.Chat{}, err
-	}
-	if spec.Backend == domain.ChatBackendCodex && (c == nil || !c.cfg.Codex.Enabled) {
-		return voice.Session{}, voice.Chat{}, fmt.Errorf("codex backend is disabled")
 	}
 	owner, err := c.agent.CreateQuickSessionWithSpec(ctx, spec)
 	if err != nil {

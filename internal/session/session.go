@@ -88,6 +88,15 @@ func (s *Session) UpdateConfig(cfg RegistryConfig) {
 	s.mu.Unlock()
 }
 
+// requireBackendAvailable reports whether new chats may use backend, for
+// example whether the Codex backend is enabled.
+func (s *Session) requireBackendAvailable(backend domain.ChatBackend) error {
+	if available := s.configSnapshot().BackendAvailable; available != nil {
+		return available(backend)
+	}
+	return nil
+}
+
 func (s *Session) configSnapshot() RegistryConfig {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -529,7 +538,7 @@ func (s *Session) NewRootChatWithDimensions(ctx context.Context, title string, r
 // NewChatWithSpec creates a chat from the shared surface-independent contract.
 func (s *Session) NewChatWithSpec(ctx context.Context, parentChatID *id.ID, spec domain.ChatCreateSpec) (*chatpkg.Chat, error) {
 	spec = spec.Normalized()
-	if spec.Backend == domain.ChatBackendKoder && spec.ProviderID == "" && spec.ModelID == "" && s.configSnapshot().FollowForNewChats {
+	if spec.Backend.UsesKoderModels() && spec.ProviderID == "" && spec.ModelID == "" && s.configSnapshot().FollowForNewChats {
 		spec.ProviderID = domain.DefaultModelReference
 		spec.ModelID = domain.DefaultModelReference
 	}
@@ -573,17 +582,18 @@ func (s *Session) newChatWithSpec(ctx context.Context, parentChatID *id.ID, spec
 	if _, ok := chatrole.DefaultRegistry().Lookup(role); !ok {
 		return nil, fmt.Errorf("profile %q is not registered", role)
 	}
-	if backend == "" {
-		backend = domain.ChatBackendKoder
+	backend = backend.OrDefault()
+	if err := backend.Validate(); err != nil {
+		return nil, err
 	}
-	if backend != domain.ChatBackendKoder && backend != domain.ChatBackendCodex {
-		return nil, fmt.Errorf("chat backend %q is not supported", backend)
+	if err := s.requireBackendAvailable(backend); err != nil {
+		return nil, err
 	}
 	if interactionMode == "" {
 		interactionMode = domain.InteractionModeText
 	}
-	if interactionMode != domain.InteractionModeText && interactionMode != domain.InteractionModeVoice {
-		return nil, fmt.Errorf("interaction mode %q is not supported", interactionMode)
+	if err := interactionMode.Validate(); err != nil {
+		return nil, err
 	}
 	title := strings.TrimSpace(spec.Title)
 	titleUserDefined := title != ""
@@ -631,7 +641,7 @@ func (s *Session) newChatWithSpec(ctx context.Context, parentChatID *id.ID, spec
 	if providerID == "" && template.EffectiveBackend() == backend {
 		providerID = strings.TrimSpace(template.ProviderID)
 	}
-	if backend == domain.ChatBackendCodex {
+	if !backend.UsesKoderModels() {
 		providerID = ""
 	}
 	permissionProfile := spec.PermissionProfile
@@ -1267,7 +1277,7 @@ func (s *Session) EnsureChatModel(ctx context.Context, chatID id.ID, defaultProv
 	if !ok {
 		return domain.Chat{}, fmt.Errorf("chat %s not found", chatID)
 	}
-	if chatRecord.EffectiveBackend() != domain.ChatBackendKoder {
+	if !chatRecord.Backend.UsesKoderModels() {
 		return chatRecord, nil
 	}
 	if strings.TrimSpace(chatRecord.ProviderID) != "" && strings.TrimSpace(chatRecord.ModelID) != "" {

@@ -259,14 +259,14 @@ func (startTool) NormalizeArgs(args map[string]string) (map[string]string, error
 		out["task_ref"] = ref
 	}
 	if backend := domain.ChatBackend(strings.TrimSpace(args["backend"])); backend != "" {
-		if backend != domain.ChatBackendKoder && backend != domain.ChatBackendCodex {
-			return nil, fmt.Errorf("unsupported backend %q", backend)
+		if err := backend.Validate(); err != nil {
+			return nil, err
 		}
 		out["backend"] = string(backend)
 	}
 	if mode := domain.InteractionMode(strings.TrimSpace(args["interaction_mode"])); mode != "" {
-		if mode != domain.InteractionModeText && mode != domain.InteractionModeVoice {
-			return nil, fmt.Errorf("unsupported interaction mode %q", mode)
+		if err := mode.Validate(); err != nil {
+			return nil, err
 		}
 		out["interaction_mode"] = string(mode)
 	}

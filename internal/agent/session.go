@@ -31,9 +31,8 @@ func (e *Engine) sessionRegistryConfig(defaults settings.NewSessionDefaults) ses
 	if e != nil && e.browser != nil {
 		cfg.OnChatArchived = e.browser.CleanupChat
 	}
-	codexEnabled := e != nil && e.cfg.Codex.Enabled
 	cfg.BackendAvailable = func(backend domain.ChatBackend) error {
-		if backend == domain.ChatBackendCodex && !codexEnabled {
+		if backend == domain.ChatBackendCodex && (e == nil || !e.cfg.Codex.Enabled) {
 			return fmt.Errorf("codex backend is disabled")
 		}
 		return nil
