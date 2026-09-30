@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
@@ -21,13 +20,6 @@ func sessionCollection(st *store.Store) store.Collection[domain.Session] {
 		Namespace: "sessions",
 		GetID:     func(v domain.Session) string { return v.ID },
 		SetID:     func(v *domain.Session, id string) { v.ID = id },
-	})
-}
-
-func createSessionRecord(ctx context.Context, st *store.Store, chatsSrc *chatpkg.Source, title, providerID, modelID, permissionProfile string, parentID *id.ID) (domain.Session, error) {
-	return createSessionRecordWithOptions(ctx, st, chatsSrc, createSessionOptions{
-		Title: title, TitleUserDefined: strings.TrimSpace(title) != "", ProviderID: providerID, ModelID: modelID, PermissionProfile: permissionProfile, ParentID: parentID,
-		InitialChatRole: chatrole.Orchestrator,
 	})
 }
 

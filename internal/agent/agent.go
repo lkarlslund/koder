@@ -741,15 +741,6 @@ func (e *Engine) nextAssistantTimelineItemForTurn(_ context.Context, _ id.ID, rt
 	return rt.NextAssistantItem(), nil
 }
 
-func (e *Engine) buildConversation(ctx context.Context, sessionID, chatID id.ID) ([]provider.Message, error) {
-	owner, err := e.LoadSession(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	session := owner.Snapshot().Session
-	return e.buildConversationPreview(ctx, session, chatID, "", nil, nil, nil)
-}
-
 func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Session, chatID id.ID, prompt string, drafts []attachment.Draft, refs []reference.Draft, turnInstructions []provider.InstructionBlock) ([]provider.Message, error) {
 	envelope, err := e.buildPromptEnvelopePreview(ctx, session, chatID, prompt, drafts, refs, turnInstructions)
 	if err != nil {
@@ -1062,12 +1053,6 @@ func (e *Engine) compactionChatRequest(session domain.Session, chat domain.Chat,
 		Role:    provider.RoleUser,
 		Content: e.compactPromptWithInstructions(instructions),
 	}), stream)
-}
-
-func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) ([]provider.Message, string, error) {
-	base := compactionBaseForNextCut(timeline, len(timeline))
-	keepStart := base.MinKeepStart + modelruntime.PreservedTimelineToolCallTailStart(timeline[base.MinKeepStart:], e.Runtime.CompactionKeepToolCalls())
-	return e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, keepStart, base)
 }
 
 func (e *Engine) buildCompactionConversationForTimelinePrefix(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, keepStart int, base compactionCutBase) ([]provider.Message, string, error) {

@@ -724,25 +724,6 @@ func repairTimelineSequenceIndex(ctx context.Context, st *store.Store, chatID id
 	return nil
 }
 
-func timelinePageAfter(items []domain.TimelineItem, after id.ID, limit int) TimelinePage {
-	total := len(items)
-	start := 0
-	if after != "" {
-		idx := slices.IndexFunc(items, func(item domain.TimelineItem) bool { return item.ID == after })
-		if idx >= 0 {
-			start = idx + 1
-		}
-	}
-	if start >= total {
-		return TimelinePage{HasMore: total > 0, LoadedAll: total == 0, Total: total}
-	}
-	if limit <= 0 {
-		limit = total
-	}
-	end := min(total, start+limit)
-	return timelinePage(items[start:end], start > 0, end < total, total)
-}
-
 func timelinePage(items []domain.TimelineItem, hasMore, hasNewer bool, total int) TimelinePage {
 	page := TimelinePage{
 		Items:     slices.Clone(items),
@@ -869,60 +850,6 @@ func interruptedToolStatus(status domain.ToolStatus) bool {
 		status == domain.ToolStatusRunning ||
 		status == domain.ToolStatusAwaitingApproval ||
 		status == domain.ToolStatusAwaitingInput
-}
-
-func appendAssistantToolCalls(ctx context.Context, st *store.Store, chatID id.ID, calls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
-	return appendAssistantToolCallsWithItem(ctx, st, chatID, domain.TimelineItem{}, calls, text, domain.ReasoningContent{}, usage)
-}
-
-func appendAssistantToolCallsWithItem(ctx context.Context, st *store.Store, chatID id.ID, item domain.TimelineItem, calls []domain.ToolCall, text string, reasoning domain.ReasoningContent, usage domain.Usage) (domain.TimelineItem, error) {
-	if len(calls) == 0 && strings.TrimSpace(text) == "" {
-		return domain.TimelineItem{}, fmt.Errorf("assistant item needs text or tool calls")
-	}
-	assistant := domain.AssistantMessage{Text: text, Reasoning: reasoning}
-	for _, call := range calls {
-		if err := assistant.AddToolCall(call); err != nil {
-			return domain.TimelineItem{}, err
-		}
-	}
-	usage = usage.Normalized()
-	if usage.HasAnyTokens() {
-		assistant.Usage = &usage
-	}
-	if item.ID == "" {
-		var err error
-		item, err = appendTimeline(ctx, st, chatID, assistant)
-		if err != nil {
-			return domain.TimelineItem{}, err
-		}
-	} else {
-		unlock := store.LockTimelineMutation()
-		defer unlock()
-		now := time.Now().UTC()
-		if item.ChatID == "" {
-			item.ChatID = chatID
-		}
-		if item.Seq == 0 {
-			items, err := timelineForChat(ctx, st, chatID)
-			if err != nil {
-				return domain.TimelineItem{}, err
-			}
-			item.Seq = int64(len(items) + 1)
-		}
-		if item.CreatedAt.IsZero() {
-			item.CreatedAt = now
-		}
-		item.UpdatedAt = now
-		item.Content = assistant
-		if _, err := insertTimelineItem(ctx, st, item); err != nil {
-			return domain.TimelineItem{}, err
-		}
-	}
-	item.Seal(time.Now().UTC())
-	if err := putTimelineItem(ctx, st, item); err != nil {
-		return domain.TimelineItem{}, err
-	}
-	return item, nil
 }
 
 func pendingApprovalsForTimeline(chatRecord domain.Chat, items []domain.TimelineItem) []Approval {

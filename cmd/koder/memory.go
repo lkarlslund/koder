@@ -43,12 +43,6 @@ func openOptionalMemoryStore(stateDir string, open memoryStoreOpener) optionalMe
 	return optionalMemoryStore{Store: st}
 }
 
-func openDefaultMemoryStore(stateDir string) optionalMemoryStore {
-	return openOptionalMemoryStore(stateDir, func(stateDir string) (memoryStoreAPI.Store, error) {
-		return memoryPebble.Open(stateDir)
-	})
-}
-
 func openConfiguredMemoryStore(stateDir string, cfg config.Memory, open memoryStoreOpener) (optionalMemoryStore, error) {
 	if !cfg.Enabled && !cfg.Required {
 		return optionalMemoryStore{}, nil

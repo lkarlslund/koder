@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/execruntime"
+	"github.com/lkarlslund/koder/internal/textutil"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -312,11 +313,7 @@ func normalizeComment(value string) string {
 	}
 	comment = strings.Join(strings.Fields(comment), " ")
 	const maxCommentRunes = 160
-	runes := []rune(comment)
-	if len(runes) <= maxCommentRunes {
-		return comment
-	}
-	return string(runes[:maxCommentRunes])
+	return textutil.TruncateRunes(comment, maxCommentRunes)
 }
 
 func (statusTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {

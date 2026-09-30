@@ -2050,27 +2050,22 @@ func (r *Chat) AttachToolResult(ctx context.Context, toolCallID string, result d
 
 // AttachToolError attaches an error to one live tool call and persists the updated item.
 func (r *Chat) AttachToolError(ctx context.Context, toolCallID string, toolErr domain.ToolError) (domain.TimelineItem, error) {
-	return r.updateToolCall(ctx, toolCallID, func(call *domain.ToolCall) error {
-		call.Error = &toolErr
-		call.Result = nil
-		call.Approval = nil
-		call.ApprovalID = ""
-		call.Status = domain.ToolStatusErrored
-		if call.CompletedAt.IsZero() {
-			call.CompletedAt = time.Now().UTC()
-		}
-		return nil
-	})
+	return r.finishToolCallWithError(ctx, toolCallID, toolErr, domain.ToolStatusErrored)
 }
 
 // AttachToolCanceled marks one live tool call as canceled and persists the updated item.
 func (r *Chat) AttachToolCanceled(ctx context.Context, toolCallID string, toolErr domain.ToolError) (domain.TimelineItem, error) {
+	return r.finishToolCallWithError(ctx, toolCallID, toolErr, domain.ToolStatusCanceled)
+}
+
+// finishToolCallWithError records toolErr as the call's terminal outcome.
+func (r *Chat) finishToolCallWithError(ctx context.Context, toolCallID string, toolErr domain.ToolError, status domain.ToolStatus) (domain.TimelineItem, error) {
 	return r.updateToolCall(ctx, toolCallID, func(call *domain.ToolCall) error {
 		call.Error = &toolErr
 		call.Result = nil
 		call.Approval = nil
 		call.ApprovalID = ""
-		call.Status = domain.ToolStatusCanceled
+		call.Status = status
 		if call.CompletedAt.IsZero() {
 			call.CompletedAt = time.Now().UTC()
 		}
@@ -3885,45 +3880,6 @@ func (r *Chat) snapshotUpdateFlags(event *domain.Event, transcriptChanged, queue
 		ContextChanged:    contextChanged,
 		ApprovalsChanged:  approvalsChanged,
 	}
-}
-
-func (r *Chat) appendOptimisticUserMessage(item domain.QueuedInput, session domain.Session, chat domain.Chat) {
-	_ = session
-	if domain.DeliveryForQueuedInput(item) == domain.QueuedInputDeliveryContinue || r.state == nil {
-		return
-	}
-	now := time.Now().UTC()
-	summary := strings.TrimSpace(item.Text)
-	user := domain.UserMessage{Text: summary, Source: domain.UserMessageSourceForQueuedInput(item)}
-	for _, draft := range item.Attachments {
-		user.Attachments = append(user.Attachments, domain.Attachment(draft))
-	}
-	for _, ref := range item.References {
-		user.References = append(user.References, domain.Reference(ref))
-	}
-	requiresImages := userMessageRequiresImages(user)
-	r.mu.Lock()
-	timelineItem := domain.TimelineItem{
-		ID:        NewTimelineID(now),
-		ChatID:    chat.ID,
-		Seq:       r.state.NextTimelineSequence(),
-		Content:   user,
-		CreatedAt: now,
-		UpdatedAt: now,
-		SealedAt:  now,
-	}
-	r.state.AppendTimelineItem(timelineItem)
-	if requiresImages {
-		r.chat.RequiresImages = true
-	}
-	r.chat.LastMessage = summary
-	r.state.UpdateChat(func(chat *domain.Chat) {
-		if requiresImages {
-			chat.RequiresImages = true
-		}
-		chat.LastMessage = summary
-	})
-	r.mu.Unlock()
 }
 
 func timelineRequiresImages(timeline []domain.TimelineItem) bool {

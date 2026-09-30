@@ -89,20 +89,12 @@ func evidenceKey(id string) []byte {
 	return recordKey(recordEvidence, id)
 }
 
-func chunkPrefix() []byte {
-	return recordPrefix(recordChunk)
-}
-
 func entryPrefix() []byte {
 	return recordPrefix(recordEntry)
 }
 
 func linkPrefix() []byte {
 	return recordPrefix(recordLink)
-}
-
-func evidencePrefix() []byte {
-	return recordPrefix(recordEvidence)
 }
 
 func recordPrefix(kind byte) []byte {
