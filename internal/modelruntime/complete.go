@@ -349,7 +349,6 @@ func (r *Runtime) shouldCavemanThinking(reasoning string) bool {
 }
 
 func (r *Runtime) completeCavemanThinking(ctx context.Context, providerID id.ID, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {
-	promptProgressPending := r.promptProgressProbePending(providerID) && provider.RequestsPromptProgress(req)
 	stream := func(req provider.ChatRequest) (provider.ChatResponse, error) {
 		streamCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
@@ -403,16 +402,24 @@ func (r *Runtime) completeCavemanThinking(ctx context.Context, providerID id.ID,
 			Meta: map[string]string{"caveman": "started"},
 		}
 	}
-	resp, err := stream(req)
-	if err == nil {
-		if promptProgressPending {
-			r.setPromptProgressSupport(providerID, true)
-		}
-		return resp, nil
+	return r.SendWithPromptProgressProbe(providerID, req, stream)
+}
+
+// SendWithPromptProgressProbe sends req. While the provider's prompt-progress
+// support is still unknown, it records whether the provider accepted the
+// request, and retries once without prompt progress if the provider rejected
+// it for that reason.
+func (r *Runtime) SendWithPromptProgressProbe(providerID id.ID, req provider.ChatRequest, send func(provider.ChatRequest) (provider.ChatResponse, error)) (provider.ChatResponse, error) {
+	if !r.promptProgressProbePending(providerID) || !provider.RequestsPromptProgress(req) {
+		return send(req)
 	}
-	if promptProgressPending && provider.ShouldRetryWithoutPromptProgress(err) {
+	resp, err := send(req)
+	switch {
+	case err == nil:
+		r.setPromptProgressSupport(providerID, true)
+	case provider.ShouldRetryWithoutPromptProgress(err):
 		r.setPromptProgressSupport(providerID, false)
-		return stream(provider.WithoutPromptProgress(req))
+		return send(provider.WithoutPromptProgress(req))
 	}
 	return resp, err
 }

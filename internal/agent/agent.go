@@ -556,47 +556,6 @@ func (e *Engine) providerConfigForChat(chat domain.Chat) config.Provider {
 	return cfg
 }
 
-func (e *Engine) providerConfig(providerID id.ID) (config.Provider, bool) {
-	return e.cfg.Provider(string(providerID))
-}
-
-func (e *Engine) promptProgressProbePending(providerID id.ID) bool {
-	cfg, ok := e.providerConfig(providerID)
-	return ok && provider.PromptProgressProbePending(cfg)
-}
-
-func (e *Engine) setPromptProgressSupport(providerID id.ID, supported bool) {
-	id := strings.TrimSpace(string(providerID))
-	if id == "" || e.cfg.Providers == nil {
-		return
-	}
-	cfg := e.cfg
-	providerCfg, ok := cfg.Providers[id]
-	if !ok {
-		return
-	}
-	if config.PromptProgressObservationValid(providerCfg) && providerCfg.PromptProgressSupported == supported {
-		return
-	}
-	providerCfg = config.WithPromptProgressObservation(providerCfg, supported, time.Now())
-	providers := make(map[string]config.Provider, len(cfg.Providers))
-	for key, value := range cfg.Providers {
-		providers[key] = value
-	}
-	providers[id] = providerCfg
-	cfg.Providers = providers
-	e.cfg = cfg
-	if strings.TrimSpace(cfg.Path()) == "" {
-		return
-	}
-	if err := cfg.Save(); err != nil {
-		e.recordLifecycle("", "prompt_progress_probe_save_failed", err.Error(), map[string]string{
-			"provider":  id,
-			"supported": strconv.FormatBool(supported),
-		})
-	}
-}
-
 func (e *Engine) providerStreamingEnabled(chat domain.Chat) bool {
 	return e.providerConfigForChat(chat).Stream
 }
@@ -773,13 +732,6 @@ func normalizeSessionTitle(raw string) string {
 		words = words[:6]
 	}
 	return strings.Join(words, " ")
-}
-
-func (e *Engine) recordLifecycle(sessionID id.ID, kind, text string, meta map[string]string) {
-	if e.debug == nil {
-		return
-	}
-	e.debug.RecordLifecycle(sessionID, kind, text, meta)
 }
 
 func (e *Engine) nextAssistantTimelineItemForTurn(_ context.Context, _ id.ID, rt *chatpkg.Chat) (domain.TimelineItem, error) {
@@ -1444,7 +1396,6 @@ func (e *Engine) compactionToolResultMessage(tool domain.ToolCall) (provider.Mes
 }
 
 func (e *Engine) completeCompactionChat(ctx context.Context, chat domain.Chat, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {
-	promptProgressPending := e.promptProgressProbePending(chat.ProviderID) && provider.RequestsPromptProgress(req)
 	summaryBytes := 0
 	streamLimitExceeded := false
 	streamCtx, cancelStream := context.WithCancel(ctx)
@@ -1485,35 +1436,17 @@ func (e *Engine) completeCompactionChat(ctx context.Context, chat domain.Chat, c
 			out <- evt
 		}
 	}
-	if req.Stream {
+	send := func(req provider.ChatRequest) (provider.ChatResponse, error) {
+		if !req.Stream {
+			return client.CompleteChat(ctx, req)
+		}
 		resp, err := client.StreamChatResponse(streamCtx, req, onEvent)
 		if streamLimitExceeded {
 			return provider.ChatResponse{}, fmt.Errorf("compaction output exceeded %s", textutil.FormatBytes(compactionMaxBytes))
 		}
-		if err == nil {
-			if promptProgressPending {
-				e.setPromptProgressSupport(chat.ProviderID, true)
-			}
-			return resp, nil
-		}
-		if promptProgressPending && provider.ShouldRetryWithoutPromptProgress(err) {
-			e.setPromptProgressSupport(chat.ProviderID, false)
-			return client.StreamChatResponse(streamCtx, provider.WithoutPromptProgress(req), onEvent)
-		}
 		return resp, err
 	}
-	resp, err := client.CompleteChat(ctx, req)
-	if err == nil {
-		if promptProgressPending {
-			e.setPromptProgressSupport(chat.ProviderID, true)
-		}
-		return resp, nil
-	}
-	if promptProgressPending && provider.ShouldRetryWithoutPromptProgress(err) {
-		e.setPromptProgressSupport(chat.ProviderID, false)
-		return client.CompleteChat(ctx, provider.WithoutPromptProgress(req))
-	}
-	return resp, err
+	return e.SendWithPromptProgressProbe(chat.ProviderID, req, send)
 }
 
 func (e *Engine) completeCompactionChatWithContextRetry(ctx context.Context, chat domain.Chat, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {
