@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"iter"
+	"slices"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -24,8 +26,12 @@ func pendingUserInputCalls(timeline []domain.TimelineItem) []domain.ToolCall {
 
 // PendingUserInputCalls returns unresolved interactive questions in a timeline.
 func PendingUserInputCalls(timeline []domain.TimelineItem) []domain.ToolCall {
+	return pendingUserInputCallsIn(slices.Values(timeline))
+}
+
+func pendingUserInputCallsIn(timeline iter.Seq[domain.TimelineItem]) []domain.ToolCall {
 	var calls []domain.ToolCall
-	for _, item := range timeline {
+	for item := range timeline {
 		assistant, ok := item.Content.(domain.AssistantMessage)
 		if !ok {
 			continue

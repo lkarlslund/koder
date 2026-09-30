@@ -16,7 +16,7 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 )
 
-func testConfig(t *testing.T) config.Config {
+func testConfig(t testing.TB) config.Config {
 	t.Helper()
 	return config.Default().WithStateDir(t.TempDir())
 }

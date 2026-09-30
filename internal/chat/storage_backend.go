@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"iter"
 	"slices"
 	"strings"
 	"sync"
@@ -853,8 +854,12 @@ func interruptedToolStatus(status domain.ToolStatus) bool {
 }
 
 func pendingApprovalsForTimeline(chatRecord domain.Chat, items []domain.TimelineItem) []Approval {
+	return pendingApprovalsIn(chatRecord, slices.Values(items))
+}
+
+func pendingApprovalsIn(chatRecord domain.Chat, items iter.Seq[domain.TimelineItem]) []Approval {
 	var approvals []Approval
-	for _, item := range items {
+	for item := range items {
 		assistant, ok := item.Content.(domain.AssistantMessage)
 		if !ok {
 			continue

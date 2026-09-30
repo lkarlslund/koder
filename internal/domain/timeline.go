@@ -116,16 +116,6 @@ func (p ModelPerformance) HasAny() bool {
 		p.GenerationMS > 0 || p.GenerationTokensPerSecond > 0
 }
 
-// AppendText appends visible assistant text.
-func (m *AssistantMessage) AppendText(delta string) {
-	m.Text += delta
-}
-
-// AppendReasoning appends assistant reasoning text.
-func (m *AssistantMessage) AppendReasoning(delta string) {
-	m.Reasoning.Text += delta
-}
-
 // AddToolCall appends a model-requested tool call.
 func (m *AssistantMessage) AddToolCall(call ToolCall) error {
 	call.ToolCallID = ToolCallID(strings.TrimSpace(string(call.ToolCallID)))

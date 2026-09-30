@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
@@ -24,6 +25,26 @@ type TimelineRecord struct {
 	Item              domain.TimelineItem
 	revision          uint64
 	persistedRevision uint64
+	text, reasoning   streamedText
+}
+
+// streamedText accumulates streamed deltas without re-copying earlier text:
+// strings.Builder.String does not copy, and strings it returned stay valid as
+// the builder grows, so each append costs amortized O(len(delta)).
+type streamedText struct {
+	buf strings.Builder
+}
+
+// append returns current+delta. When current is not the string this builder
+// last produced (another path replaced it), the builder is reseeded first.
+func (t *streamedText) append(current, delta string) string {
+	built := t.buf.String()
+	if len(built) != len(current) || unsafe.StringData(built) != unsafe.StringData(current) {
+		t.buf.Reset()
+		t.buf.WriteString(current)
+	}
+	t.buf.WriteString(delta)
+	return t.buf.String()
 }
 
 type dirtyTimelineItem struct {
@@ -139,7 +160,7 @@ func (s *ChatState) CurrentContextSize() domain.ContextUsage {
 	if s.chat.ContextTokensKnown {
 		tokens = s.chat.LastKnownContextTokens
 	}
-	if timelineAnchor, ok := timelineContextAnchorTokens(s.timelineItems()); ok {
+	if timelineAnchor, ok := s.latestContextAnchorTokens(); ok {
 		tokens = timelineAnchor
 	}
 	if tokens < 0 {
@@ -153,17 +174,36 @@ func (s *ChatState) CurrentContextSize() domain.ContextUsage {
 
 func latestTimelineContextAnchor(items []domain.TimelineItem) (int, int, bool) {
 	for idx := len(items) - 1; idx >= 0; idx-- {
-		switch payload := items[idx].Content.(type) {
-		case domain.AssistantMessage:
-			if payload.Usage != nil && payload.Usage.Normalized().HasAnyTokens() {
-				contextTokens, ok := payload.Usage.Normalized().ContextTokens()
-				if ok {
-					return idx, contextTokens, true
-				}
-			}
+		if tokens, ok := contextAnchorTokens(items[idx]); ok {
+			return idx, tokens, true
 		}
 	}
 	return 0, 0, false
+}
+
+// latestContextAnchorTokens scans the live timeline backwards for the most
+// recent reported context size.
+func (s *ChatState) latestContextAnchorTokens() (int, bool) {
+	for idx := len(s.timeline) - 1; idx >= 0; idx-- {
+		if record := s.timeline[idx]; record != nil {
+			if tokens, ok := contextAnchorTokens(record.Item); ok {
+				return tokens, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func contextAnchorTokens(item domain.TimelineItem) (int, bool) {
+	payload, ok := item.Content.(domain.AssistantMessage)
+	if !ok || payload.Usage == nil {
+		return 0, false
+	}
+	usage := payload.Usage.Normalized()
+	if !usage.HasAnyTokens() {
+		return 0, false
+	}
+	return usage.ContextTokens()
 }
 
 func timelineContextAnchorTokens(items []domain.TimelineItem) (int, bool) {
@@ -338,25 +378,24 @@ func isDurableTimelineItem(item domain.TimelineItem) bool {
 	return item.ID != ""
 }
 
-// timelineItems returns the live timeline items without detaching their
-// nested slices, maps, and pointers. Callers must only read the result.
-func (s *ChatState) timelineItems() []domain.TimelineItem {
+// liveItems yields the live timeline items, oldest first, without copying
+// the timeline. Items share nested slices, maps, and pointers with the
+// state, so callers must only read them.
+func (s *ChatState) liveItems(yield func(domain.TimelineItem) bool) {
 	if s == nil {
-		return nil
+		return
 	}
-	out := make([]domain.TimelineItem, 0, len(s.timeline))
 	for _, record := range s.timeline {
-		if record != nil {
-			out = append(out, record.Item)
+		if record != nil && !yield(record.Item) {
+			return
 		}
 	}
-	return out
 }
 
 // PendingUserInputCalls returns detached copies of unresolved interactive
 // questions without cloning the rest of the timeline.
 func (s *ChatState) PendingUserInputCalls() []domain.ToolCall {
-	calls := PendingUserInputCalls(s.timelineItems())
+	calls := pendingUserInputCallsIn(s.liveItems)
 	for index := range calls {
 		calls[index] = cloneToolCall(calls[index])
 	}
@@ -557,7 +596,7 @@ func (s *ChatState) AppendAssistantText(chatID id.ID, text string) error {
 	if !ok {
 		return fmt.Errorf("timeline item %s is not assistant", record.Item.ID)
 	}
-	assistant.AppendText(text)
+	assistant.Text = record.text.append(assistant.Text, text)
 	record.Item.Content = assistant
 	record.Item.UpdatedAt = time.Now().UTC()
 	record.revision++
@@ -580,7 +619,7 @@ func (s *ChatState) AppendAssistantReasoning(chatID id.ID, text string) error {
 	if !ok {
 		return fmt.Errorf("timeline item %s is not assistant", record.Item.ID)
 	}
-	assistant.AppendReasoning(text)
+	assistant.Reasoning.Text = record.reasoning.append(assistant.Reasoning.Text, text)
 	record.Item.Content = assistant
 	record.Item.UpdatedAt = time.Now().UTC()
 	record.revision++
@@ -621,7 +660,7 @@ func (s *ChatState) RefreshApprovals(chat domain.Chat) {
 	if s == nil {
 		return
 	}
-	s.approvals = pendingApprovalsForTimeline(chat, s.timelineItems())
+	s.approvals = pendingApprovalsIn(chat, s.liveItems)
 }
 
 // UpsertApproval adds or replaces one approval snapshot.

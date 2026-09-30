@@ -720,7 +720,7 @@ func (f *runtimeFakeRunner) promptTimelineAt(i int) []domain.TimelineItem {
 	return slices.Clone(f.promptTimeline[i])
 }
 
-func openTestStore(t *testing.T) *store.Store {
+func openTestStore(t testing.TB) *store.Store {
 	t.Helper()
 	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
@@ -732,7 +732,7 @@ func openTestStore(t *testing.T) *store.Store {
 	return st
 }
 
-func createSessionWithPlan(t *testing.T, st *store.Store) (domain.Session, domain.Chat, planning.Plan) {
+func createSessionWithPlan(t testing.TB, st *store.Store) (domain.Session, domain.Chat, planning.Plan) {
 	t.Helper()
 	ctx := context.Background()
 	session, err := modeltest.CreateSession(ctx, st, "test", "provider", "model", nil)
@@ -756,7 +756,7 @@ func createSessionWithPlan(t *testing.T, st *store.Store) (domain.Session, domai
 	return session, chat, plan
 }
 
-func newTestChat(t *testing.T, st *store.Store, session domain.Session, chatRecord domain.Chat, runner any) *Chat {
+func newTestChat(t testing.TB, st *store.Store, session domain.Session, chatRecord domain.Chat, runner any) *Chat {
 	t.Helper()
 	chat, err := Load(context.Background(), session, chatRecord, depsForFake(st, runner), nil)
 	if err != nil {
