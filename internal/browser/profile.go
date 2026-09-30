@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/lkarlslund/koder/internal/fsutil"
 )
 
 func (m *Manager) enforceProfilePreferences() error {
@@ -52,33 +54,11 @@ func setPreference(root map[string]any, section, key string, value any) {
 }
 
 func writeJSONAtomically(path string, value any, mode fs.FileMode) (err error) {
-	file, err := os.CreateTemp(filepath.Dir(path), ".preferences-*")
-	if err != nil {
-		return err
-	}
-	tempPath := file.Name()
-	defer func() {
-		_ = file.Close()
-		if err != nil {
-			_ = os.Remove(tempPath)
-		}
-	}()
-	if err = file.Chmod(mode); err != nil {
-		return err
-	}
-	encoder := json.NewEncoder(file)
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
 	encoder.SetEscapeHTML(false)
-	if err = encoder.Encode(value); err != nil {
+	if err := encoder.Encode(value); err != nil {
 		return err
 	}
-	if err = file.Sync(); err != nil {
-		return err
-	}
-	if err = file.Close(); err != nil {
-		return err
-	}
-	if err = os.Rename(tempPath, path); err != nil {
-		return err
-	}
-	return nil
+	return fsutil.WriteFileAtomic(path, buf.Bytes(), mode)
 }

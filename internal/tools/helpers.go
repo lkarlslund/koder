@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
+	"github.com/lkarlslund/koder/internal/fsutil"
 	"github.com/lkarlslund/koder/internal/processgroup"
 	"github.com/lkarlslund/koder/internal/sandbox"
 	"github.com/lkarlslund/koder/internal/textutil"
@@ -345,36 +346,7 @@ func WriteFile(abs string, data []byte, mode fs.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(abs), ".koder-write-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	renamed := false
-	defer func() {
-		if !renamed {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-	closeTemp := func() {
-		_ = tmp.Close()
-	}
-	if _, err := tmp.Write(data); err != nil {
-		closeTemp()
-		return err
-	}
-	if err := tmp.Chmod(mode); err != nil {
-		closeTemp()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, abs); err != nil {
-		return err
-	}
-	renamed = true
-	return nil
+	return fsutil.WriteFileAtomic(abs, data, mode)
 }
 
 func workspaceRoot(root string) (string, error) {

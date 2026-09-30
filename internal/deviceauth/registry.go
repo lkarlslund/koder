@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/fsutil"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/textutil"
 )
@@ -318,29 +319,8 @@ func (r *Registry) persistLocked() error {
 	if err != nil {
 		return fmt.Errorf("encode device registry: %w", err)
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(r.path), ".voice-devices-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create device registry file: %w", err)
-	}
-	temporaryPath := temporary.Name()
-	defer func() { _ = os.Remove(temporaryPath) }()
-	if err := temporary.Chmod(0o600); err != nil {
-		_ = temporary.Close()
-		return fmt.Errorf("protect device registry file: %w", err)
-	}
-	if _, err := temporary.Write(append(raw, '\n')); err != nil {
-		_ = temporary.Close()
+	if err := fsutil.WriteFileAtomic(r.path, append(raw, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write device registry: %w", err)
-	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return fmt.Errorf("sync device registry: %w", err)
-	}
-	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close device registry: %w", err)
-	}
-	if err := os.Rename(temporaryPath, r.path); err != nil {
-		return fmt.Errorf("replace device registry: %w", err)
 	}
 	return nil
 }

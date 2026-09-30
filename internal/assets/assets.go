@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/lkarlslund/koder/internal/fsutil"
 )
 
 const manifestName = "managed-assets.json"
@@ -196,7 +198,7 @@ func writeManifest(root string, m manifest) error {
 		return fmt.Errorf("encode asset manifest: %w", err)
 	}
 	data = append(data, '\n')
-	return atomicWrite(filepath.Join(root, manifestName), data, 0o644)
+	return fsutil.WriteFileAtomic(filepath.Join(root, manifestName), data, 0o644)
 }
 
 func resolveTarget(root string, target string) (string, string, error) {
@@ -216,31 +218,10 @@ func writeAssetFile(path string, content []byte, mode fs.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create managed asset directory: %w", err)
 	}
-	if err := atomicWrite(path, content, mode); err != nil {
+	if err := fsutil.WriteFileAtomic(path, content, mode); err != nil {
 		return fmt.Errorf("write managed asset %s: %w", path, err)
 	}
 	return nil
-}
-
-func atomicWrite(path string, content []byte, mode fs.FileMode) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".koder-managed-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }()
-	if _, err := tmp.Write(content); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(mode); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
 }
 
 func manifestEntry(item Asset, target string, hash string, mode fs.FileMode) manifestFile {
