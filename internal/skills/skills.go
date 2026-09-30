@@ -13,6 +13,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/textutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -597,8 +598,7 @@ func truncate(value string, maxLen int) string {
 	if utf8.RuneCountInString(value) <= maxLen || maxLen <= 3 {
 		return value
 	}
-	runes := []rune(value)
-	return strings.TrimSpace(string(runes[:maxLen-3])) + "..."
+	return strings.TrimSpace(textutil.TruncateRunes(value, maxLen-3)) + "..."
 }
 
 func DebugString(items []Skill) string {

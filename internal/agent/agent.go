@@ -38,6 +38,7 @@ import (
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/settings"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/textutil"
 	"github.com/lkarlslund/koder/internal/tokenestimate"
 	"github.com/lkarlslund/koder/internal/toolruntime"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -1494,28 +1495,6 @@ func (e *Engine) compactionToolResultMessage(tool domain.ToolCall) (provider.Mes
 	return provider.Message{Role: provider.RoleUser, Content: "Tool result for " + tool.Tool.String() + ":\n" + body}, true
 }
 
-func compactTextForCompaction(text string, label string) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return ""
-	}
-	const maxBytes = 16 * 1024
-	lines := strings.Split(text, "\n")
-	if len([]byte(text)) <= maxBytes && len(lines) <= 160 {
-		return text
-	}
-	if len(lines) <= 160 {
-		data := []byte(text)
-		if len(data) <= maxBytes {
-			return text
-		}
-		return strings.TrimSpace(string(data[:maxBytes])) + fmt.Sprintf("\n[%s truncated for compaction: kept %d bytes]", label, maxBytes)
-	}
-	head := strings.Join(lines[:80], "\n")
-	tail := strings.Join(lines[len(lines)-80:], "\n")
-	return head + fmt.Sprintf("\n[%s truncated for compaction: kept first 80 and last 80 lines of %d lines]\n", label, len(lines)) + tail
-}
-
 func (e *Engine) completeCompactionChat(ctx context.Context, chat domain.Chat, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {
 	promptProgressPending := e.promptProgressProbePending(chat.ProviderID) && provider.RequestsPromptProgress(req)
 	summaryBytes := 0
@@ -1540,7 +1519,7 @@ func (e *Engine) completeCompactionChat(ctx context.Context, chat domain.Chat, c
 			}
 			out <- domain.Event{
 				Kind: domain.EventKindStatus,
-				Text: fmt.Sprintf("Streaming compacted results (%s)", formatCompactionBytes(summaryBytes)),
+				Text: fmt.Sprintf("Streaming compacted results (%s)", textutil.FormatBytes(summaryBytes)),
 				Meta: map[string]string{"compaction": "streaming"},
 			}
 		case domain.EventKindStatus:
@@ -1561,7 +1540,7 @@ func (e *Engine) completeCompactionChat(ctx context.Context, chat domain.Chat, c
 	if req.Stream {
 		resp, err := client.StreamChatResponse(streamCtx, req, onEvent)
 		if streamLimitExceeded {
-			return provider.ChatResponse{}, fmt.Errorf("compaction output exceeded %s", formatCompactionBytes(compactionMaxBytes))
+			return provider.ChatResponse{}, fmt.Errorf("compaction output exceeded %s", textutil.FormatBytes(compactionMaxBytes))
 		}
 		if err == nil {
 			if promptProgressPending {
@@ -1632,7 +1611,7 @@ func validateCompactionResponse(resp provider.ChatResponse, beforeContextTokens,
 		return "", fmt.Errorf("empty compaction summary")
 	}
 	if len(summary) > compactionMaxBytes {
-		return "", fmt.Errorf("compaction output exceeded %s", formatCompactionBytes(compactionMaxBytes))
+		return "", fmt.Errorf("compaction output exceeded %s", textutil.FormatBytes(compactionMaxBytes))
 	}
 	if beforeContextTokens > compactionReductionCheckMinTokens && (afterContextTokens <= 0 || afterContextTokens >= beforeContextTokens) {
 		return "", fmt.Errorf("compaction did not reduce context (%d tokens before, %d after)", beforeContextTokens, afterContextTokens)
@@ -1656,17 +1635,6 @@ func compactionPromptProgressText(meta map[string]string) string {
 	return "Compaction pre-processing"
 }
 
-func formatCompactionBytes(size int) string {
-	if size < 1024 {
-		return fmt.Sprintf("%d B", size)
-	}
-	value := float64(size) / 1024
-	if value < 10 {
-		return fmt.Sprintf("%.1f KB", value)
-	}
-	return fmt.Sprintf("%.0f KB", value)
-}
-
 func (e *Engine) estimateCompactedTimelineContextTokens(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, compactionItem domain.TimelineItem, firstKeptItemID string, summary string) int {
 	simulated := make([]domain.TimelineItem, 0, len(timeline)+1)
 	simulated = append(simulated, timeline...)
@@ -1677,4 +1645,9 @@ func (e *Engine) estimateCompactedTimelineContextTokens(session domain.Session, 
 		return tokenestimate.Text(summary)
 	}
 	return estimated
+}
+
+// compactTextForCompaction bounds text embedded in a compaction prompt.
+func compactTextForCompaction(text string, label string) string {
+	return tools.CompactTextForCompaction(text, 80, 80, 16*1024, label)
 }

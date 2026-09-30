@@ -18,6 +18,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
+	"github.com/lkarlslund/koder/internal/textutil"
 	"github.com/lkarlslund/koder/internal/version"
 )
 
@@ -383,10 +384,10 @@ func (r *Recorder) RecordEvent(sessionID id.ID, evt domain.Event) {
 		SessionID: sessionID,
 		Source:    "event",
 		Kind:      string(evt.Kind),
-		Text:      truncate(evt.Text, 4096),
+		Text:      textutil.Ellipsize(evt.Text, 4096),
 		Tool:      evt.Tool,
 		Meta:      cloneMeta(evt.Meta),
-		RawJSON:   truncate(evt.RawJSON, 4096),
+		RawJSON:   textutil.Ellipsize(evt.RawJSON, 4096),
 	}
 	if evt.Err != nil {
 		entry.Error = evt.Err.Error()
@@ -415,7 +416,7 @@ func (r *Recorder) RecordLifecycle(sessionID id.ID, kind, text string, meta map[
 		SessionID: sessionID,
 		Source:    "lifecycle",
 		Kind:      strings.TrimSpace(kind),
-		Text:      truncate(strings.TrimSpace(text), 4096),
+		Text:      textutil.Ellipsize(strings.TrimSpace(text), 4096),
 		Meta:      cloneMeta(meta),
 	}
 	r.mu.Lock()
@@ -447,7 +448,7 @@ func (r *Recorder) RecordHTTP(trace HTTPTrace) {
 		}
 		r.lastHTTPBody[key] = fullRequestBody
 	}
-	trace.ResponseBody = truncate(trace.ResponseBody, 8192)
+	trace.ResponseBody = textutil.Ellipsize(trace.ResponseBody, 8192)
 	trace.RequestHdrs = cloneMeta(trace.RequestHdrs)
 	trace.ResponseHdrs = cloneMeta(trace.ResponseHdrs)
 	r.httpTraces = appendHTTPTrace(r.httpTraces, trace, r.maxHTTP)
@@ -503,7 +504,7 @@ func (r *Recorder) UpdateActiveHTTP(requestID id.ID, trace HTTPTrace) {
 		active.trace.Status = trace.Status
 	}
 	if trace.ResponseBody != "" {
-		active.trace.ResponseBody = truncate(trace.ResponseBody, 8192)
+		active.trace.ResponseBody = textutil.Ellipsize(trace.ResponseBody, 8192)
 		active.trace.ResponseBytes = len(trace.ResponseBody)
 	}
 	if trace.ResponseHdrs != nil {
@@ -1809,14 +1810,6 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func truncate(value string, max int) string {
-	value = strings.TrimSpace(value)
-	if len(value) <= max {
-		return value
-	}
-	return value[:max-1] + "…"
-}
-
 type analyzedTranscriptMessage struct {
 	item        domain.TimelineItem
 	role        domain.MessageRole
@@ -1921,7 +1914,7 @@ func analyzeTranscriptItem(item domain.TimelineItem) analyzedTranscriptMessage {
 	default:
 		out.kind = "item"
 	}
-	out.summary = truncate(out.text, 120)
+	out.summary = textutil.Ellipsize(out.text, 120)
 	return out
 }
 

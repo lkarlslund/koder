@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
+	"github.com/lkarlslund/koder/internal/textutil"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -448,8 +449,7 @@ func truncateReadLine(line string) string {
 	if utf8.RuneCountInString(line) <= maxReadLineChars {
 		return line
 	}
-	runes := []rune(line)
-	return string(runes[:maxReadLineChars]) + maxReadLineTruncSuffix
+	return textutil.TruncateRunes(line, maxReadLineChars) + maxReadLineTruncSuffix
 }
 
 func fileReadFooter(page filePage, readRange readRange) string {

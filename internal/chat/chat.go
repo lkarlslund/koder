@@ -18,6 +18,7 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/textutil"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -3832,23 +3833,12 @@ func toolCallDeltaStatusText(evt domain.Event) string {
 		toolName += " tool"
 	}
 	if args := evt.Meta["arguments"]; args != "" {
-		return fmt.Sprintf("Receiving %s call (%s arguments)", toolName, formatBytes(len(args)))
+		return fmt.Sprintf("Receiving %s call (%s arguments)", toolName, textutil.FormatBytes(len(args)))
 	}
 	if size, err := strconv.Atoi(evt.Meta["argument_bytes"]); err == nil && size > 0 {
-		return fmt.Sprintf("Receiving %s call (%s arguments)", toolName, formatBytes(size))
+		return fmt.Sprintf("Receiving %s call (%s arguments)", toolName, textutil.FormatBytes(size))
 	}
 	return fmt.Sprintf("Receiving %s call...", toolName)
-}
-
-func formatBytes(size int) string {
-	if size < 1024 {
-		return fmt.Sprintf("%d B", size)
-	}
-	const unit = 1024
-	if size < unit*unit {
-		return fmt.Sprintf("%.1f KB", float64(size)/unit)
-	}
-	return fmt.Sprintf("%.1f MB", float64(size)/(unit*unit))
 }
 
 func (r *Chat) snapshotQueue() []domain.QueuedInput {

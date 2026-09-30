@@ -18,6 +18,7 @@ import (
 	memoryService "github.com/lkarlslund/koder/internal/memory/service"
 	memoryStoreAPI "github.com/lkarlslund/koder/internal/memory/store"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/textutil"
 )
 
 const maxCuratorTimelineText = 48 << 10
@@ -351,7 +352,7 @@ func boundedCuratorText(value string) string {
 	if len(value) <= maxCuratorTimelineText {
 		return value
 	}
-	return value[:maxCuratorTimelineText] + "\n[TRUNCATED]"
+	return textutil.TruncateBytes(value, maxCuratorTimelineText) + "\n[TRUNCATED]"
 }
 
 // Draft implements curation.DraftModel using the originating Koder model when

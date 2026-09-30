@@ -8,7 +8,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/lkarlslund/koder/internal/textutil"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/voice"
 )
@@ -181,9 +183,8 @@ func jsonResult(value any) (tools.Result, error) {
 
 func boundedText(value string, maxRunes int) string {
 	value = strings.TrimSpace(value)
-	runes := []rune(value)
-	if len(runes) <= maxRunes {
+	if utf8.RuneCountInString(value) <= maxRunes {
 		return value
 	}
-	return strings.TrimSpace(string(runes[:maxRunes])) + "…"
+	return strings.TrimSpace(textutil.TruncateRunes(value, maxRunes)) + "…"
 }

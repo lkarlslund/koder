@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	cdpbrowser "github.com/chromedp/cdproto/browser"
 	"github.com/chromedp/cdproto/cdp"
@@ -36,6 +37,7 @@ import (
 	"github.com/lkarlslund/koder/internal/browserapi"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/textutil"
 )
 
 const (
@@ -1985,16 +1987,15 @@ func findScript(query, wantedRole string) string {
 }
 
 func truncateSnapshot(text string, maxChars int) (string, bool) {
-	characters := []rune(text)
-	if len(characters) <= maxChars {
+	if utf8.RuneCountInString(text) <= maxChars {
 		return text, false
 	}
 	const marker = "\n... snapshot truncated ..."
-	markerCharacters := []rune(marker)
-	if maxChars <= len(markerCharacters) {
-		return string(characters[:maxChars]), true
+	markerChars := utf8.RuneCountInString(marker)
+	if maxChars <= markerChars {
+		return textutil.TruncateRunes(text, maxChars), true
 	}
-	return string(characters[:maxChars-len(markerCharacters)]) + marker, true
+	return textutil.TruncateRunes(text, maxChars-markerChars) + marker, true
 }
 
 func jsString(value string) string {

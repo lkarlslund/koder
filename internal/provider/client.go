@@ -22,6 +22,7 @@ import (
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/textutil"
 )
 
 type APIError struct {
@@ -1381,7 +1382,7 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 				"chunk_count": strconv.Itoa(chunkCount),
 			}
 			if strings.TrimSpace(lastPayload) != "" {
-				meta["last_payload"] = debugTruncate(strings.TrimSpace(lastPayload), 4096)
+				meta["last_payload"] = textutil.Ellipsize(strings.TrimSpace(lastPayload), 4096)
 			}
 			c.recordBodyFailure(http.MethodPost, req.URL.Path, requestBody, resp, "read_stream", err, meta, capture.String())
 			return ChatResponse{}, err
@@ -1412,7 +1413,7 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 					"chunk_count": strconv.Itoa(chunkCount),
 				}
 				if strings.TrimSpace(payload) != "" {
-					meta["last_payload"] = debugTruncate(payload, 4096)
+					meta["last_payload"] = textutil.Ellipsize(payload, 4096)
 				}
 				c.recordBodyFailure(http.MethodPost, req.URL.Path, requestBody, resp, "decode_sse_chunk", err, meta, capture.String())
 				return ChatResponse{}, fmt.Errorf("decode sse chunk: %w", err)
@@ -1448,7 +1449,7 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 			}
 		} else if line != "" && !strings.HasPrefix(line, ":") &&
 			!strings.HasPrefix(line, "event:") && !strings.HasPrefix(line, "id:") && !strings.HasPrefix(line, "retry:") {
-			lastStreamMessage = debugTruncate(line, 1024)
+			lastStreamMessage = textutil.Ellipsize(line, 1024)
 		}
 
 		if errors.Is(err, io.EOF) {
@@ -1536,14 +1537,6 @@ func (c *Client) updateActiveHTTP(requestID id.ID, trace debugsrv.HTTPTrace) {
 		return
 	}
 	c.recorder.UpdateActiveHTTP(requestID, trace)
-}
-
-func debugTruncate(value string, max int) string {
-	value = strings.TrimSpace(value)
-	if len(value) <= max {
-		return value
-	}
-	return value[:max-1] + "…"
 }
 
 func (c *Client) emitChunk(emit func(domain.Event), chunk chatChunk, raw string, currentToolCalls []ToolCall) {

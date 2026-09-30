@@ -19,6 +19,7 @@ import (
 	"github.com/lkarlslund/koder/internal/memory/kpackage"
 	memoryService "github.com/lkarlslund/koder/internal/memory/service"
 	memoryStoreAPI "github.com/lkarlslund/koder/internal/memory/store"
+	"github.com/lkarlslund/koder/internal/textutil"
 )
 
 const (
@@ -117,7 +118,7 @@ func boundedMemoryAuditPath(value string) string {
 	if len(value) <= limit {
 		return value
 	}
-	return value[:limit] + "..."
+	return textutil.TruncateBytes(value, limit) + "..."
 }
 
 type memoryResponseRecorder struct {

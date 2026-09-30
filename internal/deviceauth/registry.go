@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/textutil"
 )
 
 const invitationLifetime = 30 * time.Minute
@@ -381,11 +382,7 @@ func mergeInfo(current, update DeviceInfo) DeviceInfo {
 }
 
 func bounded(value string) string {
-	runes := []rune(strings.TrimSpace(value))
-	if len(runes) > metadataLimit {
-		runes = runes[:metadataLimit]
-	}
-	return string(runes)
+	return textutil.TruncateRunes(strings.TrimSpace(value), metadataLimit)
 }
 
 func randomCredential(prefix string, size int) (string, error) {

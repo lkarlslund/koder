@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/lkarlslund/koder/internal/textutil"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -266,9 +268,8 @@ func (tool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
 }
 
 func truncate(value string, limit int) string {
-	runes := []rune(value)
-	if len(runes) <= limit {
+	if utf8.RuneCountInString(value) <= limit {
 		return value
 	}
-	return strings.TrimSpace(string(runes[:limit]))
+	return strings.TrimSpace(textutil.TruncateRunes(value, limit))
 }

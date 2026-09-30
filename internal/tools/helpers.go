@@ -16,6 +16,7 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/processgroup"
 	"github.com/lkarlslund/koder/internal/sandbox"
+	"github.com/lkarlslund/koder/internal/textutil"
 )
 
 const (
@@ -238,7 +239,7 @@ func TruncateText(input string, limit int) (string, bool) {
 	if trimmed < 0 {
 		trimmed = 0
 	}
-	return input[:trimmed] + suffix, true
+	return textutil.TruncateBytes(input, trimmed) + suffix, true
 }
 
 func ReadTextFile(abs string, lineLimit int, byteLimit int) (string, bool, error) {

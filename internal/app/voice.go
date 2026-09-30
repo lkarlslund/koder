@@ -16,6 +16,7 @@ import (
 	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/provider"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
+	"github.com/lkarlslund/koder/internal/textutil"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/voice"
@@ -529,11 +530,7 @@ func (c *Controller) CreateVoiceTarget(ctx context.Context, title string, persis
 
 func truncateVoiceText(text string, limit int) string {
 	text = strings.TrimSpace(text)
-	runes := []rune(text)
-	if len(runes) <= limit {
-		return text
-	}
-	return strings.TrimSpace(string(runes[:limit]))
+	return strings.TrimSpace(textutil.TruncateRunes(text, limit))
 }
 
 // EnsureVoiceSession resolves an explicitly requested durable voice chat or

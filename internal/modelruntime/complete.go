@@ -17,6 +17,7 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/textutil"
 	"github.com/lkarlslund/koder/internal/tokenestimate"
 )
 
@@ -363,7 +364,7 @@ func (r *Runtime) completeCavemanThinking(ctx context.Context, providerID id.ID,
 					if out != nil {
 						out <- domain.Event{
 							Kind: domain.EventKindStatus,
-							Text: fmt.Sprintf("Caveman thinking exceeded %s; stopping rewrite", formatBytes(cavemanThinkingMaxBytes)),
+							Text: fmt.Sprintf("Caveman thinking exceeded %s; stopping rewrite", textutil.FormatBytes(cavemanThinkingMaxBytes)),
 							Meta: map[string]string{"caveman": "streaming"},
 						}
 					}
@@ -373,7 +374,7 @@ func (r *Runtime) completeCavemanThinking(ctx context.Context, providerID id.ID,
 				if out != nil && streamedBytes > 0 {
 					out <- domain.Event{
 						Kind: domain.EventKindStatus,
-						Text: fmt.Sprintf("Streaming caveman thinking (%s)", formatBytes(streamedBytes)),
+						Text: fmt.Sprintf("Streaming caveman thinking (%s)", textutil.FormatBytes(streamedBytes)),
 						Meta: map[string]string{"caveman": "streaming"},
 					}
 				}
@@ -602,15 +603,4 @@ func roundRetryDelay(delay time.Duration) time.Duration {
 		return time.Second
 	}
 	return delay
-}
-
-func formatBytes(size int) string {
-	if size < 1024 {
-		return fmt.Sprintf("%d B", size)
-	}
-	value := float64(size) / 1024
-	if value < 10 {
-		return fmt.Sprintf("%.1f KB", value)
-	}
-	return fmt.Sprintf("%.0f KB", value)
 }

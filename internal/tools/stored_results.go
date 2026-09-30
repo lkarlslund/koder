@@ -12,6 +12,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
+	"github.com/lkarlslund/koder/internal/textutil"
 )
 
 type StoredResultStatus string
@@ -513,11 +514,11 @@ func normalizeCompactFormatLimits(limits CompactFormatLimits) CompactFormatLimit
 func compactStoredResultForPart(env storedResultEnvelope, diff string, limits CompactFormatLimits) (string, bool) {
 	if env.PartKind != domain.PartKindToolOutput {
 		text, ok := formatStoredResultForPart(env)
-		return compactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, "stored result"), ok
+		return CompactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, "stored result"), ok
 	}
 	if env.Status == StoredResultStatusDenied || env.Status == StoredResultStatusError {
 		text, ok := formatStoredToolOutput(env)
-		return compactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, env.Tool.String()+" result"), ok
+		return CompactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, env.Tool.String()+" result"), ok
 	}
 	switch env.Tool {
 	case FileRead:
@@ -581,7 +582,7 @@ func compactStoredResultForPart(env storedResultEnvelope, diff string, limits Co
 		if !ok {
 			return "", false
 		}
-		return compactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, env.Tool.String()+" result"), true
+		return CompactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, env.Tool.String()+" result"), true
 	default:
 		text, ok := formatStoredToolOutput(env)
 		if !ok {
@@ -590,7 +591,7 @@ func compactStoredResultForPart(env storedResultEnvelope, diff string, limits Co
 		if shouldAppendDiffToModelText(env) && strings.TrimSpace(diff) != "" {
 			text += "\n\nDiff:\n" + diff
 		}
-		return compactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, env.Tool.String()+" result"), true
+		return CompactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, env.Tool.String()+" result"), true
 	}
 }
 
@@ -618,7 +619,7 @@ func compactReadStoredResult(result ReadStoredResult, limits CompactFormatLimits
 	} else if footer := readStoredFooter(result); footer != "" {
 		lines = append(lines, footer)
 	}
-	return compactTextForCompaction(strings.Join(lines, "\n"), limits.ReadMaxLines, 0, limits.MaxBytes, "read result")
+	return CompactTextForCompaction(strings.Join(lines, "\n"), limits.ReadMaxLines, 0, limits.MaxBytes, "read result")
 }
 
 func compactBashStoredResult(result BashStoredResult, limits CompactFormatLimits) string {
@@ -635,7 +636,7 @@ func compactBashStoredResult(result BashStoredResult, limits CompactFormatLimits
 	lines = append(lines, fmt.Sprintf("exit_code: %d", result.ExitCode))
 	if output := strings.TrimSpace(result.Output); output != "" {
 		lines = append(lines, "output:")
-		lines = append(lines, compactTextForCompaction(output, limits.ExecHeadLines, limits.ExecTailLines, limits.MaxBytes, "bash output"))
+		lines = append(lines, CompactTextForCompaction(output, limits.ExecHeadLines, limits.ExecTailLines, limits.MaxBytes, "bash output"))
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
@@ -665,7 +666,7 @@ func compactExecStoredResult(result ExecStoredResult, limits CompactFormatLimits
 	}
 	if output := strings.TrimSpace(result.Output); output != "" {
 		lines = append(lines, "output:")
-		lines = append(lines, compactTextForCompaction(output, limits.ExecHeadLines, limits.ExecTailLines, limits.MaxBytes, "exec output"))
+		lines = append(lines, CompactTextForCompaction(output, limits.ExecHeadLines, limits.ExecTailLines, limits.MaxBytes, "exec output"))
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
@@ -725,7 +726,9 @@ func compactShowMediaStoredResult(result ShowMediaStoredResult) string {
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
-func compactTextForCompaction(text string, headLines int, tailLines int, maxBytes int, label string) string {
+// CompactTextForCompaction trims text for a compaction prompt, keeping the
+// first headLines and last tailLines lines and at most maxBytes bytes.
+func CompactTextForCompaction(text string, headLines int, tailLines int, maxBytes int, label string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return ""
@@ -762,7 +765,7 @@ func trimBytesForCompaction(text string, maxBytes int, label string) string {
 	if limit < 1 {
 		limit = maxBytes
 	}
-	return strings.TrimSpace(string(data[:limit])) + string(suffix)
+	return strings.TrimSpace(textutil.TruncateBytes(string(data), limit)) + string(suffix)
 }
 
 func shouldAppendDiffToModelText(env storedResultEnvelope) bool {
