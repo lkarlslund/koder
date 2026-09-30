@@ -225,10 +225,3 @@ func modelSettings(cfg config.Config, providerID, modelID string) (ModelSettings
 		Streaming:        providerCfg.Stream,
 	}, nil
 }
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

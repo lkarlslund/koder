@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -148,11 +147,7 @@ func skillDiscoverOptions(root *rootOptions) (skills.DiscoverOptions, error) {
 	if err != nil {
 		return skills.DiscoverOptions{}, err
 	}
-	return skills.DiscoverOptions{
-		ManagedRoots:    []string{filepath.Join(cfg.ManagedAssetsDir(), "skills")},
-		DisabledPaths:   cfg.Skills.Disabled,
-		CatalogMaxChars: cfg.Skills.CatalogMaxChars,
-	}, nil
+	return skills.OptionsFromConfig(cfg), nil
 }
 
 // validateSkill validates a SKILL.md at the given path.

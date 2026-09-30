@@ -2041,16 +2041,8 @@ func applyBrowserToolDefaults(cfg *config.Config) {
 	}
 }
 
-func skillDiscoverOptions(cfg config.Config) skills.DiscoverOptions {
-	return skills.DiscoverOptions{
-		ManagedRoots:    []string{filepath.Join(cfg.ManagedAssetsDir(), "skills")},
-		DisabledPaths:   cfg.Skills.Disabled,
-		CatalogMaxChars: cfg.Skills.CatalogMaxChars,
-	}
-}
-
 func skillsPreferences(cfg config.Config, workdir string) SkillsPreferences {
-	catalog := skills.InspectWithOptions(workdir, skillDiscoverOptions(cfg))
+	catalog := skills.InspectWithOptions(workdir, skills.OptionsFromConfig(cfg))
 	state := SkillsPreferences{
 		Items:           make([]SkillPreference, 0, len(catalog.Items)),
 		Roots:           make([]SkillRootPreference, 0, len(catalog.Roots)),
@@ -2288,7 +2280,7 @@ func (c *Controller) settingsHealthLocked() SettingsHealth {
 		}
 		add("integrations", "mcp", runtime.ID, "error", runtime.ID+": "+message)
 	}
-	for _, skill := range skills.InspectWithOptions(c.projectRoot, skillDiscoverOptions(c.cfg)).Items {
+	for _, skill := range skills.InspectWithOptions(c.projectRoot, skills.OptionsFromConfig(c.cfg)).Items {
 		if !skill.Valid {
 			add("skills", "skills", skill.CanonicalPath, "error", "Skill "+skill.Name+": "+skill.Error)
 		}

@@ -435,12 +435,7 @@ func (r *Runtime) BaseInstructionsForChat(session domain.Session, chat domain.Ch
 			Text: "Resolved project AGENTS.md instructions:\n" + agentsText,
 		})
 	}
-	skillOpts := skills.DiscoverOptions{
-		ManagedRoots:    []string{filepath.Join(r.cfg.ManagedAssetsDir(), "skills")},
-		DisabledPaths:   r.cfg.Skills.Disabled,
-		CatalogMaxChars: r.cfg.Skills.CatalogMaxChars,
-	}
-	if skillText := strings.TrimSpace(skills.PromptContextWithOptions(sessionProjectRoot(session), skillOpts)); skillText != "" {
+	if skillText := strings.TrimSpace(skills.PromptContextWithOptions(sessionProjectRoot(session), skills.OptionsFromConfig(r.cfg))); skillText != "" {
 		instructions = append(instructions, provider.InstructionBlock{
 			Kind: provider.InstructionKindSkills,
 			Text: skillText,

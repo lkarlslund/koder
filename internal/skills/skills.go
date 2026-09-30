@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/lkarlslund/koder/internal/agents"
+	"github.com/lkarlslund/koder/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -82,6 +83,16 @@ type DiscoverOptions struct {
 	ManagedRoots    []string
 	DisabledPaths   []string
 	CatalogMaxChars int
+}
+
+// OptionsFromConfig returns the discovery options configured for Koder,
+// including the managed stock-skill root.
+func OptionsFromConfig(cfg config.Config) DiscoverOptions {
+	return DiscoverOptions{
+		ManagedRoots:    []string{filepath.Join(cfg.ManagedAssetsDir(), "skills")},
+		DisabledPaths:   cfg.Skills.Disabled,
+		CatalogMaxChars: cfg.Skills.CatalogMaxChars,
+	}
 }
 
 type skillFrontmatter struct {

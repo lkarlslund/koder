@@ -193,13 +193,18 @@ func validateTemplate(overlay Template) error {
 	return nil
 }
 
+var (
+	reasoningReplayTagPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
+	requestPathPartPattern    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
+)
+
 func validateReasoningReplay(value string) error {
 	value = strings.TrimSpace(value)
 	if value == "" || value == ReasoningReplaySeparateContent {
 		return nil
 	}
 	tag, ok := strings.CutPrefix(value, "tag:")
-	if !ok || !regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`).MatchString(tag) {
+	if !ok || !reasoningReplayTagPattern.MatchString(tag) {
 		return fmt.Errorf("unsupported reasoning_replay %q", value)
 	}
 	return nil
@@ -211,7 +216,7 @@ func validatePath(path string) error {
 		return fmt.Errorf("request path is required")
 	}
 	for _, part := range parts {
-		if part == "" || !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`).MatchString(part) {
+		if part == "" || !requestPathPartPattern.MatchString(part) {
 			return fmt.Errorf("invalid request path %q", path)
 		}
 	}

@@ -2545,7 +2545,7 @@ func isComposerTokenBoundary(r rune) bool {
 
 func (c *Controller) matchingComposerSkills(workdir string, query string) []skills.Skill {
 	var matches []skills.Skill
-	opts := skillDiscoverOptions(c.cfg)
+	opts := skills.OptionsFromConfig(c.cfg)
 	for _, item := range skills.DiscoverWithOptions(workdir, opts) {
 		name := strings.ToLower(strings.TrimSpace(item.Name))
 		if query == "" || strings.HasPrefix(name, query) {

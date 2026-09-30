@@ -371,9 +371,10 @@ func TurnInstructionBlocks(note string, continuePrompt string) []provider.Instru
 	return out
 }
 
+var toolCallTagPattern = regexp.MustCompile(`(?s)<koder_tool>\s*(\{.*?\})\s*</koder_tool>`)
+
 func ParseToolCall(text string) (*tools.Request, string) {
-	re := regexp.MustCompile(`(?s)<koder_tool>\s*(\{.*?\})\s*</koder_tool>`)
-	match := re.FindStringSubmatch(text)
+	match := toolCallTagPattern.FindStringSubmatch(text)
 	if len(match) != 2 {
 		return nil, text
 	}
@@ -381,7 +382,7 @@ func ParseToolCall(text string) (*tools.Request, string) {
 	if err != nil || call.Tool == "" {
 		return nil, text
 	}
-	plain := strings.TrimSpace(re.ReplaceAllString(text, ""))
+	plain := strings.TrimSpace(toolCallTagPattern.ReplaceAllString(text, ""))
 	return &call, plain
 }
 
