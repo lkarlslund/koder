@@ -795,8 +795,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.recordWebSocketWrite(clientID, "rpc_response", size)
-		if err == nil {
-		}
 		if establishesBaseline {
 			s.sendSelectedGitDiff(ctx, conn, &writeMu, clientID)
 		}
