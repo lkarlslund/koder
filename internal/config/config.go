@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
@@ -956,20 +957,33 @@ var toolDefaultKindAliases = map[string]domain.ToolKind{
 	"milestoneupdateitem":       domain.ToolKindMilestoneUpdate,
 }
 
+var toolNameSeparators = strings.NewReplacer("_", "", "-", "")
+
+// builtinToolKindsByCanonicalName maps each built-in tool kind's lowercase
+// name, without separators, to the kind.
+var builtinToolKindsByCanonicalName = sync.OnceValue(func() map[string]domain.ToolKind {
+	kinds := domain.BuiltinToolKinds()
+	out := make(map[string]domain.ToolKind, len(kinds))
+	for _, kind := range kinds {
+		canonical := toolNameSeparators.Replace(strings.ToLower(kind.String()))
+		if _, exists := out[canonical]; !exists {
+			out[canonical] = kind
+		}
+	}
+	return out
+})
+
 func parseToolDefaultKind(name string) (domain.ToolKind, error) {
 	trimmed := strings.TrimSpace(name)
-	normalized := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(strings.TrimSpace(name)))
+	normalized := toolNameSeparators.Replace(strings.ToLower(trimmed))
 	if kind, ok := toolDefaultKindAliases[normalized]; ok {
 		return kind, nil
 	}
-	for _, kind := range domain.BuiltinToolKinds() {
-		if kind.String() == trimmed {
-			return kind, nil
-		}
-		canonical := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(kind.String()))
-		if canonical == normalized {
-			return kind, nil
-		}
+	if kind := domain.ToolKind(trimmed); slices.Contains(domain.BuiltinToolKinds(), kind) {
+		return kind, nil
+	}
+	if kind, ok := builtinToolKindsByCanonicalName()[normalized]; ok {
+		return kind, nil
 	}
 	return "", fmt.Errorf("unknown tool default %q", name)
 }
