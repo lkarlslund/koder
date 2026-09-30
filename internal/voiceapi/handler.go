@@ -754,9 +754,7 @@ func (h *Handler) serveImageAttachment(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(draft)
+	writeJSONResponse(w, http.StatusOK, draft)
 }
 
 func (h *Handler) serveServerInfo(w http.ResponseWriter, r *http.Request) {
@@ -808,11 +806,7 @@ func (h *Handler) serveServerInfo(w http.ResponseWriter, r *http.Request) {
 		response.VoiceConnectionActive = true
 		response.VoiceConnectionSince = &active.StartedAt
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		return
-	}
+	writeJSONResponse(w, http.StatusOK, response)
 }
 
 func voiceDeviceLeaseID(r *http.Request) string {
@@ -885,14 +879,11 @@ func (h *Handler) serveSessions(w http.ResponseWriter, r *http.Request) {
 			response.AppUpdate = &meta
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
+	status := http.StatusOK
 	if created != nil {
-		w.WriteHeader(http.StatusCreated)
+		status = http.StatusCreated
 	}
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		return
-	}
+	writeJSONResponse(w, status, response)
 }
 
 func (h *Handler) chatBackendOptions(ctx context.Context) []voice.ChatBackendOption {
@@ -925,7 +916,7 @@ func (h *Handler) serveTemporaryVoiceSession(w http.ResponseWriter, r *http.Requ
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	writeSessionsResponse(w, http.StatusCreated, sessionsResponse{Protocol: protocolVersion, Session: &session, Chat: &chat, Chats: []voice.Chat{chat}})
+	writeJSONResponse(w, http.StatusCreated, sessionsResponse{Protocol: protocolVersion, Session: &session, Chat: &chat, Chats: []voice.Chat{chat}})
 }
 
 func (h *Handler) serveVoiceSession(w http.ResponseWriter, r *http.Request) {
@@ -964,9 +955,7 @@ func (h *Handler) serveVoiceSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sortVoiceSessions(sessions)
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(sessionsResponse{Protocol: protocolVersion, VoiceSessions: sessions})
+		writeJSONResponse(w, http.StatusOK, sessionsResponse{Protocol: protocolVersion, VoiceSessions: sessions})
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, sessionRequestLimit)
@@ -998,9 +987,7 @@ func (h *Handler) serveVoiceSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sortVoiceSessions(sessions)
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(sessionsResponse{Protocol: protocolVersion, VoiceSession: &updated, VoiceSessions: sessions})
+	writeJSONResponse(w, http.StatusOK, sessionsResponse{Protocol: protocolVersion, VoiceSession: &updated, VoiceSessions: sessions})
 }
 
 func (h *Handler) serveManagedSession(w http.ResponseWriter, r *http.Request, backend voice.SessionManagementBackend, sessionID string) {
@@ -1031,7 +1018,7 @@ func (h *Handler) serveManagedSession(w http.ResponseWriter, r *http.Request, ba
 	}
 	sessions = withoutDeletedSessions(sessions)
 	slices.SortStableFunc(sessions, func(a, b voice.Session) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
-	writeSessionsResponse(w, http.StatusOK, sessionsResponse{Protocol: protocolVersion, Session: updated, Sessions: sessions})
+	writeJSONResponse(w, http.StatusOK, sessionsResponse{Protocol: protocolVersion, Session: updated, Sessions: sessions})
 }
 
 func decodeUpdateSessionRequest(w http.ResponseWriter, r *http.Request) (updateSessionRequest, bool) {
@@ -1088,7 +1075,7 @@ func (h *Handler) serveSessionChats(w http.ResponseWriter, r *http.Request, sess
 	if created != nil {
 		status = http.StatusCreated
 	}
-	writeSessionsResponse(w, status, sessionsResponse{Protocol: protocolVersion, Chat: created, Chats: chats})
+	writeJSONResponse(w, status, sessionsResponse{Protocol: protocolVersion, Chat: created, Chats: chats})
 }
 
 func (h *Handler) serveSessionChat(w http.ResponseWriter, r *http.Request, sessionID, chatID string) {
@@ -1143,7 +1130,7 @@ func (h *Handler) serveSessionChat(w http.ResponseWriter, r *http.Request, sessi
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	writeSessionsResponse(w, http.StatusOK, sessionsResponse{Protocol: protocolVersion, Chats: chats})
+	writeJSONResponse(w, http.StatusOK, sessionsResponse{Protocol: protocolVersion, Chats: chats})
 }
 
 func decodeCreateSessionRequest(w http.ResponseWriter, r *http.Request) (createSessionRequest, bool) {
@@ -1174,11 +1161,11 @@ func normalizeVoiceChatSpec(spec domain.ChatCreateSpec) domain.ChatCreateSpec {
 	return spec.Normalized()
 }
 
-func writeSessionsResponse(w http.ResponseWriter, status int, response sessionsResponse) {
+func writeJSONResponse(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(value)
 }
 
 func sortVoiceSessions(sessions []voice.Session) {
@@ -1297,10 +1284,7 @@ func (h *Handler) serveBindDevice(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bind device: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(bindDeviceResponse{Protocol: protocolVersion, Binding: binding})
+	writeJSONResponse(w, http.StatusCreated, bindDeviceResponse{Protocol: protocolVersion, Binding: binding})
 }
 
 func appendIncomingAudio(cfg voice.AudioConfig, incoming *incomingAudio, payload []byte) error {
@@ -1339,7 +1323,7 @@ func appendIncomingAudio(cfg voice.AudioConfig, incoming *incomingAudio, payload
 
 func writeResult(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, call *voice.Call, backend backend, audioConfig voice.AudioConfig, updates androidUpdateSource, utteranceID, _ string, message voice.Message, callErr error) error {
 	if callErr != nil {
-		if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: callErr.Error(), ErrorCode: clientErrorCode(callErr)}); err != nil {
+		if err := writeFrame(ctx, conn, writeMu, serverFrame{Type: "error", UtteranceID: utteranceID, Error: callErr.Error(), ErrorCode: domain.ClientErrorCode(callErr)}); err != nil {
 			return err
 		}
 		return writeReady(ctx, conn, writeMu, call, audioConfig, updates)
@@ -1367,14 +1351,6 @@ func writeResult(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex,
 		}
 	}
 	return writeReady(ctx, conn, writeMu, call, audioConfig, updates)
-}
-
-func clientErrorCode(err error) string {
-	var coded interface{ ClientErrorCode() string }
-	if errors.As(err, &coded) {
-		return coded.ClientErrorCode()
-	}
-	return ""
 }
 
 func writeSpeech(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, speech voice.SpeechBackend, transport voice.AudioFormat, utteranceID, text string) error {

@@ -14,6 +14,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/lkarlslund/koder/internal/attachment"
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/phonedevice"
 	"github.com/lkarlslund/koder/internal/voice"
 )
@@ -121,7 +122,7 @@ func (t *cachedTurn) finish(err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if err != nil {
-		frame := serverFrame{Type: "error", UtteranceID: t.utteranceID, Error: err.Error(), ErrorCode: clientErrorCode(err)}
+		frame := serverFrame{Type: "error", UtteranceID: t.utteranceID, Error: err.Error(), ErrorCode: domain.ClientErrorCode(err)}
 		t.events = append(t.events, turnEvent{frame: &frame})
 	} else if t.audioStarted {
 		frame := serverFrame{Type: "tts_end", UtteranceID: t.utteranceID}
