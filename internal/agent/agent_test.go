@@ -275,28 +275,6 @@ func TestParseToolCall(t *testing.T) {
 	}
 }
 
-func TestCompactionMessagesRenderLintMessage(t *testing.T) {
-	engine := &Engine{}
-	item := domain.TimelineItem{
-		ID:      "lint-item",
-		Content: domain.LintMessage{Text: "bad.json\n- syntax error", Files: []string{"bad.json"}},
-	}
-
-	messages, err := engine.compactionMessagesForTimelineItem(domain.Session{}, item, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(messages) != 1 {
-		t.Fatalf("expected one lint compaction message, got %#v", messages)
-	}
-	if messages[0].Role != provider.RoleUser {
-		t.Fatalf("expected user role for lint diagnostics, got %s", messages[0].Role)
-	}
-	if !strings.Contains(messages[0].Content, "Post-edit diagnostics:") || !strings.Contains(messages[0].Content, "bad.json") {
-		t.Fatalf("expected lint diagnostics in compaction message, got %q", messages[0].Content)
-	}
-}
-
 func testConfig(t *testing.T) config.Config {
 	t.Helper()
 	cfg := config.Default().WithStateDir(t.TempDir())
@@ -558,7 +536,7 @@ func compactTestChat(t *testing.T, engine *Engine, session domain.Session, chatR
 	if err != nil {
 		return err
 	}
-	return engine.compactChatRuntime(context.Background(), session, rt, client, trigger, instructions, out)
+	return engine.compactChat(context.Background(), session, rt, client, trigger, instructions, out)
 }
 
 func waitForToolStatus(t *testing.T, st *store.Store, chatID id.ID, toolCallID string, want domain.ToolStatus) bool {
@@ -1554,227 +1532,6 @@ func TestBuildConversationAfterCompactionPreservesSavedBoundarySuffix(t *testing
 		if !strings.Contains(got, retained) {
 			t.Fatalf("expected saved boundary suffix %q after compaction, got %#v", retained, conversation)
 		}
-	}
-}
-
-func TestBuildCompactionConversationIncludesRecentToolTailInSummarySource(t *testing.T) {
-	cfg := testConfig(t)
-	st, err := store.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	engine := New(cfg, st, nil)
-	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	chat := defaultChatForSession(t, st, session.ID)
-
-	appendUserTimelineItem(t, st, chat.ID, "old question")
-	toolReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}
-	appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
-	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/tmp/project", tools.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
-
-	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	conversation, firstKeptItemID, err := engine.buildCompactionConversationForTimeline(session, chat, timeline)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(conversation) == 0 {
-		t.Fatal("expected compaction source conversation")
-	}
-	if firstKeptItemID == "" {
-		t.Fatal("expected completed recent tool call boundary after compaction")
-	}
-	joined := providerMessagesText(conversation)
-	if strings.Contains(joined, "/tmp/project") {
-		t.Fatalf("expected retained recent tool output to be left out of compaction source, got %#v", conversation)
-	}
-}
-
-func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
-	cfg := testConfig(t)
-	workdir := t.TempDir()
-	st, err := store.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	engine := New(cfg, st, nil)
-	session, err := modeltest.CreateSession(context.Background(), st, "test", "openai", "gpt-5.4", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	chat := defaultChatForSession(t, st, session.ID)
-
-	imagePath := filepath.Join(workdir, "screen.png")
-	writeAgentTestPNG(t, imagePath)
-	appendUserTimelineItemWithAttachments(t, st, chat.ID, "old screenshot", []domain.Attachment{{
-		Name: "screen.png",
-		MIME: "image/png",
-		Path: imagePath,
-		Size: 12,
-	}})
-	imageReq := tools.Request{Tool: domain.ToolKindViewImage, ToolCallID: "call_image", Args: map[string]string{"path": "screen.png"}}
-	appendAssistantToolTimelineItem(t, st, chat.ID, imageReq, "I will inspect the image.")
-	attachToolResultTimelineItem(t, st, chat.ID, imageReq, "Viewed image screen.png", tools.ViewImageStoredResult{
-		Path:       "screen.png",
-		SourcePath: imagePath,
-		MIMEType:   "image/png",
-		Summary:    "Viewed image screen.png",
-	})
-	tailReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_tail", Args: map[string]string{"command": "pwd"}}
-	appendAssistantToolTimelineItem(t, st, chat.ID, tailReq, "")
-	attachToolResultTimelineItem(t, st, chat.ID, tailReq, "/tmp/project", tools.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
-
-	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	conversation, firstKeptItemID, err := engine.buildCompactionConversationForTimeline(session, chat, timeline)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if firstKeptItemID == "" {
-		t.Fatal("expected completed recent tool call boundary after compaction")
-	}
-	payload, err := json.Marshal(conversation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rendered := string(payload)
-	if strings.Contains(rendered, "image_url") || strings.Contains(rendered, "data:image") {
-		t.Fatalf("expected text-only compaction request, got %s", rendered)
-	}
-	for _, msg := range conversation {
-		if len(msg.ContentParts) != 0 {
-			t.Fatalf("expected no content parts in compaction message, got %#v", msg)
-		}
-		if msg.Role == provider.RoleTool || msg.ToolCallID != "" || len(msg.ToolCalls) != 0 {
-			t.Fatalf("expected compaction messages to avoid structured tool protocol, got %#v", msg)
-		}
-	}
-	if !strings.Contains(rendered, "Image attachment omitted for text-only compaction") {
-		t.Fatalf("expected image metadata in text-only compaction request, got %s", rendered)
-	}
-	if strings.Contains(rendered, "/tmp/project") {
-		t.Fatalf("expected retained recent tool output to be left out of compaction source, got %s", rendered)
-	}
-}
-
-func TestBuildCompactionConversationTruncatesLargeToolOutput(t *testing.T) {
-	cfg := testConfig(t)
-	cfg.Compaction.KeepToolCalls = 1
-	st, err := store.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	engine := New(cfg, st, nil)
-	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	chat := defaultChatForSession(t, st, session.ID)
-
-	lines := make([]string, 0, 220)
-	for i := 0; i < 220; i++ {
-		lines = append(lines, fmt.Sprintf("output-line-%03d", i))
-	}
-	req := tools.Request{Tool: domain.ToolKindExecCommand, ToolCallID: "call_exec", Args: map[string]string{"cmd": "long"}}
-	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
-	attachToolResultTimelineItem(t, st, chat.ID, req, strings.Join(lines, "\n"), tools.ExecStoredResult{
-		ProcessID: "proc-1",
-		Command:   "long",
-		State:     "done",
-		Output:    strings.Join(lines, "\n"),
-	})
-	tailReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_tail", Args: map[string]string{"command": "pwd"}}
-	appendAssistantToolTimelineItem(t, st, chat.ID, tailReq, "")
-	attachToolResultTimelineItem(t, st, chat.ID, tailReq, "/tmp/project", tools.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
-
-	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	conversation, _, err := engine.buildCompactionConversationForTimeline(session, chat, timeline)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rendered := ""
-	for _, msg := range conversation {
-		rendered += msg.Content + "\n"
-	}
-	for _, want := range []string{"process_id: proc-1", "command: long", "exec output truncated for compaction", "output-line-000", "output-line-219"} {
-		if !strings.Contains(rendered, want) {
-			t.Fatalf("expected %q in compaction rendering, got %q", want, rendered)
-		}
-	}
-	if strings.Contains(rendered, "output-line-100") {
-		t.Fatalf("expected middle output to be omitted, got %q", rendered)
-	}
-}
-
-func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.T) {
-	cfg := testConfig(t)
-	st, err := store.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	engine := New(cfg, st, nil)
-	session, err := modeltest.CreateSession(context.Background(), st, "test", cfg.Defaults.ProviderID, "test-model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	chat := defaultChatForSession(t, st, session.ID)
-
-	appendUserTimelineItem(t, st, chat.ID, strings.Repeat("old raw history ", 1000))
-	previousReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_previous", Args: map[string]string{"command": "pwd"}}
-	previousToolItem := appendAssistantToolTimelineItem(t, st, chat.ID, previousReq, "")
-	attachToolResultTimelineItem(t, st, chat.ID, previousReq, "/tmp/project", tools.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
-	appendCompactionTimelineItem(t, st, chat.ID, "previous compact summary", previousToolItem.ID)
-	appendUserTimelineItem(t, st, chat.ID, "new raw history")
-	latestReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_latest", Args: map[string]string{"command": "latest-retained-tool-marker"}}
-	appendAssistantToolTimelineItem(t, st, chat.ID, latestReq, "")
-	attachToolResultTimelineItem(t, st, chat.ID, latestReq, "latest-retained-result-marker", tools.BashStoredResult{Command: "latest-retained-tool-marker", Output: "latest-retained-result-marker"})
-
-	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	conversation, firstKeptItemID, err := engine.buildCompactionConversationForTimeline(session, chat, timeline)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if firstKeptItemID == "" {
-		t.Fatal("expected completed recent tool call boundary after compaction")
-	}
-	rendered := ""
-	for _, msg := range conversation {
-		rendered += msg.Content + "\n"
-	}
-	if strings.Contains(rendered, "old raw history") {
-		t.Fatalf("expected previous raw history to remain summarized away, got %q", rendered)
-	}
-	for _, want := range []string{"previous compact summary", "/tmp/project", "new raw history"} {
-		if !strings.Contains(rendered, want) {
-			t.Fatalf("expected %q in compaction rendering, got %q", want, rendered)
-		}
-	}
-	if strings.Contains(rendered, "latest-retained-tool-marker") || strings.Contains(rendered, "latest-retained-result-marker") {
-		t.Fatalf("expected retained latest tool call to be left out of compaction source, got %q", rendered)
-	}
-	if strings.Contains(rendered, "call_latest") {
-		t.Fatalf("expected compaction source to avoid provider tool call IDs, got %q", rendered)
 	}
 }
 
@@ -5243,23 +5000,23 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 	}
 }
 
-func TestValidateCompactionResponseRejectsUnsafeResults(t *testing.T) {
+func TestCheckCompactionSummaryRejectsUnsafeResults(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name   string
-		resp   provider.ChatResponse
-		before int
-		after  int
-		want   string
+		name    string
+		summary string
+		before  int
+		after   int
+		want    string
 	}{
-		{name: "length limit", resp: provider.ChatResponse{Text: "partial", FinishReason: "length"}, before: 100_000, after: 10_000, want: "provider stopped"},
-		{name: "byte limit", resp: provider.ChatResponse{Text: strings.Repeat("x", compactionMaxBytes+1)}, before: 100_000, after: 10_000, want: "exceeded"},
-		{name: "no reduction", resp: provider.ChatResponse{Text: "summary"}, before: 100_000, after: 100_000, want: "did not reduce"},
+		{name: "empty", summary: "", before: 100_000, after: 10_000, want: "empty"},
+		{name: "byte limit", summary: strings.Repeat("x", compactionMaxBytes+1), before: 100_000, after: 10_000, want: "exceeded"},
+		{name: "no reduction", summary: "summary", before: 100_000, after: 100_000, want: "did not reduce"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := validateCompactionResponse(test.resp, test.before, test.after)
+			err := checkCompactionSummary(test.summary, test.before, test.after)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want containing %q", err, test.want)
 			}
@@ -5267,72 +5024,7 @@ func TestValidateCompactionResponseRejectsUnsafeResults(t *testing.T) {
 	}
 }
 
-func TestCompleteCompactionChatStopsOversizedStream(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		payload, err := json.Marshal(map[string]any{
-			"choices": []any{map[string]any{"delta": map[string]any{"content": strings.Repeat("x", compactionMaxBytes+1)}}},
-		})
-		if err != nil {
-			t.Errorf("marshal stream payload: %v", err)
-			return
-		}
-		_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
-		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-	}))
-	defer server.Close()
-
-	client, err := provider.New("test", config.Provider{BaseURL: server.URL, Timeout: time.Second}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	engine := New(testConfig(t), nil, nil)
-	_, err = engine.completeCompactionChat(context.Background(), domain.Chat{ProviderID: "test"}, client, provider.ChatRequest{Model: "test", Stream: true}, nil)
-	if err == nil || !strings.Contains(err.Error(), "exceeded 64 KB") {
-		t.Fatalf("error = %v, want oversized compaction error", err)
-	}
-}
-
-func TestCompleteCompactionChatDoesNotCountReasoningAgainstSummaryLimit(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		for _, delta := range []map[string]any{
-			{"reasoning": strings.Repeat("r", compactionMaxBytes+1)},
-			{"content": "short summary"},
-		} {
-			payload, err := json.Marshal(map[string]any{
-				"choices": []any{map[string]any{"delta": delta}},
-			})
-			if err != nil {
-				t.Errorf("marshal stream payload: %v", err)
-				return
-			}
-			_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
-		}
-		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
-		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-	}))
-	defer server.Close()
-
-	client, err := provider.New("test", config.Provider{BaseURL: server.URL, Timeout: time.Second}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	engine := New(testConfig(t), nil, nil)
-	resp, err := engine.completeCompactionChat(context.Background(), domain.Chat{ProviderID: "test"}, client, provider.ChatRequest{Model: "test", Stream: true}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.Text != "short summary" {
-		t.Fatalf("summary = %q, want short summary", resp.Text)
-	}
-}
-
-func TestCompleteCompactionChatRetriesContextOverflowWithoutOldestHistory(t *testing.T) {
+func TestSummarizeRetriesContextOverflowWithoutOldestHistory(t *testing.T) {
 	t.Parallel()
 
 	var requests [][]provider.Message
@@ -5354,61 +5046,29 @@ func TestCompleteCompactionChatRetriesContextOverflowWithoutOldestHistory(t *tes
 	}))
 	defer server.Close()
 
-	client, err := provider.New("test", config.Provider{BaseURL: server.URL, Timeout: time.Second}, nil)
+	providerCfg := config.Provider{BaseURL: server.URL, Timeout: time.Second}
+	client, err := provider.New("test", providerCfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	engine := New(testConfig(t), nil, nil)
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{"test": providerCfg}
+	engine := New(cfg, nil, nil)
 	req := provider.ChatRequest{Model: "test", Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "system"},
 		{Role: provider.RoleUser, Content: "oldest history"},
 		{Role: provider.RoleAssistant, Content: "newer history"},
 		{Role: provider.RoleUser, Content: "compact now"},
 	}}
-	resp, err := engine.completeCompactionChatWithContextRetry(context.Background(), domain.Chat{ProviderID: "test"}, client, req, nil)
+	summary, err := engine.summarizeInTemporaryChat(context.Background(), domain.Session{}, domain.Chat{ProviderID: "test", ModelID: "test"}, client, req, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Text != "summary" || len(requests) != 2 {
-		t.Fatalf("response = %#v, requests = %d", resp, len(requests))
+	if summary != "summary" || len(requests) != 2 {
+		t.Fatalf("summary = %q, requests = %d", summary, len(requests))
 	}
 	if got := requests[1]; len(got) != 3 || got[0].Content != "system" || got[1].Content != "newer history" || got[2].Content != "compact now" {
 		t.Fatalf("retried messages = %#v", got)
-	}
-}
-
-func TestBuildCompactionConversationOmitsHistoricalReasoning(t *testing.T) {
-	t.Parallel()
-
-	cfg := testConfig(t)
-	cfg.SetModelConfig(config.ModelConfig{
-		ProviderID:  "test",
-		ModelID:     "Qwen/Qwen3.8-Flash",
-		ModelPreset: provider.ModelPresetQwen38PreserveThinking,
-	})
-	engine := New(cfg, nil, nil)
-	timeline := []domain.TimelineItem{{
-		ID:  "assistant-1",
-		Seq: 1,
-		Content: domain.AssistantMessage{
-			Text:      "visible result",
-			Reasoning: domain.ReasoningContent{Text: "private historical reasoning"},
-		},
-	}}
-	messages, _, err := engine.buildCompactionConversationForTimeline(
-		domain.Session{},
-		domain.Chat{ProviderID: "test", ModelID: "Qwen/Qwen3.8-Flash"},
-		timeline,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := json.Marshal(messages)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), "private historical reasoning") || !strings.Contains(string(raw), "visible result") {
-		t.Fatalf("compaction messages = %s", raw)
 	}
 }
 
@@ -6053,7 +5713,7 @@ func TestCompactSessionMarksCanceledCompactionFailed(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- engine.compactChatRuntime(ctx, session, rt, client, "manual", "", nil)
+		errCh <- engine.compactChat(ctx, session, rt, client, "manual", "", nil)
 	}()
 	<-requestStarted
 	cancel()
@@ -7925,4 +7585,67 @@ func parseApprovalID(raw string) (id.ID, error) {
 		return "", fmt.Errorf("approval id is required")
 	}
 	return id, nil
+}
+
+func TestCompactionRunsAsTemporaryChatLikeANormalTurn(t *testing.T) {
+	t.Parallel()
+
+	var sawTools bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode compaction request: %v", err)
+			return
+		}
+		_, sawTools = body["tools"]
+		// A reply cut off by the server's output limit is accepted, as in a
+		// normal turn.
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"compact summary"},"finish_reason":"length"}]}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 32768})
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	engine := New(cfg, st, nil)
+	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	appendUserTimelineItem(t, st, chat.ID, "hello")
+	appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: "world"})
+	client, err := provider.New("test", cfg.Providers["test"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out := make(chan domain.Event, 32)
+	if err := compactTestChat(t, engine, session, chat, client, "manual", "", out); err != nil {
+		t.Fatalf("compaction failed: %v", err)
+	}
+	close(out)
+	for evt := range out {
+		if evt.Kind == domain.EventKindMessageDelta || evt.Kind == domain.EventKindReasoning {
+			t.Fatalf("summary text leaked into the chat as %s", evt.Kind)
+		}
+	}
+	if sawTools {
+		t.Fatal("temporary compaction chat must not offer tools")
+	}
+	items, err := testTimelineForChat(context.Background(), st, chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compaction, ok := items[len(items)-1].Content.(domain.Compaction)
+	if !ok || compaction.Status != "completed" || compaction.Summary != "compact summary" {
+		t.Fatalf("last item = %#v", items[len(items)-1].Content)
+	}
 }

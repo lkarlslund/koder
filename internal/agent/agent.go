@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -41,7 +40,6 @@ import (
 	"github.com/lkarlslund/koder/internal/textutil"
 	"github.com/lkarlslund/koder/internal/tokenestimate"
 	"github.com/lkarlslund/koder/internal/toolruntime"
-	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
 	"github.com/lkarlslund/koder/internal/tools/sessiontool"
 )
@@ -351,26 +349,6 @@ func (e *Engine) SetExecManager(manager *execruntime.Manager) {
 	}
 }
 
-func chatModel(chat domain.Chat) (string, string, error) {
-	providerID := strings.TrimSpace(chat.ProviderID)
-	modelID := strings.TrimSpace(chat.ModelID)
-	if providerID == "" {
-		return "", "", fmt.Errorf("chat %s has no provider", chat.ID)
-	}
-	if modelID == "" {
-		return "", "", fmt.Errorf("chat %s has no model", chat.ID)
-	}
-	return providerID, modelID, nil
-}
-
-func resolvedChatModel(cfg config.Config, chat domain.Chat) (string, string, error) {
-	if chat.UsesDefaultModel() {
-		chat.ProviderID = strings.TrimSpace(cfg.Defaults.ProviderID)
-		chat.ModelID = strings.TrimSpace(cfg.Defaults.ModelID)
-	}
-	return chatModel(chat)
-}
-
 func (e *Engine) clientForChat(chat domain.Chat) (*provider.Client, error) {
 	model, err := e.settings.Model(chat)
 	if err != nil {
@@ -393,7 +371,7 @@ func (e *Engine) CompactChat(ctx context.Context, rt *chatpkg.Chat, instructions
 	if out != nil {
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Compacting session..."}
 	}
-	if err := e.compactChatRuntime(ctx, session, rt, client, "manual", instructions, out); err != nil {
+	if err := e.compactChat(ctx, session, rt, client, "manual", instructions, out); err != nil {
 		return err
 	}
 	if out != nil {
@@ -544,20 +522,6 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 		return "", err
 	}
 	return title, nil
-}
-
-func (e *Engine) providerConfigForChat(chat domain.Chat) config.Provider {
-	if model, err := e.settings.Model(chat); err == nil {
-		return model.Provider
-	}
-	providerID, modelID, _ := resolvedChatModel(e.cfg, chat)
-	providerID, _ = e.cfg.ResolveModel(providerID, modelID)
-	cfg, _ := e.cfg.Provider(providerID)
-	return cfg
-}
-
-func (e *Engine) providerStreamingEnabled(chat domain.Chat) bool {
-	return e.providerConfigForChat(chat).Stream
 }
 
 func shouldRefreshSessionTitle(session domain.Session, timeline []domain.TimelineItem) bool {
@@ -774,14 +738,6 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 	return e.BuildPromptEnvelopeForTimeline(session, chat, timeline, prompt, drafts, refs, turnInstructions)
 }
 
-func formatThinkingBlock(reasoning string) string {
-	reasoning = strings.TrimSpace(reasoning)
-	if reasoning == "" {
-		return ""
-	}
-	return "<think>\n" + reasoning + "\n</think>"
-}
-
 func (e *Engine) compactPrompt() string {
 	return modelruntime.ManagedPrompt(e.cfg.ManagedAssetsDir(), "compaction-prompt.md")
 }
@@ -804,7 +760,7 @@ func (e *Engine) autoCompactAtTurnBoundary(ctx context.Context, session domain.S
 	if out != nil {
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at %d%% known context used", used)}
 	}
-	if err := e.compactTurnSession(ctx, session, chat, rt, client, "auto", "", out); err != nil {
+	if err := e.compactChat(ctx, session, rt, client, "auto", "", out); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -836,27 +792,32 @@ func contextUsagePercent(tokens, contextWindow int) (int, bool) {
 	return min(100, (tokens*100)/contextWindow), true
 }
 
-func (e *Engine) compactChatRuntime(ctx context.Context, session domain.Session, rt *chatpkg.Chat, client *provider.Client, trigger, instructions string, out chan<- domain.Event) error {
+// compactChat summarizes a chat's history in a temporary chat on the
+// compaction model and records the summary as a compaction item.
+//
+// The temporary chat is an ordinary chat that exists only for this request:
+// no ID, backend, tools, or stored data. Its history is the chat's timeline up
+// to the cut point, rendered exactly as for a normal turn (earlier compaction
+// summaries included), and the compaction prompt is its user message.
+func (e *Engine) compactChat(ctx context.Context, session domain.Session, rt *chatpkg.Chat, client *provider.Client, trigger, instructions string, out chan<- domain.Event) error {
 	if rt == nil {
-		return fmt.Errorf("chat is required")
+		return fmt.Errorf("chat runtime is required")
 	}
 	chat := rt.Snapshot().Chat
-	compactionChat, compactionClient, err := e.compactionSessionClient(chat, client)
-	if err != nil {
-		return err
-	}
-
 	timeline, err := rt.Timeline(ctx)
 	if err != nil {
 		return err
 	}
-	req, firstKeptItemID, err := e.buildCompactionRequestForTimeline(session, compactionChat, timeline, instructions, e.providerStreamingEnabled(compactionChat))
+	timeline = chatpkg.FilterQueuedTimelineItems(timeline)
+	tempChat, tempClient, err := e.compactionChat(chat, client)
 	if err != nil {
 		return err
 	}
-	if len(req.Messages) <= 1 {
-		return nil
+	req, firstKeptItemID, err := e.buildCompactionRequestForTimeline(session, tempChat, timeline, instructions, e.ProviderStreamingEnabled(tempChat))
+	if err != nil || len(req.Messages) == 0 {
+		return err // nothing new since the last compaction
 	}
+
 	beforeContextTokens, _ := e.EstimateContextTokensForTimeline(session, chat, timeline)
 	compactionItem, err := rt.AppendCompaction(ctx, domain.Compaction{
 		Trigger:             trigger,
@@ -867,155 +828,48 @@ func (e *Engine) compactChatRuntime(ctx context.Context, session domain.Session,
 	if err != nil {
 		return err
 	}
-	updateCompactionState := func(summary, status string, afterContextTokens int) error {
-		next := domain.Compaction{
-			Summary:             summary,
-			Trigger:             trigger,
-			Status:              status,
-			FirstKeptItemID:     firstKeptItemID,
-			BeforeContextTokens: beforeContextTokens,
-			AfterContextTokens:  afterContextTokens,
-		}
+	record := func(summary, status string, afterContextTokens int) error {
 		var err error
-		compactionItem, err = rt.UpdateCompaction(context.WithoutCancel(ctx), compactionItem, next)
-		return err
-	}
-	if out != nil {
-		out <- domain.Event{
-			Kind: domain.EventKindStatus,
-			Text: "Compacting session...",
-			Item: compactionItem,
-			Meta: map[string]string{"refresh": "details", "compaction": "started"},
-		}
-	}
-	resp, err := e.completeCompactionChatWithContextRetry(ctx, compactionChat, compactionClient, req, out)
-	if err != nil {
-		_ = updateCompactionState("", "failed", 0)
-		return err
-	}
-	responseText := strings.TrimSpace(resp.Text)
-	if responseText == "" {
-		responseText = strings.TrimSpace(resp.Reasoning)
-	}
-	afterContextTokens := e.estimateCompactedTimelineContextTokens(session, chat, timeline, compactionItem, firstKeptItemID, responseText)
-	summary, err := validateCompactionResponse(resp, beforeContextTokens, afterContextTokens)
-	if err != nil {
-		_ = updateCompactionState("", "failed", 0)
-		return err
-	}
-	if err := updateCompactionState(summary, "completed", afterContextTokens); err != nil {
-		return err
-	}
-	if err := rt.ResetContextAndTokenUsage(ctx); err != nil {
-		return err
-	}
-	if out != nil {
-		completed := compactionItem
-		completed.Content = domain.Compaction{
-			Summary:             summary,
-			Trigger:             trigger,
-			Status:              "completed",
-			FirstKeptItemID:     firstKeptItemID,
-			BeforeContextTokens: beforeContextTokens,
-			AfterContextTokens:  afterContextTokens,
-		}
-		completed.Seal(time.Now().UTC())
-		out <- domain.Event{
-			Kind: domain.EventKindStatus,
-			Text: "Session compacted",
-			Item: completed,
-			Meta: map[string]string{"refresh": "details", "compaction": "completed"},
-		}
-	}
-	return nil
-}
-
-func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session, chat domain.Chat, rt *chatpkg.Chat, client *provider.Client, trigger, instructions string, out chan<- domain.Event) error {
-	if rt == nil {
-		return fmt.Errorf("chat runtime is required")
-	}
-	compactionChat, compactionClient, err := e.compactionSessionClient(chat, client)
-	if err != nil {
-		return err
-	}
-
-	timeline := rt.SnapshotTimeline()
-	req, firstKeptItemID, err := e.buildCompactionRequestForTimeline(session, compactionChat, timeline, instructions, e.providerStreamingEnabled(compactionChat))
-	if err != nil {
-		return err
-	}
-	if len(req.Messages) <= 1 {
-		return nil
-	}
-	beforeContextTokens, _ := e.EstimateContextTokensForTimeline(session, chat, timeline)
-	compactionItem, err := rt.AppendCompaction(ctx, domain.Compaction{
-		Trigger:             trigger,
-		Status:              "pending",
-		FirstKeptItemID:     firstKeptItemID,
-		BeforeContextTokens: beforeContextTokens,
-	})
-	if err != nil {
-		return err
-	}
-	updateCompactionState := func(summary, status string, afterContextTokens int) error {
-		next := domain.Compaction{
+		compactionItem, err = rt.UpdateCompaction(context.WithoutCancel(ctx), compactionItem, domain.Compaction{
 			Summary:             summary,
 			Trigger:             trigger,
 			Status:              status,
 			FirstKeptItemID:     firstKeptItemID,
 			BeforeContextTokens: beforeContextTokens,
 			AfterContextTokens:  afterContextTokens,
-		}
-		var updateErr error
-		compactionItem, updateErr = rt.UpdateCompaction(context.WithoutCancel(ctx), compactionItem, next)
-		return updateErr
-	}
-	if out != nil {
-		out <- domain.Event{
-			Kind: domain.EventKindStatus,
-			Text: "Compacting session...",
-			Item: compactionItem,
-			Meta: map[string]string{"refresh": "details", "compaction": "started"},
-		}
-	}
-	resp, err := e.completeCompactionChatWithContextRetry(ctx, compactionChat, compactionClient, req, out)
-	if err != nil {
-		_ = updateCompactionState("", "failed", 0)
+		})
 		return err
 	}
-	responseText := strings.TrimSpace(resp.Text)
-	if responseText == "" {
-		responseText = strings.TrimSpace(resp.Reasoning)
+	emit(out, domain.Event{Kind: domain.EventKindStatus, Text: "Compacting session...", Item: compactionItem, Meta: map[string]string{"refresh": "details", "compaction": "started"}})
+
+	summary, err := e.summarizeInTemporaryChat(ctx, session, tempChat, tempClient, req, out)
+	var afterContextTokens int
+	if err == nil {
+		afterContextTokens = e.estimateCompactedTimelineContextTokens(session, chat, timeline, compactionItem, firstKeptItemID, summary)
+		err = checkCompactionSummary(summary, beforeContextTokens, afterContextTokens)
 	}
-	afterContextTokens := e.estimateCompactedTimelineContextTokens(session, chat, timeline, compactionItem, firstKeptItemID, responseText)
-	summary, err := validateCompactionResponse(resp, beforeContextTokens, afterContextTokens)
 	if err != nil {
-		_ = updateCompactionState("", "failed", 0)
+		_ = record("", "failed", 0)
 		return err
 	}
-	if err := updateCompactionState(summary, "completed", afterContextTokens); err != nil {
+	if err := record(summary, "completed", afterContextTokens); err != nil {
 		return err
 	}
 	if err := rt.ResetContextAndTokenUsage(ctx); err != nil {
 		return err
 	}
-	if out != nil {
-		out <- domain.Event{
-			Kind: domain.EventKindStatus,
-			Text: "Session compacted",
-			Item: compactionItem,
-			Meta: map[string]string{"refresh": "details", "compaction": "completed"},
-		}
-	}
+	emit(out, domain.Event{Kind: domain.EventKindStatus, Text: "Session compacted", Item: compactionItem, Meta: map[string]string{"refresh": "details", "compaction": "completed"}})
 	return nil
 }
 
-func (e *Engine) compactionSessionClient(chat domain.Chat, client *provider.Client) (domain.Chat, *provider.Client, error) {
-	next := chat
-	next.WorkflowRole = chatrole.Compaction
+// compactionChat returns the temporary chat that runs compaction, and its
+// client. The compaction settings pick the model; by default that is the
+// chat's own model and client.
+func (e *Engine) compactionChat(chat domain.Chat, client *provider.Client) (domain.Chat, *provider.Client, error) {
+	temp := domain.Chat{SessionID: chat.SessionID, ProviderID: chat.ProviderID, ModelID: chat.ModelID}
 	cfg := e.settings.Snapshot()
 	if strings.TrimSpace(cfg.Compaction.ProviderID) == "" && strings.TrimSpace(cfg.Compaction.ModelID) == "" {
-		return next, client, nil
+		return temp, client, nil
 	}
 	compaction, err := e.settings.Compaction(chat, e.compactPrompt())
 	if err != nil {
@@ -1025,82 +879,98 @@ func (e *Engine) compactionSessionClient(chat domain.Chat, client *provider.Clie
 		}
 		return domain.Chat{}, nil, fmt.Errorf("compaction provider %q is not configured or is disabled: %w", providerID, err)
 	}
-	if compaction.Provider.Disabled {
-		return domain.Chat{}, nil, fmt.Errorf("compaction provider %q is disabled", compaction.Model.ProviderID)
-	}
-	next.ProviderID = compaction.ProviderID
-	next.ModelID = compaction.ModelID
+	temp.ProviderID, temp.ModelID = compaction.ProviderID, compaction.ModelID
 	compactionClient, err := provider.New(compaction.Model.ProviderID, compaction.Provider, e.debug, e.health)
 	if err != nil {
 		return domain.Chat{}, nil, fmt.Errorf("create compaction provider %q: %w", compaction.Model.ProviderID, err)
 	}
-	return next, compactionClient, nil
+	return temp, compactionClient, nil
 }
 
-func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, instructions string, stream bool) (provider.ChatRequest, string, error) {
-	base := compactionBaseForNextCut(timeline, len(timeline))
-	keepStart := base.MinKeepStart + modelruntime.PreservedTimelineToolCallTailStart(timeline[base.MinKeepStart:], e.CompactionKeepToolCalls())
-	messages, firstKeptItemID, err := e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, keepStart, base)
+// buildCompactionRequestForTimeline builds the temporary chat's request: the
+// timeline up to the cut point, rendered like a normal turn (earlier
+// compaction summaries included), with the compaction prompt as the user
+// message. It also returns the first item kept after the summary. The request
+// has no messages when nothing is new since the last compaction.
+func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, tempChat domain.Chat, timeline []domain.TimelineItem, instructions string, stream bool) (provider.ChatRequest, string, error) {
+	segmentStart := compactionSegmentStartForNextCut(timeline, len(timeline))
+	keepStart := segmentStart + modelruntime.PreservedTimelineToolCallTailStart(timeline[segmentStart:], e.CompactionKeepToolCalls())
+	if keepStart <= segmentStart {
+		return provider.ChatRequest{}, "", nil
+	}
+	envelope, err := e.BuildPromptEnvelopeForTimeline(session, tempChat, timeline[:keepStart], e.compactPromptWithInstructions(instructions), nil, nil, nil)
 	if err != nil {
 		return provider.ChatRequest{}, "", err
 	}
-	req := e.compactionChatRequest(session, chat, messages, instructions, stream)
-	return req, firstKeptItemID, nil
+	req := e.ChatRequest(session, tempChat, provider.SerializePromptEnvelope(envelope), stream)
+	return req, firstKeptItemIDForCompactionCut(timeline, keepStart), nil
 }
 
-func (e *Engine) compactionChatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, instructions string, stream bool) provider.ChatRequest {
-	return e.ChatRequest(session, chat, append(messages, provider.Message{
-		Role:    provider.RoleUser,
-		Content: e.compactPromptWithInstructions(instructions),
-	}), stream)
-}
-
-func (e *Engine) buildCompactionConversationForTimelinePrefix(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, keepStart int, base compactionCutBase) ([]provider.Message, string, error) {
-	keepStart = max(0, min(keepStart, len(timeline)))
-	if base.Start > keepStart {
-		base.Start = keepStart
-	}
-	head := timeline[:keepStart]
-	firstKeptItemID := firstKeptItemIDForCompactionCut(timeline, keepStart)
-	var envelope provider.PromptEnvelope
-	var err error
-	if strings.TrimSpace(base.Summary) != "" {
-		envelope, err = e.buildCompactionPromptEnvelopeForTimelineRange(session, chat, timeline[base.Start:keepStart], base.Summary)
-	} else {
-		envelope, err = e.buildCompactionPromptEnvelopeForTimeline(session, chat, head)
-	}
-	if err != nil {
-		return nil, "", err
-	}
-	return provider.SerializePromptEnvelope(envelope), firstKeptItemID, nil
-}
-
-type compactionCutBase struct {
-	Start        int
-	MinKeepStart int
-	Summary      string
-}
-
-func compactionBaseForNextCut(timeline []domain.TimelineItem, keepStart int) compactionCutBase {
-	keepStart = max(0, min(keepStart, len(timeline)))
-	segmentStart := compactionSegmentStartForNextCut(timeline, keepStart)
-	base := compactionCutBase{Start: segmentStart, MinKeepStart: segmentStart}
-	for idx, item := range timeline {
-		compacted, ok := item.Content.(domain.Compaction)
-		if !ok || strings.TrimSpace(compacted.Summary) == "" {
-			continue
+// summarizeInTemporaryChat sends the temporary chat's request and returns the
+// reply. Streamed text stays out of the real chat; only progress is reported.
+// If the prompt overflows the context window, the oldest message is dropped
+// and the request retried.
+func (e *Engine) summarizeInTemporaryChat(ctx context.Context, session domain.Session, tempChat domain.Chat, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (string, error) {
+	for {
+		resp, err := e.completeWithCompactionProgress(ctx, session, tempChat, client, req, out)
+		if err == nil {
+			summary := strings.TrimSpace(resp.Text)
+			if summary == "" {
+				summary = strings.TrimSpace(resp.RawReasoning)
+			}
+			return summary, nil
 		}
-		firstKeptIdx := modelruntime.FirstKeptTimelineIndex(timeline, compacted.FirstKeptItemID)
-		if firstKeptIdx < 0 || firstKeptIdx >= segmentStart || firstKeptIdx >= idx {
-			continue
+		if !provider.IsContextWindowExceeded(err) || !dropOldestCompactionMessage(&req) {
+			return "", err
 		}
-		if !modelruntime.ValidCompactionBoundary(timeline[:idx], compacted.FirstKeptItemID) {
-			continue
-		}
-		base.Start = firstKeptIdx
-		base.Summary = compacted.Summary
+		emit(out, domain.Event{Kind: domain.EventKindStatus, Text: "Compaction prompt exceeded the context window; retrying without its oldest item", Meta: map[string]string{"compaction": "progress"}})
 	}
-	return base
+}
+
+// completeWithCompactionProgress sends req through the normal model request
+// path and turns its stream into compaction progress for the real chat.
+func (e *Engine) completeWithCompactionProgress(ctx context.Context, session domain.Session, tempChat domain.Chat, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (chatpkg.ModelResponse, error) {
+	events := make(chan domain.Event, 64)
+	forwarded := make(chan struct{})
+	go func() {
+		defer close(forwarded)
+		summaryBytes := 0
+		for evt := range events {
+			switch {
+			case evt.Kind == domain.EventKindMessageDelta:
+				summaryBytes += len(evt.Text)
+				emit(out, domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Streaming compacted results (%s)", textutil.FormatBytes(summaryBytes)), Meta: map[string]string{"compaction": "streaming"}})
+			case evt.Kind == domain.EventKindStatus && evt.Meta[domain.EventMetaPromptProgress] == "true":
+				evt.Meta["compaction"] = "progress"
+				evt.Text = compactionPromptProgressText(evt.Meta)
+				emit(out, evt)
+			}
+		}
+	}()
+	resp, err := e.CompleteModelRequest(ctx, session, tempChat, client, events, req, domain.TimelineItem{})
+	close(events)
+	<-forwarded
+	return resp, err
+}
+
+func emit(out chan<- domain.Event, evt domain.Event) {
+	if out != nil {
+		out <- evt
+	}
+}
+
+// checkCompactionSummary rejects summaries that would damage the chat: empty,
+// oversized, or failing to shrink a large context.
+func checkCompactionSummary(summary string, beforeContextTokens, afterContextTokens int) error {
+	switch {
+	case summary == "":
+		return fmt.Errorf("empty compaction summary")
+	case len(summary) > compactionMaxBytes:
+		return fmt.Errorf("compaction output exceeded %s", textutil.FormatBytes(compactionMaxBytes))
+	case beforeContextTokens > compactionReductionCheckMinTokens && (afterContextTokens <= 0 || afterContextTokens >= beforeContextTokens):
+		return fmt.Errorf("compaction did not reduce context (%d tokens before, %d after)", beforeContextTokens, afterContextTokens)
+	}
+	return nil
 }
 
 func firstKeptItemIDForCompactionCut(timeline []domain.TimelineItem, keepStart int) string {
@@ -1108,55 +978,6 @@ func firstKeptItemIDForCompactionCut(timeline []domain.TimelineItem, keepStart i
 		return ""
 	}
 	return timeline[keepStart].ID
-}
-
-func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) (provider.PromptEnvelope, error) {
-	envelope := provider.PromptEnvelope{Instructions: e.BaseInstructionsForChat(session, chat)}
-	segmentStart := 0
-	for idx, item := range timeline {
-		if compacted, ok := item.Content.(domain.Compaction); ok {
-			if strings.TrimSpace(compacted.Summary) == "" {
-				continue
-			}
-			if !modelruntime.ValidCompactionBoundary(timeline[segmentStart:idx], compacted.FirstKeptItemID) {
-				continue
-			}
-			envelope.Items = append(envelope.Items[:0], modelruntime.CompactedHistoryMessage(compacted.Summary))
-			if segmentStart < idx {
-				preserved, err := e.compactionMessagesForCompactionTail(session, timeline[segmentStart:idx], compacted.FirstKeptItemID, false)
-				if err != nil {
-					return provider.PromptEnvelope{}, err
-				}
-				envelope.Items = append(envelope.Items, preserved...)
-			}
-			segmentStart = idx + 1
-			continue
-		}
-		messages, err := e.compactionMessagesForTimelineItem(session, item, false)
-		if err != nil {
-			return provider.PromptEnvelope{}, err
-		}
-		envelope.Items = append(envelope.Items, messages...)
-	}
-	return envelope, nil
-}
-
-func (e *Engine) buildCompactionPromptEnvelopeForTimelineRange(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, baseSummary string) (provider.PromptEnvelope, error) {
-	envelope := provider.PromptEnvelope{
-		Instructions: e.BaseInstructionsForChat(session, chat),
-		Items:        []provider.Message{modelruntime.CompactedHistoryMessage(baseSummary)},
-	}
-	for _, item := range timeline {
-		if _, ok := item.Content.(domain.Compaction); ok {
-			continue
-		}
-		messages, err := e.compactionMessagesForTimelineItem(session, item, false)
-		if err != nil {
-			return provider.PromptEnvelope{}, err
-		}
-		envelope.Items = append(envelope.Items, messages...)
-	}
-	return envelope, nil
 }
 
 func compactionSegmentStartForNextCut(timeline []domain.TimelineItem, keepStart int) int {
@@ -1175,281 +996,6 @@ func compactionSegmentStartForNextCut(timeline []domain.TimelineItem, keepStart 
 	return segmentStart
 }
 
-func (e *Engine) compactionMessagesForCompactionTail(session domain.Session, items []domain.TimelineItem, firstKeptItemID string, preserveThinking bool) ([]provider.Message, error) {
-	start := modelruntime.FirstKeptTimelineIndex(items, firstKeptItemID)
-	if start < 0 {
-		start = modelruntime.PreservedTimelineToolCallTailStart(items, e.CompactionKeepToolCalls())
-	}
-	if start >= len(items) {
-		return nil, nil
-	}
-	out := make([]provider.Message, 0, len(items)-start)
-	for _, item := range items[start:] {
-		messages, err := e.compactionMessagesForTimelineItem(session, item, preserveThinking)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, messages...)
-	}
-	return out, nil
-}
-
-func (e *Engine) compactionMessagesForTimelineItem(session domain.Session, item domain.TimelineItem, preserveThinking bool) ([]provider.Message, error) {
-	switch content := item.Content.(type) {
-	case domain.UserMessage:
-		body := e.compactionUserMessageText(session, content)
-		if body == "" {
-			return nil, nil
-		}
-		return []provider.Message{{Role: provider.RoleUser, Content: body}}, nil
-	case domain.AssistantMessage:
-		body := compactAssistantMessageText(content, preserveThinking)
-		if body == "" {
-			return nil, nil
-		}
-		out := []provider.Message{{Role: provider.RoleAssistant, Content: body}}
-		for _, tool := range content.Tools {
-			msg, ok := e.compactionToolResultMessage(tool)
-			if ok {
-				out = append(out, msg)
-			}
-		}
-		return out, nil
-	case domain.Compaction:
-		if strings.TrimSpace(content.Summary) == "" {
-			return nil, nil
-		}
-		return []provider.Message{modelruntime.CompactedHistoryMessage(content.Summary)}, nil
-	case domain.ToolExecution:
-		body := ""
-		if content.Result != nil {
-			body = strings.TrimSpace(content.Result.Text)
-		}
-		if content.Error != nil {
-			body = strings.TrimSpace(content.Error.Message)
-		}
-		if body == "" {
-			return nil, nil
-		}
-		return []provider.Message{{Role: provider.RoleUser, Content: compactTextForCompaction(content.Tool.String()+" output:\n"+body, "tool execution")}}, nil
-	case domain.Notice:
-		return nil, nil
-	case domain.LintMessage:
-		body := strings.TrimSpace(content.Text)
-		if body == "" {
-			return nil, nil
-		}
-		return []provider.Message{{Role: provider.RoleUser, Content: compactTextForCompaction("Post-edit diagnostics:\n"+body, "lint diagnostics")}}, nil
-	default:
-		return nil, fmt.Errorf("unsupported timeline item %s content %T", item.ID, item.Content)
-	}
-}
-
-func (e *Engine) compactionUserMessageText(session domain.Session, msg domain.UserMessage) string {
-	blocks := make([]string, 0, 1+len(msg.Attachments)+len(msg.References))
-	if text := strings.TrimSpace(msg.Text); text != "" {
-		blocks = append(blocks, text)
-	}
-	for _, ref := range msg.References {
-		meta := reference.Metadata{
-			Kind:    reference.Kind(ref.Kind),
-			Path:    ref.Path,
-			Display: ref.Display,
-			Start:   ref.Start,
-			End:     ref.End,
-		}
-		resolved, err := modelruntime.ResolveReference(session, meta)
-		label := strings.TrimSpace(ref.Display)
-		if label == "" {
-			label = strings.TrimSpace(ref.Path)
-		}
-		if err != nil {
-			blocks = append(blocks, fmt.Sprintf("Reference omitted for text-only compaction: %s (read failed: %v)", label, err))
-			continue
-		}
-		if label == "" {
-			label = "reference"
-		}
-		blocks = append(blocks, "Referenced "+label+":\n"+compactTextForCompaction(resolved, "reference"))
-	}
-	for _, item := range msg.Attachments {
-		meta := attachment.Metadata{
-			ID: item.ID, Name: item.Name, MIME: item.MIME, Path: item.Path, Size: item.Size, Source: item.Source, Original: item.Original,
-		}
-		name := strings.TrimSpace(meta.Name)
-		if name == "" {
-			name = strings.TrimSpace(meta.Path)
-		}
-		if name == "" {
-			name = "attachment"
-		}
-		switch attachment.ClassifyMIME(meta.MIME) {
-		case attachment.KindText:
-			body, err := e.files.ReadText(meta)
-			if err != nil {
-				blocks = append(blocks, fmt.Sprintf("Attachment omitted for text-only compaction: %s (read failed: %v)", name, err))
-				continue
-			}
-			blocks = append(blocks, "Attached text file "+name+":\n"+compactTextForCompaction(body, "attachment "+name))
-		case attachment.KindImage:
-			lines := []string{"Image attachment omitted for text-only compaction:", "- name: " + name}
-			if mime := strings.TrimSpace(meta.MIME); mime != "" {
-				lines = append(lines, "- mime: "+mime)
-			}
-			if meta.Size > 0 {
-				lines = append(lines, fmt.Sprintf("- size: %d bytes", meta.Size))
-			}
-			blocks = append(blocks, strings.Join(lines, "\n"))
-		default:
-			blocks = append(blocks, fmt.Sprintf("Attachment omitted for text-only compaction: %s (unsupported MIME %s)", name, meta.MIME))
-		}
-	}
-	return strings.TrimSpace(strings.Join(blocks, "\n\n"))
-}
-
-func compactAssistantMessageText(msg domain.AssistantMessage, preserveThinking bool) string {
-	blocks := make([]string, 0, 3)
-	if preserveThinking && msg.Reasoning.ReplayText() != "" {
-		blocks = append(blocks, formatThinkingBlock(msg.Reasoning.ReplayText()))
-	}
-	if text := strings.TrimSpace(msg.Text); text != "" {
-		blocks = append(blocks, text)
-	}
-	if len(msg.Tools) > 0 {
-		lines := make([]string, 0, len(msg.Tools)+1)
-		lines = append(lines, "Tool calls:")
-		for _, tool := range msg.Tools {
-			args, err := json.Marshal(tool.Args)
-			if err != nil {
-				lines = append(lines, fmt.Sprintf("- %s <args unavailable: %v>", tool.Tool, err))
-				continue
-			}
-			lines = append(lines, fmt.Sprintf("- %s %s", tool.Tool, string(args)))
-		}
-		blocks = append(blocks, strings.Join(lines, "\n"))
-	}
-	return strings.TrimSpace(strings.Join(blocks, "\n\n"))
-}
-
-func (e *Engine) compactionToolResultMessage(tool domain.ToolCall) (provider.Message, bool) {
-	if tool.Result == nil && tool.Error == nil {
-		return provider.Message{}, false
-	}
-	status := domain.ToolResultStatusOK
-	text := ""
-	diff := ""
-	var data any
-	if tool.Result != nil {
-		status = tool.Result.Status
-		text = tool.Result.Text
-		diff = tool.Result.Diff
-		data = tool.Result.Data
-	}
-	if tool.Error != nil {
-		status = domain.ToolResultStatusError
-		text = tool.Error.Message
-		data = tools.ErrorStoredResult{Message: tool.Error.Message}
-	}
-	part := domain.Part{
-		Kind: domain.PartKindToolOutput,
-		Payload: domain.ToolOutputPayload{
-			Tool:       tool.Tool,
-			ToolCallID: string(tool.ToolCallID),
-			Args:       tool.Args,
-			Status:     status,
-			Text:       text,
-			Diff:       diff,
-			Result:     data,
-		},
-	}
-	part.Body = part.Text()
-	body := strings.TrimSpace(part.Text())
-	if formatted, ok := tools.CompactModelTextForPart(part, diff, tools.DefaultCompactFormatLimits()); ok {
-		body = strings.TrimSpace(formatted)
-	} else if diff != "" {
-		if body != "" {
-			body += "\n\nDiff:\n" + diff
-		} else {
-			body = "Diff:\n" + diff
-		}
-		body = compactTextForCompaction(body, tool.Tool.String()+" result")
-	}
-	if body == "" {
-		return provider.Message{}, false
-	}
-	return provider.Message{Role: provider.RoleUser, Content: "Tool result for " + tool.Tool.String() + ":\n" + body}, true
-}
-
-func (e *Engine) completeCompactionChat(ctx context.Context, chat domain.Chat, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {
-	summaryBytes := 0
-	streamLimitExceeded := false
-	streamCtx, cancelStream := context.WithCancel(ctx)
-	defer cancelStream()
-	onEvent := func(evt domain.Event) {
-		switch evt.Kind {
-		case domain.EventKindMessageDelta, domain.EventKindReasoning:
-			if evt.Kind == domain.EventKindMessageDelta {
-				summaryBytes += len(evt.Text)
-			}
-			if summaryBytes > compactionMaxBytes && !streamLimitExceeded {
-				streamLimitExceeded = true
-				cancelStream()
-			}
-			if out == nil {
-				return
-			}
-			if summaryBytes <= 0 {
-				return
-			}
-			out <- domain.Event{
-				Kind: domain.EventKindStatus,
-				Text: fmt.Sprintf("Streaming compacted results (%s)", textutil.FormatBytes(summaryBytes)),
-				Meta: map[string]string{"compaction": "streaming"},
-			}
-		case domain.EventKindStatus:
-			if out == nil {
-				return
-			}
-			if evt.Meta[domain.EventMetaPromptProgress] != "true" {
-				return
-			}
-			if evt.Meta == nil {
-				evt.Meta = map[string]string{}
-			}
-			evt.Meta["compaction"] = "progress"
-			evt.Text = compactionPromptProgressText(evt.Meta)
-			out <- evt
-		}
-	}
-	send := func(req provider.ChatRequest) (provider.ChatResponse, error) {
-		if !req.Stream {
-			return client.CompleteChat(ctx, req)
-		}
-		resp, err := client.StreamChatResponse(streamCtx, req, onEvent)
-		if streamLimitExceeded {
-			return provider.ChatResponse{}, fmt.Errorf("compaction output exceeded %s", textutil.FormatBytes(compactionMaxBytes))
-		}
-		return resp, err
-	}
-	return e.SendWithPromptProgressProbe(chat.ProviderID, req, send)
-}
-
-func (e *Engine) completeCompactionChatWithContextRetry(ctx context.Context, chat domain.Chat, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {
-	for {
-		resp, err := e.completeCompactionChat(ctx, chat, client, req, out)
-		if err == nil || !provider.IsContextWindowExceeded(err) || !dropOldestCompactionMessage(&req) {
-			return resp, err
-		}
-		if out != nil {
-			out <- domain.Event{
-				Kind: domain.EventKindStatus,
-				Text: "Compaction prompt exceeded the context window; retrying without its oldest item",
-				Meta: map[string]string{"compaction": "progress"},
-			}
-		}
-	}
-}
-
 func dropOldestCompactionMessage(req *provider.ChatRequest) bool {
 	if req == nil || len(req.Messages) < 2 {
 		return false
@@ -1463,26 +1009,6 @@ func dropOldestCompactionMessage(req *provider.ChatRequest) bool {
 		return true
 	}
 	return false
-}
-
-func validateCompactionResponse(resp provider.ChatResponse, beforeContextTokens, afterContextTokens int) (string, error) {
-	if strings.EqualFold(strings.TrimSpace(resp.FinishReason), "length") {
-		return "", fmt.Errorf("provider stopped compaction at its output limit before completing the summary")
-	}
-	summary := strings.TrimSpace(resp.Text)
-	if summary == "" {
-		summary = strings.TrimSpace(resp.Reasoning)
-	}
-	if summary == "" {
-		return "", fmt.Errorf("empty compaction summary")
-	}
-	if len(summary) > compactionMaxBytes {
-		return "", fmt.Errorf("compaction output exceeded %s", textutil.FormatBytes(compactionMaxBytes))
-	}
-	if beforeContextTokens > compactionReductionCheckMinTokens && (afterContextTokens <= 0 || afterContextTokens >= beforeContextTokens) {
-		return "", fmt.Errorf("compaction did not reduce context (%d tokens before, %d after)", beforeContextTokens, afterContextTokens)
-	}
-	return summary, nil
 }
 
 func compactionPromptProgressText(meta map[string]string) string {
@@ -1511,9 +1037,4 @@ func (e *Engine) estimateCompactedTimelineContextTokens(session domain.Session, 
 		return tokenestimate.Text(summary)
 	}
 	return estimated
-}
-
-// compactTextForCompaction bounds text embedded in a compaction prompt.
-func compactTextForCompaction(text string, label string) string {
-	return tools.CompactTextForCompaction(text, 80, 80, 16*1024, label)
 }
