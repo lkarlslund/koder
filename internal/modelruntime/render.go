@@ -184,8 +184,20 @@ type renderScope struct {
 	session          domain.Session
 	chat             domain.Chat
 	preserveThinking bool
+	replay           string
+	replayLoaded     bool
 	localDefs        []provider.ToolDefinition
 	localDefsLoaded  bool
+}
+
+// scopeReasoningReplay returns how preserved reasoning is serialized for the
+// scope's chat, resolving the model overlay on first use.
+func (r *Runtime) scopeReasoningReplay(scope *renderScope) string {
+	if !scope.replayLoaded {
+		scope.replay = r.reasoningReplay(scope.chat)
+		scope.replayLoaded = true
+	}
+	return scope.replay
 }
 
 func (r *Runtime) newRenderScope(session domain.Session, chat domain.Chat) *renderScope {
@@ -272,7 +284,7 @@ func (r *Runtime) conversationMessages(scope *renderScope, item domain.TimelineI
 		// historical chat message. In particular, llama.cpp rejects an assistant
 		// message that has reasoning_content but neither content nor tool_calls.
 		if preserveThinking && len(reasoningChunks) > 0 && (message.Content != "" || len(message.ToolCalls) > 0) {
-			message = provider.WithReasoningReplay(message, strings.Join(reasoningChunks, "\n\n"), r.reasoningReplay(chat))
+			message = provider.WithReasoningReplay(message, strings.Join(reasoningChunks, "\n\n"), r.scopeReasoningReplay(scope))
 		}
 		out := []provider.Message{message}
 		if strings.TrimSpace(out[0].Content) == "" && len(out[0].ToolCalls) == 0 {
