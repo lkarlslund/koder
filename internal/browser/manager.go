@@ -960,9 +960,8 @@ func (m *Manager) InteractOutcome(ctx context.Context, chat browserapi.Chat, act
 	if len(changes) > 0 && (action == "click" || action == "press") {
 		outcome.Observation = compactPageObservation(opCtx, 2500)
 	}
-	selected := true
 	m.mu.Lock()
-	selected = m.selected[chat.ChatID] == tab.id
+	selected := m.selected[chat.ChatID] == tab.id
 	m.mu.Unlock()
 	outcome.Tab = browserapi.Tab{ID: tab.id, Title: after.Title, URL: after.URL, Owned: true, Selected: selected}
 	outcome.LoadState = after.Ready
@@ -1085,9 +1084,8 @@ func (m *Manager) Wait(ctx context.Context, chat browserapi.Chat, options browse
 	if current, observeErr := observePage(finalCtx); observeErr == nil {
 		lastObservation = current
 	}
-	selected := true
 	m.mu.Lock()
-	selected = m.selected[chat.ChatID] == tab.id
+	selected := m.selected[chat.ChatID] == tab.id
 	m.mu.Unlock()
 	query, role := options.Text, ""
 	if condition == "target" {

@@ -67,7 +67,7 @@ func (m *Manager) runObscuraTask(ctx context.Context, executable, decisionURL st
 	if err != nil {
 		return browserapi.TaskResult{}, fmt.Errorf("create Obscura task storage: %w", err)
 	}
-	defer os.RemoveAll(storage)
+	defer func() { _ = os.RemoveAll(storage) }()
 
 	result := browserapi.TaskResult{Status: "incomplete", Backend: "obscura"}
 	frontier := []taskLink{{URL: start.String(), Label: start.String()}}
@@ -146,7 +146,7 @@ func obscuraDownload(ctx context.Context, executable, storage string, link taskL
 	}
 	path := file.Name()
 	_ = file.Close()
-	defer os.Remove(path)
+	defer func() { _ = os.Remove(path) }()
 	commandCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(commandCtx, executable, "fetch", "--quiet", "--dump", "original", "--storage-dir", storage, "--output", path, link.URL)
@@ -220,7 +220,7 @@ func rankTaskLinks(ctx context.Context, endpoint, goal, page string, links []tas
 	if err != nil {
 		return
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	var decoded struct {
 		Answers map[string]struct {
 			Probabilities map[string]float64 `json:"probabilities"`

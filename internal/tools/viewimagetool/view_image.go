@@ -50,7 +50,7 @@ func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) 
 	if runtime.Attachments == nil || runtime.SessionID == "" {
 		return tools.Result{}, errors.New("session attachment storage is unavailable")
 	}
-	label, name := req.Args["path"], "remote-image"
+	var label, name string
 	var data []byte
 	var mimeType string
 	var err error

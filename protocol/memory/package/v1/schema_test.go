@@ -202,7 +202,7 @@ func validateJSONLines[T interface{ Validate() error }](t *testing.T, path strin
 	if err != nil {
 		t.Fatalf("open %s: %v", path, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	scanner := bufio.NewScanner(file)
 	data := readPackageTestFile(t, path)
 	if len(data) > 0 && !bytes.HasSuffix(data, []byte{'\n'}) {
