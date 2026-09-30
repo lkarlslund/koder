@@ -19,12 +19,26 @@ const portablePixmapMIME = "image/x-portable-pixmap"
 // LoadImage reads an image using its content rather than its filename. Binary
 // PPM images, commonly produced by QEMU's screendump command, are converted to
 // PNG because browsers and chat-completion image inputs do not support PPM.
+// Results are cached until the file changes; callers must not modify the
+// returned bytes.
 func LoadImage(path string) ([]byte, string, error) {
-	data, err := os.ReadFile(path)
+	info, err := os.Stat(path)
 	if err != nil {
 		return nil, "", err
 	}
-	return PrepareImage(data)
+	if data, mimeType, ok := preparedImages.get(path, info); ok {
+		return data, mimeType, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, "", err
+	}
+	data, mimeType, err := PrepareImage(raw)
+	if err != nil {
+		return nil, "", err
+	}
+	preparedImages.put(path, info, data, mimeType)
+	return data, mimeType, nil
 }
 
 // PrepareImage validates image bytes and normalizes formats that providers do

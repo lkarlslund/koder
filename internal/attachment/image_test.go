@@ -68,3 +68,36 @@ func TestLoadImageValidatesRasterData(t *testing.T) {
 		t.Fatal("expected corrupt JPEG to be rejected")
 	}
 }
+
+func TestLoadImageReusesPreparedImageUntilFileChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shot.png")
+	writePNG := func(width int) {
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, width, 1))); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writePNG(1)
+	first, _, err := LoadImage(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, _, err := LoadImage(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if &first[0] != &again[0] {
+		t.Fatal("expected unchanged image to be served from the cache")
+	}
+	writePNG(2)
+	changed, _, err := LoadImage(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(first, changed) {
+		t.Fatal("expected a rewritten image to be reloaded")
+	}
+}

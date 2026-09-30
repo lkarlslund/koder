@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/lkarlslund/koder/internal/agents"
@@ -145,7 +147,7 @@ func InspectWithOptions(workdir string, opts DiscoverOptions) Catalog {
 				continue
 			}
 			seenFiles[canonicalPath] = struct{}{}
-			skill, parseErr := loadSkill(skillPath, root.Scope, root.Path, entry.Name())
+			skill, parseErr := parsedSkills.load(skillPath, info, root.Scope, root.Path, entry.Name())
 			skill.Enabled = !pathDisabled(skill, disabled)
 			if parseErr != nil {
 				skill.Error = parseErr.Error()
@@ -324,6 +326,43 @@ func projectRoots(workdir string, projectRoot string) []Root {
 		current = parent
 	}
 	return roots
+}
+
+// parsedSkills caches parsed SKILL.md files. Discovery runs several times per
+// model step; re-reading and re-parsing unchanged files dominated its cost.
+// An entry is reused only while the file's size and modification time match.
+var parsedSkills = &skillFileCache{entries: map[skillFileKey]skillFile{}}
+
+type skillFileKey struct {
+	path, root, name string
+	scope            Scope
+}
+
+type skillFile struct {
+	size    int64
+	modTime time.Time
+	skill   Skill
+	err     error
+}
+
+type skillFileCache struct {
+	mu      sync.Mutex
+	entries map[skillFileKey]skillFile
+}
+
+func (c *skillFileCache) load(path string, info os.FileInfo, scope Scope, root string, fallbackName string) (Skill, error) {
+	key := skillFileKey{path: path, root: root, name: fallbackName, scope: scope}
+	c.mu.Lock()
+	entry, ok := c.entries[key]
+	c.mu.Unlock()
+	if ok && entry.size == info.Size() && entry.modTime.Equal(info.ModTime()) {
+		return entry.skill, entry.err
+	}
+	skill, err := loadSkill(path, scope, root, fallbackName)
+	c.mu.Lock()
+	c.entries[key] = skillFile{size: info.Size(), modTime: info.ModTime(), skill: skill, err: err}
+	c.mu.Unlock()
+	return skill, err
 }
 
 func loadSkill(path string, scope Scope, root string, fallbackName string) (Skill, error) {

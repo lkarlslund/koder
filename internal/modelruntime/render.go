@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/assets"
 	"github.com/lkarlslund/koder/internal/attachment"
@@ -702,11 +704,14 @@ func (r *Runtime) systemPrompt() string {
 	return ManagedPrompt(r.cfg.ManagedAssetsDir(), "system-prompt.md")
 }
 
+// ManagedPrompt returns the user's managed copy of a prompt asset, or the
+// embedded default when there is none. The managed file is re-read only when
+// its size or modification time changes, so edits still apply on the next
+// model step.
 func ManagedPrompt(root string, name string) string {
 	if root = strings.TrimSpace(root); root != "" {
-		data, err := os.ReadFile(filepath.Join(root, name))
-		if err == nil {
-			return strings.TrimSpace(string(data))
+		if text, ok := managedPrompts.read(filepath.Join(root, name)); ok {
+			return text
 		}
 	}
 	data, err := assets.DefaultContent(name)
@@ -733,4 +738,36 @@ func (r *Runtime) sessionEnvironmentPrompt(session domain.Session) string {
 
 func sessionProjectRoot(session domain.Session) string {
 	return strings.TrimSpace(session.ProjectRoot)
+}
+
+var managedPrompts = &promptFileCache{entries: map[string]promptFile{}}
+
+type promptFile struct {
+	size    int64
+	modTime time.Time
+	text    string
+}
+
+type promptFileCache struct {
+	mu      sync.Mutex
+	entries map[string]promptFile
+}
+
+func (c *promptFileCache) read(path string) (string, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if entry, ok := c.entries[path]; ok && entry.size == info.Size() && entry.modTime.Equal(info.ModTime()) {
+		return entry.text, true
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	text := strings.TrimSpace(string(data))
+	c.entries[path] = promptFile{size: info.Size(), modTime: info.ModTime(), text: text}
+	return text, true
 }
