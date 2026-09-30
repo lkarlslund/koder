@@ -981,6 +981,34 @@ func TestOutOfOrderToolResultEventsDoNotRegressSiblingCalls(t *testing.T) {
 	assertDone("persisted", persisted)
 }
 
+func TestLateToolCallsPersistedEventDoesNotRegressRunningCall(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	rt := newTestChat(t, st, session, chatRecord, &runtimeFakeRunner{})
+
+	persisted, err := rt.AppendAssistantToolCalls(ctx, domain.TimelineItem{}, []domain.ToolCall{
+		{ToolCallID: "call-a", Tool: domain.ToolKindFileRead, Status: domain.ToolStatusPending},
+	}, "", domain.ReasoningContent{}, domain.Usage{}, domain.ModelPerformance{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The model loop queues "tool calls persisted" and starts the tool at
+	// once, so the tool can be marked running before that event is handled.
+	time.Sleep(time.Millisecond)
+	if _, err := rt.MarkToolRunning(ctx, "call-a"); err != nil {
+		t.Fatal(err)
+	}
+	rt.handleStreamEventForTurn(0, domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool calls persisted", Item: persisted})
+
+	timeline := rt.Snapshot().Timeline
+	assistant := timeline[len(timeline)-1].Content.(domain.AssistantMessage)
+	if call := assistant.ToolByID("call-a"); call == nil || call.Status != domain.ToolStatusRunning {
+		t.Fatalf("late persisted event regressed running call: %#v", call)
+	}
+}
+
 func TestHydrationRepairsPersistedRunningToolCalls(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

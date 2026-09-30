@@ -3102,7 +3102,12 @@ func (r *Chat) handleStreamEventForTurn(turn uint64, evt domain.Event) {
 			// the item with the event's older value would regress sibling calls.
 			r.state.EnsureTimelineItem(evt.Item)
 		default:
-			r.state.UpsertTimelineItem(evt.Item)
+			// Events are applied after they queue on the chat loop, so the owner
+			// may already hold a newer value, e.g. a tool marked running before
+			// the "tool calls persisted" event for its pending item arrives.
+			if current, ok := r.state.TimelineItem(evt.Item.ID); !ok || !current.UpdatedAt.After(evt.Item.UpdatedAt) {
+				r.state.UpsertTimelineItem(evt.Item)
+			}
 		}
 		transcriptChanged = true
 		if text := timelineItemSummary(evt.Item); text != "" {
