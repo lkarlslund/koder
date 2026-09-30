@@ -139,7 +139,7 @@ func (s *Server) writeMemoryLink(w http.ResponseWriter, requestID string, status
 	if metadata.ETag != "" {
 		w.Header().Set("ETag", metadata.ETag)
 	}
-	s.writeMemoryJSON(w, status, memoryapi.LinkResponse{
+	writeMemoryJSON(w, status, memoryapi.LinkResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID), ResourceMetadata: metadata,
 		Link: link, Classification: classification,
 	})

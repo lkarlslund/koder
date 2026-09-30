@@ -49,7 +49,7 @@ func (s *Server) listMemoryEntries(w http.ResponseWriter, r *http.Request, reque
 	if limit <= 0 {
 		limit = 50
 	}
-	s.writeMemoryJSON(w, http.StatusOK, memoryapi.EntryListResponse{
+	writeMemoryJSON(w, http.StatusOK, memoryapi.EntryListResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID), Entries: page.Entries,
 		Page: memoryapi.Page{Limit: limit, Returned: len(page.Entries), NextCursor: page.NextCursor},
 	})
@@ -242,7 +242,7 @@ func (s *Server) deleteMemoryEntry(w http.ResponseWriter, r *http.Request, reque
 		s.writeMemoryServiceError(w, requestID, err)
 		return
 	}
-	s.writeMemoryJSON(w, http.StatusOK, memoryapi.DeleteResponse{
+	writeMemoryJSON(w, http.StatusOK, memoryapi.DeleteResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID),
 		Object:           memory.ObjectRef{Kind: memory.ObjectKindEntry, ID: string(entryID)}, Deleted: true,
 	})
@@ -267,7 +267,7 @@ func (s *Server) getMemoryEntryEvidence(w http.ResponseWriter, r *http.Request, 
 	if limit <= 0 {
 		limit = 50
 	}
-	s.writeMemoryJSON(w, http.StatusOK, memoryapi.EvidenceListResponse{
+	writeMemoryJSON(w, http.StatusOK, memoryapi.EvidenceListResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID), Evidence: page.Evidence,
 		Page: memoryapi.Page{Limit: limit, Returned: len(page.Evidence), NextCursor: page.NextCursor},
 	})
@@ -296,7 +296,7 @@ func (s *Server) getMemoryHistory(w http.ResponseWriter, r *http.Request, reques
 	if limit <= 0 {
 		limit = 50
 	}
-	s.writeMemoryJSON(w, http.StatusOK, memoryapi.HistoryResponse{
+	writeMemoryJSON(w, http.StatusOK, memoryapi.HistoryResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID), Object: object, Revisions: revisions,
 		Page: memoryapi.Page{Limit: limit, Returned: len(revisions), NextCursor: page.NextCursor},
 	})
@@ -415,7 +415,7 @@ func (s *Server) writeMemoryEntry(w http.ResponseWriter, requestID string, statu
 	if metadata.ETag != "" {
 		w.Header().Set("ETag", metadata.ETag)
 	}
-	s.writeMemoryJSON(w, status, memoryapi.EntryResponse{
+	writeMemoryJSON(w, status, memoryapi.EntryResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID), ResourceMetadata: metadata,
 		Entry: entry, Replacement: replacement, Classification: classification,
 	})

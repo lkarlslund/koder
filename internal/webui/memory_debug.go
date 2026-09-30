@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -38,15 +37,9 @@ func (s *Server) handleMemoryDebug(w http.ResponseWriter, r *http.Request) {
 		writeMemoryDebugError(w, http.StatusServiceUnavailable, "memory diagnostics unavailable")
 		return
 	}
-	writeMemoryDebugJSON(w, http.StatusOK, memoryDebugResponse{Status: status})
-}
-
-func writeMemoryDebugJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
+	writeMemoryJSON(w, http.StatusOK, memoryDebugResponse{Status: status})
 }
 
 func writeMemoryDebugError(w http.ResponseWriter, status int, message string) {
-	writeMemoryDebugJSON(w, status, map[string]string{"error": message})
+	writeMemoryJSON(w, status, map[string]string{"error": message})
 }

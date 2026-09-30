@@ -62,7 +62,7 @@ func (s *ChatState) MergeTimelineLoaded(chat domain.Chat, timeline []domain.Time
 		s.approvals = slices.Clone(approvals)
 		return
 	}
-	s.approvals = deriveApprovals(chat, timeline)
+	s.approvals = pendingApprovalsForTimeline(chat, timeline)
 }
 
 func (s *ChatState) Chat() domain.Chat {
@@ -631,43 +631,7 @@ func (s *ChatState) RefreshApprovals(chat domain.Chat) {
 	if s == nil {
 		return
 	}
-	s.approvals = deriveApprovals(chat, s.SnapshotTimeline())
-}
-
-func deriveApprovals(chat domain.Chat, timeline []domain.TimelineItem) []Approval {
-	var approvals []Approval
-	for _, item := range timeline {
-		assistant, ok := item.Content.(domain.AssistantMessage)
-		if !ok {
-			continue
-		}
-		for _, call := range assistant.Tools {
-			if call.Status != domain.ToolStatusAwaitingApproval {
-				continue
-			}
-			approvals = append(approvals, Approval{
-				ID:         SyntheticApprovalID(string(call.ToolCallID)),
-				SessionID:  chat.SessionID,
-				ChatID:     chat.ID,
-				Tool:       call.Tool,
-				ToolCallID: string(call.ToolCallID),
-				Command:    approvalCommand(call),
-				Status:     domain.ApprovalStatusPending,
-				CreatedAt:  item.UpdatedAt,
-			})
-		}
-	}
-	return approvals
-}
-
-func approvalCommand(call domain.ToolCall) string {
-	if command := strings.TrimSpace(call.Args["command"]); command != "" {
-		return command
-	}
-	if path := strings.TrimSpace(call.Args["path"]); path != "" {
-		return path
-	}
-	return strings.TrimSpace(call.Tool.String())
+	s.approvals = pendingApprovalsForTimeline(chat, s.timelineItems())
 }
 
 // UpsertApproval adds or replaces one approval snapshot.

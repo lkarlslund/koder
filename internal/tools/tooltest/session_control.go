@@ -84,14 +84,14 @@ func (c SessionControl) AddTasks(ctx context.Context, sessionID id.ID, ref strin
 		return nil, err
 	}
 	out := make([]planning.Task, 0, len(items))
-	nextKey := nextTaskKey(all, milestoneKey)
+	nextKey := planning.NextTaskKeyNumber(all, milestoneKey)
 	for _, content := range items {
 		content = strings.TrimSpace(content)
 		if content == "" {
 			continue
 		}
-		out = append(out, planning.Task{ID: id.NewAt(now), Key: nextKey, SessionID: sessionID, MilestoneKey: milestoneKey, Content: content, Status: planning.TaskStatusPending, Position: len(existing) + len(out), CreatedAt: now, UpdatedAt: now})
-		nextKey = incrementTaskKey(nextKey, milestoneKey)
+		out = append(out, planning.Task{ID: id.NewAt(now), Key: planning.ScopedTaskKey(milestoneKey, nextKey), SessionID: sessionID, MilestoneKey: milestoneKey, Content: content, Status: planning.TaskStatusPending, Position: len(existing) + len(out), CreatedAt: now, UpdatedAt: now})
+		nextKey++
 	}
 	for _, item := range out {
 		if err := modeltest.PutTask(ctx, c.Store, item); err != nil {
@@ -143,31 +143,6 @@ func (c SessionControl) DeleteTask(ctx context.Context, key string) error {
 
 func (c SessionControl) ListTasks(ctx context.Context, sessionID id.ID, ref string) ([]planning.Task, error) {
 	return modeltest.ListTasks(ctx, c.Store, sessionID, ref)
-}
-
-func nextTaskKey(items []planning.Task, milestoneKey string) string {
-	next := 1
-	for _, item := range items {
-		key := strings.TrimSpace(item.Key)
-		prefix := strings.TrimSpace(milestoneKey) + "T"
-		if !strings.HasPrefix(key, prefix) {
-			continue
-		}
-		var n int
-		if _, err := fmt.Sscanf(strings.TrimPrefix(key, prefix), "%d", &n); err == nil && n >= next {
-			next = n + 1
-		}
-	}
-	return planning.ScopedTaskKey(milestoneKey, next)
-}
-
-func incrementTaskKey(key, milestoneKey string) string {
-	prefix := strings.TrimSpace(milestoneKey) + "T"
-	var n int
-	if _, err := fmt.Sscanf(strings.TrimPrefix(strings.TrimSpace(key), prefix), "%d", &n); err != nil || n <= 0 {
-		return planning.ScopedTaskKey(milestoneKey, 1)
-	}
-	return planning.ScopedTaskKey(milestoneKey, n+1)
 }
 
 func (c SessionControl) AddTask(ctx context.Context, sessionID id.ID, body string, status planning.LegacyTaskStatus) (planning.LegacyTask, error) {

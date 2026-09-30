@@ -47,7 +47,7 @@ func (s *Server) handleMemoryPackages(w http.ResponseWriter, r *http.Request) {
 			s.writeMemoryServiceError(w, requestID, err)
 			return
 		}
-		s.writeMemoryJSON(w, http.StatusOK, memoryapi.PackagePreviewResponse{
+		writeMemoryJSON(w, http.StatusOK, memoryapi.PackagePreviewResponse{
 			ResponseMetadata: memoryapi.Metadata(requestID), Preview: preview,
 		})
 	case r.URL.Path == memoryapi.PackageStagePath:
@@ -70,13 +70,13 @@ func (s *Server) handleMemoryPackages(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			classified := memoryService.ClassifyError(err)
 			status := memoryServiceHTTPStatus(classified.Code)
-			s.writeMemoryJSON(w, status, memoryapi.PackageStageResponse{
+			writeMemoryJSON(w, status, memoryapi.PackageStageResponse{
 				ResponseMetadata: memoryapi.Metadata(requestID), Preview: stage.Preview, Error: classified,
 			})
 			return
 		}
 		w.Header().Set("Location", memoryapi.PackageStageItemPath(stage.ID))
-		s.writeMemoryJSON(w, http.StatusCreated, memoryapi.PackageStageResponse{
+		writeMemoryJSON(w, http.StatusCreated, memoryapi.PackageStageResponse{
 			ResponseMetadata: memoryapi.Metadata(requestID), Stage: &stage, Preview: stage.Preview,
 		})
 	case strings.HasPrefix(r.URL.Path, memoryapi.PackageStagePath+"/"):
@@ -113,7 +113,7 @@ func (s *Server) handleMemoryPackageStage(w http.ResponseWriter, r *http.Request
 			s.writeMemoryServiceError(w, requestID, err)
 			return
 		}
-		s.writeMemoryJSON(w, http.StatusOK, memoryapi.PackageActivationResponse{
+		writeMemoryJSON(w, http.StatusOK, memoryapi.PackageActivationResponse{
 			ResponseMetadata: memoryapi.Metadata(requestID), Result: result,
 		})
 		return
@@ -126,7 +126,7 @@ func (s *Server) handleMemoryPackageStage(w http.ResponseWriter, r *http.Request
 		s.writeMemoryServiceError(w, requestID, err)
 		return
 	}
-	s.writeMemoryJSON(w, http.StatusOK, memoryapi.PackageDiscardResponse{
+	writeMemoryJSON(w, http.StatusOK, memoryapi.PackageDiscardResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID), StageID: stageID, Discarded: true,
 	})
 }

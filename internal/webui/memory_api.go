@@ -192,7 +192,7 @@ func (s *Server) listMemoryChunks(w http.ResponseWriter, r *http.Request, reques
 	if limit <= 0 {
 		limit = 50
 	}
-	s.writeMemoryJSON(w, http.StatusOK, memoryapi.ChunkListResponse{
+	writeMemoryJSON(w, http.StatusOK, memoryapi.ChunkListResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID),
 		Chunks:           page.Chunks,
 		Page: memoryapi.Page{
@@ -360,7 +360,7 @@ func (s *Server) deleteMemoryChunk(w http.ResponseWriter, r *http.Request, reque
 		s.writeMemoryServiceError(w, requestID, err)
 		return
 	}
-	s.writeMemoryJSON(w, http.StatusOK, response)
+	writeMemoryJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) authenticateMemoryRequest(w http.ResponseWriter, r *http.Request) (string, context.Context, bool) {
@@ -565,7 +565,7 @@ func (s *Server) writeMemoryChunk(w http.ResponseWriter, requestID string, statu
 	if metadata.ETag != "" {
 		w.Header().Set("ETag", metadata.ETag)
 	}
-	s.writeMemoryJSON(w, status, memoryapi.ChunkResponse{
+	writeMemoryJSON(w, status, memoryapi.ChunkResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID), ResourceMetadata: metadata,
 		Chunk: chunk, Classification: classification,
 	})
@@ -574,7 +574,7 @@ func (s *Server) writeMemoryChunk(w http.ResponseWriter, requestID string, statu
 func (s *Server) writeMemoryServiceError(w http.ResponseWriter, requestID string, err error) {
 	classified := memoryService.ClassifyError(err)
 	status := memoryServiceHTTPStatus(classified.Code)
-	s.writeMemoryJSON(w, status, memoryapi.ErrorResponse{ResponseMetadata: memoryapi.Metadata(requestID), Error: classified})
+	writeMemoryJSON(w, status, memoryapi.ErrorResponse{ResponseMetadata: memoryapi.Metadata(requestID), Error: classified})
 }
 
 func (s *Server) writeMemoryReadError(w http.ResponseWriter, requestID string, err error) {
@@ -587,13 +587,13 @@ func (s *Server) writeMemoryReadError(w http.ResponseWriter, requestID string, e
 }
 
 func (s *Server) writeMemoryError(w http.ResponseWriter, requestID string, status int, code memoryService.ErrorCode, message string) {
-	s.writeMemoryJSON(w, status, memoryapi.ErrorResponse{
+	writeMemoryJSON(w, status, memoryapi.ErrorResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID),
 		Error:            &memoryService.ServiceError{Code: code, Message: message},
 	})
 }
 
-func (s *Server) writeMemoryJSON(w http.ResponseWriter, status int, value any) {
+func writeMemoryJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)

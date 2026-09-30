@@ -37,7 +37,7 @@ func (s *Server) handleMemoryCurationCandidates(w http.ResponseWriter, r *http.R
 		s.writeMemoryCurationError(w, requestID, err)
 		return
 	}
-	s.writeMemoryJSON(w, http.StatusOK, memoryapi.CurationCandidateListResponse{
+	writeMemoryJSON(w, http.StatusOK, memoryapi.CurationCandidateListResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID), Candidates: candidates,
 		Page: memoryapi.Page{Limit: limit, Returned: len(candidates)},
 	})
@@ -85,7 +85,7 @@ func (s *Server) handleMemoryCurationCandidate(w http.ResponseWriter, r *http.Re
 		s.writeMemoryCurationError(w, requestID, err)
 		return
 	}
-	s.writeMemoryJSON(w, http.StatusOK, memoryapi.CurationCandidateResponse{
+	writeMemoryJSON(w, http.StatusOK, memoryapi.CurationCandidateResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID), Candidate: candidate,
 	})
 }

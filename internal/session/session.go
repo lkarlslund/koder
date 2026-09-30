@@ -1629,7 +1629,7 @@ func (s *Session) AddTasks(ctx context.Context, sessionID id.ID, milestoneKey st
 		return nil, err
 	}
 	items := make([]planning.Task, 0, len(contents))
-	nextKey := nextTaskKey(allTasks, milestoneKey)
+	nextKey := planning.NextTaskKeyNumber(allTasks, milestoneKey)
 	for _, content := range contents {
 		content = strings.TrimSpace(content)
 		if content == "" {
@@ -1637,7 +1637,7 @@ func (s *Session) AddTasks(ctx context.Context, sessionID id.ID, milestoneKey st
 		}
 		items = append(items, planning.Task{
 			ID:           id.New(),
-			Key:          nextKey,
+			Key:          planning.ScopedTaskKey(milestoneKey, nextKey),
 			SessionID:    sessionID,
 			MilestoneKey: milestoneKey,
 			Content:      content,
@@ -1646,7 +1646,7 @@ func (s *Session) AddTasks(ctx context.Context, sessionID id.ID, milestoneKey st
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		})
-		nextKey = incrementTaskKey(nextKey, milestoneKey)
+		nextKey++
 	}
 	for _, item := range items {
 		if err := s.planSrc.SaveTask(ctx, item); err != nil {
@@ -2364,31 +2364,6 @@ func normalizeTaskPositions(tasks []planning.Task) {
 	for idx := range tasks {
 		tasks[idx].Position = idx
 	}
-}
-
-func nextTaskKey(items []planning.Task, milestoneKey string) string {
-	next := 1
-	for _, item := range items {
-		key := strings.TrimSpace(item.Key)
-		prefix := strings.TrimSpace(milestoneKey) + "T"
-		if !strings.HasPrefix(key, prefix) {
-			continue
-		}
-		var n int
-		if _, err := fmt.Sscanf(strings.TrimPrefix(key, prefix), "%d", &n); err == nil && n >= next {
-			next = n + 1
-		}
-	}
-	return planning.ScopedTaskKey(milestoneKey, next)
-}
-
-func incrementTaskKey(key, milestoneKey string) string {
-	prefix := strings.TrimSpace(milestoneKey) + "T"
-	var n int
-	if _, err := fmt.Sscanf(strings.TrimPrefix(strings.TrimSpace(key), prefix), "%d", &n); err != nil || n <= 0 {
-		return planning.ScopedTaskKey(milestoneKey, 1)
-	}
-	return planning.ScopedTaskKey(milestoneKey, n+1)
 }
 
 var _ tools.SessionControl = (*Session)(nil)

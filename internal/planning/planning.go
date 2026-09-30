@@ -275,10 +275,10 @@ func nextPlanningKeyNumber(items []Milestone, prefix string) int {
 }
 
 func nextTaskKey(items []Task, milestoneKey string) string {
-	return ScopedTaskKey(milestoneKey, nextTaskKeyNumber(items, milestoneKey))
+	return ScopedTaskKey(milestoneKey, NextTaskKeyNumber(items, milestoneKey))
 }
 
-func nextTaskKeyNumber(items []Task, milestoneKey string) int {
+func NextTaskKeyNumber(items []Task, milestoneKey string) int {
 	next := 1
 	for _, item := range items {
 		if n, ok := parseTaskKeyNumber(item.Key, milestoneKey); ok && n >= next {

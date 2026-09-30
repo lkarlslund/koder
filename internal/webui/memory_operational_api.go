@@ -31,7 +31,7 @@ func (s *Server) handleMemoryOperationalStatus(w http.ResponseWriter, r *http.Re
 		s.writeMemoryServiceError(w, requestID, err)
 		return
 	}
-	s.writeMemoryJSON(w, http.StatusOK, memoryapi.OperationalStatusResponse{
+	writeMemoryJSON(w, http.StatusOK, memoryapi.OperationalStatusResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID), Status: status,
 	})
 }
@@ -60,7 +60,7 @@ func (s *Server) handleMemoryIndexRebuild(w http.ResponseWriter, r *http.Request
 			s.writeMemoryServiceError(w, requestID, err)
 			return
 		}
-		s.writeMemoryJSON(w, http.StatusAccepted, memoryapi.IndexRebuildCancelResponse{
+		writeMemoryJSON(w, http.StatusAccepted, memoryapi.IndexRebuildCancelResponse{
 			ResponseMetadata: memoryapi.Metadata(requestID), Result: result,
 		})
 		return
@@ -75,7 +75,7 @@ func (s *Server) handleMemoryIndexRebuild(w http.ResponseWriter, r *http.Request
 		s.writeMemoryServiceError(w, requestID, err)
 		return
 	}
-	s.writeMemoryJSON(w, http.StatusAccepted, memoryapi.IndexRebuildResponse{
+	writeMemoryJSON(w, http.StatusAccepted, memoryapi.IndexRebuildResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID), Result: result,
 	})
 }

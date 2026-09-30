@@ -51,7 +51,7 @@ func (s *Server) handleMemoryChatContext(w http.ResponseWriter, r *http.Request)
 		s.writeMemoryServiceError(w, requestID, err)
 		return
 	}
-	s.writeMemoryJSON(w, http.StatusOK, memoryapi.ChatContextResponse{
+	writeMemoryJSON(w, http.StatusOK, memoryapi.ChatContextResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID), Object: request.Object,
 		ExplorerURL: memoryapi.ObjectExplorerURL(request.Object), Queued: true,
 	})

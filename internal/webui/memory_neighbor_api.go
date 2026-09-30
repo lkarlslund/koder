@@ -39,7 +39,7 @@ func (s *Server) handleMemoryNeighbors(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 {
 		limit = 25
 	}
-	s.writeMemoryJSON(w, http.StatusOK, memoryapi.NeighborResponse{
+	writeMemoryJSON(w, http.StatusOK, memoryapi.NeighborResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID), Object: request.Object, Neighbors: page.Neighbors,
 		Page: memoryapi.Page{Limit: limit, Returned: len(page.Neighbors), NextCursor: page.NextCursor},
 	})

@@ -219,14 +219,14 @@ func AddTasks(ctx context.Context, st *store.Store, sessionID id.ID, milestoneKe
 	}
 	now := time.Now().UTC()
 	items := make([]planning.Task, 0, len(contents))
-	nextKey := nextTaskKey(all, milestoneKey)
+	nextKey := planning.NextTaskKeyNumber(all, milestoneKey)
 	for _, content := range contents {
 		content = strings.TrimSpace(content)
 		if content == "" {
 			continue
 		}
-		items = append(items, planning.Task{ID: id.NewAt(now), Key: nextKey, SessionID: sessionID, MilestoneKey: milestoneKey, Content: content, Status: planning.TaskStatusPending, Position: len(existing) + len(items), CreatedAt: now, UpdatedAt: now})
-		nextKey = incrementTaskKey(nextKey, milestoneKey)
+		items = append(items, planning.Task{ID: id.NewAt(now), Key: planning.ScopedTaskKey(milestoneKey, nextKey), SessionID: sessionID, MilestoneKey: milestoneKey, Content: content, Status: planning.TaskStatusPending, Position: len(existing) + len(items), CreatedAt: now, UpdatedAt: now})
+		nextKey++
 	}
 	for _, item := range items {
 		if err := TaskCollection(st).Put(ctx, item); err != nil {
@@ -285,31 +285,6 @@ func ListTasks(ctx context.Context, st *store.Store, sessionID id.ID, milestoneK
 	}
 	planning.SortTasks(items)
 	return items, nil
-}
-
-func nextTaskKey(items []planning.Task, milestoneKey string) string {
-	next := 1
-	for _, item := range items {
-		key := strings.TrimSpace(item.Key)
-		prefix := strings.TrimSpace(milestoneKey) + "T"
-		if !strings.HasPrefix(key, prefix) {
-			continue
-		}
-		var n int
-		if _, err := fmt.Sscanf(strings.TrimPrefix(key, prefix), "%d", &n); err == nil && n >= next {
-			next = n + 1
-		}
-	}
-	return planning.ScopedTaskKey(milestoneKey, next)
-}
-
-func incrementTaskKey(key, milestoneKey string) string {
-	prefix := strings.TrimSpace(milestoneKey) + "T"
-	var n int
-	if _, err := fmt.Sscanf(strings.TrimPrefix(strings.TrimSpace(key), prefix), "%d", &n); err != nil || n <= 0 {
-		return planning.ScopedTaskKey(milestoneKey, 1)
-	}
-	return planning.ScopedTaskKey(milestoneKey, n+1)
 }
 
 func AppendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content domain.TimelineContent) (domain.TimelineItem, error) {

@@ -58,7 +58,7 @@ func (s *Server) handleMemoryGraphView(w http.ResponseWriter, r *http.Request) {
 			s.writeMemoryServiceError(w, requestID, err)
 			return
 		}
-		s.writeMemoryJSON(w, http.StatusOK, memoryapi.GraphViewResponse{ResponseMetadata: memoryapi.Metadata(requestID), View: view})
+		writeMemoryJSON(w, http.StatusOK, memoryapi.GraphViewResponse{ResponseMetadata: memoryapi.Metadata(requestID), View: view})
 	case http.MethodPut:
 		s.updateMemoryGraphView(w, r, requestID, ctx, service, viewID)
 	case http.MethodDelete:
@@ -75,7 +75,7 @@ func (s *Server) listMemoryGraphViews(w http.ResponseWriter, requestID string, c
 		s.writeMemoryServiceError(w, requestID, err)
 		return
 	}
-	s.writeMemoryJSON(w, http.StatusOK, memoryapi.GraphViewListResponse{ResponseMetadata: memoryapi.Metadata(requestID), Views: views})
+	writeMemoryJSON(w, http.StatusOK, memoryapi.GraphViewListResponse{ResponseMetadata: memoryapi.Metadata(requestID), Views: views})
 }
 
 func (s *Server) createMemoryGraphView(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *memoryService.Service) {
@@ -90,7 +90,7 @@ func (s *Server) createMemoryGraphView(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	w.Header().Set("Location", memoryapi.GraphViewPath(view.ID))
-	s.writeMemoryJSON(w, http.StatusCreated, memoryapi.GraphViewResponse{ResponseMetadata: memoryapi.Metadata(requestID), View: view})
+	writeMemoryJSON(w, http.StatusCreated, memoryapi.GraphViewResponse{ResponseMetadata: memoryapi.Metadata(requestID), View: view})
 }
 
 func (s *Server) updateMemoryGraphView(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *memoryService.Service, viewID string) {
@@ -104,7 +104,7 @@ func (s *Server) updateMemoryGraphView(w http.ResponseWriter, r *http.Request, r
 		s.writeMemoryServiceError(w, requestID, err)
 		return
 	}
-	s.writeMemoryJSON(w, http.StatusOK, memoryapi.GraphViewResponse{ResponseMetadata: memoryapi.Metadata(requestID), View: view})
+	writeMemoryJSON(w, http.StatusOK, memoryapi.GraphViewResponse{ResponseMetadata: memoryapi.Metadata(requestID), View: view})
 }
 
 func (s *Server) deleteMemoryGraphView(w http.ResponseWriter, r *http.Request, requestID string, ctx context.Context, service *memoryService.Service, viewID string) {
@@ -117,5 +117,5 @@ func (s *Server) deleteMemoryGraphView(w http.ResponseWriter, r *http.Request, r
 		s.writeMemoryServiceError(w, requestID, err)
 		return
 	}
-	s.writeMemoryJSON(w, http.StatusOK, memoryapi.GraphViewDeleteResponse{ResponseMetadata: memoryapi.Metadata(requestID), ID: viewID, Deleted: true})
+	writeMemoryJSON(w, http.StatusOK, memoryapi.GraphViewDeleteResponse{ResponseMetadata: memoryapi.Metadata(requestID), ID: viewID, Deleted: true})
 }

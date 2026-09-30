@@ -51,7 +51,7 @@ func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 		page.Truncated = true
 		page.TruncationReasons = result.GraphExpansion.Reasons
 	}
-	s.writeMemoryJSON(w, http.StatusOK, memoryapi.SearchResponse{
+	writeMemoryJSON(w, http.StatusOK, memoryapi.SearchResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID), OperationID: result.OperationID,
 		Terms: result.Terms, Matches: result.Matches,
 		Warnings: result.Warnings, Contradictions: result.Contradictions, AsOf: result.AsOf,
@@ -112,7 +112,7 @@ func (s *Server) handleMemoryGraphSnapshot(w http.ResponseWriter, r *http.Reques
 	if limit <= 0 {
 		limit = 100
 	}
-	s.writeMemoryJSON(w, http.StatusOK, memoryapi.GraphSnapshotResponse{
+	writeMemoryJSON(w, http.StatusOK, memoryapi.GraphSnapshotResponse{
 		ResponseMetadata: memoryapi.Metadata(requestID), Generation: result.Generation, Checkpoint: result.Checkpoint,
 		Nodes: nodes, Edges: edges,
 		Page: memoryapi.Page{Limit: limit, Returned: len(nodes), Truncated: result.Truncated, TruncationReasons: result.TruncationReasons},
