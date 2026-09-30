@@ -774,7 +774,23 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			resp.Error = err.Error()
 			resp.ErrorCode = domain.ClientErrorCode(err)
 		}
-		size, writeErr := writeJSON(ctx, conn, &writeMu, resp)
+		establishesBaseline := err == nil && rpcEstablishesSnapshotBaseline(req.Method, result)
+		var size int
+		var writeErr error
+		if establishesBaseline {
+			// Subscribe before the client can act on this baseline, and hold the
+			// write lock until the response is out: events that follow the
+			// baseline are then neither lost nor delivered ahead of it.
+			writeMu.Lock()
+			baselineMu.Lock()
+			baselineEstablished = true
+			baselineMu.Unlock()
+			syncSelectedSubscription()
+			size, writeErr = writeJSONLocked(ctx, conn, resp)
+			writeMu.Unlock()
+		} else {
+			size, writeErr = writeJSON(ctx, conn, &writeMu, resp)
+		}
 		if writeErr != nil {
 			slog.Info("websocket closed while writing rpc response", "client", clientID, "method", req.Method, "error", writeErr)
 			return
@@ -783,11 +799,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			s.updateDebugChats()
 		}
-		if err == nil && rpcEstablishesSnapshotBaseline(req.Method, result) {
-			baselineMu.Lock()
-			baselineEstablished = true
-			baselineMu.Unlock()
-			syncSelectedSubscription()
+		if establishesBaseline {
 			s.sendSelectedGitDiff(ctx, conn, &writeMu, clientID)
 		}
 		select {
@@ -2555,14 +2567,20 @@ func writeHTTPRPCResponse(w http.ResponseWriter, resp rpcResponse) {
 }
 
 func writeJSON(ctx context.Context, conn *websocket.Conn, mu *sync.Mutex, value any) (int, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	return writeJSONLocked(ctx, conn, value)
+}
+
+// writeJSONLocked writes one message; the caller holds the connection's
+// write lock.
+func writeJSONLocked(ctx context.Context, conn *websocket.Conn, value any) (int, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return 0, err
 	}
 	writeCtx, cancel := context.WithTimeout(ctx, websocketWriteTimeout)
 	defer cancel()
-	mu.Lock()
-	defer mu.Unlock()
 	if err := conn.Write(writeCtx, websocket.MessageText, data); err != nil {
 		return 0, err
 	}
