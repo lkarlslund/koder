@@ -21,7 +21,7 @@ func (r *Runtime) PreparePromptTurn(ctx context.Context, rt *chatpkg.Chat, input
 	snapshot := rt.Snapshot()
 	session := snapshot.Session
 	chat := snapshot.Chat
-	if err := r.validatePromptAttachments(chat, drafts); err != nil {
+	if err := r.ValidatePromptAttachments(chat, drafts); err != nil {
 		return nil, err
 	}
 	if err := r.validateChatRequirements(chat); err != nil {
@@ -92,7 +92,7 @@ func (r *Runtime) MaxToolLoopSteps() int {
 	return config.Default().MaxToolLoopSteps
 }
 
-func (r *Runtime) validatePromptAttachments(chat domain.Chat, drafts []attachment.Draft) error {
+func (r *Runtime) ValidatePromptAttachments(chat domain.Chat, drafts []attachment.Draft) error {
 	if len(drafts) == 0 {
 		return nil
 	}

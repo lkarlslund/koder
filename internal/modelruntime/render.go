@@ -35,7 +35,7 @@ func (r *Runtime) BuildConversationForTurn(_ context.Context, req chatpkg.TurnRe
 }
 
 func (r *Runtime) BuildPromptEnvelopeForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, prompt string, drafts []attachment.Draft, refs []reference.Draft, turnInstructions []provider.InstructionBlock) (provider.PromptEnvelope, error) {
-	baseInstructions := r.baseInstructionsForChat(session, chat)
+	baseInstructions := r.BaseInstructionsForChat(session, chat)
 	envelope := provider.PromptEnvelope{Instructions: baseInstructions}
 	segmentStart := 0
 	for idx, item := range timeline {
@@ -43,11 +43,11 @@ func (r *Runtime) BuildPromptEnvelopeForTimeline(session domain.Session, chat do
 			if strings.TrimSpace(compacted.Summary) == "" {
 				continue
 			}
-			if !validCompactionBoundary(timeline[segmentStart:idx], compacted.FirstKeptItemID) {
+			if !ValidCompactionBoundary(timeline[segmentStart:idx], compacted.FirstKeptItemID) {
 				continue
 			}
 			envelope.Instructions = baseInstructions
-			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(compacted.Summary))
+			envelope.Items = append(envelope.Items[:0], CompactedHistoryMessage(compacted.Summary))
 			if segmentStart < idx {
 				preserved, err := r.timelineMessagesForCompactionTail(session, chat, timeline[segmentStart:idx], compacted.FirstKeptItemID)
 				if err != nil {
@@ -105,9 +105,9 @@ func previewTurnInstructionMessages(blocks []provider.InstructionBlock) []provid
 }
 
 func (r *Runtime) timelineMessagesForCompactionTail(session domain.Session, chat domain.Chat, items []domain.TimelineItem, firstKeptItemID string) ([]provider.Message, error) {
-	start := firstKeptTimelineIndex(items, firstKeptItemID)
+	start := FirstKeptTimelineIndex(items, firstKeptItemID)
 	if start < 0 {
-		start = preservedTimelineToolCallTailStart(items, r.compactionKeepToolCalls())
+		start = PreservedTimelineToolCallTailStart(items, r.CompactionKeepToolCalls())
 	}
 	if start >= len(items) {
 		return nil, nil
@@ -129,7 +129,7 @@ func (r *Runtime) timelineMessagesForCompactionTail(session domain.Session, chat
 	return out, nil
 }
 
-func firstKeptTimelineIndex(items []domain.TimelineItem, firstKeptItemID string) int {
+func FirstKeptTimelineIndex(items []domain.TimelineItem, firstKeptItemID string) int {
 	if strings.TrimSpace(firstKeptItemID) == "" {
 		return -1
 	}
@@ -141,7 +141,7 @@ func firstKeptTimelineIndex(items []domain.TimelineItem, firstKeptItemID string)
 	return -1
 }
 
-func preservedTimelineToolCallTailStart(items []domain.TimelineItem, keepCalls int) int {
+func PreservedTimelineToolCallTailStart(items []domain.TimelineItem, keepCalls int) int {
 	if keepCalls <= 0 || len(items) == 0 {
 		return len(items)
 	}
@@ -409,7 +409,7 @@ func modelToolResultBody(tool domain.ToolCall, status domain.ToolResultStatus, b
 	return strings.TrimSpace(guidance.String()) + "\n\nTool error:\n" + body
 }
 
-func (r *Runtime) baseInstructionsForChat(session domain.Session, chat domain.Chat) []provider.InstructionBlock {
+func (r *Runtime) BaseInstructionsForChat(session domain.Session, chat domain.Chat) []provider.InstructionBlock {
 	instructions := []provider.InstructionBlock{{
 		Kind: provider.InstructionKindBaseSystem,
 		Text: r.systemPrompt(),
@@ -449,7 +449,7 @@ func (r *Runtime) baseInstructionsForChat(session domain.Session, chat domain.Ch
 	return instructions
 }
 
-func compactedHistoryMessage(summary string) provider.Message {
+func CompactedHistoryMessage(summary string) provider.Message {
 	return provider.Message{
 		Role: provider.RoleUser,
 		Content: strings.TrimSpace(
@@ -555,7 +555,7 @@ func (r *Runtime) userMessageWithContext(session domain.Session, parts []domain.
 			if start > cursor {
 				contentParts = append(contentParts, provider.TextPart(prompt[cursor:start]))
 			}
-			resolved, err := r.resolveReference(session, ref)
+			resolved, err := ResolveReference(session, ref)
 			if err != nil {
 				return provider.Message{}, false, err
 			}
@@ -579,7 +579,7 @@ func (r *Runtime) userMessageWithContext(session domain.Session, parts []domain.
 	return message, true, nil
 }
 
-func (r *Runtime) resolveReference(session domain.Session, meta reference.Metadata) (string, error) {
+func ResolveReference(session domain.Session, meta reference.Metadata) (string, error) {
 	root := sessionProjectRoot(session)
 	switch meta.Kind {
 	case reference.KindFile:
@@ -646,17 +646,6 @@ func (r *Runtime) chatSupportsImageAttachments(chat domain.Chat) bool {
 	return err == nil && supported
 }
 
-func providerCfgForChat(cfg config.Config, chat domain.Chat) config.Provider {
-	providerID := chat.ProviderID
-	if chat.UsesDefaultModel() {
-		providerID = cfg.Defaults.ProviderID
-	}
-	if providerCfg, ok := cfg.Provider(providerID); ok {
-		return providerCfg
-	}
-	return config.Provider{}
-}
-
 func (r *Runtime) preserveThinkingEnabled(chat domain.Chat) bool {
 	model, err := r.settings.Model(chat)
 	if err != nil {
@@ -673,22 +662,22 @@ func (r *Runtime) reasoningReplay(chat domain.Chat) string {
 	return provider.ReasoningReplay(model.Provider, model.Model, r.modelOverlays)
 }
 
-func (r *Runtime) compactionKeepToolCalls() int {
+func (r *Runtime) CompactionKeepToolCalls() int {
 	return config.NormalizeCompactionKeepToolCalls(r.settings.Snapshot().Compaction.KeepToolCalls)
 }
 
-func validCompactionBoundary(items []domain.TimelineItem, firstKeptItemID string) bool {
+func ValidCompactionBoundary(items []domain.TimelineItem, firstKeptItemID string) bool {
 	if strings.TrimSpace(firstKeptItemID) == "" {
 		return true
 	}
-	return firstKeptTimelineIndex(items, firstKeptItemID) >= 0
+	return FirstKeptTimelineIndex(items, firstKeptItemID) >= 0
 }
 
 func (r *Runtime) systemPrompt() string {
-	return managedPrompt(r.cfg.ManagedAssetsDir(), "system-prompt.md")
+	return ManagedPrompt(r.cfg.ManagedAssetsDir(), "system-prompt.md")
 }
 
-func managedPrompt(root string, name string) string {
+func ManagedPrompt(root string, name string) string {
 	if root = strings.TrimSpace(root); root != "" {
 		data, err := os.ReadFile(filepath.Join(root, name))
 		if err == nil {

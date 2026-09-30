@@ -3,20 +3,15 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
-	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/agents"
-	"github.com/lkarlslund/koder/internal/assets"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/browser"
 	"github.com/lkarlslund/koder/internal/browserapi"
@@ -42,7 +37,6 @@ import (
 	"github.com/lkarlslund/koder/internal/reference"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/settings"
-	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tokenestimate"
 	"github.com/lkarlslund/koder/internal/toolruntime"
@@ -422,14 +416,14 @@ func (e *Engine) PreviewNextRequest(ctx context.Context, session domain.Session,
 }
 
 func (e *Engine) PreviewNextRequestForChat(ctx context.Context, session domain.Session, chat domain.Chat, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (provider.ChatRequest, error) {
-	if err := e.validatePromptAttachments(chat, drafts); err != nil {
+	if err := e.modelRuntime.ValidatePromptAttachments(chat, drafts); err != nil {
 		return provider.ChatRequest{}, err
 	}
 	messages, err := e.buildConversationPreview(ctx, session, chat.ID, prompt, drafts, refs, chatpkg.TurnInstructionBlocks(note, ""))
 	if err != nil {
 		return provider.ChatRequest{}, err
 	}
-	return e.chatRequest(session, chat, messages, false), nil
+	return e.ChatRequest(session, chat, messages, false), nil
 }
 
 func (e *Engine) PreparePromptTurn(ctx context.Context, rt *chatpkg.Chat, input domain.QueuedInput, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
@@ -576,13 +570,6 @@ func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Sessio
 	})
 }
 
-func (e *Engine) maxToolLoopSteps() int {
-	if e.cfg.MaxToolLoopSteps > 0 {
-		return e.cfg.MaxToolLoopSteps
-	}
-	return config.Default().MaxToolLoopSteps
-}
-
 func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client) (string, error) {
 	now := time.Now().UTC()
 	timeline, prompt, err := e.titleSummaryMessages(ctx, session.ID)
@@ -592,7 +579,7 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 	if !shouldRefreshSessionTitle(session, timeline) {
 		return "", nil
 	}
-	resp, err := client.CompleteChat(ctx, e.chatRequest(session, chat, prompt, false))
+	resp, err := client.CompleteChat(ctx, e.ChatRequest(session, chat, prompt, false))
 	if err != nil {
 		return "", err
 	}
@@ -613,42 +600,6 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 		return "", err
 	}
 	return title, nil
-}
-
-func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, stream bool) provider.ChatRequest {
-	var modelID string
-	var providerCfg config.Provider
-	var modelCfg config.ModelConfig
-	if model, err := e.settings.Model(chat); err == nil {
-		modelID = model.SourceModelID
-		providerCfg = model.Provider
-		modelCfg = model.Model
-	} else {
-		providerID, fallbackModelID, _ := resolvedChatModel(e.cfg, chat)
-		_, modelID = e.cfg.ResolveModel(providerID, fallbackModelID)
-		providerCfg = e.providerConfigForChat(chat)
-		modelCfg = e.modelConfigForChat(chat)
-	}
-	extraBody := provider.RequestExtraBody(providerCfg, modelCfg, e.modelOverlays)
-	extraBody = provider.WithLlamaPromptCache(extraBody, providerCfg)
-	req := provider.ChatRequest{
-		SessionID:          session.ID,
-		ChatID:             chat.ID,
-		Model:              modelID,
-		Messages:           messages,
-		Stream:             stream,
-		ExtraBody:          extraBody,
-		ToolArgumentLimits: tools.ArgumentByteLimits(),
-	}
-	if len(messages) > 0 && (chat.ID != "" || chat.WorkflowRole != "") {
-		if e.toolsRuntime != nil {
-			req.Tools = e.toolsRuntime.Definitions(session, chat)
-		}
-		if len(req.Tools) > 0 {
-			req.ToolChoice = "auto"
-		}
-	}
-	return req
 }
 
 func (e *Engine) providerConfigForChat(chat domain.Chat) config.Provider {
@@ -702,42 +653,8 @@ func (e *Engine) setPromptProgressSupport(providerID id.ID, supported bool) {
 	}
 }
 
-func (e *Engine) modelConfigForChat(chat domain.Chat) config.ModelConfig {
-	if model, err := e.settings.Model(chat); err == nil {
-		return model.Model
-	}
-	return modelConfigForRequest(e.cfg, chat.ProviderID, chat.ModelID)
-}
-
-func modelConfigForRequest(cfg config.Config, providerID, modelID string) config.ModelConfig {
-	model := cfg.ModelRequestOptions(providerID, modelID)
-	if strings.TrimSpace(model.ProviderID) == "" {
-		model.ProviderID = strings.TrimSpace(providerID)
-	}
-	if strings.TrimSpace(model.ModelID) == "" {
-		model.ModelID = strings.TrimSpace(modelID)
-	}
-	return model
-}
-
 func (e *Engine) providerStreamingEnabled(chat domain.Chat) bool {
 	return e.providerConfigForChat(chat).Stream
-}
-
-func (e *Engine) preserveThinkingEnabled(chat domain.Chat) bool {
-	model, err := e.settings.Model(chat)
-	if err != nil {
-		return false
-	}
-	return provider.PreserveThinkingEnabled(model.Provider, model.Model, e.modelOverlays)
-}
-
-func (e *Engine) reasoningReplay(chat domain.Chat) string {
-	model, err := e.settings.Model(chat)
-	if err != nil {
-		return modeloverlay.ReasoningReplayTagThink
-	}
-	return provider.ReasoningReplay(model.Provider, model.Model, e.modelOverlays)
 }
 
 func shouldRefreshSessionTitle(session domain.Session, timeline []domain.TimelineItem) bool {
@@ -974,539 +891,6 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 	return e.modelRuntime.BuildPromptEnvelopeForTimeline(session, chat, timeline, prompt, drafts, refs, turnInstructions)
 }
 
-func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, prompt string, drafts []attachment.Draft, refs []reference.Draft, turnInstructions []provider.InstructionBlock) (provider.PromptEnvelope, error) {
-	baseInstructions := e.baseInstructionsForChat(session, chat)
-	envelope := provider.PromptEnvelope{Instructions: baseInstructions}
-	segmentStart := 0
-	for idx, item := range timeline {
-		if compacted, ok := item.Content.(domain.Compaction); ok {
-			if strings.TrimSpace(compacted.Summary) == "" {
-				continue
-			}
-			if !validCompactionBoundary(timeline[segmentStart:idx], compacted.FirstKeptItemID) {
-				continue
-			}
-			envelope.Instructions = baseInstructions
-			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(compacted.Summary))
-			if segmentStart < idx {
-				preserved, err := e.timelineMessagesForCompactionTail(session, chat, timeline[segmentStart:idx], compacted.FirstKeptItemID)
-				if err != nil {
-					return provider.PromptEnvelope{}, err
-				}
-				envelope.Items = append(envelope.Items, preserved...)
-			}
-			segmentStart = idx + 1
-			continue
-		}
-		messages, err := e.conversationMessagesForTimelineItem(session, chat, item, e.preserveThinkingEnabled(chat))
-		if err != nil {
-			return provider.PromptEnvelope{}, err
-		}
-		envelope.Items = appendTimelinePromptMessages(envelope.Items, item, messages...)
-	}
-	envelope.Items = append(envelope.Items, previewTurnInstructionMessages(turnInstructions)...)
-	if strings.TrimSpace(prompt) != "" || len(drafts) > 0 {
-		msg, ok, err := e.previewUserMessage(session, prompt, drafts, refs)
-		if err != nil {
-			return provider.PromptEnvelope{}, err
-		}
-		if ok {
-			envelope.Items = append(envelope.Items, msg)
-		}
-	}
-	return envelope, nil
-}
-
-func previewTurnInstructionMessages(blocks []provider.InstructionBlock) []provider.Message {
-	var out []provider.Message
-	for _, block := range blocks {
-		user, ok := chatpkg.TurnInstructionUserMessage(block)
-		if !ok {
-			continue
-		}
-		out = append(out, provider.Message{Role: provider.RoleUser, Content: user.Text})
-	}
-	return out
-}
-
-func appendTimelinePromptMessages(items []provider.Message, item domain.TimelineItem, messages ...provider.Message) []provider.Message {
-	return append(items, messages...)
-}
-
-func (e *Engine) timelineMessagesForCompactionTail(session domain.Session, chat domain.Chat, items []domain.TimelineItem, firstKeptItemID string) ([]provider.Message, error) {
-	start := firstKeptTimelineIndex(items, firstKeptItemID)
-	if start < 0 {
-		start = preservedTimelineToolCallTailStart(items, e.compactionKeepToolCalls())
-	}
-	if start >= len(items) {
-		return nil, nil
-	}
-	out := make([]provider.Message, 0, len(items)-start)
-	for _, item := range items[start:] {
-		if _, ok := item.Content.(domain.Compaction); ok {
-			continue
-		}
-		messages, err := e.conversationMessagesForTimelineItem(session, chat, item, e.preserveThinkingEnabled(chat))
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, messages...)
-	}
-	return out, nil
-}
-
-func firstKeptTimelineIndex(items []domain.TimelineItem, firstKeptItemID string) int {
-	if strings.TrimSpace(firstKeptItemID) == "" {
-		return -1
-	}
-	for idx, item := range items {
-		if item.ID == firstKeptItemID {
-			return idx
-		}
-	}
-	return -1
-}
-
-func preservedTimelineToolCallTailStart(items []domain.TimelineItem, keepCalls int) int {
-	if keepCalls <= 0 || len(items) == 0 {
-		return len(items)
-	}
-	remaining := keepCalls
-	start := len(items)
-	for idx := len(items) - 1; idx >= 0; idx-- {
-		count := completedTimelineToolCallCount(items[idx])
-		if count == 0 {
-			continue
-		}
-		start = idx
-		remaining -= count
-		if remaining <= 0 {
-			return idx
-		}
-	}
-	return start
-}
-
-func completedTimelineToolCallCount(item domain.TimelineItem) int {
-	message, ok := item.Content.(domain.AssistantMessage)
-	if !ok {
-		return 0
-	}
-	count := 0
-	for _, tool := range message.Tools {
-		if tool.Status == domain.ToolStatusDone || tool.Status == domain.ToolStatusErrored || tool.Status == domain.ToolStatusDenied || tool.Status == domain.ToolStatusCanceled {
-			count++
-		}
-	}
-	return count
-}
-
-func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, chat domain.Chat, item domain.TimelineItem, preserveThinking bool) ([]provider.Message, error) {
-	switch content := item.Content.(type) {
-	case domain.UserMessage:
-		parts := make([]domain.Part, 0, 1+len(content.Attachments)+len(content.References))
-		if strings.TrimSpace(content.Text) != "" {
-			parts = append(parts, domain.Part{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: content.Text}})
-		}
-		for _, attachment := range content.Attachments {
-			parts = append(parts, domain.Part{Kind: domain.PartKindAttachment, Payload: domain.AttachmentPayload(attachment)})
-		}
-		for _, ref := range content.References {
-			parts = append(parts, domain.Part{Kind: domain.PartKindReference, Payload: domain.ReferencePayload(ref)})
-		}
-		msg, ok, err := e.userMessageWithContext(session, parts)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			if userMessageIsSteer(content) {
-				msg = wrapStructuredSteerMessage(msg)
-			}
-			return []provider.Message{msg}, nil
-		}
-		if strings.TrimSpace(content.Text) == "" {
-			return nil, nil
-		}
-		text := content.Text
-		if userMessageIsSteer(content) {
-			text = steerUserMessageText(text)
-		}
-		return []provider.Message{{Role: provider.RoleUser, Content: text}}, nil
-	case domain.AssistantMessage:
-		var toolCalls []provider.ToolCall
-		for _, tool := range content.Tools {
-			if strings.TrimSpace(string(tool.ToolCallID)) == "" {
-				return nil, fmt.Errorf("assistant item %s has tool call without id", item.ID)
-			}
-			toolCalls = append(toolCalls, tools.ToolCall(tools.CanonicalRequest(tools.Request{
-				Tool:       tool.Tool,
-				ToolCallID: string(tool.ToolCallID),
-				Args:       tool.Args,
-			})))
-		}
-		textChunks := []string{}
-		reasoningChunks := []string{}
-		if preserveThinking && content.Reasoning.ReplayText() != "" {
-			reasoningChunks = append(reasoningChunks, content.Reasoning.ReplayText())
-		}
-		if strings.TrimSpace(content.Text) != "" {
-			textChunks = append(textChunks, content.Text)
-		}
-		message := provider.Message{
-			Role:      provider.RoleAssistant,
-			Content:   strings.TrimSpace(strings.Join(textChunks, "\n\n")),
-			ToolCalls: toolCalls,
-		}
-		// Reasoning alone is an interrupted response and is not a valid assistant
-		// history message for providers such as llama.cpp.
-		if preserveThinking && len(reasoningChunks) > 0 && (message.Content != "" || len(message.ToolCalls) > 0) {
-			message = provider.WithReasoningReplay(message, strings.Join(reasoningChunks, "\n\n"), e.reasoningReplay(chat))
-		}
-		out := []provider.Message{message}
-		if strings.TrimSpace(out[0].Content) == "" && len(out[0].ToolCalls) == 0 {
-			out = out[:0]
-		}
-		for _, tool := range content.Tools {
-			msg, ok := e.timelineToolResultMessage(chat, tool)
-			if ok {
-				out = append(out, msg)
-			}
-		}
-		return out, nil
-	case domain.Compaction:
-		return nil, fmt.Errorf("compaction item %s must be handled at envelope boundary", item.ID)
-	case domain.ToolExecution:
-		body := ""
-		if content.Result != nil {
-			body = strings.TrimSpace(content.Result.Text)
-		}
-		if content.Error != nil {
-			body = strings.TrimSpace(content.Error.Message)
-		}
-		if body == "" {
-			return nil, nil
-		}
-		return []provider.Message{{Role: provider.RoleUser, Content: fmt.Sprintf("%s output:\n%s", content.Tool, body)}}, nil
-	case domain.Notice:
-		return nil, nil
-	case domain.LintMessage:
-		body := strings.TrimSpace(content.Text)
-		if body == "" {
-			return nil, nil
-		}
-		return []provider.Message{{Role: provider.RoleUser, Content: "Post-edit diagnostics:\n" + body}}, nil
-	default:
-		return nil, fmt.Errorf("unsupported timeline item %s content %T", item.ID, item.Content)
-	}
-}
-
-func userMessageIsSteer(msg domain.UserMessage) bool {
-	return msg.Delivery == domain.QueuedInputDeliveryTurnBoundary
-}
-
-func steerUserMessageText(text string) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return ""
-	}
-	return "User steering update:\n" +
-		"<user_input>\n" + text + "\n</user_input>\n\n" +
-		"Apply this update to the active turn before choosing the next action."
-}
-
-func wrapStructuredSteerMessage(msg provider.Message) provider.Message {
-	if strings.TrimSpace(msg.Content) != "" {
-		msg.Content = steerUserMessageText(msg.Content)
-	}
-	if len(msg.ContentParts) > 0 {
-		wrapped := make([]provider.ContentPart, 0, len(msg.ContentParts)+2)
-		wrapped = append(wrapped, provider.TextPart("User steering update:\n"))
-		wrapped = append(wrapped, msg.ContentParts...)
-		wrapped = append(wrapped, provider.TextPart("\n\nApply this update to the active turn before choosing the next action."))
-		msg.ContentParts = wrapped
-	}
-	return msg
-}
-
-func (e *Engine) timelineToolResultMessage(chat domain.Chat, tool domain.ToolCall) (provider.Message, bool) {
-	if tool.Result == nil && tool.Error == nil {
-		return provider.Message{}, false
-	}
-	status := domain.ToolResultStatusOK
-	text := ""
-	diff := ""
-	var data any
-	if tool.Result != nil {
-		status = tool.Result.Status
-		text = tool.Result.Text
-		diff = tool.Result.Diff
-		data = tool.Result.Data
-	}
-	if tool.Error != nil {
-		status = domain.ToolResultStatusError
-		text = tool.Error.Message
-		data = tools.ErrorStoredResult{Message: tool.Error.Message}
-	}
-	part := domain.Part{
-		Kind: domain.PartKindToolOutput,
-		Payload: domain.ToolOutputPayload{
-			Tool:       tool.Tool,
-			ToolCallID: string(tool.ToolCallID),
-			Args:       tool.Args,
-			Status:     status,
-			Text:       text,
-			Diff:       diff,
-			Result:     data,
-		},
-	}
-	part.Body = part.Text()
-	if imageMsg, ok := e.toolImageMessage(chat, part, string(tool.ToolCallID), text); ok {
-		return imageMsg, true
-	}
-	body := strings.TrimSpace(part.Text())
-	if formatted, ok := tools.ModelTextForPart(part, diff); ok {
-		body = strings.TrimSpace(formatted)
-	} else if diff != "" {
-		if body != "" {
-			body += "\n\nDiff:\n" + diff
-		} else {
-			body = "Diff:\n" + diff
-		}
-	}
-	return provider.Message{Role: provider.RoleTool, Content: body, ToolCallID: string(tool.ToolCallID)}, true
-}
-
-func (e *Engine) baseInstructionsForChat(session domain.Session, chat domain.Chat) []provider.InstructionBlock {
-	environmentPrompt := e.sessionEnvironmentPrompt(session)
-	instructions := []provider.InstructionBlock{{
-		Kind: provider.InstructionKindBaseSystem,
-		Text: e.systemPrompt(),
-	}, {
-		Kind: provider.InstructionKindEnvironment,
-		Text: environmentPrompt,
-	}}
-	if roleText := strings.TrimSpace(chatrole.SystemPromptForChat(chat)); roleText != "" {
-		instructions = append(instructions, provider.InstructionBlock{
-			Kind: provider.InstructionKindProjectInstructions,
-			Text: roleText,
-		})
-	}
-	if interactionText := strings.TrimSpace(chatinteraction.SystemPrompt(chat.EffectiveInteractionMode())); interactionText != "" {
-		instructions = append(instructions, provider.InstructionBlock{
-			Kind: provider.InstructionKindProjectInstructions,
-			Text: interactionText,
-		})
-	}
-	if agentsText := strings.TrimSpace(session.AgentsResolved); agentsText != "" {
-		instructions = append(instructions, provider.InstructionBlock{
-			Kind: provider.InstructionKindProjectInstructions,
-			Text: "Resolved project AGENTS.md instructions:\n" + agentsText,
-		})
-	}
-	skillOpts := skills.DiscoverOptions{
-		ManagedRoots:    []string{filepath.Join(e.cfg.ManagedAssetsDir(), "skills")},
-		DisabledPaths:   e.cfg.Skills.Disabled,
-		CatalogMaxChars: e.cfg.Skills.CatalogMaxChars,
-	}
-	if skillText := strings.TrimSpace(skills.PromptContextWithOptions(sessionProjectRoot(session), skillOpts)); skillText != "" {
-		instructions = append(instructions, provider.InstructionBlock{
-			Kind: provider.InstructionKindSkills,
-			Text: skillText,
-		})
-	}
-	return instructions
-}
-
-func compactedHistoryMessage(summary string) provider.Message {
-	return provider.Message{
-		Role: provider.RoleUser,
-		Content: strings.TrimSpace(
-			"Compacted session summary for continuation:\n" +
-				summary +
-				"\n\nUse this summary as replacement history for the earlier conversation. Continue the task from the preserved context instead of restarting.",
-		),
-	}
-}
-
-func (e *Engine) previewUserMessage(session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft) (provider.Message, bool, error) {
-	parts := make([]domain.Part, 0, len(drafts)+len(refs)+1)
-	if strings.TrimSpace(prompt) != "" {
-		parts = append(parts, domain.Part{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: prompt}})
-	}
-	for _, draft := range drafts {
-		parts = append(parts, domain.Part{
-			Kind: domain.PartKindAttachment,
-			Payload: domain.AttachmentPayload{
-				ID: draft.ID, Name: draft.Name, MIME: draft.MIME, Path: draft.Path, Size: draft.Size, Source: draft.Source, Original: draft.Original,
-			},
-		})
-	}
-	for _, ref := range refs {
-		parts = append(parts, domain.Part{
-			Kind: domain.PartKindReference,
-			Payload: domain.ReferencePayload{
-				Kind: string(ref.Kind), Path: ref.Path, Display: ref.Display, Start: ref.Start, End: ref.End,
-			},
-		})
-	}
-	if msg, ok, err := e.userMessageWithContext(session, parts); ok || err != nil {
-		return msg, ok, err
-	}
-	if len(parts) == 0 {
-		return provider.Message{}, false, nil
-	}
-	return provider.Message{
-		Role:    provider.RoleUser,
-		Content: strings.TrimSpace(prompt),
-	}, true, nil
-}
-
-func (e *Engine) userMessageWithContext(session domain.Session, parts []domain.Part) (provider.Message, bool, error) {
-	contentParts := make([]provider.ContentPart, 0, len(parts)+1)
-	imageParts := make([]provider.ContentPart, 0, len(parts))
-	attachmentTextParts := make([]provider.ContentPart, 0, len(parts))
-	var prompt string
-	var refs []reference.Metadata
-	var hasStructured bool
-	for _, part := range parts {
-		switch part.Kind {
-		case domain.PartKindText:
-			if text := strings.TrimSpace(part.Text()); text != "" {
-				prompt = part.Text()
-			}
-		case domain.PartKindReference:
-			hasStructured = true
-			if payload, ok := part.Payload.(domain.ReferencePayload); ok {
-				refs = append(refs, reference.Metadata{
-					Kind: reference.Kind(payload.Kind), Path: payload.Path, Display: payload.Display, Start: payload.Start, End: payload.End,
-				})
-			}
-		case domain.PartKindAttachment:
-			hasStructured = true
-			payload, ok := part.Payload.(domain.AttachmentPayload)
-			if !ok {
-				return provider.Message{}, false, fmt.Errorf("attachment part has %T payload", part.Payload)
-			}
-			meta := attachment.Metadata{
-				ID: payload.ID, Name: payload.Name, MIME: payload.MIME, Path: payload.Path, Size: payload.Size, Source: payload.Source, Original: payload.Original,
-			}
-			switch attachment.ClassifyMIME(meta.MIME) {
-			case attachment.KindText:
-				body, err := e.files.ReadText(meta)
-				if err != nil {
-					return provider.Message{}, false, err
-				}
-				attachmentTextParts = append(attachmentTextParts, provider.TextPart("Attached file "+meta.Name+":\n"+body))
-			case attachment.KindImage:
-				data, err := e.files.ReadBytes(meta)
-				if err != nil {
-					return provider.Message{}, false, err
-				}
-				imageParts = append(imageParts, provider.ImagePart(meta.MIME, data))
-			default:
-				return provider.Message{}, false, fmt.Errorf("unsupported attachment in conversation: %s", meta.MIME)
-			}
-		}
-	}
-	contentParts = append(contentParts, imageParts...)
-	if len(refs) > 0 {
-		slices.SortFunc(refs, func(a, b reference.Metadata) int {
-			if a.Start != b.Start {
-				return a.Start - b.Start
-			}
-			if a.End != b.End {
-				return a.End - b.End
-			}
-			return strings.Compare(a.Path, b.Path)
-		})
-		cursor := 0
-		for _, ref := range refs {
-			start := max(0, min(ref.Start, len(prompt)))
-			end := max(start, min(ref.End, len(prompt)))
-			if start > cursor {
-				contentParts = append(contentParts, provider.TextPart(prompt[cursor:start]))
-			}
-			resolved, err := e.resolveReference(session, ref)
-			if err != nil {
-				return provider.Message{}, false, err
-			}
-			contentParts = append(contentParts, provider.TextPart(resolved))
-			cursor = end
-		}
-		if cursor < len(prompt) {
-			contentParts = append(contentParts, provider.TextPart(prompt[cursor:]))
-		}
-	} else if strings.TrimSpace(prompt) != "" {
-		contentParts = append(contentParts, provider.TextPart(prompt))
-	}
-	contentParts = append(contentParts, attachmentTextParts...)
-	if !hasStructured {
-		return provider.Message{}, false, nil
-	}
-	message := provider.Message{Role: provider.RoleUser, ContentParts: contentParts}
-	if len(contentParts) == 0 && strings.TrimSpace(prompt) != "" {
-		message.Content = prompt
-	}
-	return message, true, nil
-}
-
-func (e *Engine) resolveReference(session domain.Session, meta reference.Metadata) (string, error) {
-	root := sessionProjectRoot(session)
-	switch meta.Kind {
-	case reference.KindFile:
-		return reference.ResolveFile(root, meta)
-	case reference.KindDirectory:
-		return reference.ResolveDirectory(root, meta)
-	default:
-		return "", fmt.Errorf("unsupported reference kind %q", meta.Kind)
-	}
-}
-
-func (e *Engine) toolImageMessage(chat domain.Chat, part domain.Part, toolCallID string, body string) (provider.Message, bool) {
-	if data, _, ok := tools.MCPImageStoredResultForPart(part); ok {
-		if !e.chatSupportsImageAttachments(chat) {
-			return provider.Message{}, false
-		}
-		data, mimeType, err := attachment.PrepareImage(data)
-		if err != nil {
-			return provider.Message{}, false
-		}
-		return toolMessageWithImage(toolCallID, body, mimeType, data), true
-	}
-	stored, ok := tools.ViewImageStoredResultForPart(part)
-	sourcePath, mimeType := strings.TrimSpace(stored.SourcePath), strings.TrimSpace(stored.MIMEType)
-	if ok && sourcePath == "" && stored.Attachment != nil && e.files != nil {
-		sourcePath, _ = e.files.SessionFile(id.ID(stored.SessionID), stored.Attachment.ID)
-	}
-	if !ok {
-		browserResult, browserOK := tools.BrowserStoredResultForPart(part)
-		if !browserOK || browserResult.Attachment == nil || attachment.ClassifyMIME(browserResult.Attachment.MIME) != attachment.KindImage {
-			return provider.Message{}, false
-		}
-		sourcePath, mimeType = browserResult.Attachment.Path, browserResult.Attachment.MIME
-	}
-	if !e.chatSupportsImageAttachments(chat) {
-		return provider.Message{}, false
-	}
-	if sourcePath == "" || mimeType == "" {
-		return provider.Message{}, false
-	}
-	data, mimeType, err := attachment.LoadImage(sourcePath)
-	if err != nil || len(data) == 0 {
-		return provider.Message{}, false
-	}
-	return toolMessageWithImage(toolCallID, body, mimeType, data), true
-}
-
-func toolMessageWithImage(toolCallID, body, mimeType string, data []byte) provider.Message {
-	contentParts := make([]provider.ContentPart, 0, 2)
-	if strings.TrimSpace(body) != "" {
-		contentParts = append(contentParts, provider.TextPart(body))
-	}
-	contentParts = append(contentParts, provider.ImagePart(mimeType, data))
-	return provider.Message{Role: provider.RoleTool, ContentParts: contentParts, ToolCallID: toolCallID}
-}
-
 func formatThinkingBlock(reasoning string) string {
 	reasoning = strings.TrimSpace(reasoning)
 	if reasoning == "" {
@@ -1515,67 +899,8 @@ func formatThinkingBlock(reasoning string) string {
 	return "<think>\n" + reasoning + "\n</think>"
 }
 
-func (e *Engine) validatePromptAttachments(chat domain.Chat, drafts []attachment.Draft) error {
-	if len(drafts) == 0 {
-		return nil
-	}
-	providerID, modelID, err := resolvedChatModel(e.cfg, chat)
-	if err != nil {
-		return err
-	}
-	providerCfg, _ := e.cfg.Provider(providerID)
-	for _, draft := range drafts {
-		kind := attachment.ClassifyMIME(draft.MIME)
-		switch kind {
-		case attachment.KindText:
-			continue
-		case attachment.KindImage, attachment.KindPDF:
-			supported, err := e.caps.SupportsAttachment(providerID, providerCfg, modelID, kind)
-			if err != nil {
-				return err
-			}
-			if supported {
-				continue
-			}
-			return fmt.Errorf("provider %s model %s does not support %s attachments", providerID, modelID, kind)
-		default:
-			return fmt.Errorf("unsupported attachment type %q", draft.MIME)
-		}
-	}
-	return nil
-}
-
-func (e *Engine) chatSupportsImageAttachments(chat domain.Chat) bool {
-	providerID, modelID, err := resolvedChatModel(e.cfg, chat)
-	if err != nil {
-		return false
-	}
-	providerCfg, _ := e.cfg.Provider(providerID)
-	supported, err := e.caps.SupportsAttachment(providerID, providerCfg, modelID, attachment.KindImage)
-	return err == nil && supported
-}
-
-func providerCfgForChat(cfg config.Config, chat domain.Chat) config.Provider {
-	providerID := chat.ProviderID
-	if chat.UsesDefaultModel() {
-		providerID = cfg.Defaults.ProviderID
-	}
-	if providerCfg, ok := cfg.Provider(providerID); ok {
-		return providerCfg
-	}
-	return config.Provider{}
-}
-
-func (e *Engine) systemPrompt() string {
-	return managedPrompt(e.cfg.ManagedAssetsDir(), "system-prompt.md")
-}
-
-func systemPrompt() string {
-	return managedPrompt(config.Default().ManagedAssetsDir(), "system-prompt.md")
-}
-
 func (e *Engine) compactPrompt() string {
-	return managedPrompt(e.cfg.ManagedAssetsDir(), "compaction-prompt.md")
+	return modelruntime.ManagedPrompt(e.cfg.ManagedAssetsDir(), "compaction-prompt.md")
 }
 
 func (e *Engine) compactPromptWithInstructions(instructions string) string {
@@ -1585,20 +910,6 @@ func (e *Engine) compactPromptWithInstructions(instructions string) string {
 		return prompt
 	}
 	return strings.TrimSpace(prompt + "\n\nAdditional compaction instructions:\n" + instructions)
-}
-
-func managedPrompt(root string, name string) string {
-	if root = strings.TrimSpace(root); root != "" {
-		data, err := os.ReadFile(filepath.Join(root, name))
-		if err == nil {
-			return strings.TrimSpace(string(data))
-		}
-	}
-	data, err := assets.DefaultContent(name)
-	if err != nil {
-		panic(err)
-	}
-	return strings.TrimSpace(string(data))
 }
 
 func (e *Engine) autoCompactAtTurnBoundary(ctx context.Context, session domain.Session, chat domain.Chat, rt *chatpkg.Chat, client *provider.Client, messages []provider.Message, out chan<- domain.Event) (bool, error) {
@@ -1618,10 +929,6 @@ func (e *Engine) autoCompactAtTurnBoundary(ctx context.Context, session domain.S
 
 func (e *Engine) autoCompactThreshold() int {
 	return max(1, e.settings.Snapshot().Compaction.AutoAtPercent)
-}
-
-func (e *Engine) compactionKeepToolCalls() int {
-	return config.NormalizeCompactionKeepToolCalls(e.settings.Snapshot().Compaction.KeepToolCalls)
 }
 
 func (e *Engine) autoCompactUsagePercent(chat domain.Chat, messages []provider.Message) (int, bool) {
@@ -1667,7 +974,7 @@ func (e *Engine) compactChatRuntime(ctx context.Context, session domain.Session,
 	if len(req.Messages) <= 1 {
 		return nil
 	}
-	beforeContextTokens := e.estimateContextTokensForTimeline(session, chat, timeline)
+	beforeContextTokens, _ := e.EstimateContextTokensForTimeline(session, chat, timeline)
 	compactionItem, err := rt.AppendCompaction(ctx, domain.Compaction{
 		Trigger:             trigger,
 		Status:              "pending",
@@ -1757,7 +1064,7 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 	if len(req.Messages) <= 1 {
 		return nil
 	}
-	beforeContextTokens := e.estimateContextTokensForTimeline(session, chat, timeline)
+	beforeContextTokens, _ := e.EstimateContextTokensForTimeline(session, chat, timeline)
 	compactionItem, err := rt.AppendCompaction(ctx, domain.Compaction{
 		Trigger:             trigger,
 		Status:              "pending",
@@ -1849,7 +1156,7 @@ func (e *Engine) compactionSessionClient(chat domain.Chat, client *provider.Clie
 
 func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, instructions string, stream bool) (provider.ChatRequest, string, error) {
 	base := compactionBaseForNextCut(timeline, len(timeline))
-	keepStart := base.MinKeepStart + preservedTimelineToolCallTailStart(timeline[base.MinKeepStart:], e.compactionKeepToolCalls())
+	keepStart := base.MinKeepStart + modelruntime.PreservedTimelineToolCallTailStart(timeline[base.MinKeepStart:], e.modelRuntime.CompactionKeepToolCalls())
 	messages, firstKeptItemID, err := e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, keepStart, base)
 	if err != nil {
 		return provider.ChatRequest{}, "", err
@@ -1859,7 +1166,7 @@ func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, chat 
 }
 
 func (e *Engine) compactionChatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, instructions string, stream bool) provider.ChatRequest {
-	return e.chatRequest(session, chat, append(messages, provider.Message{
+	return e.ChatRequest(session, chat, append(messages, provider.Message{
 		Role:    provider.RoleUser,
 		Content: e.compactPromptWithInstructions(instructions),
 	}), stream)
@@ -1867,7 +1174,7 @@ func (e *Engine) compactionChatRequest(session domain.Session, chat domain.Chat,
 
 func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) ([]provider.Message, string, error) {
 	base := compactionBaseForNextCut(timeline, len(timeline))
-	keepStart := base.MinKeepStart + preservedTimelineToolCallTailStart(timeline[base.MinKeepStart:], e.compactionKeepToolCalls())
+	keepStart := base.MinKeepStart + modelruntime.PreservedTimelineToolCallTailStart(timeline[base.MinKeepStart:], e.modelRuntime.CompactionKeepToolCalls())
 	return e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, keepStart, base)
 }
 
@@ -1906,11 +1213,11 @@ func compactionBaseForNextCut(timeline []domain.TimelineItem, keepStart int) com
 		if !ok || strings.TrimSpace(compacted.Summary) == "" {
 			continue
 		}
-		firstKeptIdx := firstKeptTimelineIndex(timeline, compacted.FirstKeptItemID)
+		firstKeptIdx := modelruntime.FirstKeptTimelineIndex(timeline, compacted.FirstKeptItemID)
 		if firstKeptIdx < 0 || firstKeptIdx >= segmentStart || firstKeptIdx >= idx {
 			continue
 		}
-		if !validCompactionBoundary(timeline[:idx], compacted.FirstKeptItemID) {
+		if !modelruntime.ValidCompactionBoundary(timeline[:idx], compacted.FirstKeptItemID) {
 			continue
 		}
 		base.Start = firstKeptIdx
@@ -1927,17 +1234,17 @@ func firstKeptItemIDForCompactionCut(timeline []domain.TimelineItem, keepStart i
 }
 
 func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) (provider.PromptEnvelope, error) {
-	envelope := provider.PromptEnvelope{Instructions: e.baseInstructionsForChat(session, chat)}
+	envelope := provider.PromptEnvelope{Instructions: e.modelRuntime.BaseInstructionsForChat(session, chat)}
 	segmentStart := 0
 	for idx, item := range timeline {
 		if compacted, ok := item.Content.(domain.Compaction); ok {
 			if strings.TrimSpace(compacted.Summary) == "" {
 				continue
 			}
-			if !validCompactionBoundary(timeline[segmentStart:idx], compacted.FirstKeptItemID) {
+			if !modelruntime.ValidCompactionBoundary(timeline[segmentStart:idx], compacted.FirstKeptItemID) {
 				continue
 			}
-			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(compacted.Summary))
+			envelope.Items = append(envelope.Items[:0], modelruntime.CompactedHistoryMessage(compacted.Summary))
 			if segmentStart < idx {
 				preserved, err := e.compactionMessagesForCompactionTail(session, timeline[segmentStart:idx], compacted.FirstKeptItemID, false)
 				if err != nil {
@@ -1959,8 +1266,8 @@ func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session
 
 func (e *Engine) buildCompactionPromptEnvelopeForTimelineRange(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, baseSummary string) (provider.PromptEnvelope, error) {
 	envelope := provider.PromptEnvelope{
-		Instructions: e.baseInstructionsForChat(session, chat),
-		Items:        []provider.Message{compactedHistoryMessage(baseSummary)},
+		Instructions: e.modelRuntime.BaseInstructionsForChat(session, chat),
+		Items:        []provider.Message{modelruntime.CompactedHistoryMessage(baseSummary)},
 	}
 	for _, item := range timeline {
 		if _, ok := item.Content.(domain.Compaction); ok {
@@ -1975,13 +1282,6 @@ func (e *Engine) buildCompactionPromptEnvelopeForTimelineRange(session domain.Se
 	return envelope, nil
 }
 
-func validCompactionBoundary(items []domain.TimelineItem, firstKeptItemID string) bool {
-	if strings.TrimSpace(firstKeptItemID) == "" {
-		return true
-	}
-	return firstKeptTimelineIndex(items, firstKeptItemID) >= 0
-}
-
 func compactionSegmentStartForNextCut(timeline []domain.TimelineItem, keepStart int) int {
 	keepStart = max(0, min(keepStart, len(timeline)))
 	segmentStart := 0
@@ -1990,7 +1290,7 @@ func compactionSegmentStartForNextCut(timeline []domain.TimelineItem, keepStart 
 		if !ok || strings.TrimSpace(compacted.Summary) == "" {
 			continue
 		}
-		if !validCompactionBoundary(timeline[segmentStart:idx], compacted.FirstKeptItemID) {
+		if !modelruntime.ValidCompactionBoundary(timeline[segmentStart:idx], compacted.FirstKeptItemID) {
 			continue
 		}
 		segmentStart = idx + 1
@@ -1999,9 +1299,9 @@ func compactionSegmentStartForNextCut(timeline []domain.TimelineItem, keepStart 
 }
 
 func (e *Engine) compactionMessagesForCompactionTail(session domain.Session, items []domain.TimelineItem, firstKeptItemID string, preserveThinking bool) ([]provider.Message, error) {
-	start := firstKeptTimelineIndex(items, firstKeptItemID)
+	start := modelruntime.FirstKeptTimelineIndex(items, firstKeptItemID)
 	if start < 0 {
-		start = preservedTimelineToolCallTailStart(items, e.compactionKeepToolCalls())
+		start = modelruntime.PreservedTimelineToolCallTailStart(items, e.modelRuntime.CompactionKeepToolCalls())
 	}
 	if start >= len(items) {
 		return nil, nil
@@ -2042,7 +1342,7 @@ func (e *Engine) compactionMessagesForTimelineItem(session domain.Session, item 
 		if strings.TrimSpace(content.Summary) == "" {
 			return nil, nil
 		}
-		return []provider.Message{compactedHistoryMessage(content.Summary)}, nil
+		return []provider.Message{modelruntime.CompactedHistoryMessage(content.Summary)}, nil
 	case domain.ToolExecution:
 		body := ""
 		if content.Result != nil {
@@ -2081,7 +1381,7 @@ func (e *Engine) compactionUserMessageText(session domain.Session, msg domain.Us
 			Start:   ref.Start,
 			End:     ref.End,
 		}
-		resolved, err := e.resolveReference(session, meta)
+		resolved, err := modelruntime.ResolveReference(session, meta)
 		label := strings.TrimSpace(ref.Display)
 		if label == "" {
 			label = strings.TrimSpace(ref.Path)
@@ -2376,144 +1676,14 @@ func formatCompactionBytes(size int) string {
 	return fmt.Sprintf("%.0f KB", value)
 }
 
-func (e *Engine) estimateContextTokensForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) int {
-	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
-	if err != nil {
-		return 0
-	}
-	payload, err := json.Marshal(provider.SerializePromptEnvelope(envelope))
-	if err != nil || len(payload) == 0 {
-		return 0
-	}
-	return len(payload) / 4
-}
-
 func (e *Engine) estimateCompactedTimelineContextTokens(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, compactionItem domain.TimelineItem, firstKeptItemID string, summary string) int {
 	simulated := make([]domain.TimelineItem, 0, len(timeline)+1)
 	simulated = append(simulated, timeline...)
 	compactionItem.Content = domain.Compaction{Summary: summary, Status: "completed", FirstKeptItemID: firstKeptItemID}
 	simulated = append(simulated, compactionItem)
-	estimated := e.estimateContextTokensForTimeline(session, chat, simulated)
-	if estimated <= 0 {
+	estimated, err := e.EstimateContextTokensForTimeline(session, chat, simulated)
+	if err != nil || estimated <= 0 {
 		return tokenestimate.Text(summary)
 	}
 	return estimated
-}
-
-type providerToolCallParseResult struct {
-	Requests  []tools.Request
-	ToolCalls []domain.ToolCall
-	Err       error
-}
-
-func (e *Engine) parseProviderToolCallsForTranscript(raw []provider.ToolCall, sessionID id.ID) providerToolCallParseResult {
-	var out providerToolCallParseResult
-	var parseErr error
-	for _, item := range raw {
-		call, err := e.parseProviderToolCall(item)
-		if err != nil {
-			if parseErr == nil {
-				parseErr = err
-			}
-			e.recordLifecycle(sessionID, "provider_tool_call_parse_error", err.Error(), map[string]string{
-				"tool_call_id": strings.TrimSpace(item.ID),
-				"tool_type":    strings.TrimSpace(item.Type),
-			})
-			if failed, ok := e.failedProviderToolCall(item, err); ok {
-				out.ToolCalls = append(out.ToolCalls, failed)
-			}
-			continue
-		}
-		e.recordLifecycle(sessionID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": call.Tool.String(), "tool_call_id": call.ToolCallID})
-		out.Requests = append(out.Requests, call)
-		out.ToolCalls = append(out.ToolCalls, toolCallRecord(call))
-	}
-	out.Err = parseErr
-	return out
-}
-
-func (e *Engine) parseProviderToolCall(item provider.ToolCall) (tools.Request, error) {
-	name := strings.TrimSpace(item.Function.Name)
-	ok := false
-	serverID, toolName := "", ""
-	if e.mcp != nil {
-		localDefs := tools.Definitions(tools.Runtime{})
-		if e.toolsRuntime != nil {
-			localDefs = tools.Definitions(e.toolsRuntime.Runtime(domain.Session{}, domain.Chat{}))
-		}
-		serverID, toolName, ok = e.mcp.ResolveToolName(name, localDefs)
-	}
-	if !ok {
-		return tools.ParseProviderCall(item)
-	}
-	rawArgs := strings.TrimSpace(item.Function.Arguments)
-	if rawArgs == "" {
-		rawArgs = "{}"
-	}
-	var parsed map[string]any
-	if err := json.Unmarshal([]byte(rawArgs), &parsed); err != nil {
-		return tools.Request{}, fmt.Errorf("decode mcp tool arguments for %s: %w", name, err)
-	}
-	req := tools.Request{
-		Tool:       domain.ToolKindMCP,
-		ToolCallID: strings.TrimSpace(item.ID),
-		Args: map[string]string{
-			"server":        serverID,
-			"tool":          toolName,
-			"arguments_raw": rawArgs,
-		},
-	}
-	if req.ToolCallID == "" {
-		return tools.Request{}, fmt.Errorf("provider MCP tool call for %s missing id", name)
-	}
-	normalized, err := tools.Normalize(req)
-	if err != nil {
-		return tools.Request{}, tools.ProviderCallError{Request: req, Err: err}
-	}
-	return normalized, nil
-}
-
-func (e *Engine) failedProviderToolCall(item provider.ToolCall, parseErr error) (domain.ToolCall, bool) {
-	var callErr tools.ProviderCallError
-	if !errors.As(parseErr, &callErr) {
-		return domain.ToolCall{}, false
-	}
-	req := callErr.Request
-	if req.Tool == "" || strings.TrimSpace(req.ToolCallID) == "" {
-		return domain.ToolCall{}, false
-	}
-	now := time.Now().UTC()
-	return domain.ToolCall{
-		ToolCallID:  domain.ToolCallID(req.ToolCallID),
-		Tool:        req.Tool,
-		Args:        req.Args,
-		Status:      domain.ToolStatusErrored,
-		Error:       &domain.ToolError{Message: "Invalid tool call: " + parseErr.Error()},
-		CompletedAt: now,
-	}, true
-}
-
-func toolCallRecord(call tools.Request) domain.ToolCall {
-	return domain.ToolCall{
-		ToolCallID: domain.ToolCallID(call.ToolCallID),
-		Tool:       call.Tool,
-		Args:       call.Args,
-		Status:     domain.ToolStatusPending,
-	}
-}
-
-func serializeRequest(req tools.Request) (string, error) {
-	payload := maps.Clone(req.Args)
-	if strings.TrimSpace(req.ToolCallID) != "" {
-		payload["tool_call_id"] = req.ToolCallID
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("serialize request: %w", err)
-	}
-	return string(data), nil
-}
-
-func max(a, b int) int {
-	return slices.Max([]int{a, b})
 }

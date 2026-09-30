@@ -381,7 +381,7 @@ func (e *Engine) Draft(ctx context.Context, record memory.CurationRecord, materi
 		{Role: provider.RoleSystem, Content: "You curate durable reusable Memory from one completed chat turn. Return JSON only, exactly matching the supplied schema. Use only supplied destination chunk IDs and source item IDs. Propose nothing for transient task progress, guesses, secrets, credentials, or facts unlikely to help later. Personal facts must target the personal destination, state whether they were explicit, observed, or inferred, and keep inferences uncertain. An empty candidates array is correct when nothing is durable."},
 		{Role: provider.RoleUser, Content: string(payload)},
 	}
-	request := e.chatRequest(snapshot.Session, chatRecord, messages, false)
+	request := e.ChatRequest(snapshot.Session, chatRecord, messages, false)
 	request.Tools = nil
 	request.ToolChoice = ""
 	response, err := client.CompleteChat(ctx, request)

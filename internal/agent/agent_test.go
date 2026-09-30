@@ -34,6 +34,7 @@ import (
 	"github.com/lkarlslund/koder/internal/environment"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
+	"github.com/lkarlslund/koder/internal/modelruntime"
 	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/provider"
@@ -761,7 +762,7 @@ func timelineNoticesForChat(t *testing.T, st *store.Store, chatID id.ID) []domai
 }
 
 func TestSystemPromptDoesNotMentionInternalSlashCommands(t *testing.T) {
-	prompt := systemPrompt()
+	prompt := modelruntime.ManagedPrompt(config.Default().ManagedAssetsDir(), "system-prompt.md")
 	for _, command := range []string{"/new", "/quit", "/permissions", "/approve", "/deny"} {
 		if strings.Contains(prompt, command) {
 			t.Fatalf("expected system prompt to exclude internal slash command %q", command)
@@ -819,7 +820,7 @@ func TestEngineSystemPromptUsesManagedUserAsset(t *testing.T) {
 	}
 
 	engine := New(testConfig(t), nil, nil, nil)
-	if got := engine.systemPrompt(); got != "custom system prompt" {
+	if got := modelruntime.ManagedPrompt(engine.cfg.ManagedAssetsDir(), "system-prompt.md"); got != "custom system prompt" {
 		t.Fatalf("expected managed user system prompt, got %q", got)
 	}
 }
@@ -1035,7 +1036,7 @@ func runGit(t *testing.T, dir string, args ...string) {
 
 func TestMaxToolLoopStepsDefaultsToTwenty(t *testing.T) {
 	engine := New(testConfig(t), nil, nil, nil)
-	if got := engine.maxToolLoopSteps(); got != 500 {
+	if got := engine.MaxToolLoopSteps(); got != 500 {
 		t.Fatalf("expected default max tool loop steps 500, got %d", got)
 	}
 }
@@ -1045,30 +1046,8 @@ func TestMaxToolLoopStepsUsesConfiguredValue(t *testing.T) {
 	cfg.MaxToolLoopSteps = 7
 
 	engine := New(cfg, nil, nil, nil)
-	if got := engine.maxToolLoopSteps(); got != 7 {
+	if got := engine.MaxToolLoopSteps(); got != 7 {
 		t.Fatalf("expected configured max tool loop steps 7, got %d", got)
-	}
-}
-
-func TestApprovalSerializationRoundTrip(t *testing.T) {
-	req := tools.Request{
-		Tool: domain.ToolKindFileWrite,
-		Args: map[string]string{
-			"path":            "file.txt",
-			"content":         "after\n",
-			"force_overwrite": "true",
-		},
-	}
-	raw, err := serializeRequest(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := tools.RequestFromStored(domain.ToolKindFileWrite, raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Args["path"] != "file.txt" || got.Args["force_overwrite"] != "true" {
-		t.Fatalf("unexpected round trip args: %#v", got.Args)
 	}
 }
 
@@ -1449,7 +1428,7 @@ func TestProviderToolCallArgumentsAreNormalizedBeforePersistence(t *testing.T) {
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 
-	parsed := engine.parseProviderToolCallsForTranscript([]provider.ToolCall{{
+	parsed := engine.ParseProviderToolCallsForTranscript([]provider.ToolCall{{
 		ID: "call_1",
 		Function: provider.FunctionCall{
 			Name:      domain.ToolKindFileRead.String(),
@@ -4709,7 +4688,7 @@ func TestConversationMessagesRenderSteerAsSteeringUpdate(t *testing.T) {
 		},
 	}
 
-	messages, err := engine.conversationMessagesForTimelineItem(session, chat, item, false)
+	messages, err := engine.modelRuntime.ConversationMessagesForTimelineItem(session, chat, item, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5836,7 +5815,7 @@ func TestRepeatedCompactionBoundaryIsValidForConversationReplay(t *testing.T) {
 			FirstKeptItemID: firstKept,
 		},
 	})
-	messages, err := engine.buildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
+	messages, err := engine.modelRuntime.BuildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5897,7 +5876,7 @@ func TestRepeatedCompactionIgnoresPendingMarkerInPreservedTail(t *testing.T) {
 		{ID: "current-user", Seq: 5, Content: domain.UserMessage{Text: "continue work"}},
 	}
 
-	envelope, err := engine.buildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
+	envelope, err := engine.modelRuntime.BuildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
