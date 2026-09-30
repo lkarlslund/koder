@@ -37,6 +37,7 @@ func (r *Runtime) BuildConversationForTurn(_ context.Context, req chatpkg.TurnRe
 func (r *Runtime) BuildPromptEnvelopeForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, prompt string, drafts []attachment.Draft, refs []reference.Draft, turnInstructions []provider.InstructionBlock) (provider.PromptEnvelope, error) {
 	baseInstructions := r.BaseInstructionsForChat(session, chat)
 	envelope := provider.PromptEnvelope{Instructions: baseInstructions}
+	scope := r.newRenderScope(session, chat)
 	segmentStart := 0
 	for idx, item := range timeline {
 		if compacted, ok := item.Content.(domain.Compaction); ok {
@@ -49,7 +50,7 @@ func (r *Runtime) BuildPromptEnvelopeForTimeline(session domain.Session, chat do
 			envelope.Instructions = baseInstructions
 			envelope.Items = append(envelope.Items[:0], CompactedHistoryMessage(compacted.Summary))
 			if segmentStart < idx {
-				preserved, err := r.timelineMessagesForCompactionTail(session, chat, timeline[segmentStart:idx], compacted.FirstKeptItemID)
+				preserved, err := r.timelineMessagesForCompactionTail(scope, timeline[segmentStart:idx], compacted.FirstKeptItemID)
 				if err != nil {
 					return provider.PromptEnvelope{}, err
 				}
@@ -58,7 +59,7 @@ func (r *Runtime) BuildPromptEnvelopeForTimeline(session domain.Session, chat do
 			segmentStart = idx + 1
 			continue
 		}
-		messages, err := r.ConversationMessagesForTimelineItem(session, chat, item, r.preserveThinkingEnabled(chat))
+		messages, err := r.conversationMessages(scope, item)
 		if err != nil {
 			return provider.PromptEnvelope{}, err
 		}
@@ -104,7 +105,7 @@ func previewTurnInstructionMessages(blocks []provider.InstructionBlock) []provid
 	return out
 }
 
-func (r *Runtime) timelineMessagesForCompactionTail(session domain.Session, chat domain.Chat, items []domain.TimelineItem, firstKeptItemID string) ([]provider.Message, error) {
+func (r *Runtime) timelineMessagesForCompactionTail(scope *renderScope, items []domain.TimelineItem, firstKeptItemID string) ([]provider.Message, error) {
 	start := FirstKeptTimelineIndex(items, firstKeptItemID)
 	if start < 0 {
 		start = PreservedTimelineToolCallTailStart(items, r.CompactionKeepToolCalls())
@@ -120,7 +121,7 @@ func (r *Runtime) timelineMessagesForCompactionTail(session domain.Session, chat
 		if _, ok := item.Content.(domain.Compaction); ok {
 			continue
 		}
-		messages, err := r.ConversationMessagesForTimelineItem(session, chat, item, r.preserveThinkingEnabled(chat))
+		messages, err := r.conversationMessages(scope, item)
 		if err != nil {
 			return nil, err
 		}
@@ -175,7 +176,40 @@ func completedTimelineToolCallCount(item domain.TimelineItem) int {
 	return count
 }
 
+// renderScope holds values shared by every timeline item in one prompt
+// render, so rendering a long history computes them once instead of per item.
+type renderScope struct {
+	session          domain.Session
+	chat             domain.Chat
+	preserveThinking bool
+	localDefs        []provider.ToolDefinition
+	localDefsLoaded  bool
+}
+
+func (r *Runtime) newRenderScope(session domain.Session, chat domain.Chat) *renderScope {
+	return &renderScope{session: session, chat: chat, preserveThinking: r.preserveThinkingEnabled(chat)}
+}
+
+// localDefinitions returns the local tool definitions MCP tool names must not
+// collide with, building them on first use.
+func (r *Runtime) localDefinitions(scope *renderScope) []provider.ToolDefinition {
+	if !scope.localDefsLoaded {
+		if r.tools != nil {
+			scope.localDefs = tools.Definitions(r.tools.Runtime(scope.session, scope.chat))
+		} else {
+			scope.localDefs = tools.Definitions(tools.Runtime{})
+		}
+		scope.localDefsLoaded = true
+	}
+	return scope.localDefs
+}
+
 func (r *Runtime) ConversationMessagesForTimelineItem(session domain.Session, chat domain.Chat, item domain.TimelineItem, preserveThinking bool) ([]provider.Message, error) {
+	return r.conversationMessages(&renderScope{session: session, chat: chat, preserveThinking: preserveThinking}, item)
+}
+
+func (r *Runtime) conversationMessages(scope *renderScope, item domain.TimelineItem) ([]provider.Message, error) {
+	session, chat, preserveThinking := scope.session, scope.chat, scope.preserveThinking
 	switch content := item.Content.(type) {
 	case domain.UserMessage:
 		parts := make([]domain.Part, 0, 1+len(content.Attachments)+len(content.References))
@@ -217,7 +251,7 @@ func (r *Runtime) ConversationMessagesForTimelineItem(session domain.Session, ch
 				ToolCallID: string(tool.ToolCallID),
 				Args:       tool.Args,
 			})
-			toolCalls = append(toolCalls, r.providerToolCall(session, chat, req))
+			toolCalls = append(toolCalls, r.providerToolCall(scope, req))
 		}
 		textChunks := []string{}
 		reasoningChunks := []string{}
@@ -276,17 +310,13 @@ func (r *Runtime) ConversationMessagesForTimelineItem(session domain.Session, ch
 	}
 }
 
-func (r *Runtime) providerToolCall(session domain.Session, chat domain.Chat, req tools.Request) provider.ToolCall {
+func (r *Runtime) providerToolCall(scope *renderScope, req tools.Request) provider.ToolCall {
 	if req.Tool != domain.ToolKindMCP || r.mcp == nil {
 		return tools.ToolCall(req)
 	}
 	serverID := strings.TrimSpace(req.Args["server"])
 	toolName := strings.TrimSpace(req.Args["tool"])
-	localDefs := tools.Definitions(tools.Runtime{})
-	if r.tools != nil {
-		localDefs = tools.Definitions(r.tools.Runtime(session, chat))
-	}
-	exposedName, ok := r.mcp.ExposedToolName(serverID, toolName, localDefs)
+	exposedName, ok := r.mcp.ExposedToolName(serverID, toolName, r.localDefinitions(scope))
 	if !ok {
 		return tools.ToolCall(req)
 	}
