@@ -47,18 +47,18 @@ import (
 )
 
 type Engine struct {
-	cfg               config.Config
-	store             *store.Store
-	debug             *debugsrv.Recorder
-	files             *attachment.Manager
-	offeredFiles      *offeredfile.Manager
-	caps              *provider.CapabilityStore
-	health            *provider.HealthTracker
-	agents            *agents.Manager
-	mcp               *mcp.Manager
-	settings          *settings.Store
-	modelOverlays     modeloverlay.Catalog
-	modelRuntime      *modelruntime.Runtime
+	cfg           config.Config
+	store         *store.Store
+	debug         *debugsrv.Recorder
+	files         *attachment.Manager
+	offeredFiles  *offeredfile.Manager
+	caps          *provider.CapabilityStore
+	health        *provider.HealthTracker
+	agents        *agents.Manager
+	mcp           *mcp.Manager
+	settings      *settings.Store
+	modelOverlays modeloverlay.Catalog
+	*modelruntime.Runtime
 	toolsRuntime      *toolruntime.Runtime
 	browser           *browser.Manager
 	codex             *codexdriver.Manager
@@ -148,7 +148,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		}
 		return strings.TrimSpace(strings.Join(parts, "\n\n"))
 	})
-	e.modelRuntime = modelruntime.New(modelruntime.Config{
+	e.Runtime = modelruntime.New(modelruntime.Config{
 		Config:   cfg,
 		Store:    st,
 		Debug:    debug,
@@ -159,7 +159,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		Settings: settingsStore,
 		MCP:      e.mcp,
 	})
-	e.modelRuntime.SetRetryPause(func(ctx context.Context, delay time.Duration, onTick func(time.Duration)) error {
+	e.Runtime.SetRetryPause(func(ctx context.Context, delay time.Duration, onTick func(time.Duration)) error {
 		if e.retryPause == nil {
 			return modelruntime.DefaultRetryPause(ctx, delay, onTick)
 		}
@@ -168,7 +168,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 	chatSource := chatpkg.NewSource(e.ChatDeps)
 	planSource := planning.NewSource(st)
 	e.registry = sessionpkg.NewRegistry(st, chatSource, planSource, e.sessionRegistryConfig(settingsStore.NewSessionDefaults()))
-	e.modelRuntime.SetSessionSource(e)
+	e.Runtime.SetSessionSource(e)
 	e.toolsRuntime = toolruntime.New(toolruntime.Config{
 		Settings:         settingsStore,
 		Debug:            debug,
@@ -182,7 +182,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		DisabledSkills:   cfg.Skills.Disabled,
 		SkillCatalogMax:  cfg.Skills.CatalogMaxChars,
 	})
-	e.modelRuntime.SetToolsRuntime(e.toolsRuntime)
+	e.Runtime.SetToolsRuntime(e.toolsRuntime)
 	if e.codex != nil {
 		e.codex.SetToolBridge(codexToolBridge{engine: e})
 	}
@@ -225,8 +225,8 @@ func (e *Engine) updateConfig(cfg config.Config, connectMCPAsync bool) error {
 		e.settings = settings.New(cfg)
 	}
 	e.agents = agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md"))
-	if e.modelRuntime != nil {
-		e.modelRuntime.UpdateConfig(cfg)
+	if e.Runtime != nil {
+		e.Runtime.UpdateConfig(cfg)
 	}
 	if e.registry != nil {
 		e.registry.UpdateConfig(e.sessionRegistryConfig(e.settings.NewSessionDefaults()))
@@ -415,7 +415,7 @@ func (e *Engine) PreviewNextRequest(ctx context.Context, session domain.Session,
 }
 
 func (e *Engine) PreviewNextRequestForChat(ctx context.Context, session domain.Session, chat domain.Chat, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (provider.ChatRequest, error) {
-	if err := e.modelRuntime.ValidatePromptAttachments(chat, drafts); err != nil {
+	if err := e.Runtime.ValidatePromptAttachments(chat, drafts); err != nil {
 		return provider.ChatRequest{}, err
 	}
 	messages, err := e.buildConversationPreview(ctx, session, chat.ID, prompt, drafts, refs, chatpkg.TurnInstructionBlocks(note, ""))
@@ -423,30 +423,6 @@ func (e *Engine) PreviewNextRequestForChat(ctx context.Context, session domain.S
 		return provider.ChatRequest{}, err
 	}
 	return e.ChatRequest(session, chat, messages, false), nil
-}
-
-func (e *Engine) PreparePromptTurn(ctx context.Context, rt *chatpkg.Chat, input domain.QueuedInput, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
-	return e.modelRuntime.PreparePromptTurn(ctx, rt, input, prompt, drafts, refs, note, out)
-}
-
-func (e *Engine) PrepareContinueTurn(ctx context.Context, rt *chatpkg.Chat, note string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
-	return e.modelRuntime.PrepareContinueTurn(ctx, rt, note, out)
-}
-
-func (e *Engine) MaxToolLoopSteps() int {
-	return e.modelRuntime.MaxToolLoopSteps()
-}
-
-func (e *Engine) ClientForChat(chat domain.Chat) (*provider.Client, error) {
-	return e.modelRuntime.ClientForChat(chat)
-}
-
-func (e *Engine) BeginModelTurn(ctx context.Context, sessionID, chatID id.ID, step int, out chan<- domain.Event) error {
-	return e.modelRuntime.BeginModelTurn(ctx, sessionID, chatID, step, out)
-}
-
-func (e *Engine) BuildConversationForTurn(ctx context.Context, req chatpkg.TurnRequest) ([]provider.Message, error) {
-	return e.modelRuntime.BuildConversationForTurn(ctx, req)
 }
 
 func (e *Engine) AutoCompactAtTurnBoundary(ctx context.Context, rt *chatpkg.Chat, client *provider.Client, messages []provider.Message, out chan<- domain.Event) (bool, error) {
@@ -466,32 +442,8 @@ func (e *Engine) AutoCompactAtTurnBoundary(ctx context.Context, rt *chatpkg.Chat
 	return true, nil
 }
 
-func (e *Engine) ProviderStreamingEnabled(chat domain.Chat) bool {
-	return e.modelRuntime.ProviderStreamingEnabled(chat)
-}
-
-func (e *Engine) ChatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, stream bool) provider.ChatRequest {
-	return e.modelRuntime.ChatRequest(session, chat, messages, stream)
-}
-
 func (e *Engine) NextAssistantTimelineItemForTurn(ctx context.Context, rt *chatpkg.Chat) (domain.TimelineItem, error) {
 	return e.nextAssistantTimelineItemForTurn(ctx, "", rt)
-}
-
-func (e *Engine) CompleteModelRequest(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client, out chan<- domain.Event, req provider.ChatRequest, assistantItem domain.TimelineItem) (chatpkg.ModelResponse, error) {
-	return e.modelRuntime.CompleteModelRequest(ctx, session, chat, client, out, req, assistantItem)
-}
-
-func (e *Engine) ParseProviderToolCallsForTranscript(raw []provider.ToolCall, sessionID id.ID) chatpkg.ToolCallParseResult {
-	return e.modelRuntime.ParseProviderToolCallsForTranscript(raw, sessionID)
-}
-
-func (e *Engine) FailedStreamedProviderToolCall(callErr provider.ToolCallError) domain.ToolCall {
-	return e.modelRuntime.FailedStreamedProviderToolCall(callErr)
-}
-
-func (e *Engine) RecordLifecycle(sessionID id.ID, kind, text string, meta map[string]string) {
-	e.modelRuntime.RecordLifecycle(sessionID, kind, text, meta)
 }
 
 func (e *Engine) MaybeUpdateChatTitle(ctx context.Context, chatID id.ID) (string, error) {
@@ -854,10 +806,6 @@ func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Se
 	return provider.SerializePromptEnvelope(envelope), nil
 }
 
-func (e *Engine) EstimateContextTokensForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) (int, error) {
-	return e.modelRuntime.EstimateContextTokensForTimeline(session, chat, timeline)
-}
-
 func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.Session, chatID id.ID, prompt string, drafts []attachment.Draft, refs []reference.Draft, turnInstructions []provider.InstructionBlock) (provider.PromptEnvelope, error) {
 	chat := domain.Chat{WorkflowRole: chatrole.General}
 	if chatID != "" {
@@ -880,7 +828,7 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 		}
 	}
 	timeline = chatpkg.FilterQueuedTimelineItems(timeline)
-	return e.modelRuntime.BuildPromptEnvelopeForTimeline(session, chat, timeline, prompt, drafts, refs, turnInstructions)
+	return e.Runtime.BuildPromptEnvelopeForTimeline(session, chat, timeline, prompt, drafts, refs, turnInstructions)
 }
 
 func formatThinkingBlock(reasoning string) string {
@@ -1148,7 +1096,7 @@ func (e *Engine) compactionSessionClient(chat domain.Chat, client *provider.Clie
 
 func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, instructions string, stream bool) (provider.ChatRequest, string, error) {
 	base := compactionBaseForNextCut(timeline, len(timeline))
-	keepStart := base.MinKeepStart + modelruntime.PreservedTimelineToolCallTailStart(timeline[base.MinKeepStart:], e.modelRuntime.CompactionKeepToolCalls())
+	keepStart := base.MinKeepStart + modelruntime.PreservedTimelineToolCallTailStart(timeline[base.MinKeepStart:], e.Runtime.CompactionKeepToolCalls())
 	messages, firstKeptItemID, err := e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, keepStart, base)
 	if err != nil {
 		return provider.ChatRequest{}, "", err
@@ -1166,7 +1114,7 @@ func (e *Engine) compactionChatRequest(session domain.Session, chat domain.Chat,
 
 func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) ([]provider.Message, string, error) {
 	base := compactionBaseForNextCut(timeline, len(timeline))
-	keepStart := base.MinKeepStart + modelruntime.PreservedTimelineToolCallTailStart(timeline[base.MinKeepStart:], e.modelRuntime.CompactionKeepToolCalls())
+	keepStart := base.MinKeepStart + modelruntime.PreservedTimelineToolCallTailStart(timeline[base.MinKeepStart:], e.Runtime.CompactionKeepToolCalls())
 	return e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, keepStart, base)
 }
 
@@ -1226,7 +1174,7 @@ func firstKeptItemIDForCompactionCut(timeline []domain.TimelineItem, keepStart i
 }
 
 func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) (provider.PromptEnvelope, error) {
-	envelope := provider.PromptEnvelope{Instructions: e.modelRuntime.BaseInstructionsForChat(session, chat)}
+	envelope := provider.PromptEnvelope{Instructions: e.Runtime.BaseInstructionsForChat(session, chat)}
 	segmentStart := 0
 	for idx, item := range timeline {
 		if compacted, ok := item.Content.(domain.Compaction); ok {
@@ -1258,7 +1206,7 @@ func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session
 
 func (e *Engine) buildCompactionPromptEnvelopeForTimelineRange(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, baseSummary string) (provider.PromptEnvelope, error) {
 	envelope := provider.PromptEnvelope{
-		Instructions: e.modelRuntime.BaseInstructionsForChat(session, chat),
+		Instructions: e.Runtime.BaseInstructionsForChat(session, chat),
 		Items:        []provider.Message{modelruntime.CompactedHistoryMessage(baseSummary)},
 	}
 	for _, item := range timeline {
@@ -1293,7 +1241,7 @@ func compactionSegmentStartForNextCut(timeline []domain.TimelineItem, keepStart 
 func (e *Engine) compactionMessagesForCompactionTail(session domain.Session, items []domain.TimelineItem, firstKeptItemID string, preserveThinking bool) ([]provider.Message, error) {
 	start := modelruntime.FirstKeptTimelineIndex(items, firstKeptItemID)
 	if start < 0 {
-		start = modelruntime.PreservedTimelineToolCallTailStart(items, e.modelRuntime.CompactionKeepToolCalls())
+		start = modelruntime.PreservedTimelineToolCallTailStart(items, e.Runtime.CompactionKeepToolCalls())
 	}
 	if start >= len(items) {
 		return nil, nil

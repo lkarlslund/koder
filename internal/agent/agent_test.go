@@ -4623,7 +4623,7 @@ func TestConversationMessagesRenderSteerAsSteeringUpdate(t *testing.T) {
 		},
 	}
 
-	messages, err := engine.modelRuntime.ConversationMessagesForTimelineItem(session, chat, item, false)
+	messages, err := engine.Runtime.ConversationMessagesForTimelineItem(session, chat, item, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5750,7 +5750,7 @@ func TestRepeatedCompactionBoundaryIsValidForConversationReplay(t *testing.T) {
 			FirstKeptItemID: firstKept,
 		},
 	})
-	messages, err := engine.modelRuntime.BuildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
+	messages, err := engine.Runtime.BuildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5811,7 +5811,7 @@ func TestRepeatedCompactionIgnoresPendingMarkerInPreservedTail(t *testing.T) {
 		{ID: "current-user", Seq: 5, Content: domain.UserMessage{Text: "continue work"}},
 	}
 
-	envelope, err := engine.modelRuntime.BuildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
+	envelope, err := engine.Runtime.BuildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
