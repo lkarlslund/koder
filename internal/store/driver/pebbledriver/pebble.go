@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -143,10 +144,16 @@ func (b *Backend) Put(ctx context.Context, namespace string, id string, data []b
 	if err := batch.Set([]byte(driver.RecordKey(namespace, id)), data, nil); err != nil {
 		return fmt.Errorf("put %s %s: %w", namespace, id, err)
 	}
+	keys := make([]string, 0, len(indexes))
 	for name, index := range indexes {
-		if err := batch.Set([]byte(driver.OrderedIndexKey(namespace, name, index.Value, index.Order, id)), nil, nil); err != nil {
+		key := driver.OrderedIndexKey(namespace, name, index.Value, index.Order, id)
+		if err := batch.Set([]byte(key), nil, nil); err != nil {
 			return fmt.Errorf("index %s %s: %w", namespace, id, err)
 		}
+		keys = append(keys, key)
+	}
+	if err := setIndexRefs(batch, namespace, id, keys); err != nil {
+		return err
 	}
 	return batch.Commit(pebble.Sync)
 }
@@ -333,6 +340,15 @@ func (b *Backend) AddIndexEntries(ctx context.Context, namespace, name, value st
 		if err := batch.Set([]byte(key), nil, nil); err != nil {
 			return fmt.Errorf("build index %s %s: %w", namespace, entry.ID, err)
 		}
+		// A record without refs predates them; the fallback scan in
+		// deleteIndexEntries finds this key as well.
+		if keys, ok, err := b.indexRefs(namespace, entry.ID); err != nil {
+			return err
+		} else if ok && !slices.Contains(keys, key) {
+			if err := setIndexRefs(batch, namespace, entry.ID, append(keys, key)); err != nil {
+				return err
+			}
+		}
 	}
 	return batch.Commit(pebble.Sync)
 }
@@ -381,26 +397,79 @@ func (b *Backend) listByIndex(namespace string, lookup *driver.IndexLookup) ([][
 	return out, iter.Error()
 }
 
+// deleteIndexEntries removes every index key the record owns. Records keep
+// their keys under an index-refs entry; only records written before refs
+// existed need the namespace scan.
 func (b *Backend) deleteIndexEntries(batch *pebble.Batch, namespace, id string) error {
+	keys, ok, err := b.indexRefs(namespace, id)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		if keys, err = b.scanIndexKeys(namespace, id); err != nil {
+			return err
+		}
+	}
+	for _, key := range keys {
+		if err := batch.Delete([]byte(key), nil); err != nil && !errors.Is(err, pebble.ErrNotFound) {
+			return err
+		}
+	}
+	if err := batch.Delete(indexRefsKey(namespace, id), nil); err != nil && !errors.Is(err, pebble.ErrNotFound) {
+		return err
+	}
+	return nil
+}
+
+func (b *Backend) scanIndexKeys(namespace, id string) ([]string, error) {
 	prefix := []byte("collection-index/" + namespace + "/")
 	iter, err := b.db.NewIter(&pebble.IterOptions{
 		LowerBound: prefix,
 		UpperBound: nextPrefix(prefix),
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = iter.Close() }()
 	suffix := []byte("/" + id)
 	orderedSuffix := []byte("~" + id)
+	var keys []string
 	for ok := iter.First(); ok; ok = iter.Next() {
 		if bytes.HasSuffix(iter.Key(), suffix) || bytes.HasSuffix(iter.Key(), orderedSuffix) {
-			if err := batch.Delete(iter.Key(), nil); err != nil && !errors.Is(err, pebble.ErrNotFound) {
-				return err
-			}
+			keys = append(keys, string(iter.Key()))
 		}
 	}
-	return iter.Error()
+	return keys, iter.Error()
+}
+
+// indexRefsKey stores the index keys one record owns. The prefix does not
+// overlap the collection/ or collection-index/ key spaces.
+func indexRefsKey(namespace, id string) []byte {
+	return []byte("collection-index-refs/" + namespace + "/" + id)
+}
+
+func (b *Backend) indexRefs(namespace, id string) ([]string, bool, error) {
+	data, closer, err := b.db.Get(indexRefsKey(namespace, id))
+	if errors.Is(err, pebble.ErrNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = closer.Close() }()
+	var keys []string
+	if err := json.Unmarshal(data, &keys); err != nil {
+		return nil, false, fmt.Errorf("decode index refs %s %s: %w", namespace, id, err)
+	}
+	return keys, true, nil
+}
+
+func setIndexRefs(batch *pebble.Batch, namespace, id string, keys []string) error {
+	data, err := json.Marshal(keys)
+	if err != nil {
+		return err
+	}
+	return batch.Set(indexRefsKey(namespace, id), data, nil)
 }
 
 func nextPrefix(prefix []byte) []byte {
