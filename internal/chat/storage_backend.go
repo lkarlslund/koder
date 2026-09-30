@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/chatrole"
@@ -673,10 +674,32 @@ func timelineCursorForItem(ctx context.Context, st *store.Store, itemID id.ID) (
 	return timelineIndexCursor(item), nil
 }
 
+// sequenceIndexChecked records chats whose chat-seq index is known complete
+// in this process. Every insert maintains both indexes, so one successful
+// check per chat is enough; the check itself scans the whole chat index.
+var sequenceIndexChecked sync.Map // sequenceIndexKey -> struct{}
+
+type sequenceIndexKey struct {
+	store  *store.Store
+	chatID id.ID
+}
+
 func ensureTimelineSequenceIndex(ctx context.Context, st *store.Store, chatID id.ID) error {
 	if chatID == "" {
 		return fmt.Errorf("timeline page: chat id is required")
 	}
+	key := sequenceIndexKey{store: st, chatID: chatID}
+	if _, ok := sequenceIndexChecked.Load(key); ok {
+		return nil
+	}
+	if err := repairTimelineSequenceIndex(ctx, st, chatID); err != nil {
+		return err
+	}
+	sequenceIndexChecked.Store(key, struct{}{})
+	return nil
+}
+
+func repairTimelineSequenceIndex(ctx context.Context, st *store.Store, chatID id.ID) error {
 	unlock := store.LockTimelineMutation()
 	defer unlock()
 	collection := timelineCollection(st)
@@ -834,14 +857,11 @@ func appendTimeline(ctx context.Context, st *store.Store, chatID id.ID, content 
 }
 
 func latestTimelineSequence(ctx context.Context, st *store.Store, chatID id.ID) (int64, error) {
-	page, err := timelineCollection(st).ListIndexPage(ctx, "chat-seq", string(chatID), "", "", 1, true)
-	if err != nil {
+	items, err := timelineCollection(st).TailIndex(ctx, "chat-seq", string(chatID), 1)
+	if err != nil || len(items) == 0 {
 		return 0, err
 	}
-	if len(page.Items) == 0 {
-		return 0, nil
-	}
-	return page.Items[len(page.Items)-1].Seq, nil
+	return items[len(items)-1].Seq, nil
 }
 
 func interruptedToolStatus(status domain.ToolStatus) bool {
