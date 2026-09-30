@@ -61,8 +61,6 @@ type Engine struct {
 	toolsRuntime      *toolruntime.Runtime
 	browser           *browser.Manager
 	codex             *codexdriver.Manager
-	envMu             sync.Mutex
-	envPrompts        map[id.ID]string
 	registry          *sessionpkg.Registry
 	retryPause        func(context.Context, time.Duration, func(time.Duration)) error
 	curationMu        sync.RWMutex
@@ -522,13 +520,6 @@ func (e *Engine) RefreshAgents(ctx context.Context, sessionID id.ID) (domain.Ses
 		return domain.Session{}, err
 	}
 	return e.refreshSessionAgents(ctx, session, chat, client)
-}
-
-func needsSessionAgentsRefresh(session domain.Session) bool {
-	if strings.TrimSpace(session.ProjectChecksum) == "" {
-		return true
-	}
-	return strings.TrimSpace(session.AgentsResolved) == "" && strings.TrimSpace(session.AgentsSummary) == ""
 }
 
 func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client) (domain.Session, error) {

@@ -599,11 +599,6 @@ func boolArgDefault(args map[string]string, key string, fallback bool) bool {
 	return parsed
 }
 
-func jsonString(value string) string {
-	data, _ := json.Marshal(value)
-	return string(data)
-}
-
 func permittedBrowserURL(runtime tools.Runtime, raw string) (string, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Scheme != "file" {

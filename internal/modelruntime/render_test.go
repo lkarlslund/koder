@@ -455,3 +455,67 @@ func providerMessagesText(messages []provider.Message) string {
 	}
 	return strings.Join(parts, "\n")
 }
+
+func TestNeedsSessionAgentsRefresh(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		session domain.Session
+		want    bool
+	}{
+		{
+			name:    "missing checksum",
+			session: domain.Session{},
+			want:    true,
+		},
+		{
+			name: "missing resolved and summary",
+			session: domain.Session{
+				ProjectChecksum: "abc",
+			},
+			want: true,
+		},
+		{
+			name: "resolved present",
+			session: domain.Session{
+				ProjectChecksum: "abc",
+				AgentsResolved:  "resolved",
+			},
+			want: false,
+		},
+		{
+			name: "summary present",
+			session: domain.Session{
+				ProjectChecksum: "abc",
+				AgentsSummary:   "summary",
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := needsSessionAgentsRefresh(tc.session); got != tc.want {
+				t.Fatalf("needsSessionAgentsRefresh() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSessionEnvironmentPromptBuildsOncePerSession(t *testing.T) {
+	workdir := t.TempDir()
+	runtime := New(Config{Config: testConfig(t)})
+	session := domain.Session{ID: "session-42", ProjectRoot: workdir}
+
+	first := runtime.sessionEnvironmentPrompt(session)
+	if first == "" {
+		t.Fatal("expected generated environment prompt")
+	}
+	runtime.envCache[string(session.ID)] = "cached prompt"
+	second := runtime.sessionEnvironmentPrompt(session)
+	if second != "cached prompt" {
+		t.Fatalf("expected cached environment prompt, got %q", second)
+	}
+}

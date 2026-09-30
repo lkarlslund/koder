@@ -92,10 +92,6 @@ type skillFrontmatter struct {
 	Metadata      map[string]string `yaml:"metadata"`
 }
 
-func Discover(workdir string) []Skill {
-	return DiscoverWithOptions(workdir, DiscoverOptions{})
-}
-
 func DiscoverWithOptions(workdir string, opts DiscoverOptions) []Skill {
 	catalog := InspectWithOptions(workdir, opts)
 	out := make([]Skill, 0, len(catalog.Items))
@@ -179,10 +175,6 @@ func InspectFile(path string) (Skill, error) {
 	return loadSkill(path, ScopeProject, filepath.Dir(filepath.Dir(path)), filepath.Base(filepath.Dir(path)))
 }
 
-func Find(workdir string, name string) (Skill, bool) {
-	return FindWithOptions(workdir, name, DiscoverOptions{})
-}
-
 func FindWithOptions(workdir string, name string, opts DiscoverOptions) (Skill, bool) {
 	needle := normalizeName(name)
 	for _, skill := range DiscoverWithOptions(workdir, opts) {
@@ -191,10 +183,6 @@ func FindWithOptions(workdir string, name string, opts DiscoverOptions) (Skill, 
 		}
 	}
 	return Skill{}, false
-}
-
-func AvailableNames(workdir string) []string {
-	return AvailableNamesWithOptions(workdir, DiscoverOptions{})
 }
 
 func AvailableNamesWithOptions(workdir string, opts DiscoverOptions) []string {
@@ -206,20 +194,12 @@ func AvailableNamesWithOptions(workdir string, opts DiscoverOptions) []string {
 	return names
 }
 
-func ToolDescription(base string, workdir string) string {
-	return ToolDescriptionWithOptions(base, workdir, DiscoverOptions{})
-}
-
 func ToolDescriptionWithOptions(base string, workdir string, opts DiscoverOptions) string {
 	listing := catalogXML(DiscoverWithOptions(workdir, opts), catalogLimit(opts))
 	if listing == "" {
 		return base
 	}
 	return strings.TrimSpace(base) + "\n\n" + listing
-}
-
-func PromptContext(workdir string) string {
-	return PromptContextWithOptions(workdir, DiscoverOptions{})
 }
 
 func PromptContextWithOptions(workdir string, opts DiscoverOptions) string {

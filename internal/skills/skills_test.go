@@ -165,7 +165,7 @@ func TestDiscoverWithEmptyWorkdirUsesCurrentProject(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(old) })
 	writeSkill(t, filepath.Join(repo, ".agents", "skills", "local", fileName), "local", "Current project skill")
-	items := Discover("")
+	items := DiscoverWithOptions("", DiscoverOptions{})
 	if len(items) != 1 || items[0].Name != "local" {
 		t.Fatalf("empty workdir did not use current project: %#v", items)
 	}
@@ -179,7 +179,7 @@ func TestToolDescriptionIncludesAvailableSkills(t *testing.T) {
 	mustMkdirAll(t, filepath.Join(repo, ".git"))
 	writeSkill(t, filepath.Join(repo, ".agents", "skills", "formatter", fileName), "formatter", "Format output consistently")
 
-	description := ToolDescription("Load a reusable local skill by name", repo)
+	description := ToolDescriptionWithOptions("Load a reusable local skill by name", repo, DiscoverOptions{})
 	if !strings.Contains(description, "<available_skills>") {
 		t.Fatalf("expected available skills block, got %q", description)
 	}
@@ -196,7 +196,7 @@ func TestPromptContextMentionsDollarSyntax(t *testing.T) {
 	mustMkdirAll(t, filepath.Join(repo, ".git"))
 	writeSkill(t, filepath.Join(repo, ".agents", "skills", "review", fileName), "review", "Review code carefully")
 
-	context := PromptContext(repo)
+	context := PromptContextWithOptions(repo, DiscoverOptions{})
 	if !strings.Contains(context, "$skill-name") {
 		t.Fatalf("expected dollar skill hint, got %q", context)
 	}
