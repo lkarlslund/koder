@@ -235,6 +235,7 @@ type ProviderDraft struct {
 	AuthMethod              string            `json:"auth_method"`
 	Name                    string            `json:"name"`
 	BaseURL                 string            `json:"base_url"`
+	Transport               string            `json:"transport"`
 	APIKey                  string            `json:"api_key"`
 	APIKeyEnv               string            `json:"api_key_env"`
 	Model                   string            `json:"model"`

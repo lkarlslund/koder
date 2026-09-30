@@ -1837,6 +1837,18 @@
               <div class="settings-field-control"><input id="settings-provider-url" class="form-control" x-model="providerDraft.base_url" autocomplete="off"></div>
             </div>
             <div class="settings-field">
+              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-transport">Server type</label><div class="settings-field-help">Which request fields model settings such as thinking map to. Leave on Auto-detect unless it guesses wrong.</div></div>
+              <div class="settings-field-control settings-field-control-md">
+                <select id="settings-provider-transport" class="form-select" x-model="providerDraft.transport">
+                  <option value="">Auto-detect</option>
+                  <option value="openai">OpenAI-compatible</option>
+                  <option value="llama">llama.cpp server</option>
+                  <option value="ninfer">ninfer</option>
+                  <option value="dashscope">DashScope (Alibaba)</option>
+                </select>
+              </div>
+            </div>
+            <div class="settings-field">
               <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-api-key">API key</label></div>
               <div class="settings-field-control"><input id="settings-provider-api-key" class="form-control" type="password" x-model="providerDraft.api_key" autocomplete="off"></div>
             </div>

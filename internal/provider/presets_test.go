@@ -14,21 +14,6 @@ func requestExtraBody(t *testing.T, cfg config.Provider, model config.ModelConfi
 	return RequestExtraBody(cfg, model, modeloverlay.Load(t.TempDir()))
 }
 
-func TestAutoMatchPresetIDMatchesQwen36(t *testing.T) {
-	if got := AutoMatchPresetID("Qwen/Qwen3.6-35B-A3B"); got != ModelPresetQwen36PreserveThinking {
-		t.Fatalf("expected qwen3.6 preset, got %q", got)
-	}
-	if got := AutoMatchPresetID("gpt-5.4"); got != ModelPresetDefault {
-		t.Fatalf("expected default preset, got %q", got)
-	}
-}
-
-func TestAutoMatchPresetIDMatchesQwen38(t *testing.T) {
-	if got := AutoMatchPresetID("ggml-org/Qwen3.8-27B-GGUF"); got != ModelPresetQwen38PreserveThinking {
-		t.Fatalf("expected qwen3.8 preset, got %q", got)
-	}
-}
-
 func TestRequestExtraBodyUsesQwen38ThinkingOptions(t *testing.T) {
 	got := requestExtraBody(t, config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, config.ModelConfig{
 		ModelID:         "qwen3.8-27b-q8-mtp",

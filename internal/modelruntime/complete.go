@@ -430,7 +430,7 @@ func cavemanThinkingExtraBody(cfg config.Provider, model config.ModelConfig, cat
 		body = map[string]any{}
 	}
 	body["max_tokens"] = cavemanThinkingMaxTokens
-	if strings.Contains(strings.ToLower(cfg.BaseURL), "dashscope") {
+	if provider.OverlayTransport(cfg) == config.TransportDashScope {
 		body["enable_thinking"] = false
 		body["preserve_thinking"] = false
 		return body

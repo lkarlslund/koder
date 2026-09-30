@@ -131,6 +131,7 @@ type Provider struct {
 	AuthMethod              string            `toml:"auth_method"`
 	Name                    string            `toml:"name"`
 	BaseURL                 string            `toml:"base_url"`
+	Transport               string            `toml:"transport,omitempty"`
 	APIKey                  string            `toml:"api_key"`
 	APIKeyEnv               string            `toml:"api_key_env"`
 	Headers                 map[string]string `toml:"headers"`
@@ -571,6 +572,9 @@ func (c *Config) applyDefaults() {
 			provider.Timeout = fallbackProvider.Timeout
 		}
 		provider.PromptProgressMode = NormalizePromptProgressMode(provider.PromptProgressMode)
+		if provider.Transport = NormalizeTransport(provider.Transport); provider.Transport == "" {
+			provider.Transport = InferTransport(provider)
+		}
 		if provider.PromptProgressProbed && !PromptProgressObservationValid(provider) {
 			provider.PromptProgressProbed = false
 			provider.PromptProgressSupported = false

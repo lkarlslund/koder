@@ -1,78 +1,19 @@
 package provider
 
 import (
-	"net/url"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 )
 
+// Stored model_preset values; the overlay catalog resolves them.
 const (
 	ModelPresetAuto                   = "auto"
 	ModelPresetDefault                = "default"
 	ModelPresetQwen36PreserveThinking = "qwen3.6-preserve-thinking"
 	ModelPresetQwen38PreserveThinking = "qwen3.8-preserve-thinking"
 )
-
-type ModelPreset struct {
-	ID          string
-	Title       string
-	Description string
-}
-
-var modelPresets = []ModelPreset{
-	{ID: ModelPresetAuto, Title: "Auto", Description: "Match a preset from the selected model name"},
-	{ID: ModelPresetDefault, Title: "Default", Description: "No model-specific request overrides"},
-	{ID: ModelPresetQwen36PreserveThinking, Title: "Qwen 3.6 No Thinking", Description: "Disable Qwen 3.6 hidden reasoning by default on compatible servers"},
-	{ID: ModelPresetQwen38PreserveThinking, Title: "Qwen 3.8 Thinking", Description: "Preserve Qwen 3.8 reasoning across turns on compatible servers"},
-}
-
-func Presets() []ModelPreset {
-	out := make([]ModelPreset, len(modelPresets))
-	copy(out, modelPresets)
-	return out
-}
-
-func LookupPreset(id string) (ModelPreset, bool) {
-	id = normalizePresetID(id)
-	for _, preset := range modelPresets {
-		if preset.ID == id {
-			return preset, true
-		}
-	}
-	return ModelPreset{}, false
-}
-
-func NormalizePresetSelection(id string) string {
-	id = normalizePresetID(id)
-	if _, ok := LookupPreset(id); ok {
-		return id
-	}
-	return ModelPresetAuto
-}
-
-func ResolvePresetID(modelID, selected string) string {
-	selected = NormalizePresetSelection(selected)
-	switch selected {
-	case ModelPresetAuto:
-		return AutoMatchPresetID(modelID)
-	case ModelPresetDefault, ModelPresetQwen36PreserveThinking, ModelPresetQwen38PreserveThinking:
-		return selected
-	default:
-		return ModelPresetDefault
-	}
-}
-
-func AutoMatchPresetID(modelID string) string {
-	if looksLikeQwen36(modelID) {
-		return ModelPresetQwen36PreserveThinking
-	}
-	if looksLikeQwen38(modelID) {
-		return ModelPresetQwen38PreserveThinking
-	}
-	return ModelPresetDefault
-}
 
 func PreserveThinkingEnabled(cfg config.Provider, model config.ModelConfig, catalog modeloverlay.Catalog) bool {
 	resolved := catalog.Resolve(model.ModelID, model.ModelPreset, OverlayTransport(cfg))
@@ -155,17 +96,13 @@ func pointerValue(value *float64) any {
 }
 
 // OverlayTransport names the request dialect available to JSON bindings.
+// Config loading records it per provider; providers built in memory without
+// one fall back to the same inference.
 func OverlayTransport(cfg config.Provider) string {
-	if isDashScopeBaseURL(cfg.BaseURL) {
-		return "dashscope"
+	if transport := config.NormalizeTransport(cfg.Transport); transport != "" {
+		return transport
 	}
-	if looksLikeNinferProvider(cfg) {
-		return "ninfer"
-	}
-	if looksLikeLlamaProvider(cfg) {
-		return "llama"
-	}
-	return "openai"
+	return config.InferTransport(cfg)
 }
 
 func applyCustomExtraBody(body map[string]any, extra map[string]any) {
@@ -188,7 +125,7 @@ func protectedExtraBodyKey(key string) bool {
 }
 
 func WithLlamaPromptCache(body map[string]any, cfg config.Provider) map[string]any {
-	if !looksLikeLlamaProvider(cfg) {
+	if OverlayTransport(cfg) != config.TransportLlama {
 		return body
 	}
 	if body == nil {
@@ -216,67 +153,4 @@ func PromptProgressProbePending(cfg config.Provider) bool {
 
 func PromptProgressRequested(cfg config.Provider) bool {
 	return PromptProgressEnabled(cfg) || PromptProgressProbePending(cfg)
-}
-
-func normalizePresetID(id string) string {
-	id = strings.TrimSpace(strings.ToLower(id))
-	if id == "" {
-		return ModelPresetAuto
-	}
-	return id
-}
-
-func looksLikeQwen36(modelID string) bool {
-	modelID = strings.ToLower(strings.TrimSpace(modelID))
-	if modelID == "" {
-		return false
-	}
-	return strings.Contains(modelID, "qwen3.6")
-}
-
-func looksLikeQwen38(modelID string) bool {
-	modelID = strings.ToLower(strings.TrimSpace(modelID))
-	if modelID == "" {
-		return false
-	}
-	return strings.Contains(modelID, "qwen3.8")
-}
-
-func isDashScopeBaseURL(raw string) bool {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return false
-	}
-	host := strings.ToLower(parsed.Hostname())
-	return strings.Contains(host, "dashscope.aliyuncs.com") || strings.Contains(host, "dashscope-intl.aliyuncs.com")
-}
-
-func looksLikeLlamaProvider(cfg config.Provider) bool {
-	if looksLikeNinferProvider(cfg) {
-		return false
-	}
-	for _, value := range []string{cfg.Kind, cfg.TemplateID, cfg.Name} {
-		if strings.Contains(strings.ToLower(strings.TrimSpace(value)), "llama") {
-			return true
-		}
-	}
-	parsed, err := url.Parse(strings.TrimSpace(cfg.BaseURL))
-	if err != nil {
-		return false
-	}
-	switch strings.ToLower(parsed.Hostname()) {
-	case "localhost", "127.0.0.1", "::1":
-		return true
-	default:
-		return false
-	}
-}
-
-func looksLikeNinferProvider(cfg config.Provider) bool {
-	for _, value := range []string{cfg.TemplateID, cfg.Name} {
-		if strings.Contains(strings.ToLower(strings.TrimSpace(value)), "ninfer") {
-			return true
-		}
-	}
-	return false
 }

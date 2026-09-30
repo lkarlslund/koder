@@ -24,6 +24,7 @@ type Descriptor struct {
 	Title          string
 	Description    string
 	DefaultBaseURL string
+	Transport      string
 	Headers        map[string]string
 	ModelHint      string
 	Local          bool
@@ -39,6 +40,7 @@ type ConnectDraft struct {
 	AuthMethod              string
 	Name                    string
 	BaseURL                 string
+	Transport               string
 	APIKey                  string
 	APIKeyEnv               string
 	Model                   string
@@ -72,7 +74,7 @@ var catalog = []Descriptor{
 	{ID: "perplexity", Title: "Perplexity", Description: "Perplexity chat completions API", DefaultBaseURL: "https://api.perplexity.ai", ModelHint: "sonar"},
 	{ID: "mistral", Title: "Mistral", Description: "Mistral OpenAI-compatible API", DefaultBaseURL: "https://api.mistral.ai/v1", ModelHint: "mistral-large-latest", SupportsImages: true},
 	{ID: "cerebras", Title: "Cerebras", Description: "Cerebras OpenAI-compatible API", DefaultBaseURL: "https://api.cerebras.ai/v1", ModelHint: "llama-4-scout-17b-16e-instruct", SupportsImages: true},
-	{ID: "ollama", Title: "Ollama", Description: "Local Ollama OpenAI-compatible endpoint", DefaultBaseURL: "http://127.0.0.1:11434/v1", ModelHint: "qwen2.5-coder:latest", Local: true, SupportsImages: true},
+	{ID: "ollama", Title: "Ollama", Description: "Local Ollama OpenAI-compatible endpoint", DefaultBaseURL: "http://127.0.0.1:11434/v1", ModelHint: "qwen2.5-coder:latest", Transport: config.TransportOpenAI, Local: true, SupportsImages: true},
 	{ID: "openai-compatible", Title: "OpenAI-compatible", Description: "Any OpenAI-compatible API or gateway", DefaultBaseURL: "https://api.openai.com/v1", ModelHint: "model-id", SupportsImages: true},
 }
 
@@ -103,6 +105,7 @@ func BuildDraft(id string, existing map[string]config.Provider) (ConnectDraft, e
 		Kind:               ProviderKindCompatible,
 		Name:               desc.Title,
 		BaseURL:            desc.DefaultBaseURL,
+		Transport:          desc.Transport,
 		Model:              desc.ModelHint,
 		Stream:             true,
 		Timeout:            2 * time.Minute,
@@ -134,6 +137,7 @@ func BuildDraftForExisting(id string, existing config.Provider) (ConnectDraft, e
 		AuthMethod:              existing.AuthMethod,
 		Name:                    firstNonEmpty(existing.Name, desc.Title),
 		BaseURL:                 firstNonEmpty(existing.BaseURL, desc.DefaultBaseURL),
+		Transport:               existing.Transport,
 		APIKey:                  existing.APIKey,
 		APIKeyEnv:               existing.APIKeyEnv,
 		Model:                   desc.ModelHint,
@@ -156,6 +160,7 @@ func (d ConnectDraft) ToConfig() config.Provider {
 		AuthMethod:              strings.TrimSpace(d.AuthMethod),
 		Name:                    strings.TrimSpace(d.Name),
 		BaseURL:                 strings.TrimSpace(d.BaseURL),
+		Transport:               config.NormalizeTransport(d.Transport),
 		APIKey:                  strings.TrimSpace(d.APIKey),
 		APIKeyEnv:               strings.TrimSpace(d.APIKeyEnv),
 		Headers:                 cloneHeaders(d.Headers),
