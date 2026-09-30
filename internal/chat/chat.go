@@ -1574,14 +1574,15 @@ func (r *Chat) snapshot(includeTimeline bool) Snapshot {
 		return Snapshot{Session: r.session, Chat: r.chat, TimelineHasMore: !r.timelineLoaded || r.timelineHasOlder, TimelineLoadedAll: r.timelineLoaded && !r.timelineHasOlder, Turn: turnForStatus(r.status, r.active, r.cancelState), Status: r.status, StatusText: r.statusText, TokenUsage: r.chat.TokenUsage.Normalized(), Active: r.active}
 	}
 	chatRecord := r.state.Chat()
+	pendingInputCalls := r.state.PendingUserInputCalls()
 	snapshot := Snapshot{
 		Session:           r.session,
 		Chat:              chatRecord,
 		TimelineHasMore:   !r.timelineLoaded || r.timelineHasOlder,
 		TimelineLoadedAll: r.timelineLoaded && !r.timelineHasOlder,
 		Approvals:         r.state.Approvals(),
-		PendingUserInput:  pendingUserInputCount(r.state.SnapshotTimeline()),
-		PendingInputCalls: pendingUserInputCalls(r.state.SnapshotTimeline()),
+		PendingUserInput:  len(pendingInputCalls),
+		PendingInputCalls: pendingInputCalls,
 		QueuedInputs:      visibleQueuedInputs(r.queue),
 		Turn:              turnForStatus(r.status, r.active, r.cancelState),
 		Status:            r.status,

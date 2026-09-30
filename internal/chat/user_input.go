@@ -58,7 +58,7 @@ func (r *Chat) pendingUserInputCalls() ([]domain.ToolCall, error) {
 	if r.state == nil {
 		return nil, nil
 	}
-	return pendingUserInputCalls(r.state.SnapshotTimeline()), nil
+	return r.state.PendingUserInputCalls(), nil
 }
 
 func validateUserInputAnswers(calls []domain.ToolCall, submitted []tools.UserInputAnswer) (map[string][]tools.UserInputAnswer, error) {

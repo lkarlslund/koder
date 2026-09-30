@@ -138,7 +138,7 @@ func (s *ChatState) CurrentContextSize() domain.ContextUsage {
 	if s.chat.ContextTokensKnown {
 		tokens = s.chat.LastKnownContextTokens
 	}
-	if timelineAnchor, ok := timelineContextAnchorTokens(s.SnapshotTimeline()); ok {
+	if timelineAnchor, ok := timelineContextAnchorTokens(s.timelineItems()); ok {
 		tokens = timelineAnchor
 	}
 	if tokens < 0 {
@@ -337,6 +337,31 @@ func isDurableTimelineItem(item domain.TimelineItem) bool {
 	return item.ID != ""
 }
 
+// timelineItems returns the live timeline items without detaching their
+// nested slices, maps, and pointers. Callers must only read the result.
+func (s *ChatState) timelineItems() []domain.TimelineItem {
+	if s == nil {
+		return nil
+	}
+	out := make([]domain.TimelineItem, 0, len(s.timeline))
+	for _, record := range s.timeline {
+		if record != nil {
+			out = append(out, record.Item)
+		}
+	}
+	return out
+}
+
+// PendingUserInputCalls returns detached copies of unresolved interactive
+// questions without cloning the rest of the timeline.
+func (s *ChatState) PendingUserInputCalls() []domain.ToolCall {
+	calls := PendingUserInputCalls(s.timelineItems())
+	for index := range calls {
+		calls[index] = cloneToolCall(calls[index])
+	}
+	return calls
+}
+
 // SnapshotTimeline returns detached timeline values.
 func (s *ChatState) SnapshotTimeline() []domain.TimelineItem {
 	if s == nil {
@@ -367,11 +392,7 @@ func snapshotTimelineItem(item domain.TimelineItem) domain.TimelineItem {
 		content.Error = clonePointer(content.Error)
 		content.Tools = slices.Clone(content.Tools)
 		for index := range content.Tools {
-			tool := &content.Tools[index]
-			tool.Args = cloneStringMap(tool.Args)
-			tool.Result = cloneToolResult(tool.Result)
-			tool.Error = clonePointer(tool.Error)
-			tool.Approval = clonePointer(tool.Approval)
+			content.Tools[index] = cloneToolCall(content.Tools[index])
 		}
 		item.Content = content
 	case domain.ToolExecution:
@@ -387,6 +408,14 @@ func snapshotTimelineItem(item domain.TimelineItem) domain.TimelineItem {
 		item.Content = content
 	}
 	return item
+}
+
+func cloneToolCall(tool domain.ToolCall) domain.ToolCall {
+	tool.Args = cloneStringMap(tool.Args)
+	tool.Result = cloneToolResult(tool.Result)
+	tool.Error = clonePointer(tool.Error)
+	tool.Approval = clonePointer(tool.Approval)
+	return tool
 }
 
 func clonePointer[T any](value *T) *T {

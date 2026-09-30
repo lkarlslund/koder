@@ -1314,12 +1314,23 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 	lastStreamMessage := ""
 	sawFinishReason := false
 	capture := newDebugStreamCapture(8192)
-	updateActiveStream := func(meta map[string]string) {
+	tracingActive := c.recorder != nil && activeRequestID != ""
+	var responseHdrs map[string]string
+	if tracingActive {
+		responseHdrs = redactHeaders(resp.Header)
+	}
+	updateActiveStream := func() {
+		if !tracingActive {
+			return
+		}
 		c.updateActiveHTTP(activeRequestID, debugsrv.HTTPTrace{
 			Status:       resp.StatusCode,
-			ResponseHdrs: redactHeaders(resp.Header),
+			ResponseHdrs: responseHdrs,
 			ResponseBody: capture.String(),
-			Meta:         meta,
+			Meta: map[string]string{
+				"phase":       "streaming",
+				"chunk_count": strconv.Itoa(chunkCount),
+			},
 		})
 	}
 	recordTrace := func(errText string, meta map[string]string) {
@@ -1377,10 +1388,7 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 		}
 
 		capture.Append(line)
-		updateActiveStream(map[string]string{
-			"phase":       "streaming",
-			"chunk_count": strconv.Itoa(chunkCount),
-		})
+		updateActiveStream()
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "data:") {
 			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))

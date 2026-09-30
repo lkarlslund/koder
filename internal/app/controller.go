@@ -1305,7 +1305,11 @@ func (c *Controller) eventForSelectedSession(event sessionpkg.Event, selectedCha
 		if session.ID == "" {
 			session.ID = event.SessionID
 		}
-		update.Snapshot = c.snapshotWithExecProcessesForSession(session, update.Snapshot)
+		// Streamed text and reasoning deltas are sent as item appends, which
+		// never carry exec processes, so skip the per-token process listing.
+		if !isStreamTextEvent(update.Event) {
+			update.Snapshot = c.snapshotWithExecProcessesForSession(session, update.Snapshot)
+		}
 		if update.Status == "" {
 			update.Status = update.Snapshot.Status
 		}
@@ -2967,4 +2971,8 @@ func Touch(now time.Time, chat *domain.Chat) {
 	if chat != nil {
 		chat.UpdatedAt = now
 	}
+}
+
+func isStreamTextEvent(event *domain.Event) bool {
+	return event != nil && (event.Kind == domain.EventKindMessageDelta || event.Kind == domain.EventKindReasoning)
 }
