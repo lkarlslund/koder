@@ -3922,23 +3922,20 @@ func userMessageRequiresImages(user domain.UserMessage) bool {
 }
 
 func toolCallRequiresImages(call domain.ToolCall) bool {
-	if (call.Tool != domain.ToolKindViewImage && call.Tool != domain.ToolKindViewPDF) || call.Result == nil || call.Result.Status != domain.ToolResultStatusOK {
-		return false
-	}
-	return toolResultRequiresImages(call.Tool, call.ToolCallID, call.Args, *call.Result)
+	return call.Result != nil && toolResultRequiresImages(call.Tool, call.ToolCallID, call.Args, *call.Result)
 }
 
 func toolExecutionRequiresImages(execution domain.ToolExecution) bool {
-	isImageTool := execution.Tool == domain.ToolKindViewImage || execution.Tool == domain.ToolKindViewPDF || execution.Tool == domain.ToolKindBrowserScreenshot || execution.Tool == domain.ToolKindBrowserImage ||
-		(execution.Tool == domain.ToolKindBrowserCapture && (execution.Args["action"] == "screenshot" || execution.Args["action"] == "image"))
-	if !isImageTool || execution.Result == nil || execution.Result.Status != domain.ToolResultStatusOK {
-		return false
-	}
-	return toolResultRequiresImages(execution.Tool, execution.ToolCallID, execution.Args, *execution.Result)
+	return execution.Result != nil && toolResultRequiresImages(execution.Tool, execution.ToolCallID, execution.Args, *execution.Result)
 }
 
+// toolResultRequiresImages reports whether a successful tool result gives
+// the model an image, which the chat's model must then accept.
 func toolResultRequiresImages(tool domain.ToolKind, toolCallID domain.ToolCallID, args map[string]string, result domain.ToolResult) bool {
-	part := domain.Part{
+	if result.Status != domain.ToolResultStatusOK {
+		return false
+	}
+	_, ok := tools.ModelImageForPart(domain.Part{
 		Kind: domain.PartKindToolOutput,
 		Payload: domain.ToolOutputPayload{
 			Tool:       tool,
@@ -3949,14 +3946,8 @@ func toolResultRequiresImages(tool domain.ToolKind, toolCallID domain.ToolCallID
 			Diff:       result.Diff,
 			Result:     result.Data,
 		},
-	}
-	stored, ok := tools.ViewImageStoredResultForPart(part)
-	if ok {
-		return strings.TrimSpace(stored.SourcePath) != "" || strings.TrimSpace(stored.Path) != "" ||
-			(stored.Attachment != nil && strings.TrimSpace(stored.Attachment.ID) != "" && strings.TrimSpace(stored.SessionID) != "")
-	}
-	browserResult, ok := tools.BrowserStoredResultForPart(part)
-	return ok && browserResult.Attachment != nil && attachment.ClassifyMIME(browserResult.Attachment.MIME) == attachment.KindImage
+	})
+	return ok
 }
 
 func (r *Chat) appendPersistedInterruptNotice(ctx context.Context, reason string) error {

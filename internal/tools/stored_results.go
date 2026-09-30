@@ -856,6 +856,39 @@ func BrowserStoredResultForPart(part domain.Part) (BrowserStoredResult, bool) {
 	return result, true
 }
 
+// ModelImage is an image a tool result hands to the model: inline Data, or
+// a file at SourcePath, or an Attachment in SessionID's attachment store.
+type ModelImage struct {
+	Data       []byte
+	SourcePath string
+	SessionID  string
+	Attachment *attachment.Metadata
+	MIMEType   string
+}
+
+// ModelImageForPart returns the image a tool result gives the model, if any.
+// It is the one definition of which tool results carry images: MCP image
+// content, view_image and view_pdf results, and browser captures.
+func ModelImageForPart(part domain.Part) (ModelImage, bool) {
+	if data, mimeType, ok := MCPImageStoredResultForPart(part); ok {
+		return ModelImage{Data: data, MIMEType: mimeType}, true
+	}
+	if stored, ok := ViewImageStoredResultForPart(part); ok {
+		image := ModelImage{
+			SourcePath: strings.TrimSpace(stored.SourcePath),
+			SessionID:  strings.TrimSpace(stored.SessionID),
+			Attachment: stored.Attachment,
+			MIMEType:   strings.TrimSpace(stored.MIMEType),
+		}
+		hasAttachment := image.Attachment != nil && strings.TrimSpace(image.Attachment.ID) != "" && image.SessionID != ""
+		return image, image.SourcePath != "" || hasAttachment
+	}
+	if browser, ok := BrowserStoredResultForPart(part); ok && attachment.ClassifyMIME(browser.Attachment.MIME) == attachment.KindImage {
+		return ModelImage{SourcePath: browser.Attachment.Path, MIMEType: browser.Attachment.MIME}, true
+	}
+	return ModelImage{}, false
+}
+
 func ShowImageStoredResultForPart(part domain.Part) (ShowImageStoredResult, bool) {
 	env, ok := storedResultFromPart(part)
 	if !ok || env.PartKind != domain.PartKindToolOutput || env.Tool != ShowImage {

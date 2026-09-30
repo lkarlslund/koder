@@ -631,32 +631,22 @@ func ResolveReference(session domain.Session, meta reference.Metadata) (string, 
 }
 
 func (r *Runtime) toolImageMessage(chat domain.Chat, part domain.Part, toolCallID string, body string) (provider.Message, bool) {
-	if data, _, ok := tools.MCPImageStoredResultForPart(part); ok {
-		if !r.chatSupportsImageAttachments(chat) {
-			return provider.Message{}, false
-		}
-		data, mimeType, err := attachment.PrepareImage(data)
+	image, ok := tools.ModelImageForPart(part)
+	if !ok || !r.chatSupportsImageAttachments(chat) {
+		return provider.Message{}, false
+	}
+	if len(image.Data) > 0 {
+		data, mimeType, err := attachment.PrepareImage(image.Data)
 		if err != nil {
 			return provider.Message{}, false
 		}
 		return toolMessageWithImage(toolCallID, body, mimeType, data), true
 	}
-	stored, ok := tools.ViewImageStoredResultForPart(part)
-	sourcePath, mimeType := strings.TrimSpace(stored.SourcePath), strings.TrimSpace(stored.MIMEType)
-	if ok && sourcePath == "" && stored.Attachment != nil && r.files != nil {
-		sourcePath, _ = r.files.SessionFile(id.ID(stored.SessionID), stored.Attachment.ID)
+	sourcePath := image.SourcePath
+	if sourcePath == "" && image.Attachment != nil && r.files != nil {
+		sourcePath, _ = r.files.SessionFile(id.ID(image.SessionID), image.Attachment.ID)
 	}
-	if !ok {
-		browserResult, browserOK := tools.BrowserStoredResultForPart(part)
-		if !browserOK || browserResult.Attachment == nil || attachment.ClassifyMIME(browserResult.Attachment.MIME) != attachment.KindImage {
-			return provider.Message{}, false
-		}
-		sourcePath, mimeType = browserResult.Attachment.Path, browserResult.Attachment.MIME
-	}
-	if !r.chatSupportsImageAttachments(chat) {
-		return provider.Message{}, false
-	}
-	if sourcePath == "" || mimeType == "" {
+	if sourcePath == "" || image.MIMEType == "" {
 		return provider.Message{}, false
 	}
 	data, mimeType, err := attachment.LoadImage(sourcePath)
