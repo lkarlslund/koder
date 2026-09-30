@@ -168,7 +168,7 @@ func TestRecorderTracksSessionEventsAndRuntime(t *testing.T) {
 	rec.UpdateProcess(ProcessDebug{Status: "Ready"})
 	rec.UpdateSubsystemHealth("memory", SubsystemHealth{Status: "ready", Enabled: true, Available: true, Backend: "pebble", SchemaVersion: 1, IndexGeneration: 2})
 	rec.RegisterClient(ClientDebug{ID: "client-1", SelectedSession: "session-7", SelectedChat: "chat-9", ViewportWidth: 80})
-	rec.UpdateChats([]ChatDebug{{ID: "chat-9", SessionID: "session-7", Status: "idle"}})
+	rec.SetChatSource(func() []ChatDebug { return []ChatDebug{{ID: "chat-9", SessionID: "session-7", Status: "idle"}} })
 
 	events := rec.Events("session-7")
 	if len(events) != 2 {
@@ -685,14 +685,16 @@ func TestServerExposesSessionHydrationDebug(t *testing.T) {
 
 	rec := NewRecorder()
 	rec.RegisterClient(ClientDebug{ID: "client-1", SelectedSession: sessionID, SelectedChat: defaultChatID})
-	rec.UpdateChats([]ChatDebug{{
-		ID:               defaultChatID,
-		SessionID:        sessionID,
-		Title:            "Main",
-		Status:           "idle",
-		QueueLen:         0,
-		PendingApprovals: 0,
-	}})
+	rec.SetChatSource(func() []ChatDebug {
+		return []ChatDebug{{
+			ID:               defaultChatID,
+			SessionID:        sessionID,
+			Title:            "Main",
+			Status:           "idle",
+			QueueLen:         0,
+			PendingApprovals: 0,
+		}}
+	})
 	source := &fakeSource{sessions: []SessionDebug{{
 		ID:                  sessionID,
 		Title:               "debug",
@@ -829,7 +831,7 @@ func TestServerExposesClientsAndChats(t *testing.T) {
 
 	rec := NewRecorder()
 	rec.RegisterClient(ClientDebug{ID: "client-1", SelectedSession: "session-7", SelectedChat: "chat-9", TimelineItemsLoaded: 42})
-	rec.UpdateChats([]ChatDebug{{ID: "chat-9", SessionID: "session-7", Status: "idle"}})
+	rec.SetChatSource(func() []ChatDebug { return []ChatDebug{{ID: "chat-9", SessionID: "session-7", Status: "idle"}} })
 	srv := httptest.NewServer(Handler(nil, rec))
 	defer srv.Close()
 
@@ -916,18 +918,20 @@ func TestRuntimeDebugSeparatesClientAndChatState(t *testing.T) {
 		InterruptVisible: true,
 		InterruptArmed:   true,
 	})
-	recorder.UpdateChats([]ChatDebug{{
-		ID:               "chat-9",
-		SessionID:        "session-7",
-		Title:            "Main",
-		Status:           "streaming_response",
-		StatusText:       "Streaming LLM response ...",
-		Active:           true,
-		Busy:             true,
-		QueueLen:         2,
-		PendingApprovals: 1,
-		RunningToolCalls: 3,
-	}})
+	recorder.SetChatSource(func() []ChatDebug {
+		return []ChatDebug{{
+			ID:               "chat-9",
+			SessionID:        "session-7",
+			Title:            "Main",
+			Status:           "streaming_response",
+			StatusText:       "Streaming LLM response ...",
+			Active:           true,
+			Busy:             true,
+			QueueLen:         2,
+			PendingApprovals: 1,
+			RunningToolCalls: 3,
+		}}
+	})
 
 	runtime := recorder.Runtime()
 	if runtime.Process.Status != "Web UI running" {

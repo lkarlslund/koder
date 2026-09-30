@@ -1541,8 +1541,10 @@ func TestWebSocketHelloReturnsState(t *testing.T) {
 	if len(clients) != 1 || clients[0].ID != clientID || !clients[0].Connected {
 		t.Fatalf("expected registered debug client %q, got %#v", clientID, clients)
 	}
-	if chats := recorder.Chats(); len(chats) != 0 {
-		t.Fatalf("expected welcome hello to avoid activating debug chats, got %#v", chats)
+	for _, chat := range recorder.Chats() {
+		if chat.SessionID != sessions.Sessions[0].ID {
+			t.Fatalf("expected hello to activate only the selected session, got live chat %#v", chat)
+		}
 	}
 }
 

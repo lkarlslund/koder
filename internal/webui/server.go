@@ -142,6 +142,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 		memoryRequestTimeout: defaultMemoryRequestTimeout,
 		memoryBrowserToken:   memoryBrowserToken,
 	}
+	s.debug.SetChatSource(controller.DebugChats)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/favicon.ico", handleFavicon)
@@ -610,7 +611,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			RemoteAddr: r.RemoteAddr,
 			UserAgent:  r.UserAgent(),
 		})
-		s.updateDebugChats()
 		defer s.debug.UnregisterClient(clientID)
 	}
 	defer s.deleteClientSelection(clientID)
@@ -701,7 +701,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			streamTimerC = streamTimer.C
 		}
 		writeEvent := func(webEvent app.Event) bool {
-			s.updateDebugChats()
 			size, err := writeJSON(ctx, conn, &writeMu, webEvent)
 			if err != nil {
 				slog.Info("websocket closed while writing event", "client", clientID, "type", webEvent.Type, "error", err)
@@ -797,7 +796,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 		s.recordWebSocketWrite(clientID, "rpc_response", size)
 		if err == nil {
-			s.updateDebugChats()
 		}
 		if establishesBaseline {
 			s.sendSelectedGitDiff(ctx, conn, &writeMu, clientID)
@@ -910,7 +908,6 @@ func (s *Server) handleHTTPRPC(w http.ResponseWriter, r *http.Request) {
 	result, err := s.handleRPC(r.Context(), clientID, req.Method, req.Params)
 	if err == nil {
 		s.updateClientSelectionFromResult(clientID, result)
-		s.updateDebugChats()
 	}
 	resp := rpcResponse{ID: req.ID, OK: err == nil, Result: result}
 	if err != nil {
@@ -2401,69 +2398,6 @@ func websocketUsesGlobalControllerEvent(typ string) bool {
 	default:
 		return true
 	}
-}
-
-func (s *Server) updateDebugChats() {
-	if s == nil || s.debug == nil || s.controller == nil {
-		return
-	}
-	s.debug.UpdateChats(chatDebugFromState(s.controller.State()))
-}
-
-func chatDebugFromState(state app.State) []debugsrv.ChatDebug {
-	statuses := make(map[id.ID]app.ChatSidebarStatus, len(state.ChatStatuses))
-	for _, status := range state.ChatStatuses {
-		statuses[status.ChatID] = status
-	}
-	out := make([]debugsrv.ChatDebug, 0, len(state.Chats))
-	for _, item := range state.Chats {
-		if item.ID == "" {
-			continue
-		}
-		snapshot := state.Snapshots[item.ID]
-		status := statuses[item.ID]
-		value := status.Status
-		if value == "" {
-			value = string(snapshot.Status)
-		}
-		text := status.StatusText
-		if text == "" {
-			text = snapshot.StatusText
-		}
-		queue := snapshot.QueuedInputs
-		if queue == nil {
-			queue = item.QueuedInputs
-		}
-		out = append(out, debugsrv.ChatDebug{
-			ID:               item.ID,
-			SessionID:        item.SessionID,
-			Title:            item.Title,
-			Status:           value,
-			StatusText:       text,
-			Active:           snapshot.Active,
-			Busy:             status.Busy || snapshot.Active,
-			QueueLen:         len(queue),
-			PendingApprovals: len(snapshot.Approvals),
-			RunningToolCalls: runningToolCalls(snapshot.Timeline),
-		})
-	}
-	return out
-}
-
-func runningToolCalls(timeline []domain.TimelineItem) int {
-	var count int
-	for _, item := range timeline {
-		message, ok := item.Content.(domain.AssistantMessage)
-		if !ok {
-			continue
-		}
-		for _, tool := range message.Tools {
-			if tool.Status == domain.ToolStatusRunning {
-				count++
-			}
-		}
-	}
-	return count
 }
 
 type rpcHello struct {

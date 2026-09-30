@@ -38,6 +38,60 @@ func (c *Controller) DebugSessions(ctx context.Context, runtime debugsrv.Runtime
 	return out, nil
 }
 
+// DebugChats summarizes the loaded chat runtimes for the debug API.
+func (c *Controller) DebugChats() []debugsrv.ChatDebug {
+	if c == nil || c.agent == nil {
+		return nil
+	}
+	var out []debugsrv.ChatDebug
+	for _, owner := range c.agent.LoadedSessions() {
+		if owner == nil {
+			continue
+		}
+		snapshot := owner.Snapshot()
+		for _, chatRecord := range snapshot.Chats {
+			live, ok := snapshot.Snapshots[chatRecord.ID]
+			if !ok {
+				continue
+			}
+			queue := live.QueuedInputs
+			if queue == nil {
+				queue = chatRecord.QueuedInputs
+			}
+			out = append(out, debugsrv.ChatDebug{
+				ID:               chatRecord.ID,
+				SessionID:        chatRecord.SessionID,
+				Title:            chatRecord.Title,
+				Status:           string(live.Status),
+				StatusText:       live.StatusText,
+				Active:           live.Active,
+				Busy:             live.Active,
+				QueueLen:         len(queue),
+				PendingApprovals: len(live.Approvals),
+				RunningToolCalls: runningToolCalls(live.Timeline),
+			})
+		}
+	}
+	slices.SortFunc(out, func(a, b debugsrv.ChatDebug) int { return strings.Compare(string(a.ID), string(b.ID)) })
+	return out
+}
+
+func runningToolCalls(timeline []domain.TimelineItem) int {
+	var count int
+	for _, item := range timeline {
+		message, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		for _, tool := range message.Tools {
+			if tool.Status == domain.ToolStatusRunning {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 func (c *Controller) DebugSession(ctx context.Context, sessionID id.ID, runtime debugsrv.RuntimeDebug) (debugsrv.SessionDetail, error) {
 	owner, err := c.debugOwner(ctx, sessionID)
 	if err != nil {

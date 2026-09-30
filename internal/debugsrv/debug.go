@@ -298,7 +298,7 @@ type Recorder struct {
 	maxHTTP       int
 	process       ProcessDebug
 	clients       map[string]ClientDebug
-	chats         map[id.ID]ChatDebug
+	chatSource    func() []ChatDebug
 	events        []RecordedEvent
 	sessionEvents map[id.ID][]RecordedEvent
 	httpTraces    []HTTPTrace
@@ -318,7 +318,6 @@ func NewRecorder() *Recorder {
 		maxEvents:     defaultMaxLogs,
 		maxHTTP:       defaultMaxHTTP,
 		clients:       map[string]ClientDebug{},
-		chats:         map[id.ID]ChatDebug{},
 		sessionEvents: map[id.ID][]RecordedEvent{},
 		lastHTTPBody:  map[string]string{},
 		activeHTTP:    map[id.ID]activeHTTPTrace{},
@@ -820,26 +819,32 @@ func (r *Recorder) UnregisterClient(clientID string) {
 	r.clients[clientID] = client
 }
 
-func (r *Recorder) UpdateChats(chats []ChatDebug) {
+// SetChatSource sets how the recorder lists live chat runtimes. The source is
+// called only when a debug endpoint asks for chats.
+func (r *Recorder) SetChatSource(source func() []ChatDebug) {
 	if r == nil {
 		return
 	}
-	next := make(map[id.ID]ChatDebug, len(chats))
-	for _, chat := range chats {
-		if chat.ID == "" {
-			continue
-		}
-		next[chat.ID] = chat
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.chats = next
+	r.chatSource = source
+}
+
+func (r *Recorder) liveChats() []ChatDebug {
+	r.mu.RLock()
+	source := r.chatSource
+	r.mu.RUnlock()
+	if source == nil {
+		return nil
+	}
+	return source()
 }
 
 func (r *Recorder) Runtime() RuntimeDebug {
 	if r == nil {
 		return RuntimeDebug{}
 	}
+	chats := r.liveChats()
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	process := r.process
@@ -849,7 +854,6 @@ func (r *Recorder) Runtime() RuntimeDebug {
 		process.Build = version.Current()
 	}
 	clients := cloneClients(r.clients)
-	chats := cloneChats(r.chats)
 	process.WebsocketClientCount = connectedClientCount(clients)
 	return RuntimeDebug{
 		Process:    process,
@@ -894,19 +898,19 @@ func (r *Recorder) Chats() []ChatDebug {
 	if r == nil {
 		return nil
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return cloneChats(r.chats)
+	return r.liveChats()
 }
 
 func (r *Recorder) Chat(chatID id.ID) (ChatDebug, bool) {
 	if r == nil {
 		return ChatDebug{}, false
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	chat, ok := r.chats[chatID]
-	return chat, ok
+	for _, chat := range r.liveChats() {
+		if chat.ID == chatID {
+			return chat, true
+		}
+	}
+	return ChatDebug{}, false
 }
 
 func (r *Recorder) Events(sessionID id.ID) []RecordedEvent {
@@ -1721,18 +1725,6 @@ func cloneClients(src map[string]ClientDebug) []ClientDebug {
 		return nil
 	}
 	out := make([]ClientDebug, 0, len(src))
-	for _, item := range src {
-		out = append(out, item)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
-}
-
-func cloneChats(src map[id.ID]ChatDebug) []ChatDebug {
-	if len(src) == 0 {
-		return nil
-	}
-	out := make([]ChatDebug, 0, len(src))
 	for _, item := range src {
 		out = append(out, item)
 	}
