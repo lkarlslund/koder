@@ -69,6 +69,20 @@ func (s *Source) ListRecordsForSession(ctx context.Context, sessionID id.ID) ([]
 	return listRecordsForSession(ctx, deps.Store, sessionID)
 }
 
+// ListAutoRestartRecords returns chats that a process restart interrupted
+// and that should resume when koder starts again.
+func (s *Source) ListAutoRestartRecords(ctx context.Context) ([]domain.Chat, error) {
+	deps, err := s.currentDeps()
+	if err != nil {
+		return nil, err
+	}
+	chats, err := chatCollection(deps.Store).List(ctx, store.All[domain.Chat]())
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(chats, func(chat domain.Chat) bool { return !chat.AutoRestart }), nil
+}
+
 func (s *Source) DefaultRecord(ctx context.Context, sessionID id.ID) (domain.Chat, error) {
 	deps, err := s.currentDeps()
 	if err != nil {

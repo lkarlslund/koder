@@ -177,6 +177,12 @@ func (r *Registry) List(ctx context.Context) ([]domain.Session, error) {
 	return listSessionRecords(ctx, r.store)
 }
 
+// AutoRestartChats returns persisted chats interrupted by a process restart
+// without loading their sessions.
+func (r *Registry) AutoRestartChats(ctx context.Context) ([]domain.Chat, error) {
+	return r.chatsSrc.ListAutoRestartRecords(ctx)
+}
+
 func (r *Registry) Create(ctx context.Context, title, projectRoot string, createProjectRoot bool) (*Session, error) {
 	return r.create(ctx, title, projectRoot, createProjectRoot, "", domain.SessionKindRegular, false, chatrole.Orchestrator)
 }

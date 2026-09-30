@@ -2055,10 +2055,11 @@ func TestControllerAccessSettingsPersistBySession(t *testing.T) {
 
 	engine := agent.New(cfg, st, nil, nil)
 	next := New(cfg, engine)
-	if err := next.loadSession(context.Background(), sessionID, ""); err != nil {
-		t.Fatalf("start next controller: %v", err)
+	state, err := next.StateForSelection(context.Background(), Selection{SessionID: sessionID})
+	if err != nil {
+		t.Fatalf("select session in next controller: %v", err)
 	}
-	if got := next.State().Access.Settings.Network; got {
+	if got := state.Access.Settings.Network; got {
 		t.Fatalf("expected access settings to persist with network disabled")
 	}
 }
@@ -2881,8 +2882,11 @@ func activateTestSession(t *testing.T, ctrl *Controller, projectRoot string) dom
 	if err != nil {
 		t.Fatalf("create test session: %v", err)
 	}
-	if err := ctrl.loadSession(context.Background(), session.ID, ""); err != nil {
+	if _, err := ctrl.StateForSelection(context.Background(), Selection{SessionID: session.ID}); err != nil {
 		t.Fatalf("activate test session: %v", err)
+	}
+	if err := ctrl.EnsureSessionWorkspace(context.Background(), session.ID); err != nil {
+		t.Fatalf("watch test session workspace: %v", err)
 	}
 	return session
 }
@@ -3610,4 +3614,86 @@ func TestNewestSessionUsesUpdatedAtThenID(t *testing.T) {
 	if got.ID != "session-2" {
 		t.Fatalf("expected newest session 2, got %s", got.ID)
 	}
+}
+
+func newestSession(sessions []domain.Session) domain.Session {
+	var best domain.Session
+	for _, item := range sessions {
+		if item.ID == "" {
+			continue
+		}
+		if best.ID == "" || item.UpdatedAt.After(best.UpdatedAt) || (item.UpdatedAt.Equal(best.UpdatedAt) && item.ID > best.ID) {
+			best = item
+		}
+	}
+	return best
+}
+
+func TestControllerStartResumesRestartInterruptedChats(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	session, err := modeltest.CreateSession(ctx, st, "restart", "test", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interrupted, err := modeltest.DefaultChat(ctx, st, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	untouched, err := modeltest.CreateChat(ctx, st, session.ID, "untouched", chatrole.General, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, chatID := range []id.ID{interrupted.ID, untouched.ID} {
+		call := domain.ToolCall{ToolCallID: domain.ToolCallID("call-" + string(chatID)), Tool: domain.ToolKindFileRead, Args: map[string]string{"path": "README.md"}, Status: domain.ToolStatusPending}
+		if _, err := modeltest.AppendAssistantToolCalls(ctx, st, chatID, []domain.ToolCall{call}, "", domain.Usage{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	interrupted.AutoRestart = true
+	if err := modeltest.ChatCollection(st).Put(ctx, interrupted); err != nil {
+		t.Fatal(err)
+	}
+
+	ctrl := New(cfg, agent.New(cfg, st, nil, nil))
+	if err := ctrl.Start(ctx, StartupModeNew, t.TempDir()); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
+	t.Cleanup(func() { _ = ctrl.ShutdownWithCancelReason(context.Background(), chat.CancelReasonShutdownInterrupt) })
+
+	stored, err := modeltest.ChatCollection(st).Get(ctx, string(interrupted.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AutoRestart {
+		t.Fatal("expected auto-restart flag to be cleared after resume")
+	}
+	if got := firstToolCall(t, st, interrupted.ID); got.Status != domain.ToolStatusErrored || got.Error == nil || got.Error.Message != processRestartToolFailure {
+		t.Fatalf("expected interrupted tool call to fail with restart message, got %#v", got)
+	}
+	if got := firstToolCall(t, st, untouched.ID); got.Status != domain.ToolStatusPending {
+		t.Fatalf("expected chat without auto-restart to be left alone, got %#v", got)
+	}
+}
+
+func firstToolCall(t *testing.T, st *store.Store, chatID id.ID) domain.ToolCall {
+	t.Helper()
+	items, err := modeltest.TimelineForChat(context.Background(), st, chatID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if assistant, ok := item.Content.(domain.AssistantMessage); ok && len(assistant.Tools) > 0 {
+			return assistant.Tools[0]
+		}
+	}
+	t.Fatalf("chat %s has no tool calls", chatID)
+	return domain.ToolCall{}
 }

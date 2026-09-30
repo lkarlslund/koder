@@ -122,6 +122,14 @@ func (e *Engine) Sessions(ctx context.Context) ([]domain.Session, error) {
 	return e.registry.List(ctx)
 }
 
+// AutoRestartChats returns persisted chats interrupted by a process restart.
+func (e *Engine) AutoRestartChats(ctx context.Context) ([]domain.Chat, error) {
+	if e == nil || e.registry == nil {
+		return nil, fmt.Errorf("session registry is required")
+	}
+	return e.registry.AutoRestartChats(ctx)
+}
+
 // CreateSession creates, configures, and loads a live session owner.
 func (e *Engine) CreateSession(ctx context.Context, title, projectRoot string, createProjectRoot bool) (*sessionpkg.Session, error) {
 	if e == nil || e.registry == nil {

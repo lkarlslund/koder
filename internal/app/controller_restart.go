@@ -9,49 +9,17 @@ import (
 )
 
 const processRestartToolFailure = "Tool execution failed because koder restarted before the tool completed."
-const processStartupRunningToolFailure = "Tool execution failed because koder restarted while the tool was running."
 
-func (c *Controller) autoResumeRestartInterruptedChats(runtimes map[id.ID]*chat.Chat, snapshots map[id.ID]chat.Snapshot) {
-	for id, snapshot := range snapshots {
-		if !snapshot.Chat.AutoRestart {
-			continue
-		}
-		rt := runtimes[id]
-		if rt == nil {
-			continue
-		}
-		_ = rt.ClearAutoRestart(context.Background())
-		if !shouldAutoResumeRestartInterrupted(snapshot) {
-			continue
-		}
-		if !hasContinueQueued(snapshot) {
-			rt.Enqueue(chat.QueueItem{Kind: chat.QueueKindContinue, Source: domain.UserMessageSourceAutoResume})
-		}
+// resumeRestartInterruptedChats resumes chats that a process restart
+// interrupted. Sessions stay lazily activated: only sessions owning an
+// interrupted chat are loaded. Tool calls that were in flight are failed so
+// the resumed turn starts from a settled transcript.
+func (c *Controller) resumeRestartInterruptedChats(ctx context.Context) error {
+	chats, err := c.agent.AutoRestartChats(ctx)
+	if err != nil {
+		return err
 	}
-}
-
-func (c *Controller) failStartupRunningToolCallsOnce(ctx context.Context, chats []domain.Chat) error {
-	c.mu.Lock()
-	if c.clearedStartupRunningTools {
-		c.mu.Unlock()
-		return nil
-	}
-	c.clearedStartupRunningTools = true
-	c.mu.Unlock()
-	for sessionID, chatIDs := range groupChatIDsBySession(chats, false) {
-		owner, err := c.agent.LoadSession(ctx, sessionID)
-		if err != nil {
-			return err
-		}
-		if _, err := owner.FailRunningToolCalls(ctx, chatIDs, processStartupRunningToolFailure); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (c *Controller) failProcessInterruptedToolCalls(ctx context.Context, chats []domain.Chat) error {
-	for sessionID, chatIDs := range groupChatIDsBySession(chats, true) {
+	for sessionID, chatIDs := range groupChatIDsBySession(chats) {
 		owner, err := c.agent.LoadSession(ctx, sessionID)
 		if err != nil {
 			return err
@@ -59,29 +27,35 @@ func (c *Controller) failProcessInterruptedToolCalls(ctx context.Context, chats 
 		if _, err := owner.FailInterruptedToolCalls(ctx, chatIDs, processRestartToolFailure); err != nil {
 			return err
 		}
+		for _, chatID := range chatIDs {
+			rt, err := owner.Chat(ctx, chatID)
+			if err != nil {
+				return err
+			}
+			resumeRestartInterruptedChat(ctx, rt)
+		}
 	}
 	return nil
 }
 
-func groupChatIDsBySession(chats []domain.Chat, autoRestartOnly bool) map[id.ID][]id.ID {
+func resumeRestartInterruptedChat(ctx context.Context, rt *chat.Chat) {
+	snapshot := rt.Snapshot()
+	_ = rt.ClearAutoRestart(ctx)
+	if !snapshot.Active && snapshot.Status != chat.StatusWaitingApproval && !hasContinueQueued(snapshot) {
+		rt.Enqueue(chat.QueueItem{Kind: chat.QueueKindContinue, Source: domain.UserMessageSourceAutoResume})
+	}
+	rt.Kick()
+}
+
+func groupChatIDsBySession(chats []domain.Chat) map[id.ID][]id.ID {
 	grouped := map[id.ID][]id.ID{}
 	for _, chatRecord := range chats {
 		if chatRecord.SessionID == "" || chatRecord.ID == "" {
 			continue
 		}
-		if autoRestartOnly && !chatRecord.AutoRestart {
-			continue
-		}
 		grouped[chatRecord.SessionID] = append(grouped[chatRecord.SessionID], chatRecord.ID)
 	}
 	return grouped
-}
-
-func shouldAutoResumeRestartInterrupted(snapshot chat.Snapshot) bool {
-	if snapshot.Active || snapshot.Status == chat.StatusWaitingApproval {
-		return false
-	}
-	return snapshot.Chat.AutoRestart
 }
 
 func hasContinueQueued(snapshot chat.Snapshot) bool {

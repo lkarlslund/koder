@@ -577,7 +577,6 @@ type Controller struct {
 	lastErr                     string
 	restartNeeded               bool
 	restartBuild                RestartBuildInfo
-	clearedStartupRunningTools  bool
 	providerHealth              *provider.HealthTracker
 	memoryEventMu               sync.Mutex
 	memoryEventUnsubscribe      func()
@@ -873,6 +872,9 @@ func (c *Controller) Start(ctx context.Context, mode StartupMode, projectRoot st
 	c.lastErr = ""
 	c.mu.Unlock()
 	c.warmConfiguredModelDetection(ctx)
+	if err := c.resumeRestartInterruptedChats(ctx); err != nil {
+		slog.Warn("resume restart-interrupted chats failed", "error", err)
+	}
 	return nil
 }
 
@@ -2566,95 +2568,6 @@ func blankAsDash(value string) string {
 	return value
 }
 
-func (c *Controller) loadSession(ctx context.Context, sessionID, chatID id.ID) error {
-	if c.agent == nil {
-		return fmt.Errorf("no chat agent")
-	}
-	owner, err := c.agent.LoadSession(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	ownerSnapshot := owner.Snapshot()
-	session := ownerSnapshot.Session
-	if session.ID == "" {
-		return fmt.Errorf("session %s not found", sessionID)
-	}
-	if !c.sessionInWorkspace(session) {
-		return fmt.Errorf("session %s does not belong to this workspace", sessionID)
-	}
-	chats := ownerSnapshot.Chats
-	if err := c.failStartupRunningToolCallsOnce(ctx, chats); err != nil {
-		return err
-	}
-	if err := c.failProcessInterruptedToolCalls(ctx, chats); err != nil {
-		return err
-	}
-	ownerSnapshot = owner.Snapshot()
-	chats = ownerSnapshot.Chats
-	var chatRecord domain.Chat
-	if chatID != "" {
-		var ok bool
-		chatRecord, ok = chatByID(chats, chatID)
-		if !ok {
-			return fmt.Errorf("chat %s not found", chatID)
-		}
-		if chatRecord.SessionID != session.ID {
-			return fmt.Errorf("chat %s does not belong to session %s", chatID, session.ID)
-		}
-		chatRecord, err = owner.EnsureChatModel(ctx, chatRecord.ID, c.cfg.Defaults.ProviderID, c.cfg.Defaults.ModelID)
-		if err != nil {
-			return err
-		}
-	} else {
-		chatRecord = newestChat(chats)
-		if chatRecord.ID == "" {
-			chatRecord, err = owner.EnsureDefaultChat(ctx)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	c.ensureModelConfig(ctx, chatRecord.ProviderID, chatRecord.ModelID)
-	session, chatRecord, chats, err = owner.TouchSelection(ctx, chatRecord.ID)
-	if err != nil {
-		return err
-	}
-	chatRecord.PermissionProfile = ""
-	rt, err := owner.Chat(ctx, chatRecord.ID)
-	if err != nil {
-		return err
-	}
-	runtimes := map[id.ID]*chat.Chat{chatRecord.ID: rt}
-	for _, item := range chats {
-		if !item.AutoRestart || item.ID == chatRecord.ID {
-			continue
-		}
-		loaded, err := owner.Chat(ctx, item.ID)
-		if err != nil {
-			return err
-		}
-		runtimes[item.ID] = loaded
-	}
-	ownerSnapshot = owner.Snapshot()
-	snapshots := make(map[id.ID]chat.Snapshot, len(ownerSnapshot.Snapshots)+1)
-	for id, snapshot := range ownerSnapshot.Snapshots {
-		snapshots[id] = snapshot
-	}
-	if _, ok := snapshots[chatRecord.ID]; !ok {
-		snapshots[chatRecord.ID] = rt.Snapshot()
-	}
-	c.mu.Lock()
-	c.lastErr = ""
-	c.mu.Unlock()
-
-	c.ensureSessionWorkspace(owner)
-	c.autoResumeRestartInterruptedChats(runtimes, snapshots)
-	for _, loaded := range runtimes {
-		loaded.Kick()
-	}
-	return nil
-}
-
 func (c *Controller) workspaceSessions(ctx context.Context) ([]domain.Session, error) {
 	if c.agent == nil {
 		return nil, fmt.Errorf("no chat agent")
@@ -2916,32 +2829,6 @@ func (c *Controller) modelInfoForChat(chatRecord domain.Chat) ModelInfo {
 	info.CapabilitiesKnown = enriched.CapabilitiesKnown
 	info.CapabilitySource = strings.TrimSpace(enriched.CapabilitySource)
 	return info
-}
-
-func newestSession(sessions []domain.Session) domain.Session {
-	var best domain.Session
-	for _, item := range sessions {
-		if item.ID == "" {
-			continue
-		}
-		if best.ID == "" || item.UpdatedAt.After(best.UpdatedAt) || (item.UpdatedAt.Equal(best.UpdatedAt) && item.ID > best.ID) {
-			best = item
-		}
-	}
-	return best
-}
-
-func newestChat(chats []domain.Chat) domain.Chat {
-	var best domain.Chat
-	for _, item := range chats {
-		if item.ID == "" {
-			continue
-		}
-		if best.ID == "" || item.UpdatedAt.After(best.UpdatedAt) || (item.UpdatedAt.Equal(best.UpdatedAt) && item.ID > best.ID) {
-			best = item
-		}
-	}
-	return best
 }
 
 func newestOpenChat(chats []domain.Chat) domain.Chat {
