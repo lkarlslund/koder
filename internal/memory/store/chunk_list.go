@@ -56,46 +56,17 @@ func PaginateChunks(chunks []memory.Chunk, request ChunkListRequest, generation 
 	if err != nil {
 		return ChunkPage{}, err
 	}
-	filtered := make([]memory.Chunk, 0, len(chunks))
-	for _, chunk := range chunks {
-		if chunkMatchesFilter(chunk, request.Filter) {
-			filtered = append(filtered, chunk)
-		}
+	order := pageOrder[memory.Chunk]{
+		sortValue:  func(record memory.Chunk) string { return chunkSortValue(record, request.Sort) },
+		objectID:   func(record memory.Chunk) string { return string(record.ID) },
+		descending: request.Descending,
 	}
-	slices.SortFunc(filtered, func(left, right memory.Chunk) int {
-		order := strings.Compare(chunkSortValue(left, request.Sort), chunkSortValue(right, request.Sort))
-		if order == 0 {
-			order = strings.Compare(string(left.ID), string(right.ID))
-		}
-		if request.Descending {
-			return -order
-		}
-		return order
-	})
-	start := 0
-	if request.Cursor != "" {
-		position, err := DecodeCursor(request.Cursor, binding)
-		if err != nil {
-			return ChunkPage{}, err
-		}
-		start = len(filtered)
-		for index, chunk := range filtered {
-			if chunkAfterPosition(chunk, request, position) {
-				start = index
-				break
-			}
-		}
+	match := func(record memory.Chunk) bool { return chunkMatchesFilter(record, request.Filter) }
+	records, next, err := paginate(chunks, match, order, request.Limit, request.Cursor, binding)
+	if err != nil {
+		return ChunkPage{}, err
 	}
-	end := min(start+request.Limit, len(filtered))
-	page := ChunkPage{Chunks: slices.Clone(filtered[start:end])}
-	if end < len(filtered) && end > start {
-		last := filtered[end-1]
-		page.NextCursor, err = EncodeCursor(binding, CursorPosition{SortValue: chunkSortValue(last, request.Sort), ObjectID: string(last.ID)})
-		if err != nil {
-			return ChunkPage{}, err
-		}
-	}
-	return page, nil
+	return ChunkPage{Chunks: records, NextCursor: next}, nil
 }
 
 func normalizeChunkListRequest(request ChunkListRequest) (ChunkListRequest, error) {
@@ -225,15 +196,4 @@ func formatSortTime(value time.Time) string {
 		return ""
 	}
 	return value.UTC().Format(time.RFC3339Nano)
-}
-
-func chunkAfterPosition(chunk memory.Chunk, request ChunkListRequest, position CursorPosition) bool {
-	order := strings.Compare(chunkSortValue(chunk, request.Sort), position.SortValue)
-	if order == 0 {
-		order = strings.Compare(string(chunk.ID), position.ObjectID)
-	}
-	if request.Descending {
-		order = -order
-	}
-	return order > 0
 }

@@ -164,8 +164,10 @@ func normalizeChunkUpdateArgs(args map[string]string) (map[string]string, error)
 	return out, nil
 }
 
-func normalizeChunkLifecycleArgs(args map[string]string, action string) (map[string]string, error) {
-	chunkID, err := normalizeChunkID(args["id"])
+// normalizeLifecycleArgs validates the id, expected revision, and reason
+// shared by chunk and entry lifecycle actions.
+func normalizeLifecycleArgs[ID ~string](args map[string]string, action string, parseID func(string) (ID, error)) (map[string]string, error) {
+	recordID, err := parseID(args["id"])
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +175,7 @@ func normalizeChunkLifecycleArgs(args map[string]string, action string) (map[str
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]string{"action": action, "id": string(chunkID), "expected_revision": strconv.FormatUint(revision, 10)}
+	out := map[string]string{"action": action, "id": string(recordID), "expected_revision": strconv.FormatUint(revision, 10)}
 	if err := normalizeReason(args, out); err != nil {
 		return nil, err
 	}
@@ -181,7 +183,7 @@ func normalizeChunkLifecycleArgs(args map[string]string, action string) (map[str
 }
 
 func normalizeChunkDeleteArgs(args map[string]string) (map[string]string, error) {
-	out, err := normalizeChunkLifecycleArgs(args, "chunk_delete")
+	out, err := normalizeLifecycleArgs(args, "chunk_delete", normalizeChunkID)
 	if err != nil {
 		return nil, err
 	}

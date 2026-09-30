@@ -58,46 +58,17 @@ func PaginateEntries(entries []memory.Entry, request EntryListRequest, generatio
 	if err != nil {
 		return EntryPage{}, err
 	}
-	filtered := make([]memory.Entry, 0, len(entries))
-	for _, entry := range entries {
-		if EntryMatchesFilter(entry, request.Filter) {
-			filtered = append(filtered, entry)
-		}
+	order := pageOrder[memory.Entry]{
+		sortValue:  func(record memory.Entry) string { return entrySortValue(record, request.Sort) },
+		objectID:   func(record memory.Entry) string { return string(record.ID) },
+		descending: request.Descending,
 	}
-	slices.SortFunc(filtered, func(left, right memory.Entry) int {
-		order := strings.Compare(entrySortValue(left, request.Sort), entrySortValue(right, request.Sort))
-		if order == 0 {
-			order = strings.Compare(string(left.ID), string(right.ID))
-		}
-		if request.Descending {
-			return -order
-		}
-		return order
-	})
-	start := 0
-	if request.Cursor != "" {
-		position, err := DecodeCursor(request.Cursor, binding)
-		if err != nil {
-			return EntryPage{}, err
-		}
-		start = len(filtered)
-		for index, entry := range filtered {
-			if entryAfterPosition(entry, request, position) {
-				start = index
-				break
-			}
-		}
+	match := func(record memory.Entry) bool { return EntryMatchesFilter(record, request.Filter) }
+	records, next, err := paginate(entries, match, order, request.Limit, request.Cursor, binding)
+	if err != nil {
+		return EntryPage{}, err
 	}
-	end := min(start+request.Limit, len(filtered))
-	page := EntryPage{Entries: slices.Clone(filtered[start:end])}
-	if end < len(filtered) && end > start {
-		last := filtered[end-1]
-		page.NextCursor, err = EncodeCursor(binding, CursorPosition{SortValue: entrySortValue(last, request.Sort), ObjectID: string(last.ID)})
-		if err != nil {
-			return EntryPage{}, err
-		}
-	}
-	return page, nil
+	return EntryPage{Entries: records, NextCursor: next}, nil
 }
 
 func normalizeEntryListRequest(request EntryListRequest) (EntryListRequest, error) {
@@ -268,15 +239,4 @@ func entrySortValue(entry memory.Entry, sort EntrySort) string {
 	default:
 		return formatSortTime(entry.UpdatedAt)
 	}
-}
-
-func entryAfterPosition(entry memory.Entry, request EntryListRequest, position CursorPosition) bool {
-	order := strings.Compare(entrySortValue(entry, request.Sort), position.SortValue)
-	if order == 0 {
-		order = strings.Compare(string(entry.ID), position.ObjectID)
-	}
-	if request.Descending {
-		order = -order
-	}
-	return order > 0
 }

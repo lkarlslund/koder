@@ -104,7 +104,7 @@ func normalizeEntryUpdateArgs(args map[string]string) (map[string]string, error)
 }
 
 func normalizeEntrySupersedeArgs(args map[string]string) (map[string]string, error) {
-	out, err := normalizeEntryLifecycleArgs(args, "entry_supersede")
+	out, err := normalizeLifecycleArgs(args, "entry_supersede", normalizeEntryID)
 	if err != nil {
 		return nil, err
 	}
@@ -116,24 +116,8 @@ func normalizeEntrySupersedeArgs(args map[string]string) (map[string]string, err
 	return out, nil
 }
 
-func normalizeEntryLifecycleArgs(args map[string]string, action string) (map[string]string, error) {
-	entryID, err := normalizeEntryID(args["id"])
-	if err != nil {
-		return nil, err
-	}
-	revision, err := normalizeExpectedRevision(args)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]string{"action": action, "id": string(entryID), "expected_revision": strconv.FormatUint(revision, 10)}
-	if err := normalizeReason(args, out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func normalizeEntryDeleteArgs(args map[string]string) (map[string]string, error) {
-	out, err := normalizeEntryLifecycleArgs(args, "entry_delete")
+	out, err := normalizeLifecycleArgs(args, "entry_delete", normalizeEntryID)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +128,7 @@ func normalizeEntryDeleteArgs(args map[string]string) (map[string]string, error)
 }
 
 func normalizeVerifyArgs(args map[string]string) (map[string]string, error) {
-	out, err := normalizeEntryLifecycleArgs(args, "verify")
+	out, err := normalizeLifecycleArgs(args, "verify", normalizeEntryID)
 	if err != nil {
 		return nil, err
 	}

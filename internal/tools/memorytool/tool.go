@@ -176,7 +176,7 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	case "chunk_update":
 		return normalizeChunkUpdateArgs(args)
 	case "chunk_archive", "chunk_restore":
-		return normalizeChunkLifecycleArgs(args, action)
+		return normalizeLifecycleArgs(args, action, normalizeChunkID)
 	case "chunk_delete":
 		return normalizeChunkDeleteArgs(args)
 	case "entry_create":
@@ -186,7 +186,7 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	case "entry_supersede":
 		return normalizeEntrySupersedeArgs(args)
 	case "entry_archive", "entry_restore":
-		return normalizeEntryLifecycleArgs(args, action)
+		return normalizeLifecycleArgs(args, action, normalizeEntryID)
 	case "entry_delete":
 		return normalizeEntryDeleteArgs(args)
 	case "link":
