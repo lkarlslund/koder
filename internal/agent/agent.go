@@ -159,7 +159,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		Settings: settingsStore,
 		MCP:      e.mcp,
 	})
-	e.Runtime.SetRetryPause(func(ctx context.Context, delay time.Duration, onTick func(time.Duration)) error {
+	e.SetRetryPause(func(ctx context.Context, delay time.Duration, onTick func(time.Duration)) error {
 		if e.retryPause == nil {
 			return modelruntime.DefaultRetryPause(ctx, delay, onTick)
 		}
@@ -168,7 +168,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 	chatSource := chatpkg.NewSource(e.ChatDeps)
 	planSource := planning.NewSource(st)
 	e.registry = sessionpkg.NewRegistry(st, chatSource, planSource, e.sessionRegistryConfig(settingsStore.NewSessionDefaults()))
-	e.Runtime.SetSessionSource(e)
+	e.SetSessionSource(e)
 	e.toolsRuntime = toolruntime.New(toolruntime.Config{
 		Settings:         settingsStore,
 		Debug:            debug,
@@ -182,7 +182,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		DisabledSkills:   cfg.Skills.Disabled,
 		SkillCatalogMax:  cfg.Skills.CatalogMaxChars,
 	})
-	e.Runtime.SetToolsRuntime(e.toolsRuntime)
+	e.SetToolsRuntime(e.toolsRuntime)
 	if e.codex != nil {
 		e.codex.SetToolBridge(codexToolBridge{engine: e})
 	}
@@ -415,7 +415,7 @@ func (e *Engine) PreviewNextRequest(ctx context.Context, session domain.Session,
 }
 
 func (e *Engine) PreviewNextRequestForChat(ctx context.Context, session domain.Session, chat domain.Chat, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (provider.ChatRequest, error) {
-	if err := e.Runtime.ValidatePromptAttachments(chat, drafts); err != nil {
+	if err := e.ValidatePromptAttachments(chat, drafts); err != nil {
 		return provider.ChatRequest{}, err
 	}
 	messages, err := e.buildConversationPreview(ctx, session, chat.ID, prompt, drafts, refs, chatpkg.TurnInstructionBlocks(note, ""))
@@ -771,7 +771,7 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 		}
 	}
 	timeline = chatpkg.FilterQueuedTimelineItems(timeline)
-	return e.Runtime.BuildPromptEnvelopeForTimeline(session, chat, timeline, prompt, drafts, refs, turnInstructions)
+	return e.BuildPromptEnvelopeForTimeline(session, chat, timeline, prompt, drafts, refs, turnInstructions)
 }
 
 func formatThinkingBlock(reasoning string) string {
@@ -1039,7 +1039,7 @@ func (e *Engine) compactionSessionClient(chat domain.Chat, client *provider.Clie
 
 func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, instructions string, stream bool) (provider.ChatRequest, string, error) {
 	base := compactionBaseForNextCut(timeline, len(timeline))
-	keepStart := base.MinKeepStart + modelruntime.PreservedTimelineToolCallTailStart(timeline[base.MinKeepStart:], e.Runtime.CompactionKeepToolCalls())
+	keepStart := base.MinKeepStart + modelruntime.PreservedTimelineToolCallTailStart(timeline[base.MinKeepStart:], e.CompactionKeepToolCalls())
 	messages, firstKeptItemID, err := e.buildCompactionConversationForTimelinePrefix(session, chat, timeline, keepStart, base)
 	if err != nil {
 		return provider.ChatRequest{}, "", err
@@ -1111,7 +1111,7 @@ func firstKeptItemIDForCompactionCut(timeline []domain.TimelineItem, keepStart i
 }
 
 func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) (provider.PromptEnvelope, error) {
-	envelope := provider.PromptEnvelope{Instructions: e.Runtime.BaseInstructionsForChat(session, chat)}
+	envelope := provider.PromptEnvelope{Instructions: e.BaseInstructionsForChat(session, chat)}
 	segmentStart := 0
 	for idx, item := range timeline {
 		if compacted, ok := item.Content.(domain.Compaction); ok {
@@ -1143,7 +1143,7 @@ func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session
 
 func (e *Engine) buildCompactionPromptEnvelopeForTimelineRange(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, baseSummary string) (provider.PromptEnvelope, error) {
 	envelope := provider.PromptEnvelope{
-		Instructions: e.Runtime.BaseInstructionsForChat(session, chat),
+		Instructions: e.BaseInstructionsForChat(session, chat),
 		Items:        []provider.Message{modelruntime.CompactedHistoryMessage(baseSummary)},
 	}
 	for _, item := range timeline {
@@ -1178,7 +1178,7 @@ func compactionSegmentStartForNextCut(timeline []domain.TimelineItem, keepStart 
 func (e *Engine) compactionMessagesForCompactionTail(session domain.Session, items []domain.TimelineItem, firstKeptItemID string, preserveThinking bool) ([]provider.Message, error) {
 	start := modelruntime.FirstKeptTimelineIndex(items, firstKeptItemID)
 	if start < 0 {
-		start = modelruntime.PreservedTimelineToolCallTailStart(items, e.Runtime.CompactionKeepToolCalls())
+		start = modelruntime.PreservedTimelineToolCallTailStart(items, e.CompactionKeepToolCalls())
 	}
 	if start >= len(items) {
 		return nil, nil
