@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/lkarlslund/koder/internal/fsutil"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/provider"
 )
@@ -71,7 +72,7 @@ func NormalizeProjectRoot(projectRoot string) string {
 	if err != nil {
 		return start
 	}
-	return cleanPath(abs)
+	return fsutil.CleanAbs(abs)
 }
 
 func (m *Manager) Discover(ctx context.Context, projectRoot string) (Snapshot, error) {
@@ -81,12 +82,12 @@ func (m *Manager) Discover(ctx context.Context, projectRoot string) (Snapshot, e
 // DiscoverProject discovers instructions without allowing project-root inference
 // to expand beyond the root owned by the session.
 func (m *Manager) DiscoverProject(ctx context.Context, projectRoot, cwd string) (Snapshot, error) {
-	root := cleanPath(projectRoot)
+	root := fsutil.CleanAbs(projectRoot)
 	if root == "" {
-		root = cleanPath(cwd)
+		root = fsutil.CleanAbs(cwd)
 	}
-	cwd = cleanPath(cwd)
-	if cwd == "" || !pathWithin(cwd, root) {
+	cwd = fsutil.CleanAbs(cwd)
+	if cwd == "" || !fsutil.Within(root, cwd) {
 		cwd = root
 	}
 	snapshot := Snapshot{
@@ -253,7 +254,7 @@ func (m *Manager) Resolve(ctx context.Context, client *provider.Client, sessionI
 }
 
 func (m *Manager) cachePath(projectRoot, checksum string) string {
-	rootHash := sha256.Sum256([]byte(cleanPath(projectRoot)))
+	rootHash := sha256.Sum256([]byte(fsutil.CleanAbs(projectRoot)))
 	return filepath.Join(m.stateDir, "agents-cache", hex.EncodeToString(rootHash[:]), checksum+".json")
 }
 
@@ -265,7 +266,7 @@ type trackedFile struct {
 }
 
 func readTrackedFile(path string) (trackedFile, bool) {
-	path = cleanPath(path)
+	path = fsutil.CleanAbs(path)
 	if strings.TrimSpace(path) == "" {
 		return trackedFile{}, false
 	}
@@ -303,8 +304,8 @@ func parseResolverResponse(raw string) (resolverResponse, error) {
 }
 
 func dirsFromCWDToRoot(cwd string, root string) []string {
-	current := cleanPath(cwd)
-	root = cleanPath(root)
+	current := fsutil.CleanAbs(cwd)
+	root = fsutil.CleanAbs(root)
 	var dirs []string
 	for {
 		dirs = append(dirs, current)
@@ -318,22 +319,6 @@ func dirsFromCWDToRoot(cwd string, root string) []string {
 		current = parent
 	}
 	return dirs
-}
-
-func cleanPath(path string) string {
-	if strings.TrimSpace(path) == "" {
-		return ""
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return filepath.Clean(path)
-	}
-	return filepath.Clean(abs)
-}
-
-func pathWithin(path, root string) bool {
-	rel, err := filepath.Rel(root, path)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func isPlainText(path string, data []byte) bool {

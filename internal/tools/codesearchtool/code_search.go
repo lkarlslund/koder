@@ -1508,7 +1508,7 @@ func pathFromURI(uri string) string {
 func relPath(rootAbs, uri string) string {
 	path := pathFromURI(uri)
 	rel, err := filepath.Rel(rootAbs, path)
-	if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+	if err != nil || !filepath.IsLocal(rel) {
 		return filepath.ToSlash(path)
 	}
 	return filepath.ToSlash(rel)

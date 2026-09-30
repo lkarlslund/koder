@@ -16,6 +16,7 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/codexapp"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/fsutil"
 	"github.com/lkarlslund/koder/internal/sandbox"
 )
 
@@ -132,7 +133,7 @@ func resolveAgentExecutable(executable string, settings accesssettings.Settings)
 	}
 	path = filepath.Clean(path)
 	home, homeErr := os.UserHomeDir()
-	if homeErr != nil || settings.Home != accesssettings.ModeNone || !pathWithin(home, path) {
+	if homeErr != nil || settings.Home != accesssettings.ModeNone || !fsutil.Within(home, path) {
 		return path, "", nil
 	}
 	resolved, err := filepath.EvalSymlinks(path)
@@ -140,7 +141,7 @@ func resolveAgentExecutable(executable string, settings accesssettings.Settings)
 		return "", "", fmt.Errorf("resolve Codex executable symlink %q: %w", path, err)
 	}
 	mount := commonAncestor(filepath.Dir(path), filepath.Dir(resolved))
-	if mount == "" || !pathWithin(home, mount) {
+	if mount == "" || !fsutil.Within(home, mount) {
 		mount = filepath.Dir(path)
 	}
 	return path, mount, nil
@@ -149,7 +150,7 @@ func resolveAgentExecutable(executable string, settings accesssettings.Settings)
 func commonAncestor(first, second string) string {
 	first = filepath.Clean(first)
 	second = filepath.Clean(second)
-	for !pathWithin(first, second) {
+	for !fsutil.Within(first, second) {
 		parent := filepath.Dir(first)
 		if parent == first {
 			return ""
@@ -157,11 +158,6 @@ func commonAncestor(first, second string) string {
 		first = parent
 	}
 	return first
-}
-
-func pathWithin(root, path string) bool {
-	relative, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
-	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 func (f *sandboxProcessFactory) RemoveChat(chatID domain.ID) error {

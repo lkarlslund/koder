@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/lkarlslund/koder/internal/fsutil"
 )
 
 type Mode string
@@ -230,7 +232,7 @@ func MapPath(settings Settings, req Request) (string, error) {
 	}
 	abs = filepath.Clean(abs)
 	tmpRoot := filepath.Clean("/tmp")
-	if !pathContains(tmpRoot, abs) || hasExplicitMapping(settings, abs, strings.TrimSpace(req.ProjectRoot)) {
+	if !fsutil.Within(tmpRoot, abs) || hasExplicitMapping(settings, abs, strings.TrimSpace(req.ProjectRoot)) {
 		return abs, nil
 	}
 	switch settings.Tmp {
@@ -254,15 +256,15 @@ func MapPath(settings Settings, req Request) (string, error) {
 }
 
 func hasExplicitMapping(settings Settings, abs string, projectRoot string) bool {
-	if projectRoot != "" && pathContains(projectRoot, abs) {
+	if projectRoot != "" && fsutil.Within(projectRoot, abs) {
 		return true
 	}
 	for _, mount := range settings.Mounts {
-		if pathContains(mount.Path, abs) {
+		if fsutil.Within(mount.Path, abs) {
 			return true
 		}
 	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" && pathContains(home, abs) {
+	if home, err := os.UserHomeDir(); err == nil && home != "" && fsutil.Within(home, abs) {
 		return true
 	}
 	return false
@@ -271,20 +273,20 @@ func hasExplicitMapping(settings Settings, abs string, projectRoot string) bool 
 func modeForPath(settings Settings, abs string, projectRoot string) Mode {
 	for idx := len(settings.Mounts) - 1; idx >= 0; idx-- {
 		mount := settings.Mounts[idx]
-		if pathContains(mount.Path, abs) {
+		if fsutil.Within(mount.Path, abs) {
 			return mount.Mode
 		}
 	}
-	if projectRoot != "" && pathContains(projectRoot, abs) {
+	if projectRoot != "" && fsutil.Within(projectRoot, abs) {
 		return settings.Project
 	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" && pathContains(home, abs) {
+	if home, err := os.UserHomeDir(); err == nil && home != "" && fsutil.Within(home, abs) {
 		return settings.Home
 	}
-	if settings.Tmp == TmpSession && strings.TrimSpace(settings.TmpDir) != "" && pathContains(settings.TmpDir, abs) {
+	if settings.Tmp == TmpSession && strings.TrimSpace(settings.TmpDir) != "" && fsutil.Within(settings.TmpDir, abs) {
 		return ModeReadWrite
 	}
-	if settings.Tmp == TmpHost && pathContains(filepath.Clean("/tmp"), abs) {
+	if settings.Tmp == TmpHost && fsutil.Within(filepath.Clean("/tmp"), abs) {
 		return ModeReadWrite
 	}
 	return settings.Root
@@ -298,13 +300,6 @@ func modeAllows(actual Mode, required Mode) bool {
 		return actual == ModeReadOnly || actual == ModeReadWrite || actual == ModeDevice
 	}
 	return actual == ModeReadWrite || actual == ModeDevice
-}
-
-func pathContains(root string, path string) bool {
-	root = filepath.Clean(root)
-	path = filepath.Clean(path)
-	rel, err := filepath.Rel(root, path)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func expandHome(path string) string {

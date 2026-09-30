@@ -206,7 +206,7 @@ func (m *Manager) ValidateDraft(draft Draft) (Draft, error) {
 		return Draft{}, fmt.Errorf("resolve draft attachment path: %w", err)
 	}
 	rel, err := filepath.Rel(draftsDir, path)
-	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+	if err != nil || rel == "." || !filepath.IsLocal(rel) {
 		return Draft{}, fmt.Errorf("draft attachment is outside the drafts directory")
 	}
 	info, err := os.Stat(path)

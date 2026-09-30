@@ -34,3 +34,23 @@ func TestWriteFileAtomicFailsWithoutDirectory(t *testing.T) {
 		t.Fatal("expected error for missing parent directory")
 	}
 }
+
+func TestWithin(t *testing.T) {
+	cases := []struct {
+		root, path string
+		want       bool
+	}{
+		{"/a", "/a", true},
+		{"/a", "/a/b/c", true},
+		{"/a", "/a/..b", true},
+		{"/a", "/ab", false},
+		{"/a", "/a/../c", false},
+		{"/a/b", "/a", false},
+		{"/a", "relative", false},
+	}
+	for _, tc := range cases {
+		if got := Within(tc.root, tc.path); got != tc.want {
+			t.Errorf("Within(%q, %q) = %v, want %v", tc.root, tc.path, got, tc.want)
+		}
+	}
+}

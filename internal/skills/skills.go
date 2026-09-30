@@ -13,6 +13,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/fsutil"
 	"github.com/lkarlslund/koder/internal/textutil"
 	"gopkg.in/yaml.v3"
 )
@@ -173,7 +174,7 @@ func InspectWithOptions(workdir string, opts DiscoverOptions) Catalog {
 
 // InspectFile parses and validates one SKILL.md file or skill directory.
 func InspectFile(path string) (Skill, error) {
-	path = cleanPath(path)
+	path = fsutil.CleanAbs(path)
 	info, err := os.Stat(path)
 	if err != nil {
 		return Skill{}, err
@@ -285,7 +286,7 @@ func discoveryRoots(workdir string, opts DiscoverOptions) []Root {
 	seen := map[string]struct{}{}
 	out := make([]Root, 0, len(roots))
 	for _, root := range roots {
-		root.Path = cleanPath(root.Path)
+		root.Path = fsutil.CleanAbs(root.Path)
 		key := canonicalPath(root.Path)
 		if _, exists := seen[key]; exists {
 			continue
@@ -300,8 +301,8 @@ func discoveryRoots(workdir string, opts DiscoverOptions) []Root {
 
 func projectRoots(workdir string, projectRoot string) []Root {
 	var roots []Root
-	current := cleanPath(workdir)
-	projectRoot = cleanPath(projectRoot)
+	current := fsutil.CleanAbs(workdir)
+	projectRoot = fsutil.CleanAbs(projectRoot)
 	if current == "" {
 		current = projectRoot
 	}
@@ -328,10 +329,10 @@ func projectRoots(workdir string, projectRoot string) []Root {
 func loadSkill(path string, scope Scope, root string, fallbackName string) (Skill, error) {
 	skill := Skill{
 		Name:      normalizeName(fallbackName),
-		Path:      cleanPath(path),
-		Directory: cleanPath(filepath.Dir(path)),
+		Path:      fsutil.CleanAbs(path),
+		Directory: fsutil.CleanAbs(filepath.Dir(path)),
 		Scope:     scope,
-		Root:      cleanPath(root),
+		Root:      fsutil.CleanAbs(root),
 		Enabled:   true,
 		Metadata:  map[string]string{},
 	}
@@ -480,7 +481,7 @@ func normalizedPathSet(paths []string) map[string]struct{} {
 		if path = strings.TrimSpace(path); path == "" {
 			continue
 		}
-		clean := cleanPath(path)
+		clean := fsutil.CleanAbs(path)
 		out[clean] = struct{}{}
 		out[canonicalPath(clean)] = struct{}{}
 	}
@@ -517,23 +518,12 @@ func cloneMetadata(src map[string]string) map[string]string {
 }
 
 func canonicalPath(path string) string {
-	path = cleanPath(path)
+	path = fsutil.CleanAbs(path)
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return path
 	}
-	return cleanPath(resolved)
-}
-
-func cleanPath(path string) string {
-	if strings.TrimSpace(path) == "" {
-		return ""
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return filepath.Clean(path)
-	}
-	return filepath.Clean(abs)
+	return fsutil.CleanAbs(resolved)
 }
 
 func escapesDirectory(path string) bool {

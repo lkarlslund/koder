@@ -140,7 +140,7 @@ func pathWithin(parent, candidate string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))), nil
+	return filepath.IsLocal(relative), nil
 }
 
 func resolvePath(path string) (string, error) {

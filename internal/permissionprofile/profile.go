@@ -345,7 +345,7 @@ func (req Request) targetsProjectOnly() bool {
 		}
 		target = filepath.Clean(target)
 		rel, err := filepath.Rel(projectRoot, target)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		if err != nil || !filepath.IsLocal(rel) {
 			return false
 		}
 	}

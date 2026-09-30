@@ -176,7 +176,7 @@ func ResolvePath(runtime Runtime, raw string, kind accesssettings.AccessKind) (a
 }
 
 func pathLabel(root, abs string) string {
-	if rel, err := filepath.Rel(root, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if rel, err := filepath.Rel(root, abs); err == nil && filepath.IsLocal(rel) {
 		return filepath.ToSlash(rel)
 	}
 	return filepath.ToSlash(abs)
@@ -373,7 +373,7 @@ func workspaceRel(root string, abs string, raw string, noun string) (string, err
 	if err != nil {
 		return "", fmt.Errorf("resolve relative %s: %w", noun, err)
 	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if !filepath.IsLocal(rel) {
 		return "", fmt.Errorf("path %q is outside the workspace", raw)
 	}
 	return rel, nil

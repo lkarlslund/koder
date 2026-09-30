@@ -208,7 +208,7 @@ func resolveTarget(root string, target string) (string, string, error) {
 	}
 	abs := filepath.Join(root, target)
 	rel, err := filepath.Rel(root, abs)
-	if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+	if err != nil || !filepath.IsLocal(rel) {
 		return "", "", fmt.Errorf("managed asset target escapes root: %q", target)
 	}
 	return abs, filepath.ToSlash(rel), nil
