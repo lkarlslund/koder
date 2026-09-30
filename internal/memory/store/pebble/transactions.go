@@ -381,7 +381,7 @@ func (tx *transaction) PutChunk(ctx context.Context, value memory.Chunk, expecte
 		return err
 	}
 	tx.derivedDirty = tx.derivedDirty || !exists || value.Counts != current.Counts
-	if err := tx.replaceChunkIndexes(ctx, optionalChunk(current, exists), &value); err != nil {
+	if err := replaceIndexes(ctx, tx, optionalChunk(current, exists), &value, buildChunkIndexEntries); err != nil {
 		return err
 	}
 	return tx.putRevisioned(chunkKey(string(value.ID)), revisionKey(recordChunk, string(value.ID), value.Revision.Number), value)
@@ -413,7 +413,7 @@ func (tx *transaction) TouchChunk(ctx context.Context, id memory.ChunkID, usedAt
 	if err := next.Validate(); err != nil {
 		return err
 	}
-	if err := tx.replaceChunkIndexes(ctx, &current, &next); err != nil {
+	if err := replaceIndexes(ctx, tx, &current, &next, buildChunkIndexEntries); err != nil {
 		return err
 	}
 	return tx.putChunkProjection(next)
@@ -477,7 +477,7 @@ func (tx *transaction) DeleteChunk(ctx context.Context, id memory.ChunkID, expec
 	if err := revision.CheckDelete("chunk", string(id), expectedRevision, current.Revision.Number, exists); err != nil {
 		return err
 	}
-	if err := tx.replaceChunkIndexes(ctx, &current, nil); err != nil {
+	if err := replaceIndexes(ctx, tx, &current, nil, buildChunkIndexEntries); err != nil {
 		return err
 	}
 	assetLower, assetUpper := prefixBounds(assetChunkPrefix(id))
@@ -498,10 +498,12 @@ func optionalChunk(chunk memory.Chunk, exists bool) *memory.Chunk {
 	return &chunk
 }
 
-func (tx *transaction) replaceChunkIndexes(ctx context.Context, old, next *memory.Chunk) error {
+// replaceIndexes deletes the index entries built from old and writes those
+// built from next, recording both for post-commit index bookkeeping.
+func replaceIndexes[T any](ctx context.Context, tx *transaction, old, next *T, build func(context.Context, []indexDefinition, T) (map[string][]indexEntry, error)) error {
 	mutation := indexMutation{}
 	if old != nil {
-		entries, err := buildChunkIndexEntries(ctx, tx.indexes, *old)
+		entries, err := build(ctx, tx.indexes, *old)
 		if err != nil {
 			return err
 		}
@@ -515,7 +517,7 @@ func (tx *transaction) replaceChunkIndexes(ctx context.Context, old, next *memor
 		mutation.delete = entries
 	}
 	if next != nil {
-		entries, err := buildChunkIndexEntries(ctx, tx.indexes, *next)
+		entries, err := build(ctx, tx.indexes, *next)
 		if err != nil {
 			return err
 		}
@@ -546,7 +548,7 @@ func (tx *transaction) PutEntry(ctx context.Context, value memory.Entry, expecte
 	if err := revision.CheckPut("entry", string(value.ID), expectedRevision, value.Revision.Number, current.Revision.Number, exists); err != nil {
 		return err
 	}
-	if err := tx.replaceEntryIndexes(ctx, optionalEntry(current, exists), &value); err != nil {
+	if err := replaceIndexes(ctx, tx, optionalEntry(current, exists), &value, buildEntryIndexEntries); err != nil {
 		return err
 	}
 	tx.derivedDirty = true
@@ -564,7 +566,7 @@ func (tx *transaction) DeleteEntry(ctx context.Context, id memory.EntryID, expec
 	if err := revision.CheckDelete("entry", string(id), expectedRevision, current.Revision.Number, exists); err != nil {
 		return err
 	}
-	if err := tx.replaceEntryIndexes(ctx, &current, nil); err != nil {
+	if err := replaceIndexes(ctx, tx, &current, nil, buildEntryIndexEntries); err != nil {
 		return err
 	}
 	if err := tx.batch.Delete(entryUsageKey(id), nil); err != nil {
@@ -583,40 +585,6 @@ func optionalEntry(entry memory.Entry, exists bool) *memory.Entry {
 		return nil
 	}
 	return &entry
-}
-
-func (tx *transaction) replaceEntryIndexes(ctx context.Context, old, next *memory.Entry) error {
-	mutation := indexMutation{}
-	if old != nil {
-		entries, err := buildEntryIndexEntries(ctx, tx.indexes, *old)
-		if err != nil {
-			return err
-		}
-		for name, values := range entries {
-			for _, entry := range values {
-				if err := tx.batch.Delete(indexKey(tx.indexGeneration, name, entry.Suffix), nil); err != nil {
-					return fmt.Errorf("delete memory index %s: %w", name, err)
-				}
-			}
-		}
-		mutation.delete = entries
-	}
-	if next != nil {
-		entries, err := buildEntryIndexEntries(ctx, tx.indexes, *next)
-		if err != nil {
-			return err
-		}
-		for name, values := range entries {
-			for _, entry := range values {
-				if err := tx.batch.Set(indexKey(tx.indexGeneration, name, entry.Suffix), entry.Value, nil); err != nil {
-					return fmt.Errorf("put memory index %s: %w", name, err)
-				}
-			}
-		}
-		mutation.put = entries
-	}
-	tx.indexMutations = append(tx.indexMutations, mutation)
-	return nil
 }
 
 func (tx *transaction) PutLink(ctx context.Context, value memory.Link, expectedRevision uint64) error {
@@ -638,7 +606,7 @@ func (tx *transaction) PutLink(ctx context.Context, value memory.Link, expectedR
 	} else if err != nil && !errors.Is(err, memoryStoreAPI.ErrNotFound) {
 		return err
 	}
-	if err := tx.updateLinkIndexes(ctx, optionalLink(current, exists), &value); err != nil {
+	if err := replaceIndexes(ctx, tx, optionalLink(current, exists), &value, buildLinkIndexEntries); err != nil {
 		return err
 	}
 	tx.derivedDirty = true
@@ -656,7 +624,7 @@ func (tx *transaction) DeleteLink(ctx context.Context, id memory.LinkID, expecte
 	if err := revision.CheckDelete("link", string(id), expectedRevision, current.Revision.Number, exists); err != nil {
 		return err
 	}
-	if err := tx.updateLinkIndexes(ctx, &current, nil); err != nil {
+	if err := replaceIndexes(ctx, tx, &current, nil, buildLinkIndexEntries); err != nil {
 		return err
 	}
 	tx.derivedDirty = true
@@ -668,40 +636,6 @@ func optionalLink(value memory.Link, exists bool) *memory.Link {
 		return nil
 	}
 	return &value
-}
-
-func (tx *transaction) updateLinkIndexes(ctx context.Context, old, next *memory.Link) error {
-	mutation := indexMutation{}
-	if old != nil {
-		entries, err := buildLinkIndexEntries(ctx, tx.indexes, *old)
-		if err != nil {
-			return err
-		}
-		for name, values := range entries {
-			for _, item := range values {
-				if err := tx.batch.Delete(indexKey(tx.indexGeneration, name, item.Suffix), nil); err != nil {
-					return fmt.Errorf("delete memory index %s: %w", name, err)
-				}
-			}
-		}
-		mutation.delete = entries
-	}
-	if next != nil {
-		entries, err := buildLinkIndexEntries(ctx, tx.indexes, *next)
-		if err != nil {
-			return err
-		}
-		for name, values := range entries {
-			for _, item := range values {
-				if err := tx.batch.Set(indexKey(tx.indexGeneration, name, item.Suffix), item.Value, nil); err != nil {
-					return fmt.Errorf("put memory index %s: %w", name, err)
-				}
-			}
-		}
-		mutation.put = entries
-	}
-	tx.indexMutations = append(tx.indexMutations, mutation)
-	return nil
 }
 
 func (tx *transaction) PutEvidence(ctx context.Context, value memory.Evidence) error {
@@ -730,7 +664,7 @@ func (tx *transaction) PutEvidence(ctx context.Context, value memory.Evidence) e
 	if err := tx.batch.Set(evidenceKey(string(value.ID)), encoded, nil); err != nil {
 		return fmt.Errorf("put evidence %s: %w", value.ID, err)
 	}
-	if err := tx.replaceEvidenceIndexes(ctx, nil, &value); err != nil {
+	if err := replaceIndexes(ctx, tx, nil, &value, buildEvidenceIndexEntries); err != nil {
 		return err
 	}
 	tx.derivedDirty = true
@@ -745,7 +679,7 @@ func (tx *transaction) DeleteEvidence(ctx context.Context, id memory.EvidenceID)
 	if err != nil {
 		return err
 	}
-	if err := tx.replaceEvidenceIndexes(ctx, &current, nil); err != nil {
+	if err := replaceIndexes(ctx, tx, &current, nil, buildEvidenceIndexEntries); err != nil {
 		return err
 	}
 	if err := tx.batch.Delete(evidenceKey(string(id)), nil); err != nil {
@@ -790,40 +724,6 @@ func (tx *transaction) DeleteAsset(ctx context.Context, chunkID memory.ChunkID, 
 	if err := tx.batch.Delete(assetKey(chunkID, path), nil); err != nil {
 		return fmt.Errorf("delete asset %s/%s: %w", chunkID, path, err)
 	}
-	return nil
-}
-
-func (tx *transaction) replaceEvidenceIndexes(ctx context.Context, old, next *memory.Evidence) error {
-	mutation := indexMutation{}
-	if old != nil {
-		entries, err := buildEvidenceIndexEntries(ctx, tx.indexes, *old)
-		if err != nil {
-			return err
-		}
-		for name, values := range entries {
-			for _, item := range values {
-				if err := tx.batch.Delete(indexKey(tx.indexGeneration, name, item.Suffix), nil); err != nil {
-					return fmt.Errorf("delete memory index %s: %w", name, err)
-				}
-			}
-		}
-		mutation.delete = entries
-	}
-	if next != nil {
-		entries, err := buildEvidenceIndexEntries(ctx, tx.indexes, *next)
-		if err != nil {
-			return err
-		}
-		for name, values := range entries {
-			for _, item := range values {
-				if err := tx.batch.Set(indexKey(tx.indexGeneration, name, item.Suffix), item.Value, nil); err != nil {
-					return fmt.Errorf("put memory index %s: %w", name, err)
-				}
-			}
-		}
-		mutation.put = entries
-	}
-	tx.indexMutations = append(tx.indexMutations, mutation)
 	return nil
 }
 
