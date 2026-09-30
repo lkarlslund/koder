@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"regexp"
 	"slices"
@@ -448,12 +449,7 @@ func (w *indexMutationWriter) close() error {
 }
 
 func sortedIndexNames(entries map[string][]indexEntry) []string {
-	names := make([]string, 0, len(entries))
-	for name := range entries {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	return names
+	return slices.Sorted(maps.Keys(entries))
 }
 
 func sortedIndexEntries(entries []indexEntry) []indexEntry {

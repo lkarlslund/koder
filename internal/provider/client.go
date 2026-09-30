@@ -22,6 +22,7 @@ import (
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/redact"
 	"github.com/lkarlslund/koder/internal/textutil"
 )
 
@@ -1989,9 +1990,8 @@ func redactHeaders(headers http.Header) map[string]string {
 	}
 	out := make(map[string]string, len(headers))
 	for key, values := range headers {
-		lower := strings.ToLower(key)
-		if lower == "authorization" || strings.Contains(lower, "api-key") || strings.Contains(lower, "token") {
-			out[key] = "[redacted]"
+		if redact.IsSensitiveHeader(key) {
+			out[key] = redact.Placeholder
 			continue
 		}
 		out[key] = strings.Join(values, ", ")

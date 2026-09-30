@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -1002,12 +1003,7 @@ func (m *Manager) serverIDs() []string {
 }
 
 func (m *Manager) serverIDsLocked() []string {
-	ids := make([]string, 0, len(m.state))
-	for id := range m.state {
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
-	return ids
+	return slices.Sorted(maps.Keys(m.state))
 }
 
 func snapshotState(state *serverState) ServerState {

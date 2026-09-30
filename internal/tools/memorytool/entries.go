@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/memory"
 	memoryService "github.com/lkarlslund/koder/internal/memory/service"
 )
@@ -362,7 +363,7 @@ func normalizeEntryID(raw string) (memory.EntryID, error) {
 func validateEvidenceIDs(values []memory.EvidenceID) error {
 	seen := make(map[memory.EvidenceID]struct{}, len(values))
 	for _, value := range values {
-		if !isCanonicalUUIDv7(string(value)) {
+		if !id.IsCanonicalV7(string(value)) {
 			return fmt.Errorf("invalid evidence ID %q", value)
 		}
 		if _, exists := seen[value]; exists {
@@ -371,23 +372,6 @@ func validateEvidenceIDs(values []memory.EvidenceID) error {
 		seen[value] = struct{}{}
 	}
 	return nil
-}
-
-func isCanonicalUUIDv7(value string) bool {
-	if len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' || value[14] != '7' || !strings.ContainsRune("89ab", rune(value[19])) {
-		return false
-	}
-	for index, character := range value {
-		if index == 8 || index == 13 || index == 18 || index == 23 {
-			continue
-		}
-		if character < '0' || character > '9' {
-			if character < 'a' || character > 'f' {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 func callEntryCreate(ctx context.Context, service *memoryService.Service, args map[string]string) (entryMutationResult, error) {

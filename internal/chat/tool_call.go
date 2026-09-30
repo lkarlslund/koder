@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -430,12 +431,7 @@ func orderedTouchedFiles(files map[string]struct{}) []string {
 	if len(files) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(files))
-	for file := range files {
-		out = append(out, file)
-	}
-	slices.Sort(out)
-	return out
+	return slices.Sorted(maps.Keys(files))
 }
 
 func (r *Chat) appendLintMessageForTouchedFiles(ctx context.Context, paths []string, out chan<- domain.Event) error {

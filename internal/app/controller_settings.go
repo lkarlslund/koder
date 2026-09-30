@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"os/exec"
@@ -1547,11 +1548,7 @@ func (c *Controller) providerStateLocked() ProviderState {
 		})
 	}
 
-	ids := make([]string, 0, len(c.cfg.Providers))
-	for id := range c.cfg.Providers {
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
+	ids := slices.Sorted(maps.Keys(c.cfg.Providers))
 
 	providers := make([]ProviderConfigItem, 0, len(ids))
 	drafts := make(map[string]ProviderDraft, len(ids))
@@ -1758,11 +1755,7 @@ func thinkingPreferencesFromConfig(cfg config.Config) ThinkingPreferences {
 }
 
 func mcpPreferencesFromConfig(src map[string]config.MCPServer) []MCPServerPreference {
-	ids := make([]string, 0, len(src))
-	for id := range src {
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
+	ids := slices.Sorted(maps.Keys(src))
 	out := make([]MCPServerPreference, 0, len(ids))
 	for _, id := range ids {
 		server := src[id]

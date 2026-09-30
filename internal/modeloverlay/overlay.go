@@ -3,12 +3,12 @@ package modeloverlay
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/assets"
@@ -117,11 +117,7 @@ func Load(root string) Catalog {
 			}
 		}
 	}
-	names := make([]string, 0, len(files))
-	for name := range files {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(files))
 	catalog := Catalog{}
 	seen := map[string]string{}
 	for _, name := range names {

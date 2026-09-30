@@ -37,6 +37,7 @@ import (
 	"github.com/lkarlslund/koder/internal/browserapi"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/redact"
 	"github.com/lkarlslund/koder/internal/textutil"
 )
 
@@ -1708,9 +1709,8 @@ func appendBounded[T any](values []T, value T, limit int) []T {
 func redactHeaders(headers network.Headers) map[string]string {
 	result := make(map[string]string, len(headers))
 	for name, value := range headers {
-		lower := strings.ToLower(name)
-		if lower == "authorization" || lower == "cookie" || lower == "set-cookie" {
-			result[name] = "[redacted]"
+		if redact.IsSensitiveHeader(name) {
+			result[name] = redact.Placeholder
 			continue
 		}
 		result[name] = fmt.Sprint(value)

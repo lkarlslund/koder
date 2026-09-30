@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"mime"
 	pathpkg "path"
 	"slices"
-	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -94,11 +94,7 @@ func Scan(ctx context.Context, pkg ValidatedPackage, classifier memory.Classifie
 		}
 	}
 
-	assetPaths := make([]string, 0, len(pkg.Assets))
-	for path := range pkg.Assets {
-		assetPaths = append(assetPaths, path)
-	}
-	sort.Strings(assetPaths)
+	assetPaths := slices.Sorted(maps.Keys(pkg.Assets))
 	for _, path := range assetPaths {
 		data := pkg.Assets[path]
 		mediaType := assetMediaType(pkg.Manifest, path)
@@ -190,11 +186,7 @@ func collectStringFields(path string, value any, fields *[]memory.Classification
 			collectStringFields(fmt.Sprintf("%s[%d]", path, index), item, fields)
 		}
 	case map[string]any:
-		keys := make([]string, 0, len(value))
-		for key := range value {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
+		keys := slices.Sorted(maps.Keys(value))
 		for _, key := range keys {
 			child := key
 			if path != "" {
@@ -299,11 +291,7 @@ func redactFields(values map[string]string, findings []memory.ClassificationFind
 		}
 		seen[finding.Field] = struct{}{}
 	}
-	fields := make([]string, 0, len(seen))
-	for field := range seen {
-		fields = append(fields, field)
-	}
-	sort.Strings(fields)
+	fields := slices.Sorted(maps.Keys(seen))
 	result := make([]RedactedField, 0, len(fields))
 	for _, field := range fields {
 		result = append(result, RedactedField{Field: field, Value: redactionMarker})

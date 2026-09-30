@@ -158,7 +158,7 @@ func (s *MemoryCandidateStore) StoreCandidates(ctx context.Context, recordID mem
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	if !isCanonicalUUIDv7(string(recordID)) {
+	if !id.IsCanonicalV7(string(recordID)) {
 		return 0, fmt.Errorf("%w: curation record ID is invalid", memory.ErrInvalidRecord)
 	}
 	s.mu.Lock()
@@ -179,7 +179,7 @@ func (s *MemoryCandidateStore) StoreCandidates(ctx context.Context, recordID mem
 	candidates := make([]StoredCandidate, 0, len(cloned))
 	for _, draft := range cloned {
 		candidateID := CandidateID(s.newID())
-		if !isCanonicalUUIDv7(string(candidateID)) {
+		if !id.IsCanonicalV7(string(candidateID)) {
 			return 0, fmt.Errorf("%w: generated candidate ID is invalid", memory.ErrInvalidRecord)
 		}
 		status := CandidateStatusPendingReview

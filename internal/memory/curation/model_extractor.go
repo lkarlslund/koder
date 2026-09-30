@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"io"
 	"slices"
-	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/memory"
 )
 
@@ -350,13 +350,13 @@ func normalizeAndValidateCandidate(ctx context.Context, classifier memory.Classi
 			return CandidateDraft{}, fmt.Errorf("%w: create_entry cannot identify a target entry", memory.ErrInvalidRecord)
 		}
 	case CandidateActionUpdateEntry, CandidateActionSupersedeEntry, CandidateActionContradictEntry:
-		if !isCanonicalUUIDv7(string(draft.TargetEntryID)) {
+		if !id.IsCanonicalV7(string(draft.TargetEntryID)) {
 			return CandidateDraft{}, fmt.Errorf("%w: target_entry_id must be a canonical UUIDv7", memory.ErrInvalidRecord)
 		}
 	default:
 		return CandidateDraft{}, fmt.Errorf("%w: candidate action is invalid", memory.ErrInvalidRecord)
 	}
-	if !isCanonicalUUIDv7(string(draft.ChunkID)) {
+	if !id.IsCanonicalV7(string(draft.ChunkID)) {
 		return CandidateDraft{}, fmt.Errorf("%w: chunk_id must be a canonical UUIDv7", memory.ErrInvalidRecord)
 	}
 	draft.Reason = memory.NormalizeTitle(draft.Reason)
@@ -478,21 +478,6 @@ func curationSourceItemIDs(record memory.CurationRecord) []string {
 		}
 	}
 	return values
-}
-
-func isCanonicalUUIDv7(value string) bool {
-	if len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' || value[14] != '7' || !strings.ContainsRune("89ab", rune(value[19])) {
-		return false
-	}
-	for index := range value {
-		if index == 8 || index == 13 || index == 18 || index == 23 {
-			continue
-		}
-		if (value[index] < '0' || value[index] > '9') && (value[index] < 'a' || value[index] > 'f') {
-			return false
-		}
-	}
-	return true
 }
 
 var candidateDraftSchema = json.RawMessage(`{

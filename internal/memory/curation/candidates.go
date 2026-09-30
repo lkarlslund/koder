@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/memory"
 )
 
@@ -91,7 +92,7 @@ func (s *MemoryCandidateStore) ListCandidates(ctx context.Context, statuses []Ca
 }
 
 func (s *MemoryCandidateStore) MarkApplied(ctx context.Context, candidateID CandidateID, expectedVersion uint64, receipt ApplyReceipt) (StoredCandidate, error) {
-	if !isCanonicalUUIDv7(string(receipt.EntryID)) || receipt.AfterRevision == 0 ||
+	if !id.IsCanonicalV7(string(receipt.EntryID)) || receipt.AfterRevision == 0 ||
 		(receipt.Created && receipt.BeforeRevision != 0) || (!receipt.Created && (receipt.BeforeRevision == 0 || receipt.AfterRevision != receipt.BeforeRevision+1)) {
 		return StoredCandidate{}, fmt.Errorf("%w: candidate apply receipt is invalid", memory.ErrInvalidRecord)
 	}

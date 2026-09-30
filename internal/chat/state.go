@@ -2,6 +2,7 @@ package chat
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -396,7 +397,7 @@ func snapshotTimelineItem(item domain.TimelineItem) domain.TimelineItem {
 		}
 		item.Content = content
 	case domain.ToolExecution:
-		content.Args = cloneStringMap(content.Args)
+		content.Args = maps.Clone(content.Args)
 		content.Result = cloneToolResult(content.Result)
 		content.Error = clonePointer(content.Error)
 		item.Content = content
@@ -411,7 +412,7 @@ func snapshotTimelineItem(item domain.TimelineItem) domain.TimelineItem {
 }
 
 func cloneToolCall(tool domain.ToolCall) domain.ToolCall {
-	tool.Args = cloneStringMap(tool.Args)
+	tool.Args = maps.Clone(tool.Args)
 	tool.Result = cloneToolResult(tool.Result)
 	tool.Error = clonePointer(tool.Error)
 	tool.Approval = clonePointer(tool.Approval)
@@ -426,21 +427,10 @@ func clonePointer[T any](value *T) *T {
 	return &copy
 }
 
-func cloneStringMap(value map[string]string) map[string]string {
-	if value == nil {
-		return nil
-	}
-	copy := make(map[string]string, len(value))
-	for key, entry := range value {
-		copy[key] = entry
-	}
-	return copy
-}
-
 func cloneToolResult(value *domain.ToolResult) *domain.ToolResult {
 	copy := clonePointer(value)
 	if copy != nil {
-		copy.Meta = cloneStringMap(copy.Meta)
+		copy.Meta = maps.Clone(copy.Meta)
 	}
 	return copy
 }

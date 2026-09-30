@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -588,11 +589,7 @@ func (s *Service) scanLexicalIndex(ctx context.Context, entries map[memory.Entry
 			termSet[posting.Term] = struct{}{}
 		}
 	}
-	terms := make([]string, 0, len(termSet))
-	for term := range termSet {
-		terms = append(terms, term)
-	}
-	slices.Sort(terms)
+	terms := slices.Sorted(maps.Keys(termSet))
 	actual := make(map[string]memoryStoreAPI.LexicalPosting, len(expected))
 	issues := make([]IntegrityIssue, 0)
 	var checked uint64
