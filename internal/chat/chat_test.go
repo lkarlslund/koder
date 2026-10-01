@@ -76,6 +76,14 @@ type reasoningOnlyLoopRunner struct {
 	calls int
 }
 
+// initialReasoningOnlyRunner first ends a turn after thinking alone, then
+// answers once nudged.
+type initialReasoningOnlyRunner struct {
+	runtimeFakeRunner
+	mu    sync.Mutex
+	calls int
+}
+
 type cancelAwareRunner struct {
 	ctxSeen chan context.Context
 	events  chan domain.Event
@@ -219,6 +227,22 @@ func (f *queuedSteerBoundaryRunner) PrepareContinueTurn(context.Context, *Chat, 
 func (f *queuedSteerBoundaryRunner) MaxToolLoopSteps() int { return 2 }
 
 func (f *reasoningOnlyLoopRunner) MaxToolLoopSteps() int { return 5 }
+
+func (f *initialReasoningOnlyRunner) MaxToolLoopSteps() int { return 5 }
+
+func (f *initialReasoningOnlyRunner) CompleteModelRequest(_ context.Context, _ domain.Session, _ domain.Chat, _ *provider.Client, _ chan<- domain.Event, _ provider.ChatRequest, _ domain.TimelineItem) (ModelResponse, error) {
+	f.mu.Lock()
+	f.calls++
+	call := f.calls
+	f.mu.Unlock()
+	if call == 1 {
+		return ModelResponse{
+			RawReasoning: "I should open the page with the browser.",
+			Reasoning:    domain.ReasoningContent{Text: "I should open the page with the browser."},
+		}, nil
+	}
+	return ModelResponse{Text: "It is a lathe."}, nil
+}
 
 func (f *reasoningOnlyLoopRunner) CompleteModelRequest(_ context.Context, _ domain.Session, _ domain.Chat, _ *provider.Client, _ chan<- domain.Event, _ provider.ChatRequest, _ domain.TimelineItem) (ModelResponse, error) {
 	f.mu.Lock()
@@ -1261,6 +1285,50 @@ func TestRuntimePausesOnInitialEmptyProviderResponse(t *testing.T) {
 			return
 		case <-deadline:
 			t.Fatalf("timed out waiting for provider-refusal pause: %#v", rt.Snapshot())
+		}
+	}
+}
+
+func TestRuntimeNudgesInitialReasoningOnlyResponse(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	runner := &initialReasoningOnlyRunner{}
+	rt := newTestChat(t, st, session, chat, runner)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "what kind of machine is this"})
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.Status != StatusIdle {
+				continue
+			}
+			timeline := rt.SnapshotTimeline()
+			if len(timeline) == 0 {
+				continue
+			}
+			last, ok := timeline[len(timeline)-1].Content.(domain.AssistantMessage)
+			if !ok || last.Text != "It is a lathe." {
+				continue
+			}
+			nudges := 0
+			for _, item := range timeline {
+				if notice, ok := item.Content.(domain.Notice); ok && notice.Kind == "loop_pause" {
+					t.Fatalf("turn paused instead of nudging: %#v", notice)
+				}
+				if user, ok := item.Content.(domain.UserMessage); ok && user.Source == domain.UserMessageSourceTurnInstruction && user.Text == ReasoningOnlyContinuationPrompt {
+					nudges++
+				}
+			}
+			if nudges != 1 {
+				t.Fatalf("nudges = %d, want 1; timeline=%#v", nudges, timeline)
+			}
+			return
+		case <-deadline:
+			t.Fatalf("timed out waiting for nudged answer: %#v", rt.SnapshotTimeline())
 		}
 	}
 }

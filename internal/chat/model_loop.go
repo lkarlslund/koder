@@ -13,6 +13,10 @@ import (
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
+// ReasoningOnlyContinuationPrompt follows a first response that held only
+// reasoning, with no visible text or tool call.
+const ReasoningOnlyContinuationPrompt = "Continue. Do not expose hidden reasoning. Either produce a visible answer for the user or make the next tool call."
+
 const AfterToolResultContinuationPrompt = "Continue from the latest tool result. If you learned a meaningful fact or changed direction, include one short visible progress sentence before the next tool call. Do not expose hidden reasoning. Either produce a visible answer for the user or make the next tool call."
 
 type modelTurnLoop struct {
@@ -212,10 +216,16 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 	if strings.TrimSpace(text) == "" && len(resp.ToolCalls) == 0 {
 		if strings.TrimSpace(resp.RawReasoning) != "" {
 			l.consecutiveReasoningOnly++
-			if step > 0 && l.consecutiveReasoningOnly == 1 {
+			// Models sometimes end the turn right after thinking. Nudge once;
+			// a second reasoning-only reply in a row pauses below.
+			if l.consecutiveReasoningOnly == 1 {
+				prompt := ReasoningOnlyContinuationPrompt
+				if step > 0 {
+					prompt = AfterToolResultContinuationPrompt
+				}
 				return TurnStepResult{
 					Continue:         true,
-					TurnInstructions: TurnInstructionBlocks("", AfterToolResultContinuationPrompt),
+					TurnInstructions: TurnInstructionBlocks("", prompt),
 				}, nil
 			}
 			l.pauseContinuation(ctx, rt, session.ID, ContinuationPause{
