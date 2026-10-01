@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -915,9 +916,11 @@ func (e *Engine) summarizeInTemporaryChat(ctx context.Context, session domain.Se
 	for {
 		resp, err := e.completeWithCompactionProgress(ctx, session, tempChat, client, req, out)
 		if err == nil {
+			// Reasoning is never a summary: replacing history with it loses
+			// the history. Fail instead, which keeps the history intact.
 			summary := strings.TrimSpace(resp.Text)
-			if summary == "" {
-				summary = strings.TrimSpace(resp.RawReasoning)
+			if summary == "" && strings.TrimSpace(resp.RawReasoning) != "" {
+				return "", errors.New("compaction model ended after thinking without writing a summary")
 			}
 			return summary, nil
 		}

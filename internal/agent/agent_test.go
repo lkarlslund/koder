@@ -5841,7 +5841,9 @@ func TestCompactSessionRejectsInvalidCompactionModelOverride(t *testing.T) {
 	}
 }
 
-func TestCompactSessionAcceptsReasoningOnlySummary(t *testing.T) {
+// A reply with only reasoning is not a summary; the compaction fails and the
+// history is kept rather than replaced by the model's thinking.
+func TestCompactSessionRejectsReasoningOnlySummary(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -5882,27 +5884,28 @@ func TestCompactSessionAcceptsReasoningOnlySummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := compactTestChat(t, engine, session, chat, client, "manual", "", nil); err != nil {
-		t.Fatal(err)
+	err = compactTestChat(t, engine, session, chat, client, "manual", "", nil)
+	if err == nil || !strings.Contains(err.Error(), "without writing a summary") {
+		t.Fatalf("compaction error = %v, want rejection of reasoning-only reply", err)
 	}
 
 	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var found bool
+	var failed bool
 	for _, item := range timeline {
 		payload, ok := item.Content.(domain.Compaction)
-		if !ok || payload.Status != "completed" {
+		if !ok {
 			continue
 		}
-		if got := strings.TrimSpace(payload.Summary); got != "reasoning-only compact summary" {
-			t.Fatalf("summary = %q", got)
+		if payload.Status == "completed" || strings.TrimSpace(payload.Summary) != "" {
+			t.Fatalf("reasoning was stored as a summary: %#v", payload)
 		}
-		found = true
+		failed = failed || payload.Status == "failed"
 	}
-	if !found {
-		t.Fatal("expected persisted compaction summary")
+	if !failed {
+		t.Fatal("expected a failed compaction record")
 	}
 }
 
