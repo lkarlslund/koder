@@ -56,7 +56,7 @@ func TestBuildDraftForExistingProvider(t *testing.T) {
 func TestProbeReturnsSortedModels(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/chat/completions" {
-			http.NotFound(w, r)
+			http.Error(w, "return_progress is not supported", http.StatusBadRequest)
 			return
 		}
 		if r.URL.Path == "/slots" || r.URL.Path == "/props" {
@@ -139,7 +139,7 @@ func TestProbeDetectsPromptProgressSupport(t *testing.T) {
 			w.Header().Set("Content-Type", "text/event-stream")
 			_, _ = w.Write([]byte("data: {\"prompt_progress\":{\"total\":10,\"processed\":5,\"cache\":2,\"time_ms\":3}}\n\n"))
 			_, _ = w.Write([]byte("data: [DONE]\n\n"))
-		case "/slots", "/props", "/api/v1/models", "/api/v0/models":
+		case "/slots", "/props", "/api/v1/models", "/api/v0/models", "/v1/systemone", "/v1/audio/speech", "/v1/audio/transcriptions":
 			http.NotFound(w, r)
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)

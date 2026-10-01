@@ -34,6 +34,7 @@ type capabilityEntry struct {
 	ChatKnown         bool      `json:"chat_known,omitempty"`
 	SupportsSTT       bool      `json:"supports_stt"`
 	SupportsTTS       bool      `json:"supports_tts"`
+	SupportsDecisions bool      `json:"supports_decisions,omitempty"`
 	SupportsImages    bool      `json:"supports_images"`
 	ImagesKnown       bool      `json:"images_known,omitempty"`
 	SupportsPDFs      bool      `json:"supports_pdfs"`
@@ -80,9 +81,10 @@ func (s *CapabilityStore) EnrichModel(providerID string, cfg config.Provider, mo
 	key := capabilityKey(providerID, cfg.BaseURL, model.ID)
 	current := inferCapabilities(providerID, cfg, model)
 	// Live provider metadata is newer than the probe cache. Persist explicit
-	// speech roles because they are stable; keep runtime/native facts in memory.
+	// model kinds (speech, decisions) because they are stable; keep
+	// runtime/native facts in memory.
 	if current.CapabilitiesKnown && strings.TrimSpace(current.CapabilitySource) != "" && strings.TrimSpace(current.CapabilitySource) != "heuristic" {
-		if strings.TrimSpace(current.CapabilitySource) == "openai-models-task" {
+		if source := strings.TrimSpace(current.CapabilitySource); source == "openai-models-task" || source == "provider-features" {
 			cache.Entries[key] = capabilityEntryFromModel(providerID, cfg, current)
 			if err := s.save(cache); err != nil {
 				return domain.Model{}, err
@@ -253,11 +255,12 @@ func applyEntry(model domain.Model, entry capabilityEntry) domain.Model {
 	}
 	model.SupportsChat = entry.SupportsChat
 	model.ChatKnown = entry.ChatKnown
-	if !entry.ChatKnown && !entry.SupportsChat && !entry.SupportsSTT && !entry.SupportsTTS {
+	if !entry.ChatKnown && !entry.SupportsChat && !entry.SupportsSTT && !entry.SupportsTTS && !entry.SupportsDecisions {
 		model.SupportsChat = true
 	}
 	model.SupportsSTT = entry.SupportsSTT
 	model.SupportsTTS = entry.SupportsTTS
+	model.SupportsDecisions = entry.SupportsDecisions
 	model.SupportsImages = entry.SupportsImages
 	model.ImagesKnown = entry.ImagesKnown
 	model.SupportsPDFs = entry.SupportsPDFs
@@ -283,6 +286,7 @@ func capabilityEntryFromModel(providerID string, cfg config.Provider, model doma
 		ChatKnown:         model.ChatKnown,
 		SupportsSTT:       model.SupportsSTT,
 		SupportsTTS:       model.SupportsTTS,
+		SupportsDecisions: model.SupportsDecisions,
 		SupportsImages:    model.SupportsImages,
 		ImagesKnown:       model.ImagesKnown,
 		SupportsPDFs:      model.SupportsPDFs,

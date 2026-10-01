@@ -144,6 +144,19 @@ type Provider struct {
 	PromptProgressSupported bool              `toml:"prompt_progress_supported"`
 	PromptProgressCheckedAt time.Time         `toml:"prompt_progress_checked_at,omitempty"`
 	PromptProgressTarget    string            `toml:"prompt_progress_target,omitempty"`
+	Features                *ProviderFeatures `toml:"features,omitempty"`
+}
+
+// ProviderFeatures records which endpoints detection found on a provider's
+// server. Every provider uses the same client; features decide what it may
+// call and which kinds its models are. Nil means the provider is undetected.
+type ProviderFeatures struct {
+	CheckedAt     time.Time `toml:"checked_at"`
+	Chat          bool      `toml:"chat"`
+	Decisions     bool      `toml:"decisions"`
+	Speech        bool      `toml:"speech"`
+	Transcription bool      `toml:"transcription"`
+	LlamaProps    bool      `toml:"llama_props"`
 }
 
 // ModelConfig stores settings for one provider/model pair.

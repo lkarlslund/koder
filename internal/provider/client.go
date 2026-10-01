@@ -319,6 +319,7 @@ func (r ChatRequest) MarshalJSON() ([]byte, error) {
 
 type modelResponseItem struct {
 	ID                     string   `json:"id"`
+	Name                   string   `json:"name"`
 	OwnedBy                string   `json:"owned_by"`
 	Type                   string   `json:"type"`
 	Family                 string   `json:"family"`
@@ -347,8 +348,21 @@ type modelResponseItem struct {
 	} `json:"status"`
 }
 
+// modelsResponse accepts the OpenAI list shape ({"data":[{"id"}]}) and the
+// named shape some servers use instead ({"models":[{"name"}]}).
 type modelsResponse struct {
-	Data []modelResponseItem `json:"data"`
+	Data   []modelResponseItem `json:"data"`
+	Models []modelResponseItem `json:"models"`
+}
+
+func (r modelsResponse) items() []modelResponseItem {
+	items := append(r.Data, r.Models...)
+	for idx := range items {
+		if strings.TrimSpace(items[idx].ID) == "" {
+			items[idx].ID = strings.TrimSpace(items[idx].Name)
+		}
+	}
+	return slices.DeleteFunc(items, func(item modelResponseItem) bool { return item.ID == "" })
 }
 
 type propsResponse struct {
@@ -432,6 +446,7 @@ type Client struct {
 	provider string
 	recorder *debugsrv.Recorder
 	health   *HealthTracker
+	features *config.ProviderFeatures
 	probeMu  sync.Mutex
 	probes   map[string]endpointSupport
 }
@@ -481,6 +496,7 @@ func New(id string, cfg config.Provider, recorder *debugsrv.Recorder, healthTrac
 		apiKey:   cfg.APIKey,
 		headers:  cfg.Headers,
 		provider: id,
+		features: cfg.Features,
 		recorder: recorder,
 		health:   health,
 	}, nil
@@ -518,12 +534,34 @@ func (c *Client) ListModels(ctx context.Context) (models []domain.Model, err err
 	if err != nil {
 		return nil, err
 	}
-	models = make([]domain.Model, 0, len(items))
+	return c.modelsFromItems(ctx, items), nil
+}
+
+func (c *Client) modelsFromItems(ctx context.Context, items []modelResponseItem) []domain.Model {
+	models := make([]domain.Model, 0, len(items))
 	for _, item := range items {
-		models = append(models, modelFromResponseItem(item))
+		model := modelFromResponseItem(item)
+		applyProviderFeatures(&model, c.features)
+		models = append(models, model)
 	}
 	c.enrichModelCatalog(ctx, models)
-	return models, nil
+	return models
+}
+
+// applyProviderFeatures settles the kind of a listed model from the provider's
+// detected endpoints: a server without chat completions cannot chat, and one
+// that answers decisions instead serves decision models.
+func applyProviderFeatures(model *domain.Model, features *config.ProviderFeatures) {
+	if features == nil || features.Chat || model.ChatKnown {
+		return
+	}
+	model.SupportsChat = false
+	model.ChatKnown = true
+	if features.Decisions {
+		model.SupportsDecisions = true
+		model.CapabilitiesKnown = true
+		model.CapabilitySource = "provider-features"
+	}
 }
 
 func (c *Client) listModelItems(ctx context.Context) ([]modelResponseItem, error) {
@@ -551,7 +589,7 @@ func (c *Client) listModelItems(ctx context.Context) ([]modelResponseItem, error
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, fmt.Errorf("decode model list: %w", err)
 	}
-	return payload.Data, nil
+	return payload.items(), nil
 }
 
 func modelFromResponseItem(item modelResponseItem) domain.Model {
@@ -580,30 +618,12 @@ func modelResponseItemByID(items []modelResponseItem, modelID string) (modelResp
 func (c *Client) DetectModelContextWindow(ctx context.Context, modelID string) (window int, err error) {
 	started := time.Now()
 	defer func() { c.observe(modelID, "detect_context_window", started, err) }()
-	req, err := c.newRequest(ctx, http.MethodGet, c.apiPath("/models"), nil)
+	items, err := c.listModelItems(ctx)
 	if err != nil {
 		return 0, err
 	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("list models: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		return 0, &APIError{
-			Operation:  "list models",
-			StatusCode: resp.StatusCode,
-			Body:       strings.TrimSpace(string(body)),
-			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
-		}
-	}
-	var payload modelsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return 0, fmt.Errorf("decode model list: %w", err)
-	}
 	modelID = strings.TrimSpace(modelID)
-	for _, item := range payload.Data {
+	for _, item := range items {
 		if strings.TrimSpace(item.ID) != modelID {
 			continue
 		}

@@ -53,11 +53,15 @@ type ConnectDraft struct {
 	PromptProgressSupported bool
 	PromptProgressCheckedAt time.Time
 	PromptProgressTarget    string
+	Features                *config.ProviderFeatures
 }
 
 type ProbeResult struct {
 	Models                  []domain.Model
 	SelectedModel           string
+	BaseURL                 string
+	Transport               string
+	Features                config.ProviderFeatures
 	PromptProgressProbed    bool
 	PromptProgressSupported bool
 	PromptProgressCheckedAt time.Time
@@ -150,6 +154,7 @@ func BuildDraftForExisting(id string, existing config.Provider) (ConnectDraft, e
 		PromptProgressSupported: existing.PromptProgressSupported,
 		PromptProgressCheckedAt: existing.PromptProgressCheckedAt,
 		PromptProgressTarget:    existing.PromptProgressTarget,
+		Features:                existing.Features,
 	}, nil
 }
 
@@ -172,19 +177,22 @@ func (d ConnectDraft) ToConfig() config.Provider {
 		PromptProgressSupported: d.PromptProgressSupported,
 		PromptProgressCheckedAt: d.PromptProgressCheckedAt,
 		PromptProgressTarget:    d.PromptProgressTarget,
+		Features:                d.Features,
 	}
 	return cfg
 }
 
+// Probe detects the draft's provider and, when it serves chat, checks
+// whether it reports prompt progress while streaming.
 func Probe(ctx context.Context, draft ConnectDraft, recorder *debugsrv.Recorder) (ProbeResult, error) {
-	client, err := New(draft.ProviderID, draft.ToConfig(), recorder)
+	detection, err := Detect(ctx, draft.ProviderID, draft.ToConfig(), recorder)
 	if err != nil {
 		return ProbeResult{}, err
 	}
-	models, err := client.ListModels(ctx)
-	if err != nil {
-		return ProbeResult{}, err
-	}
+	draft.BaseURL = detection.BaseURL
+	draft.Transport = detection.Transport
+	draft.Features = &detection.Features
+	models := detection.Models
 	slices.SortFunc(models, func(a, b domain.Model) int {
 		return strings.Compare(a.ID, b.ID)
 	})
@@ -192,8 +200,18 @@ func Probe(ctx context.Context, draft ConnectDraft, recorder *debugsrv.Recorder)
 	if err != nil {
 		return ProbeResult{}, err
 	}
+	result := ProbeResult{
+		Models:        models,
+		SelectedModel: selected,
+		BaseURL:       detection.BaseURL,
+		Transport:     detection.Transport,
+		Features:      detection.Features,
+	}
+	if !detection.Features.Chat {
+		return result, nil
+	}
 	probed, supported := probePromptProgress(ctx, draft, selected, recorder)
-	result := ProbeResult{Models: models, SelectedModel: selected, PromptProgressProbed: probed, PromptProgressSupported: supported}
+	result.PromptProgressProbed, result.PromptProgressSupported = probed, supported
 	if probed {
 		result.PromptProgressCheckedAt = time.Now()
 		result.PromptProgressTarget = config.PromptProgressObservationTarget(draft.ToConfig())

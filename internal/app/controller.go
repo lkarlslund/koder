@@ -133,6 +133,7 @@ type ModelOption struct {
 	SupportsChat           bool          `json:"supports_chat"`
 	SupportsSTT            bool          `json:"supports_stt"`
 	SupportsTTS            bool          `json:"supports_tts"`
+	SupportsDecisions      bool          `json:"supports_decisions"`
 	SupportsTools          bool          `json:"supports_tools"`
 	SupportsImages         bool          `json:"supports_images"`
 	SupportsPDFs           bool          `json:"supports_pdfs"`
@@ -169,6 +170,7 @@ type ModelInfo struct {
 	SupportsChat      bool   `json:"supports_chat"`
 	SupportsSTT       bool   `json:"supports_stt"`
 	SupportsTTS       bool   `json:"supports_tts"`
+	SupportsDecisions bool   `json:"supports_decisions"`
 	SupportsTools     bool   `json:"supports_tools"`
 	SupportsImages    bool   `json:"supports_images"`
 	SupportsPDFs      bool   `json:"supports_pdfs"`
@@ -2821,6 +2823,7 @@ func (c *Controller) modelInfoForChat(chatRecord domain.Chat) ModelInfo {
 	info.MaxOutputTokens = enriched.MaxOutputTokens
 	info.MetadataSource = strings.TrimSpace(enriched.MetadataSource)
 	info.SupportsTTS = enriched.SupportsTTS
+	info.SupportsDecisions = enriched.SupportsDecisions
 	info.SupportsTools = enriched.SupportsTools || (!enriched.ToolsKnown && enriched.SupportsChat)
 	info.SupportsImages = enriched.SupportsImages
 	info.SupportsPDFs = enriched.SupportsPDFs

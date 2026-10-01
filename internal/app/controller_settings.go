@@ -79,9 +79,10 @@ func (c *Controller) TestProvider(ctx context.Context, draft ProviderDraft) (Pro
 }
 
 func providerProbeCapabilities(models []domain.Model) []string {
-	var chat, stt, tts, tools, images, pdfs, jsonOutput, reasoning, hasUnknown bool
+	var chat, decisions, stt, tts, tools, images, pdfs, jsonOutput, reasoning, hasUnknown bool
 	for _, model := range models {
 		chat = chat || model.SupportsChat
+		decisions = decisions || model.SupportsDecisions
 		stt = stt || model.SupportsSTT
 		tts = tts || model.SupportsTTS
 		tools = tools || model.SupportsTools
@@ -102,6 +103,7 @@ func providerProbeCapabilities(models []domain.Model) []string {
 		enabled bool
 	}{
 		{label: "Chat", enabled: chat},
+		{label: "Decisions", enabled: decisions},
 		{label: "STT", enabled: stt},
 		{label: "Tools", enabled: tools},
 		{label: "Vision", enabled: images},
@@ -140,6 +142,9 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 		}
 		c.recordProviderProbe(catalogDraft.ProviderID, probe.Models, started, nil)
 		catalogDraft.Model = probe.SelectedModel
+		catalogDraft.BaseURL = probe.BaseURL
+		catalogDraft.Transport = probe.Transport
+		catalogDraft.Features = &probe.Features
 		catalogDraft.PromptProgressProbed = probe.PromptProgressProbed
 		catalogDraft.PromptProgressSupported = probe.PromptProgressSupported
 		catalogDraft.PromptProgressCheckedAt = probe.PromptProgressCheckedAt
@@ -613,6 +618,7 @@ func discoverModelOptionsForConfig(ctx context.Context, cfg config.Config, curre
 			SupportsChat:           model.SupportsChat,
 			SupportsSTT:            model.SupportsSTT,
 			SupportsTTS:            model.SupportsTTS,
+			SupportsDecisions:      model.SupportsDecisions,
 			SupportsTools:          model.SupportsTools,
 			SupportsImages:         model.SupportsImages,
 			SupportsPDFs:           model.SupportsPDFs,
@@ -703,6 +709,7 @@ func discoverModelOptionsForConfig(ctx context.Context, cfg config.Config, curre
 			SupportsChat:           source.SupportsChat || !source.CapabilitiesKnown,
 			SupportsSTT:            source.SupportsSTT,
 			SupportsTTS:            source.SupportsTTS,
+			SupportsDecisions:      source.SupportsDecisions,
 			SupportsTools:          source.SupportsTools,
 			SupportsImages:         source.SupportsImages,
 			SupportsPDFs:           source.SupportsPDFs,
@@ -1663,6 +1670,9 @@ func mergeProviderEditDefaults(next *config.Provider, existing config.Provider) 
 	}
 	if next.Timeout == 0 {
 		next.Timeout = existing.Timeout
+	}
+	if next.Features == nil {
+		next.Features = existing.Features
 	}
 }
 

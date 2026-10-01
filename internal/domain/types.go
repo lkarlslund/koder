@@ -860,16 +860,19 @@ type Part struct {
 }
 
 type Model struct {
-	ID                     string
-	OwnedBy                string
-	ContextWindow          int
-	MaxContextWindow       int
-	MaxOutputTokens        int
-	MetadataSource         string
-	SupportsChat           bool
-	ChatKnown              bool
-	SupportsSTT            bool
-	SupportsTTS            bool
+	ID               string
+	OwnedBy          string
+	ContextWindow    int
+	MaxContextWindow int
+	MaxOutputTokens  int
+	MetadataSource   string
+	SupportsChat     bool
+	ChatKnown        bool
+	SupportsSTT      bool
+	SupportsTTS      bool
+	// SupportsDecisions marks a model that answers typed decision questions
+	// (choices with probabilities) instead of generating chat text.
+	SupportsDecisions      bool
 	SupportsImages         bool
 	ImagesKnown            bool
 	SupportsPDFs           bool

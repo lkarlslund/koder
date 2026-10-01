@@ -4150,7 +4150,7 @@ func TestWebSocketNewSessionCreatesMissingProjectRootOnlyWhenRequested(t *testin
 func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/chat/completions" {
-			http.NotFound(w, r)
+			http.Error(w, "return_progress is not supported", http.StatusBadRequest)
 			return
 		}
 		if r.URL.Path == "/slots" || r.URL.Path == "/props" || r.URL.Path == "/v1/slots" || r.URL.Path == "/v1/props" {

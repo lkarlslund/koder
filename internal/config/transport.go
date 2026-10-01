@@ -34,7 +34,7 @@ func InferTransport(provider Provider) string {
 	if parsed != nil {
 		host, port = strings.ToLower(parsed.Hostname()), parsed.Port()
 	}
-	if strings.Contains(host, "dashscope.aliyuncs.com") || strings.Contains(host, "dashscope-intl.aliyuncs.com") {
+	if IsDashScopeHost(host) {
 		return TransportDashScope
 	}
 	if nameContains("ninfer", provider.TemplateID, provider.Name) {
@@ -52,6 +52,13 @@ func InferTransport(provider Provider) string {
 	default:
 		return TransportOpenAI
 	}
+}
+
+// IsDashScopeHost reports whether host serves Alibaba's DashScope API, whose
+// dialect cannot be detected from responses.
+func IsDashScopeHost(host string) bool {
+	host = strings.ToLower(host)
+	return strings.Contains(host, "dashscope.aliyuncs.com") || strings.Contains(host, "dashscope-intl.aliyuncs.com")
 }
 
 func nameContains(needle string, values ...string) bool {
