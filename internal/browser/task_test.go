@@ -2,8 +2,8 @@ package browser
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/browserapi"
@@ -22,16 +22,54 @@ func TestNormalizeTaskLinksResolvesFiltersAndBounds(t *testing.T) {
 	}
 }
 
-func TestRankTaskLinksUsesJEVProbabilities(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"answers":{"next":{"probabilities":{"c0":0.01,"c1":0.99}}}}`))
-	}))
-	defer server.Close()
+func TestRankTaskLinksUsesDecisionProbabilities(t *testing.T) {
+	var gotCriteria map[string]string
+	ranker := func(_ context.Context, state map[string]string, _ string, criteria map[string]string) (map[string]float64, error) {
+		if state["goal"] != "download the manual" {
+			t.Fatalf("state = %#v", state)
+		}
+		gotCriteria = criteria
+		return map[string]float64{"c0": 0.01, "c1": 0.99}, nil
+	}
 	links := []taskLink{{URL: "https://example.com/contact", Label: "Contact"}, {URL: "https://example.com/file", Label: "Documentation"}}
-	rankTaskLinks(context.Background(), server.URL, "download the manual", "https://example.com", links)
-	if links[0].Label != "Documentation" {
-		t.Fatalf("rankTaskLinks() = %#v", links)
+	if err := rankTaskLinks(context.Background(), ranker, "download the manual", "https://example.com", links); err != nil {
+		t.Fatal(err)
+	}
+	if links[0].Label != "Documentation" || len(gotCriteria) != 2 {
+		t.Fatalf("rankTaskLinks() = %#v, criteria %#v", links, gotCriteria)
+	}
+}
+
+func TestRankTaskLinksFallsBackToKeywordsWhenRankerFails(t *testing.T) {
+	ranker := func(context.Context, map[string]string, string, map[string]string) (map[string]float64, error) {
+		return nil, errors.New("decision service down")
+	}
+	links := []taskLink{{URL: "https://example.com/contact", Label: "Contact"}, {URL: "https://example.com/manual.pdf", Label: "Manual"}}
+	if err := rankTaskLinks(context.Background(), ranker, "download the manual", "https://example.com", links); err == nil {
+		t.Fatal("ranker failure was not reported")
+	}
+	if links[0].Label != "Manual" {
+		t.Fatalf("keyword fallback order = %#v", links)
+	}
+}
+
+func TestTaskRankerTracesTheDecisionModel(t *testing.T) {
+	if _, trace := taskRanker(context.Background(), nil); !strings.Contains(trace, "keywords") {
+		t.Fatalf("trace without resolver = %q", trace)
+	}
+	failing := func(context.Context) (ChoiceRanker, string, error) {
+		return nil, "", errors.New("no provider serves a decision model")
+	}
+	if ranker, trace := taskRanker(context.Background(), failing); ranker != nil || !strings.Contains(trace, "no provider serves a decision model") {
+		t.Fatalf("trace for failed resolve = %q", trace)
+	}
+	resolved := func(context.Context) (ChoiceRanker, string, error) {
+		return func(context.Context, map[string]string, string, map[string]string) (map[string]float64, error) {
+			return nil, nil
+		}, "laya/laya", nil
+	}
+	if ranker, trace := taskRanker(context.Background(), resolved); ranker == nil || !strings.Contains(trace, "laya/laya") {
+		t.Fatalf("trace for resolved ranker = %q", trace)
 	}
 }
 

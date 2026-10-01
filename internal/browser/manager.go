@@ -84,6 +84,7 @@ type Manager struct {
 	mu sync.Mutex
 
 	cfg        config.Browser
+	rankers    RankerResolver
 	stateDir   string
 	profileDir string
 	state      string
@@ -115,6 +116,13 @@ func NewManager(cfg config.Browser, stateDir string) *Manager {
 func (m *Manager) UpdateConfig(cfg config.Browser) {
 	m.mu.Lock()
 	m.cfg = cfg
+	m.mu.Unlock()
+}
+
+// SetRankerResolver sets how browser tasks find their decision model.
+func (m *Manager) SetRankerResolver(resolve RankerResolver) {
+	m.mu.Lock()
+	m.rankers = resolve
 	m.mu.Unlock()
 }
 

@@ -3,7 +3,6 @@ package browser
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"mime"
@@ -21,6 +20,16 @@ import (
 )
 
 const taskCandidateLimit = 24
+
+// ChoiceRanker answers a choice question about state with a probability per
+// criterion key.
+type ChoiceRanker func(ctx context.Context, state map[string]string, instructions string, criteria map[string]string) (map[string]float64, error)
+
+// RankerResolver picks the decision model for one task and returns a ranker
+// with the model's name for the task trace.
+type RankerResolver func(ctx context.Context) (ChoiceRanker, string, error)
+
+const taskRankInstructions = "Rank the links by how likely they are to complete the browser task. Prefer direct requested files and official product documentation."
 
 type taskLink struct {
 	URL   string
@@ -41,11 +50,11 @@ func (m *Manager) Task(ctx context.Context, chat browserapi.Chat, request browse
 		return browserapi.TaskResult{}, err
 	}
 	m.mu.Lock()
-	cfg := m.cfg
+	cfg, resolveRanker := m.cfg, m.rankers
 	m.mu.Unlock()
 	if cfg.TaskEngine == "" || cfg.TaskEngine == "obscura" {
 		if executable, lookupErr := exec.LookPath("obscura"); lookupErr == nil {
-			result, taskErr := m.runObscuraTask(ctx, executable, cfg.TaskDecisionURL, cfg.TaskMaxSteps, goal, start)
+			result, taskErr := m.runObscuraTask(ctx, executable, resolveRanker, cfg.TaskMaxSteps, goal, start)
 			if taskErr == nil && result.Status == "completed" {
 				return result, nil
 			}
@@ -59,7 +68,7 @@ func (m *Manager) Task(ctx context.Context, chat browserapi.Chat, request browse
 	return m.handoffTaskToChrome(ctx, chat, goal, start.String(), nil)
 }
 
-func (m *Manager) runObscuraTask(ctx context.Context, executable, decisionURL string, maxSteps int, goal string, start *url.URL) (browserapi.TaskResult, error) {
+func (m *Manager) runObscuraTask(ctx context.Context, executable string, resolveRanker RankerResolver, maxSteps int, goal string, start *url.URL) (browserapi.TaskResult, error) {
 	if maxSteps <= 0 {
 		maxSteps = 8
 	}
@@ -70,6 +79,8 @@ func (m *Manager) runObscuraTask(ctx context.Context, executable, decisionURL st
 	defer func() { _ = os.RemoveAll(storage) }()
 
 	result := browserapi.TaskResult{Status: "incomplete", Backend: "obscura"}
+	ranker, trace := taskRanker(ctx, resolveRanker)
+	result.Trace = append(result.Trace, trace)
 	frontier := []taskLink{{URL: start.String(), Label: start.String()}}
 	visited := map[string]bool{}
 	for step := 0; step < maxSteps && len(frontier) > 0; step++ {
@@ -100,7 +111,9 @@ func (m *Manager) runObscuraTask(ctx context.Context, executable, decisionURL st
 		if len(links) == 0 {
 			continue
 		}
-		rankTaskLinks(ctx, decisionURL, goal, current.URL, links)
+		if err := rankTaskLinks(ctx, ranker, goal, current.URL, links); err != nil {
+			result.Trace = append(result.Trace, "Decision model failed, ranked links by keywords: "+err.Error())
+		}
 		frontier = mergeTaskFrontier(frontier, links, maxSteps*taskCandidateLimit)
 	}
 	return result, errors.New("no verified download was found within the lightweight browsing limit")
@@ -198,41 +211,42 @@ func normalizeTaskLinks(baseURL string, links []taskLink, visited map[string]boo
 	return out
 }
 
-func rankTaskLinks(ctx context.Context, endpoint, goal, page string, links []taskLink) {
-	if endpoint == "" || len(links) < 2 {
+// taskRanker resolves the task's decision model and describes the choice
+// for the trace. Without one, links are ranked by keywords.
+func taskRanker(ctx context.Context, resolve RankerResolver) (ChoiceRanker, string) {
+	if resolve == nil {
+		return nil, "No decision model is available; ranking links by keywords"
+	}
+	ranker, name, err := resolve(ctx)
+	if err != nil {
+		return nil, "No decision model is available, ranking links by keywords: " + err.Error()
+	}
+	return ranker, "Ranking links with decision model " + name
+}
+
+// rankTaskLinks orders links by the decision model's probabilities, falling
+// back to keyword relevance when there is no ranker or it fails.
+func rankTaskLinks(ctx context.Context, ranker ChoiceRanker, goal, page string, links []taskLink) error {
+	var err error
+	if ranker != nil && len(links) > 1 {
+		criteria := make(map[string]string, len(links))
+		for i, link := range links {
+			criteria[fmt.Sprintf("c%d", i)] = strings.TrimSpace(link.Label + " — " + link.URL)
+		}
+		var probabilities map[string]float64
+		if probabilities, err = ranker(ctx, map[string]string{"goal": goal, "url": page}, taskRankInstructions, criteria); err == nil {
+			for i := range links {
+				links[i].Score += probabilities[fmt.Sprintf("c%d", i)] * 100
+			}
+		}
+	}
+	if ranker == nil || err != nil {
 		for i := range links {
 			links[i].Score += lexicalRelevance(links[i].Label+" "+links[i].URL, goal)
 		}
-		return
-	}
-	criteria := make(map[string]string, len(links))
-	for i, link := range links {
-		criteria[fmt.Sprintf("c%d", i)] = strings.TrimSpace(link.Label + " — " + link.URL)
-	}
-	payload := map[string]any{"model": "jev-latest", "state": map[string]string{"goal": goal, "url": page}, "questions": map[string]any{"next": map[string]any{"type": "choice", "instructions": "Rank the links by how likely they are to complete the browser task. Prefer direct requested files and official product documentation.", "criteria": criteria}}}
-	body, _ := json.Marshal(payload)
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return
-	}
-	request.Header.Set("Content-Type", "application/json")
-	response, err := (&http.Client{Timeout: 5 * time.Second}).Do(request)
-	if err != nil {
-		return
-	}
-	defer func() { _ = response.Body.Close() }()
-	var decoded struct {
-		Answers map[string]struct {
-			Probabilities map[string]float64 `json:"probabilities"`
-		} `json:"answers"`
-	}
-	if response.StatusCode/100 != 2 || json.NewDecoder(response.Body).Decode(&decoded) != nil {
-		return
-	}
-	for i := range links {
-		links[i].Score += decoded.Answers["next"].Probabilities[fmt.Sprintf("c%d", i)] * 100
 	}
 	sort.SliceStable(links, func(i, j int) bool { return links[i].Score > links[j].Score })
+	return err
 }
 
 func mergeTaskFrontier(frontier, links []taskLink, limit int) []taskLink {

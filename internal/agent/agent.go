@@ -132,6 +132,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		retryPause:    modelruntime.DefaultRetryPause,
 	}
 	e.browser = browser.NewManager(cfg.Browser, cfg.StateDir())
+	e.browser.SetRankerResolver(e.resolveBrowserRanker)
 	e.codex = codexdriver.New(codexdriver.NewSandboxProcessFactory(codexdriver.SandboxProcessConfig{
 		Client: codexapp.Config{
 			Executable: cfg.Codex.Executable,

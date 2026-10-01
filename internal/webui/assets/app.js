@@ -5112,6 +5112,7 @@
           if (!target) return JSON.stringify([this.activeProvider() || '', this.activeModel() || '']);
           if (target.kind === 'default') return this.defaultModelValue();
           if (target.kind === 'tts') return this.ttsModelValue();
+          if (target.kind === 'decision') return this.decisionModelValue();
           if (target.kind === 'compaction') return this.compactionModelValue();
           if (target.kind === 'thinking') return this.thinkingModelValue();
           return '';
@@ -5124,7 +5125,11 @@
             const current = this.modelPickerCurrentValue();
             return models.filter(model => model.supports_tts || this.modelOptionValue(model) === current);
           }
-          if (target?.chatOnly) return models.filter(model => model.supports_chat !== false);
+          if (target?.kind === 'decision') {
+            const current = this.modelPickerCurrentValue();
+            return models.filter(model => model.supports_decisions || this.modelOptionValue(model) === current);
+          }
+          if (!target || target.chatOnly) return models.filter(model => model.supports_chat !== false);
           return models;
         },
         modelPickerModelCurrent(model) {
@@ -5137,6 +5142,7 @@
 		  if (this.modelPickerTarget.kind === 'custom') { this.createCustomModelFromDetected(model); return; }
           if (this.modelPickerTarget.kind === 'default') this.setDefaultModelValue(value);
           if (this.modelPickerTarget.kind === 'tts') this.setTTSModelValue(value);
+          if (this.modelPickerTarget.kind === 'decision') this.setDecisionModelValue(value);
           if (this.modelPickerTarget.kind === 'compaction') this.setCompactionModelValue(value);
           if (this.modelPickerTarget.kind === 'thinking') this.setThinkingModelValue(value);
         },
@@ -5891,7 +5897,7 @@
 		  delete this.settings.health;
           if (!this.settings.ui) this.settings.ui = {};
 		  if (!this.settings.ui.tts) this.settings.ui.tts = {enabled: false, provider_id: '', model_id: '', voice: 'alloy', response_format: 'wav', speed: 1, pcm_sample_rate: 24000};
-		  if (!this.settings.browser) this.settings.browser = {enabled: true, executable: '', headed: true, operation_timeout_seconds: 30, max_tabs_per_chat: 8, max_tabs_global: 32, task_engine: 'obscura', task_decision_url: 'http://127.0.0.1:8004/v1/systemone', task_max_steps: 8};
+		  if (!this.settings.browser) this.settings.browser = {enabled: true, executable: '', headed: true, operation_timeout_seconds: 30, max_tabs_per_chat: 8, max_tabs_global: 32, task_engine: 'obscura', task_decision_provider_id: '', task_decision_model_id: '', task_max_steps: 8};
 		  if (!this.settings.codex) this.settings.codex = {configured: true, enabled: true, executable: 'codex', home: ''};
 		  if (!this.settings.access) this.settings.access = {settings: this.cloneAccessSettings({}), presets: [], global_mounts: []};
 		  if (!Array.isArray(this.settings.access.global_mounts)) this.settings.access.global_mounts = [];
@@ -6187,6 +6193,22 @@
           this.settings.ui.tts.provider_id = parts[0] || '';
           this.settings.ui.tts.model_id = parts[1] || '';
         },
+        decisionModelValue() {
+          const browser = this.settings?.browser || {};
+          if (!browser.task_decision_provider_id && !browser.task_decision_model_id) return '';
+          return JSON.stringify([browser.task_decision_provider_id || '', browser.task_decision_model_id || '']);
+        },
+        setDecisionModelValue(value) {
+          if (!this.settings?.browser) return;
+          let parts = [];
+          try {
+            parts = JSON.parse(String(value || '[]'));
+          } catch (_) {
+            parts = [];
+          }
+          this.settings.browser.task_decision_provider_id = parts[0] || '';
+          this.settings.browser.task_decision_model_id = parts[1] || '';
+        },
         compactionModelValue() {
           const c = this.settings?.compaction || {};
           if (c.use_chat_model || (!c.provider_id && !c.model_id)) return 'chat';
@@ -6280,6 +6302,7 @@
           return parts[1] || fallback;
         },
         ttsModelLabel() { return this.labelForModelValue(this.ttsModelValue(), 'First detected TTS model'); },
+        decisionModelLabel() { return this.labelForModelValue(this.decisionModelValue(), 'First detected decision model'); },
         compactionModelLabel() {
           const value = this.compactionModelValue();
           if (value === 'chat') return 'Chat model';
@@ -6539,6 +6562,7 @@
 		  if (model?.supports_reasoning) badges.push('Reasoning');
 		  if (model?.supports_stt) badges.push('STT');
 		  if (model?.supports_tts) badges.push('TTS');
+		  if (model?.supports_decisions) badges.push('Decisions');
 		  return badges;
 		},
 		openSettingsModel(key) {

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1318,7 +1317,7 @@ func applyCodexPreferences(cfg *config.Config, prefs CodexPreferences) error {
 }
 
 func nativeBrowserPreferencesFromConfig(cfg config.Browser) NativeBrowserPreferences {
-	return NativeBrowserPreferences{Enabled: cfg.Enabled, Executable: cfg.Executable, Headed: cfg.Headed, OperationTimeout: int(cfg.OperationTimeout / time.Second), MaxTabsPerChat: cfg.MaxTabsPerChat, MaxTabsGlobal: cfg.MaxTabsGlobal, TaskEngine: cfg.TaskEngine, TaskDecisionURL: cfg.TaskDecisionURL, TaskMaxSteps: cfg.TaskMaxSteps}
+	return NativeBrowserPreferences{Enabled: cfg.Enabled, Executable: cfg.Executable, Headed: cfg.Headed, OperationTimeout: int(cfg.OperationTimeout / time.Second), MaxTabsPerChat: cfg.MaxTabsPerChat, MaxTabsGlobal: cfg.MaxTabsGlobal, TaskEngine: cfg.TaskEngine, TaskDecisionProviderID: cfg.TaskDecisionProviderID, TaskDecisionModelID: cfg.TaskDecisionModelID, TaskMaxSteps: cfg.TaskMaxSteps}
 }
 
 func nativeBrowserRuntimeState(engine *agent.Engine) browserapi.Status {
@@ -1351,15 +1350,14 @@ func applyNativeBrowserPreferences(cfg *config.Config, prefs NativeBrowserPrefer
 	if taskEngine != "obscura" && taskEngine != "chrome" {
 		return fmt.Errorf("browser task engine must be obscura or chrome")
 	}
-	taskDecisionURL := strings.TrimSpace(prefs.TaskDecisionURL)
-	if taskDecisionURL == "" {
-		taskDecisionURL = cfg.Browser.TaskDecisionURL
+	decisionProviderID, decisionModelID := strings.TrimSpace(prefs.TaskDecisionProviderID), strings.TrimSpace(prefs.TaskDecisionModelID)
+	if (decisionProviderID == "") != (decisionModelID == "") {
+		return fmt.Errorf("browser task decision model needs both a provider and a model")
 	}
-	parsedDecisionURL, err := url.Parse(taskDecisionURL)
-	if err != nil || parsedDecisionURL.Host == "" || (parsedDecisionURL.Scheme != "http" && parsedDecisionURL.Scheme != "https") {
-		return fmt.Errorf("browser task decision URL must be an absolute HTTP or HTTPS URL")
+	if _, ok := cfg.Providers[decisionProviderID]; decisionProviderID != "" && !ok {
+		return fmt.Errorf("browser task decision provider %q is not configured", decisionProviderID)
 	}
-	cfg.Browser = config.Browser{Enabled: prefs.Enabled, Executable: strings.TrimSpace(prefs.Executable), Headed: prefs.Headed, OperationTimeout: time.Duration(prefs.OperationTimeout) * time.Second, MaxTabsPerChat: prefs.MaxTabsPerChat, MaxTabsGlobal: prefs.MaxTabsGlobal, TaskEngine: taskEngine, TaskDecisionURL: taskDecisionURL, TaskMaxSteps: prefs.TaskMaxSteps}
+	cfg.Browser = config.Browser{Enabled: prefs.Enabled, Executable: strings.TrimSpace(prefs.Executable), Headed: prefs.Headed, OperationTimeout: time.Duration(prefs.OperationTimeout) * time.Second, MaxTabsPerChat: prefs.MaxTabsPerChat, MaxTabsGlobal: prefs.MaxTabsGlobal, TaskEngine: taskEngine, TaskDecisionProviderID: decisionProviderID, TaskDecisionModelID: decisionModelID, TaskMaxSteps: prefs.TaskMaxSteps, LegacyTaskDecisionURL: cfg.Browser.LegacyTaskDecisionURL}
 	return nil
 }
 

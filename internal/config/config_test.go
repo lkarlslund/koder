@@ -185,7 +185,7 @@ func TestDefaultBrowserConfiguration(t *testing.T) {
 	if cfg.Browser.OperationTimeout != 30*time.Second || cfg.Browser.MaxTabsPerChat != 8 || cfg.Browser.MaxTabsGlobal != 32 {
 		t.Fatalf("unexpected browser defaults: %#v", cfg.Browser)
 	}
-	if cfg.Browser.TaskEngine != "obscura" || cfg.Browser.TaskDecisionURL != "http://127.0.0.1:8004/v1/systemone" || cfg.Browser.TaskMaxSteps != 8 {
+	if cfg.Browser.TaskEngine != "obscura" || cfg.Browser.TaskDecisionModelID != "" || cfg.Browser.TaskMaxSteps != 8 {
 		t.Fatalf("unexpected browser task defaults: %#v", cfg.Browser)
 	}
 }

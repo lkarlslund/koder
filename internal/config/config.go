@@ -113,8 +113,14 @@ type Browser struct {
 	MaxTabsPerChat   int           `toml:"max_tabs_per_chat"`
 	MaxTabsGlobal    int           `toml:"max_tabs_global"`
 	TaskEngine       string        `toml:"task_engine"`
-	TaskDecisionURL  string        `toml:"task_decision_url"`
-	TaskMaxSteps     int           `toml:"task_max_steps"`
+	// TaskDecisionProviderID and TaskDecisionModelID pin the decision model
+	// that ranks task links; empty uses the first detected decision model.
+	TaskDecisionProviderID string `toml:"task_decision_provider_id,omitempty"`
+	TaskDecisionModelID    string `toml:"task_decision_model_id,omitempty"`
+	TaskMaxSteps           int    `toml:"task_max_steps"`
+	// LegacyTaskDecisionURL is the endpoint setting that decision providers
+	// replaced. Startup detection migrates it into a provider.
+	LegacyTaskDecisionURL string `toml:"task_decision_url,omitempty"`
 }
 
 // Codex configures the per-chat Codex app-server turn backend. Authentication
@@ -363,7 +369,6 @@ func Default() Config {
 			MaxTabsPerChat:   defaultBrowserTabsPerChat,
 			MaxTabsGlobal:    defaultBrowserTabsGlobal,
 			TaskEngine:       "obscura",
-			TaskDecisionURL:  "http://127.0.0.1:8004/v1/systemone",
 			TaskMaxSteps:     defaultBrowserTaskMaxSteps,
 		},
 		Codex:      Codex{Enabled: true, Executable: "codex"},
@@ -449,10 +454,9 @@ func (c *Config) applyDefaults() {
 	if c.Browser.TaskEngine == "" {
 		c.Browser.TaskEngine = def.Browser.TaskEngine
 	}
-	c.Browser.TaskDecisionURL = strings.TrimSpace(c.Browser.TaskDecisionURL)
-	if c.Browser.TaskDecisionURL == "" {
-		c.Browser.TaskDecisionURL = def.Browser.TaskDecisionURL
-	}
+	c.Browser.TaskDecisionProviderID = strings.TrimSpace(c.Browser.TaskDecisionProviderID)
+	c.Browser.TaskDecisionModelID = strings.TrimSpace(c.Browser.TaskDecisionModelID)
+	c.Browser.LegacyTaskDecisionURL = strings.TrimSpace(c.Browser.LegacyTaskDecisionURL)
 	if c.Browser.TaskMaxSteps <= 0 {
 		c.Browser.TaskMaxSteps = def.Browser.TaskMaxSteps
 	}
