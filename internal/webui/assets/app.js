@@ -1181,7 +1181,7 @@
 		showPhoneBinding: false, phoneBinding: null, phoneBindingLoading: false, phoneBindingError: '', voiceDevices: [], voiceDevicesLoading: false, voiceDevicesError: '',
         showSessions: false, sessionTypeFilters: {sessions: true, chats: true, voice: true}, sessionStatusFilters: {active: true, starred: false, archived: false}, sessionSearchQuery: '', sessionSearchIDs: null, sessionSearchTimer: null, sessionSearchSeq: 0, sessionSearching: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, folderPicker: {open: false, target: '', path: '', parent: '', folders: [], loading: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         confirmationDialog: {open: false, title: '', message: '', confirmLabel: 'Confirm', danger: false}, confirmationResolver: null,
-		providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
+		providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerStep: 'details', providerProbe: null, providerNeedsKey: false, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
 		showModelDetails: false, modelDetails: null, settingsModelQuery: '', showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
 		settingsSkillQuery: '', showSkillInspector: false, skillInspection: null, skillInspectionLoading: false,
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary', mcpTesting: false, mcpSaving: false,
@@ -5778,27 +5778,33 @@
           this.providerDraft = Object.assign({headers: {}}, draft || {});
           this.providerHeadersText = JSON.stringify(this.providerDraft.headers || {}, null, 2);
           this.providerModelOptions = [];
+          this.providerProbe = null;
+          this.providerStatus = ''; this.providerStatusKind = 'secondary';
         },
+        // An existing provider is already detected; a new one is once Next succeeds.
+        providerDetected() { return !!this.providerProbe || !!this.providerDraft?.original_provider_id && !!(this.providerState.drafts || {})[this.providerDraft.original_provider_id]; },
         editProvider(id) {
           const draft = (this.providerState.drafts || {})[id];
-          if (draft) { this.setProviderDraft(draft); this.providerStatus = ''; this.providerStatusKind = 'secondary'; this.showProviderEditor = true; }
+          if (!draft) return;
+          this.setProviderDraft(draft);
+          this.providerNeedsKey = !!(draft.api_key || draft.api_key_env);
+          this.providerStep = 'details';
+          this.showProviderEditor = true;
         },
         addProvider() {
-          const first = this.providerTemplates()[0]?.id || 'openai-compatible';
-          this.rpc('new_provider_draft', {template_id: first}).then(draft => { this.setProviderDraft(draft); this.providerStatus = ''; this.providerStatusKind = 'secondary'; this.showProviderEditor = true; });
+          this.providerDraft = null; this.providerProbe = null; this.providerNeedsKey = false;
+          this.providerStatus = ''; this.providerStatusKind = 'secondary';
+          this.providerStep = 'preset';
+          this.showProviderEditor = true;
         },
-        closeProviderEditor() { this.showProviderEditor = false; this.providerDraft = null; this.providerModelOptions = []; this.providerStatus = ''; this.providerStatusKind = 'secondary'; },
-        providerTemplateChanged() {
-          if (!this.providerDraft) return;
-          const current = this.providerDraft;
-          this.rpc('new_provider_draft', {template_id: current.template_id}).then(next => {
-            next.original_provider_id = current.original_provider_id || next.original_provider_id;
-            next.provider_id = current.provider_id || next.provider_id;
-            next.name = current.name || next.name;
-            next.api_key = current.api_key || '';
-            this.setProviderDraft(next);
-          });
+        chooseProviderPreset(template) {
+          this.rpc('new_provider_draft', {template_id: template.id}).then(draft => {
+            this.setProviderDraft(draft);
+            this.providerNeedsKey = !!template.requires_api_key;
+            this.providerStep = 'details';
+          }).catch(err => this.showToast(err.message));
         },
+        closeProviderEditor() { this.showProviderEditor = false; this.providerDraft = null; this.providerProbe = null; this.providerModelOptions = []; this.providerStatus = ''; this.providerStatusKind = 'secondary'; },
         providerDraftPayload() {
           if (!this.providerDraft) return null;
           let headers = {};
@@ -5819,7 +5825,20 @@
         testProvider() {
           const payload = this.providerDraftPayload(); if (!payload) return;
           this.providerTesting = true; this.providerStatus = ''; this.providerStatusKind = 'secondary';
+          this.providerProbe = null;
           this.rpc('test_provider', payload).then(result => {
+            if (result.auth_required) {
+              this.providerNeedsKey = true;
+              this.providerStatus = (payload.api_key ? 'The server rejected this API key. ' : 'This server needs an API key. ') + (result.error || '');
+              this.providerStatusKind = 'warning';
+              return;
+            }
+            this.providerProbe = result;
+            if (this.providerDraft) {
+              if (result.base_url) this.providerDraft.base_url = result.base_url;
+              if (result.suggested_id) this.providerDraft.provider_id = result.suggested_id;
+              if (result.suggested_name) this.providerDraft.name = result.suggested_name;
+            }
             const count = result.model_count || 0;
             const sample = (result.models || []).slice(0, 4).join(', ');
             this.providerModelOptions = result.models || [];
@@ -5834,7 +5853,7 @@
             }
             const selected = result.selected_model ? ' Selected ' + result.selected_model + '.' : '';
             const progress = result.prompt_progress_probed ? (' Prompt progress ' + (result.prompt_progress_supported ? 'supported.' : 'not supported.')) : '';
-            this.providerStatus = 'Test passed: ' + count + ' model' + (count === 1 ? '' : 's') + (sample ? ' (' + sample + ')' : '') + '.' + selected + progress;
+            this.providerStatus = 'Connected: ' + count + ' model' + (count === 1 ? '' : 's') + (sample ? ' (' + sample + ')' : '') + '.' + selected + progress;
             this.providerStatusKind = 'success';
           }).catch(err => { this.providerStatus = err.message; this.providerStatusKind = 'danger'; }).finally(() => { this.providerTesting = false; });
         },

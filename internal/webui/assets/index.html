@@ -1799,80 +1799,104 @@
     <section class="settings-item-dialog bg-body border rounded shadow">
       <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
         <div>
-          <div class="fw-semibold"><i class="bi bi-plug me-1"></i> Provider</div>
-          <div class="small text-secondary" x-text="providerDraft?.provider_id || 'New provider'"></div>
+          <div class="fw-semibold"><i class="bi bi-plug me-1"></i> <span x-text="providerStep === 'preset' ? 'Add provider' : 'Provider'"></span></div>
+          <div class="small text-secondary" x-text="providerStep === 'preset' ? 'Choose a service, or connect any server by URL' : (providerDraft?.name || providerDraft?.provider_id || 'New provider')"></div>
         </div>
         <div class="d-flex align-items-center gap-2">
-          <button type="button" class="btn btn-sm btn-outline-secondary" title="Test provider" @click="testProvider()" :disabled="!providerDraft || providerTesting">
-            <span class="spinner-border spinner-border-sm" x-show="providerTesting"></span>
-            <i class="bi bi-plug" x-show="!providerTesting"></i>
-          </button>
-          <button type="button" class="btn btn-sm btn-primary" title="Save provider" @click="saveProvider()" :disabled="!providerDraft || providerSaving">
+          <button type="button" class="btn btn-sm btn-primary" title="Save provider" x-show="providerStep === 'details' && providerDetected()" @click="saveProvider()" :disabled="!providerDraft || providerSaving">
             <span class="spinner-border spinner-border-sm" x-show="providerSaving"></span>
             <i class="bi bi-check-lg" x-show="!providerSaving"></i>
           </button>
           <button type="button" class="btn btn-sm btn-outline-secondary" title="Close" @click="closeProviderEditor()"><i class="bi bi-x-lg"></i></button>
         </div>
       </header>
-      <form class="settings-item-form p-3" @submit.prevent="saveProvider()">
+      <div class="settings-item-form p-3" x-show="providerStep === 'preset'">
+        <div class="provider-preset-grid">
+          <template x-for="template in providerTemplates()" :key="template.id">
+            <button type="button" class="provider-preset" @click="chooseProviderPreset(template)">
+              <span class="d-flex align-items-center justify-content-between gap-2"><span class="fw-semibold" x-text="template.title"></span><span class="badge text-bg-light border" x-show="template.requires_api_key" title="This service needs an API key"><i class="bi bi-key me-1"></i>API key</span><span class="badge text-bg-light border" x-show="template.local" title="Runs on this machine">Local</span></span>
+              <span class="small text-secondary" x-text="template.description"></span>
+            </button>
+          </template>
+        </div>
+      </div>
+      <form class="settings-item-form p-3" x-show="providerStep === 'details'" @submit.prevent="providerDetected() ? saveProvider() : testProvider()">
         <template x-if="providerDraft">
           <div class="settings-section">
             <div class="settings-field">
-              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-template">Template</label></div>
-              <div class="settings-field-control settings-field-control-md"><select id="settings-provider-template" class="form-select" x-model="providerDraft.template_id" @change="providerTemplateChanged()">
-                <template x-for="template in providerTemplates()" :key="template.id">
-                  <option :value="template.id" x-text="template.title"></option>
-                </template>
-              </select></div>
+              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-url">Server URL</label><div class="settings-field-help">Koder finds the API path and detects what the server supports.</div></div>
+              <div class="settings-field-control"><input id="settings-provider-url" class="form-control" x-model="providerDraft.base_url" @input="providerProbe = null" placeholder="http://127.0.0.1:8080" autocomplete="off"></div>
             </div>
-            <div class="settings-field">
-              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-id">Provider ID</label></div>
-              <div class="settings-field-control settings-field-control-md"><input id="settings-provider-id" class="form-control" x-model="providerDraft.provider_id" autocomplete="off"></div>
-            </div>
-            <div class="settings-field">
-              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-name">Name</label></div>
-              <div class="settings-field-control settings-field-control-md"><input id="settings-provider-name" class="form-control" x-model="providerDraft.name" autocomplete="off"></div>
-            </div>
-            <div class="settings-field">
-              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-url">Base URL</label></div>
-              <div class="settings-field-control"><input id="settings-provider-url" class="form-control" x-model="providerDraft.base_url" autocomplete="off"></div>
-            </div>
-            <div class="settings-field">
-              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-transport">Server type</label><div class="settings-field-help">Which request fields model settings such as thinking map to. Leave on Auto-detect unless it guesses wrong.</div></div>
-              <div class="settings-field-control settings-field-control-md">
-                <select id="settings-provider-transport" class="form-select" x-model="providerDraft.transport">
-                  <option value="">Auto-detect</option>
-                  <option value="openai">OpenAI-compatible</option>
-                  <option value="llama">llama.cpp server</option>
-                  <option value="ninfer">ninfer</option>
-                  <option value="dashscope">DashScope (Alibaba)</option>
-                </select>
-              </div>
-            </div>
-            <div class="settings-field">
+            <div class="settings-field" x-show="providerNeedsKey">
               <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-api-key">API key</label></div>
               <div class="settings-field-control"><input id="settings-provider-api-key" class="form-control" type="password" x-model="providerDraft.api_key" autocomplete="off"></div>
             </div>
-            <div class="settings-field">
-              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-api-env">API key env</label></div>
-              <div class="settings-field-control settings-field-control-md"><input id="settings-provider-api-env" class="form-control" x-model="providerDraft.api_key_env" autocomplete="off"></div>
-            </div>
-            <div class="settings-field">
-              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-timeout">Timeout</label></div>
-              <div class="settings-field-control settings-field-control-sm"><input id="settings-provider-timeout" class="form-control" x-model="providerDraft.timeout" placeholder="10m" autocomplete="off"></div>
-            </div>
-            <div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Streaming responses</span></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="providerDraft.stream"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></div></div>
-            <div class="settings-field">
-              <div class="settings-field-label"><span class="settings-field-title">Prompt progress</span><div class="settings-field-help" x-text="promptProgressState(providerDraft).label"></div></div>
-              <div class="settings-field-control small text-secondary" x-text="promptProgressState(providerDraft).detail"></div>
-            </div>
-            <div class="settings-field settings-field-top">
-              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-headers">Headers JSON</label></div>
-              <div class="settings-field-control"><textarea id="settings-provider-headers" class="form-control font-monospace" rows="4" x-model="providerHeadersText" spellcheck="false"></textarea></div>
+            <div class="settings-actions">
+              <button type="button" class="btn btn-primary" @click="testProvider()" :disabled="providerTesting || !String(providerDraft.base_url || '').trim()">
+                <span class="spinner-border spinner-border-sm me-1" x-show="providerTesting"></span>
+                <span x-text="providerDetected() ? 'Detect again' : 'Next'"></span>
+              </button>
+              <button type="button" class="btn btn-link" x-show="!providerNeedsKey" @click="providerNeedsKey = true">Add an API key</button>
             </div>
             <div x-show="providerStatus">
-              <div class="alert mb-0" :class="providerStatusKind === 'success' ? 'alert-success' : (providerStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="providerStatus"></div>
+              <div class="alert mb-0" :class="{'alert-success': providerStatusKind === 'success', 'alert-danger': providerStatusKind === 'danger', 'alert-warning': providerStatusKind === 'warning', 'alert-secondary': !['success', 'danger', 'warning'].includes(providerStatusKind)}" x-text="providerStatus"></div>
             </div>
+            <template x-if="providerProbe">
+              <div class="settings-section">
+                <div class="settings-field settings-field-top">
+                  <div class="settings-field-label"><span class="settings-field-title">Supports</span><div class="settings-field-help" x-text="providerProbe.base_url"></div></div>
+                  <div class="settings-field-control d-flex flex-wrap gap-1">
+                    <template x-for="feature in providerProbe.features || []" :key="feature"><span class="badge text-bg-secondary" x-text="feature"></span></template>
+                  </div>
+                </div>
+                <div class="settings-field settings-field-top">
+                  <div class="settings-field-label"><span class="settings-field-title">Models</span><div class="settings-field-help" x-text="(providerProbe.model_count || 0) + ' found'"></div></div>
+                  <div class="settings-field-control provider-model-list">
+                    <template x-for="model in providerProbe.model_details || []" :key="model.id">
+                      <div class="d-flex flex-wrap align-items-center gap-1">
+                        <span class="text-break me-1" x-text="model.id"></span>
+                        <template x-for="kind in model.kinds || []" :key="kind"><span class="badge text-bg-light border" x-text="kind"></span></template>
+                        <span class="small text-secondary" x-show="model.context_window" x-text="formatTokens(model.context_window) + ' context'"></span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <template x-if="providerDetected()">
+              <div class="settings-section border-top pt-2">
+                <div class="settings-field">
+                  <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-name">Name</label></div>
+                  <div class="settings-field-control settings-field-control-md"><input id="settings-provider-name" class="form-control" x-model="providerDraft.name" autocomplete="off"></div>
+                </div>
+                <div class="settings-field">
+                  <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-id">Provider ID</label></div>
+                  <div class="settings-field-control settings-field-control-md"><input id="settings-provider-id" class="form-control" x-model="providerDraft.provider_id" autocomplete="off"></div>
+                </div>
+                <details class="provider-advanced">
+                  <summary class="small text-secondary">Advanced</summary>
+                  <div class="settings-section mt-2">
+                    <div class="settings-field">
+                      <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-api-env">API key env</label></div>
+                      <div class="settings-field-control settings-field-control-md"><input id="settings-provider-api-env" class="form-control" x-model="providerDraft.api_key_env" autocomplete="off"></div>
+                    </div>
+                    <div class="settings-field">
+                      <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-timeout">Timeout</label></div>
+                      <div class="settings-field-control settings-field-control-sm"><input id="settings-provider-timeout" class="form-control" x-model="providerDraft.timeout" placeholder="10m" autocomplete="off"></div>
+                    </div>
+                    <div class="settings-field"><div class="settings-field-label"><span class="settings-field-title">Streaming responses</span></div><div class="settings-field-control"><label class="toggle-switch"><input class="toggle-switch-input" type="checkbox" x-model="providerDraft.stream"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label></div></div>
+                    <div class="settings-field">
+                      <div class="settings-field-label"><span class="settings-field-title">Prompt progress</span><div class="settings-field-help" x-text="promptProgressState(providerDraft).label"></div></div>
+                      <div class="settings-field-control small text-secondary" x-text="promptProgressState(providerDraft).detail"></div>
+                    </div>
+                    <div class="settings-field settings-field-top">
+                      <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-headers">Headers JSON</label></div>
+                      <div class="settings-field-control"><textarea id="settings-provider-headers" class="form-control font-monospace" rows="4" x-model="providerHeadersText" spellcheck="false"></textarea></div>
+                    </div>
+                  </div>
+                </details>
+              </div>
+            </template>
           </div>
         </template>
       </form>

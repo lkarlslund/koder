@@ -491,6 +491,10 @@
 	.settings-model-variant { position: relative; background: color-mix(in srgb, var(--bs-body-bg) 96%, var(--bs-primary) 4%); }
 	.settings-model-variant::before { content: ''; position: absolute; left: -.05rem; top: 1.35rem; width: .8rem; border-top: 2px solid color-mix(in srgb, var(--bs-primary) 38%, var(--bs-border-color)); }
 	.settings-model-missing { display: flex; align-items: center; gap: .65rem; padding: .75rem .9rem; color: var(--bs-danger); background: color-mix(in srgb, var(--bs-danger-bg-subtle) 55%, var(--bs-body-bg)); }
+	.provider-preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: .6rem; }
+	.provider-preset { display: grid; gap: .2rem; text-align: left; padding: .75rem; border: 1px solid var(--bs-border-color); border-radius: .4rem; background: var(--bs-tertiary-bg); color: inherit; }
+	.provider-preset:hover, .provider-preset:focus-visible { border-color: var(--bs-primary); }
+	.provider-model-list { display: grid; gap: .35rem; max-height: 16rem; overflow: auto; }
 	.settings-model-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: .75rem; }
 	.settings-model-detail-grid > div { min-width: 0; display: grid; gap: .18rem; padding: .65rem; border: 1px solid var(--bs-border-color); border-radius: .4rem; background: var(--bs-tertiary-bg); }
 	.settings-skill-catalog { display: grid; gap: .8rem; }

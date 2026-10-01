@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/provider"
 )
 
@@ -92,7 +94,7 @@ func (c *Controller) applyProviderDetections(detected map[string]provider.Detect
 		if c.cfg.Providers == nil {
 			c.cfg.Providers = map[string]config.Provider{}
 		}
-		id := provider.UniqueProviderID(decisionProviderID(*decisionProvider), c.cfg.Providers)
+		id := provider.UniqueProviderID(cmp.Or(providerIDFromModels(decisionProvider.Models), "decisions"), c.cfg.Providers)
 		next := config.Provider{
 			TemplateID: provider.ProviderKindCompatible,
 			Kind:       provider.ProviderKindCompatible,
@@ -127,8 +129,8 @@ func (c *Controller) applyProviderDetections(detected map[string]provider.Detect
 
 // decisionProviderID names a migrated decision provider after its first
 // model, so a laya server becomes provider "laya".
-func decisionProviderID(detection provider.Detection) string {
-	for _, model := range detection.Models {
+func providerIDFromModels(models []domain.Model) string {
+	for _, model := range models {
 		id := strings.Map(func(r rune) rune {
 			switch {
 			case unicode.IsLetter(r) || unicode.IsDigit(r):
@@ -143,5 +145,5 @@ func decisionProviderID(detection provider.Detection) string {
 			return id
 		}
 	}
-	return "decisions"
+	return ""
 }

@@ -210,6 +210,7 @@ type ProviderCatalogItem struct {
 	DefaultBaseURL string `json:"default_base_url"`
 	ModelHint      string `json:"model_hint"`
 	Local          bool   `json:"local"`
+	RequiresAPIKey bool   `json:"requires_api_key"`
 }
 
 // ProviderConfigItem is one configured provider row.
@@ -253,14 +254,32 @@ type ProviderDraft struct {
 
 // ProviderProbeResult reports a provider test outcome.
 type ProviderProbeResult struct {
-	ModelCount              int        `json:"model_count"`
-	Models                  []string   `json:"models"`
-	Capabilities            []string   `json:"capabilities"`
-	MaxContextWindow        int        `json:"max_context_window,omitempty"`
-	SelectedModel           string     `json:"selected_model"`
-	PromptProgressProbed    bool       `json:"prompt_progress_probed"`
-	PromptProgressSupported bool       `json:"prompt_progress_supported"`
-	PromptProgressCheckedAt *time.Time `json:"prompt_progress_checked_at,omitempty"`
+	// AuthRequired reports that the server rejected the request for missing
+	// or invalid credentials; Error carries the server's message.
+	AuthRequired bool   `json:"auth_required,omitempty"`
+	Error        string `json:"error,omitempty"`
+	BaseURL      string `json:"base_url,omitempty"`
+	// SuggestedID and SuggestedName name a new custom provider after what
+	// detection found.
+	SuggestedID             string               `json:"suggested_id,omitempty"`
+	SuggestedName           string               `json:"suggested_name,omitempty"`
+	Features                []string             `json:"features,omitempty"`
+	ModelDetails            []ProviderProbeModel `json:"model_details,omitempty"`
+	ModelCount              int                  `json:"model_count"`
+	Models                  []string             `json:"models"`
+	Capabilities            []string             `json:"capabilities"`
+	MaxContextWindow        int                  `json:"max_context_window,omitempty"`
+	SelectedModel           string               `json:"selected_model"`
+	PromptProgressProbed    bool                 `json:"prompt_progress_probed"`
+	PromptProgressSupported bool                 `json:"prompt_progress_supported"`
+	PromptProgressCheckedAt *time.Time           `json:"prompt_progress_checked_at,omitempty"`
+}
+
+// ProviderProbeModel is one model a provider test found, with its kinds.
+type ProviderProbeModel struct {
+	ID            string   `json:"id"`
+	Kinds         []string `json:"kinds"`
+	ContextWindow int      `json:"context_window,omitempty"`
 }
 
 type ModelConfigPreference struct {

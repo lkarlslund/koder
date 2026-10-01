@@ -84,3 +84,37 @@ func TestLegacyDecisionURLStaysWhileUnreachable(t *testing.T) {
 		t.Fatalf("unreachable endpoint settled: %v %v", detection, settled)
 	}
 }
+
+func TestTestProviderReportsAuthAndSuggestsName(t *testing.T) {
+	locked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "missing key", http.StatusUnauthorized)
+	}))
+	defer locked.Close()
+	controller := New(config.Default(), nil)
+	result, err := controller.TestProvider(context.Background(), ProviderDraft{ProviderID: "cloud", TemplateID: "openai", Kind: provider.ProviderKindCompatible, BaseURL: locked.URL + "/v1"})
+	if err != nil || !result.AuthRequired {
+		t.Fatalf("result = %+v, err = %v; want auth required", result, err)
+	}
+
+	open := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"models":[{"name":"laya"}]}`))
+		case "/v1/systemone":
+			w.WriteHeader(http.StatusUnprocessableEntity)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer open.Close()
+	result, err = controller.TestProvider(context.Background(), ProviderDraft{ProviderID: "openai-compatible", TemplateID: provider.ProviderKindCompatible, Kind: provider.ProviderKindCompatible, BaseURL: open.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SuggestedID != "laya" || result.SuggestedName != "laya" || result.BaseURL != open.URL+"/v1" {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(result.ModelDetails) != 1 || result.ModelDetails[0].Kinds[0] != "Decisions" {
+		t.Fatalf("model details = %+v", result.ModelDetails)
+	}
+}

@@ -24,10 +24,11 @@ type Descriptor struct {
 	Title          string
 	Description    string
 	DefaultBaseURL string
-	Transport      string
 	Headers        map[string]string
 	ModelHint      string
 	Local          bool
+	// RequiresAPIKey marks hosted services that reject requests without a key.
+	RequiresAPIKey bool
 	SupportsImages bool
 	SupportsPDFs   bool
 }
@@ -69,17 +70,17 @@ type ProbeResult struct {
 }
 
 var catalog = []Descriptor{
-	{ID: "openai", Title: "OpenAI", Description: "Direct OpenAI API access", DefaultBaseURL: "https://api.openai.com/v1", ModelHint: "gpt-5.4", SupportsImages: true},
-	{ID: "openrouter", Title: "OpenRouter", Description: "Unified OpenAI-compatible gateway", DefaultBaseURL: "https://openrouter.ai/api/v1", ModelHint: "openai/gpt-5.4", SupportsImages: true},
-	{ID: "groq", Title: "Groq", Description: "Low-latency OpenAI-compatible API", DefaultBaseURL: "https://api.groq.com/openai/v1", ModelHint: "llama-3.3-70b-versatile", SupportsImages: true},
-	{ID: "xai", Title: "xAI", Description: "OpenAI-compatible xAI endpoint", DefaultBaseURL: "https://api.x.ai/v1", ModelHint: "grok-3-mini", SupportsImages: true},
-	{ID: "deepseek", Title: "DeepSeek", Description: "DeepSeek OpenAI-compatible API", DefaultBaseURL: "https://api.deepseek.com/v1", ModelHint: "deepseek-chat", SupportsImages: true},
-	{ID: "together", Title: "Together", Description: "Together AI OpenAI-compatible API", DefaultBaseURL: "https://api.together.xyz/v1", ModelHint: "meta-llama/Llama-3.3-70B-Instruct-Turbo", SupportsImages: true},
-	{ID: "perplexity", Title: "Perplexity", Description: "Perplexity chat completions API", DefaultBaseURL: "https://api.perplexity.ai", ModelHint: "sonar"},
-	{ID: "mistral", Title: "Mistral", Description: "Mistral OpenAI-compatible API", DefaultBaseURL: "https://api.mistral.ai/v1", ModelHint: "mistral-large-latest", SupportsImages: true},
-	{ID: "cerebras", Title: "Cerebras", Description: "Cerebras OpenAI-compatible API", DefaultBaseURL: "https://api.cerebras.ai/v1", ModelHint: "llama-4-scout-17b-16e-instruct", SupportsImages: true},
-	{ID: "ollama", Title: "Ollama", Description: "Local Ollama OpenAI-compatible endpoint", DefaultBaseURL: "http://127.0.0.1:11434/v1", ModelHint: "qwen2.5-coder:latest", Transport: config.TransportOpenAI, Local: true, SupportsImages: true},
-	{ID: "openai-compatible", Title: "OpenAI-compatible", Description: "Any OpenAI-compatible API or gateway", DefaultBaseURL: "https://api.openai.com/v1", ModelHint: "model-id", SupportsImages: true},
+	{ID: "openai", Title: "OpenAI", Description: "Direct OpenAI API access", DefaultBaseURL: "https://api.openai.com/v1", ModelHint: "gpt-5.4", RequiresAPIKey: true, SupportsImages: true},
+	{ID: "openrouter", Title: "OpenRouter", Description: "Unified OpenAI-compatible gateway", DefaultBaseURL: "https://openrouter.ai/api/v1", ModelHint: "openai/gpt-5.4", RequiresAPIKey: true, SupportsImages: true},
+	{ID: "groq", Title: "Groq", Description: "Low-latency OpenAI-compatible API", DefaultBaseURL: "https://api.groq.com/openai/v1", ModelHint: "llama-3.3-70b-versatile", RequiresAPIKey: true, SupportsImages: true},
+	{ID: "xai", Title: "xAI", Description: "OpenAI-compatible xAI endpoint", DefaultBaseURL: "https://api.x.ai/v1", ModelHint: "grok-3-mini", RequiresAPIKey: true, SupportsImages: true},
+	{ID: "deepseek", Title: "DeepSeek", Description: "DeepSeek OpenAI-compatible API", DefaultBaseURL: "https://api.deepseek.com/v1", ModelHint: "deepseek-chat", RequiresAPIKey: true, SupportsImages: true},
+	{ID: "together", Title: "Together", Description: "Together AI OpenAI-compatible API", DefaultBaseURL: "https://api.together.xyz/v1", ModelHint: "meta-llama/Llama-3.3-70B-Instruct-Turbo", RequiresAPIKey: true, SupportsImages: true},
+	{ID: "perplexity", Title: "Perplexity", Description: "Perplexity chat completions API", DefaultBaseURL: "https://api.perplexity.ai", ModelHint: "sonar", RequiresAPIKey: true},
+	{ID: "mistral", Title: "Mistral", Description: "Mistral OpenAI-compatible API", DefaultBaseURL: "https://api.mistral.ai/v1", ModelHint: "mistral-large-latest", RequiresAPIKey: true, SupportsImages: true},
+	{ID: "cerebras", Title: "Cerebras", Description: "Cerebras OpenAI-compatible API", DefaultBaseURL: "https://api.cerebras.ai/v1", ModelHint: "llama-4-scout-17b-16e-instruct", RequiresAPIKey: true, SupportsImages: true},
+	{ID: "ollama", Title: "Ollama", Description: "Local Ollama OpenAI-compatible endpoint", DefaultBaseURL: "http://127.0.0.1:11434/v1", ModelHint: "qwen2.5-coder:latest", Local: true, SupportsImages: true},
+	{ID: "openai-compatible", Title: "Custom server", Description: "Any server URL; Koder detects what it supports", ModelHint: "model-id", SupportsImages: true},
 }
 
 func Catalog() []Descriptor {
@@ -109,7 +110,6 @@ func BuildDraft(id string, existing map[string]config.Provider) (ConnectDraft, e
 		Kind:               ProviderKindCompatible,
 		Name:               desc.Title,
 		BaseURL:            desc.DefaultBaseURL,
-		Transport:          desc.Transport,
 		Model:              desc.ModelHint,
 		Stream:             true,
 		Timeout:            2 * time.Minute,

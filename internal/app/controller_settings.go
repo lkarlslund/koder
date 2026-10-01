@@ -58,14 +58,25 @@ func (c *Controller) TestProvider(ctx context.Context, draft ProviderDraft) (Pro
 	result, err := provider.Probe(ctx, providerDraftToCatalog(draft), nil)
 	if err != nil {
 		c.recordProviderProbe(draft.ProviderID, nil, started, err)
+		if errors.Is(err, provider.ErrAuthRequired) {
+			return ProviderProbeResult{AuthRequired: true, Error: err.Error()}, nil
+		}
 		return ProviderProbeResult{}, err
 	}
 	c.recordProviderProbe(draft.ProviderID, result.Models, started, nil)
 	models := make([]string, 0, len(result.Models))
+	details := make([]ProviderProbeModel, 0, len(result.Models))
 	for _, item := range result.Models {
 		models = append(models, item.ID)
+		details = append(details, ProviderProbeModel{ID: item.ID, Kinds: providerProbeCapabilities([]domain.Model{item}), ContextWindow: item.ContextWindow})
 	}
+	suggestedID, suggestedName := c.suggestedProviderName(draft, result.Models)
 	return ProviderProbeResult{
+		BaseURL:                 result.BaseURL,
+		SuggestedID:             suggestedID,
+		SuggestedName:           suggestedName,
+		Features:                providerFeatureLabels(result.Features, result.PromptProgressSupported),
+		ModelDetails:            details,
 		ModelCount:              len(result.Models),
 		Models:                  models,
 		Capabilities:            providerProbeCapabilities(result.Models),
@@ -116,6 +127,45 @@ func providerProbeCapabilities(models []domain.Model) []string {
 		}
 	}
 	return capabilities
+}
+
+// suggestedProviderName names a new custom provider after its first model.
+// Presets and existing providers keep their names.
+func (c *Controller) suggestedProviderName(draft ProviderDraft, models []domain.Model) (string, string) {
+	if strings.TrimSpace(draft.TemplateID) != provider.ProviderKindCompatible {
+		return "", ""
+	}
+	base := providerIDFromModels(models)
+	if base == "" {
+		return "", ""
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if _, exists := c.cfg.Providers[strings.TrimSpace(draft.OriginalProviderID)]; exists {
+		return "", ""
+	}
+	return provider.UniqueProviderID(base, c.cfg.Providers), models[0].ID
+}
+
+// providerFeatureLabels names the endpoints detection found, for display.
+func providerFeatureLabels(features config.ProviderFeatures, promptProgress bool) []string {
+	var labels []string
+	for _, item := range []struct {
+		label   string
+		enabled bool
+	}{
+		{"Chat completions", features.Chat},
+		{"Streaming prompt progress", promptProgress},
+		{"Decisions", features.Decisions},
+		{"Speech synthesis", features.Speech},
+		{"Transcription", features.Transcription},
+		{"llama.cpp server properties", features.LlamaProps},
+	} {
+		if item.enabled {
+			labels = append(labels, item.label)
+		}
+	}
+	return labels
 }
 
 func providerProbeMaxContextWindow(models []domain.Model) int {
@@ -1549,6 +1599,7 @@ func (c *Controller) providerStateLocked() ProviderState {
 			DefaultBaseURL: item.DefaultBaseURL,
 			ModelHint:      item.ModelHint,
 			Local:          item.Local,
+			RequiresAPIKey: item.RequiresAPIKey,
 		})
 	}
 
