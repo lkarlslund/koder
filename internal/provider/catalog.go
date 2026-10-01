@@ -103,8 +103,8 @@ func BuildDraft(id string, existing map[string]config.Provider) (ConnectDraft, e
 		return ConnectDraft{}, fmt.Errorf("provider %q not found", id)
 	}
 	draft := ConnectDraft{
-		OriginalProviderID: uniqueProviderID(desc.ID, existing),
-		ProviderID:         uniqueProviderID(desc.ID, existing),
+		OriginalProviderID: UniqueProviderID(desc.ID, existing),
+		ProviderID:         UniqueProviderID(desc.ID, existing),
 		TemplateID:         desc.ID,
 		Kind:               ProviderKindCompatible,
 		Name:               desc.Title,
@@ -310,7 +310,9 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func uniqueProviderID(base string, existing map[string]config.Provider) string {
+// UniqueProviderID returns base, or base with a numeric suffix when a
+// provider already uses it.
+func UniqueProviderID(base string, existing map[string]config.Provider) string {
 	base = strings.TrimSpace(base)
 	if base == "" {
 		base = "provider"

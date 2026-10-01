@@ -176,6 +176,7 @@ func runWeb(ctx context.Context, cfg config.Config, engine *agent.Engine, mode a
 	if err := controller.Start(ctx, mode, ""); err != nil {
 		return err
 	}
+	controller.DetectProvidersInBackground(ctx)
 	bind, err := webBindForLaunch(serveOpts)
 	if err != nil {
 		return err
