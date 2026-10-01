@@ -3094,7 +3094,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(document, `Filter providers, models, and custom variants`) ||
 		!strings.Contains(document, `settings-model-variants`) ||
 		!strings.Contains(document, `Create custom model`) ||
-		!strings.Contains(fullPage, `list="model-config-options"`) ||
+		!strings.Contains(fullPage, `baseModelOptions()`) ||
 		!strings.Contains(fullPage, `providerModelOptions`) ||
 		!strings.Contains(fullPage, `defaultModelValue()`) ||
 		!strings.Contains(fullPage, `modelOverlayControls(modelConfigDraft)`) ||

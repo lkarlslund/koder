@@ -6197,13 +6197,46 @@
         },
         modelOptionLabel(model) {
           if (!model) return '';
-          const label = (model.provider_label || model.provider_id || '') + ' / ' + (model.model_id || '');
           const suffix = [];
-          if (model.custom) suffix.push('custom');
-          if (model.detected) suffix.push('detected');
-          if (model.custom && model.source_model_id) suffix.push('uses ' + (model.source_provider_id || model.provider_id || '') + ' / ' + model.source_model_id);
-          if (model.custom && model.backing_detected === false) suffix.push('source missing');
+          if (model.custom && model.source_model_id) suffix.push('based on ' + this.modelNameWithProvider(model.source_model_id, model.source_provider_id || model.provider_id));
+          if (model.custom && model.backing_detected === false) suffix.push('base model missing');
+          const label = this.modelDisplayName(model);
           return suffix.length ? label + ' (' + suffix.join(', ') + ')' : label;
+        },
+        // Models are chosen by name; the provider is shown only when another
+        // provider offers a model with the same name.
+        modelDisplayName(model) {
+          if (!model) return '';
+          return this.modelNameWithProvider(model.model_id, model.provider_id, model.provider_label);
+        },
+        modelNameWithProvider(modelID, providerID, providerLabel = '') {
+          modelID = String(modelID || ''); providerID = String(providerID || '');
+          const models = this.settings?.models || this.modelOptions || [];
+          const ambiguous = models.some(item => item.model_id === modelID && item.provider_id !== providerID);
+          if (!ambiguous) return modelID;
+          const label = providerLabel || models.find(item => item.provider_id === providerID)?.provider_label || providerID;
+          return modelID + ' · ' + label;
+        },
+        // baseModelOptions lists the detected models a custom model can be
+        // based on; a custom model always uses its base model's provider.
+        baseModelOptions() {
+          return (this.settings?.models || [])
+            .filter(model => model.detected)
+            .map(model => ({value: this.modelOptionValue(model), label: this.modelDisplayName(model)}))
+            .sort((a, b) => a.label.localeCompare(b.label));
+        },
+        baseModelValue(draft) {
+          if (!draft?.source_model_id) return '';
+          return JSON.stringify([draft.source_provider_id || draft.provider_id || '', draft.source_model_id]);
+        },
+        setBaseModel(draft, value) {
+          if (!draft) return;
+          let parts = [];
+          try { parts = JSON.parse(String(value || '[]')); } catch (_) { parts = []; }
+          draft.source_provider_id = parts[0] || '';
+          draft.source_model_id = parts[1] || '';
+          draft.provider_id = draft.source_provider_id;
+          this.refreshModelOverlayDraft(draft);
         },
         modelUsageEntries(providerID, modelID) {
           providerID = String(providerID || '').trim(); modelID = String(modelID || '').trim();
@@ -6244,20 +6277,13 @@
           } catch (_) {
             parts = [];
           }
-          return parts[0] || parts[1] ? (parts[0] || '-') + ' / ' + (parts[1] || '-') : fallback;
+          return parts[1] || fallback;
         },
         ttsModelLabel() { return this.labelForModelValue(this.ttsModelValue(), 'First detected TTS model'); },
         compactionModelLabel() {
           const value = this.compactionModelValue();
           if (value === 'chat') return 'Chat model';
-          const model = (this.settings?.models || this.modelOptions || []).find(item => this.modelOptionValue(item) === value);
-          if (model) {
-            const provider = model.provider_label || model.provider_id || '';
-            return (model.model_id || '') + (provider ? ' · ' + provider : '');
-          }
-          let parts = [];
-          try { parts = JSON.parse(String(value || '[]')); } catch (_) { parts = []; }
-          return (parts[1] || '-') + (parts[0] ? ' · ' + parts[0] : '');
+          return this.labelForModelValue(value, 'Chat model');
         },
         thinkingModelLabel() { return this.thinkingModelValue() === 'chat' ? 'Chat model' : this.labelForModelValue(this.thinkingModelValue(), 'Chat model'); },
         defaultModelLabel() { return this.labelForModelValue(this.defaultModelValue(), 'No default model'); },
@@ -6549,20 +6575,6 @@
           if (!item?.provider_id || !item?.model_id) return;
           this.setDefaultModelValue(this.modelOptionValue(item));
         },
-        providerIDOptions() {
-          const ids = new Set((this.providerRows() || []).map(item => String(item.id || '').trim()).filter(Boolean));
-          return Array.from(ids).sort();
-        },
-        modelIDOptionsForProvider(providerID) {
-          const id = String(providerID || '').trim();
-          const ids = new Set();
-          for (const option of this.settings?.models || []) {
-            if ((!id || option.provider_id === id) && option.detected) ids.add(option.model_id);
-            if ((!id || option.source_provider_id === id) && option.source_model_id) ids.add(option.source_model_id);
-          }
-          for (const model of this.providerModelOptions || []) ids.add(model);
-          return Array.from(ids).filter(Boolean).sort();
-        },
         addOrUpdateModelConfig(providerID, modelID, values = {}) {
           if (!this.settings || !providerID || !modelID) return;
           if (!Array.isArray(this.settings.model_configs)) this.settings.model_configs = [];
@@ -6596,7 +6608,7 @@
         },
         addModelConfig() {
           const source = (this.settings?.models || []).find(model => model.detected) || {};
-          const providerID = source.provider_id || this.settings?.general?.default_provider || this.providerIDOptions()[0] || '';
+          const providerID = source.provider_id || '';
           const sourceModelID = source.model_id || '';
           this.modelConfigDraft = this.normalizeModelSettingsDraft({original_provider_id: '', original_model_id: '', provider_id: providerID, model_id: this.uniqueCustomModelID(providerID, sourceModelID), source_provider_id: providerID, source_model_id: sourceModelID, custom: true, editable: true, extra_body: {}});
           this.modelConfigDraft.extra_body_text = this.formatModelExtraBodyText(this.modelConfigDraft.extra_body);
@@ -6631,12 +6643,13 @@
         closeModelConfigEditor() { this.showModelConfigEditor = false; this.modelConfigDraft = null; this.modelConfigExtraBodyOpen = false; this.modelConfigStatus = ''; this.modelConfigStatusKind = 'secondary'; },
         saveModelConfig() {
           if (!this.settings || !this.modelConfigDraft) return;
-          const providerID = String(this.modelConfigDraft.provider_id || '').trim();
+          // A custom model is listed under the provider of the model it is based on.
+          const sourceProviderID = String(this.modelConfigDraft.source_provider_id || this.modelConfigDraft.provider_id || '').trim();
+          const providerID = sourceProviderID;
           const modelID = String(this.modelConfigDraft.model_id || '').trim();
-          const sourceProviderID = String(this.modelConfigDraft.source_provider_id || providerID).trim();
           const sourceModelID = String(this.modelConfigDraft.source_model_id || '').trim();
-          if (!providerID || !modelID || !sourceProviderID || !sourceModelID) {
-            this.modelConfigStatus = 'Provider, custom name, and source model are required'; this.modelConfigStatusKind = 'danger';
+          if (!modelID || !sourceProviderID || !sourceModelID) {
+            this.modelConfigStatus = 'A name and a base model are required'; this.modelConfigStatusKind = 'danger';
             return;
           }
           const contextWindow = Number(this.modelConfigDraft.context_window || 0);

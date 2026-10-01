@@ -878,16 +878,17 @@
             <button type="button" class="list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" :class="{'active': modelPickerModelCurrent(model)}" :title="modelUsageSummary(model.provider_id, model.model_id)" @click="selectModel(model)">
               <span class="text-start">
                 <span class="fw-semibold" x-text="model.model_id"></span>
-                <span class="d-block small opacity-75">
-                  <span x-text="model.provider_label || model.provider_id"></span>
-                  <template x-if="model.owned_by"><span x-text="' · ' + model.owned_by"></span></template>
+                <span class="d-block small opacity-75" x-show="modelDisplayName(model) !== model.model_id || model.custom || model.owned_by">
+                  <span x-show="modelDisplayName(model) !== model.model_id" x-text="model.provider_label || model.provider_id"></span>
+                  <template x-if="model.custom && model.source_model_id"><span x-text="'based on ' + modelNameWithProvider(model.source_model_id, model.source_provider_id || model.provider_id)"></span></template>
+                  <template x-if="model.owned_by"><span x-text="model.owned_by"></span></template>
                 </span>
                 <span class="d-flex flex-wrap gap-1 mt-1">
                   <span class="badge text-bg-info" x-show="model.detected">detected</span>
                   <span class="badge text-bg-primary" x-show="model.custom">custom</span>
                   <span class="badge text-bg-success" x-show="model.default">default</span>
 				  <template x-for="badge in modelCapabilityBadges(model)" :key="badge"><span class="badge text-bg-secondary" x-text="badge"></span></template>
-                  <span class="badge text-bg-warning" x-show="model.custom && !model.backing_detected">source missing</span>
+                  <span class="badge text-bg-warning" x-show="model.custom && !model.backing_detected">base model missing</span>
 				  <span class="badge" :class="runtimeHealthBadgeClass(modelHealthState(model))" :title="modelHealthTitle(model)" x-text="modelHealthBadge(model)"></span>
                   <template x-for="badge in modelUsageBadgesForModel(model)" :key="badge">
                     <span class="badge text-bg-dark" x-text="badge"></span>
@@ -902,7 +903,7 @@
           <div class="d-flex align-items-center justify-content-between gap-2 mb-3">
             <div class="min-w-0">
               <div class="fw-semibold">Global model settings</div>
-              <div class="small text-secondary text-truncate" x-text="modelSettingsDraft ? modelSettingsDraft.provider_id + ' / ' + modelSettingsDraft.model_id : ''"></div>
+              <div class="small text-secondary text-truncate" x-text="modelSettingsDraft ? modelDisplayName(modelSettingsDraft) : ''"></div>
             </div>
             <div class="d-flex align-items-center gap-2">
               <button type="button" class="btn btn-sm btn-outline-success" title="Make default model" x-show="modelSettingsDraft && !modelSettingsIsDefault()" @click="setActiveModelAsDefault()" :disabled="modelSettingsSaving"><i class="bi bi-bookmark-check"></i></button>
@@ -921,12 +922,12 @@
                 <div class="alert alert-secondary mb-0">Auto-detected models are read-only. Customize this model to create reusable global settings.</div>
               </div>
               <div class="col-12" x-show="modelSettingsEditable()">
-                <label class="form-label small text-secondary">Custom name</label>
+                <label class="form-label small text-secondary">Name</label>
                 <input class="form-control" x-model="modelSettingsDraft.model_id">
               </div>
               <div class="col-12" x-show="modelSettingsDraft.source_model_id">
-                <label class="form-label small text-secondary">Uses detected model</label>
-                <input class="form-control" :value="(modelSettingsDraft.source_provider_id || modelSettingsDraft.provider_id) + ' / ' + modelSettingsDraft.source_model_id" disabled>
+                <label class="form-label small text-secondary">Based on</label>
+                <input class="form-control" :value="modelNameWithProvider(modelSettingsDraft.source_model_id, modelSettingsDraft.source_provider_id || modelSettingsDraft.provider_id)" disabled>
               </div>
               <div class="col-12">
                 <label class="form-label small text-secondary">Context</label>
@@ -1931,25 +1932,11 @@
       <form class="settings-item-form p-3" @submit.prevent="saveModelConfig()">
         <template x-if="modelConfigDraft">
           <div class="settings-section">
-            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-provider">Provider</label></div><div class="settings-field-control settings-field-control-md"><select id="settings-model-provider" class="form-select" x-model="modelConfigDraft.provider_id">
-                <template x-for="providerID in providerIDOptions()" :key="providerID">
-                  <option :value="providerID" x-text="providerID"></option>
-                </template>
-              </select></div>
-            </div>
-            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-name">Custom name</label></div><div class="settings-field-control"><input id="settings-model-name" class="form-control" x-model="modelConfigDraft.model_id" autocomplete="off"></div></div>
-            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-source-provider">Uses provider</label><div class="settings-field-help">Provider that serves the underlying model.</div></div><div class="settings-field-control settings-field-control-md"><select id="settings-model-source-provider" class="form-select" x-model="modelConfigDraft.source_provider_id" @change="refreshModelOverlayDraft(modelConfigDraft)">
-                <template x-for="providerID in providerIDOptions()" :key="providerID">
-                  <option :value="providerID" x-text="providerID"></option>
-                </template>
-              </select></div>
-            </div>
-            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-source">Uses detected model</label></div><div class="settings-field-control"><input id="settings-model-source" class="form-control" x-model="modelConfigDraft.source_model_id" @change="refreshModelOverlayDraft(modelConfigDraft)" list="model-config-options" autocomplete="off">
-              <datalist id="model-config-options">
-                <template x-for="model in modelIDOptionsForProvider(modelConfigDraft.source_provider_id || modelConfigDraft.provider_id)" :key="model">
-                  <option :value="model"></option>
-                </template>
-              </datalist></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-name">Name</label></div><div class="settings-field-control"><input id="settings-model-name" class="form-control" x-model="modelConfigDraft.model_id" autocomplete="off"></div></div>
+            <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-source">Based on</label><div class="settings-field-help">The detected model this custom model runs on.</div></div><div class="settings-field-control"><select id="settings-model-source" class="form-select" :value="baseModelValue(modelConfigDraft)" @change="setBaseModel(modelConfigDraft, $event.target.value)">
+                <option value="" x-show="!baseModelValue(modelConfigDraft)">Choose a model</option>
+                <template x-for="option in baseModelOptions()" :key="option.value"><option :value="option.value" x-text="option.label" :selected="option.value === baseModelValue(modelConfigDraft)"></option></template>
+              </select></div></div>
             <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-context">Context window</label><div class="settings-field-help">Maximum context tokens advertised to Koder.</div></div><div class="settings-field-control settings-field-control-sm"><input id="settings-model-context" class="form-control" type="number" min="1" x-model.number="modelConfigDraft.context_window"></div></div>
             <div class="settings-field"><div class="settings-field-label"><label class="settings-field-title" for="settings-model-preset">Model overlay</label><div class="settings-field-help" x-text="modelConfigDraft.resolved_overlay?.title || 'Generic model options'"></div></div><div class="settings-field-control"><select id="settings-model-preset" class="form-select" x-model="modelConfigDraft.model_preset" @change="refreshModelOverlayDraft(modelConfigDraft)">
                 <template x-for="overlay in modelOverlayChoices(modelConfigDraft)" :key="overlay.id"><option :value="overlay.id" x-text="overlay.title"></option></template>

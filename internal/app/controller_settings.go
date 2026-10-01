@@ -867,17 +867,16 @@ func (c *Controller) ModelConfig(ctx context.Context, providerID, modelID string
 
 // SaveModelConfig validates and persists one provider/model settings row.
 func (c *Controller) SaveModelConfig(ctx context.Context, pref ModelConfigPreference) (ModelConfigPreference, error) {
-	providerID := strings.TrimSpace(pref.ProviderID)
-	modelID := strings.TrimSpace(pref.ModelID)
-	if providerID == "" {
-		return ModelConfigPreference{}, fmt.Errorf("provider id is required")
-	}
-	if modelID == "" {
+	if strings.TrimSpace(pref.ModelID) == "" {
 		return ModelConfigPreference{}, fmt.Errorf("model id is required")
 	}
 	model, err := configModelFromPreference(pref)
 	if err != nil {
 		return ModelConfigPreference{}, err
+	}
+	providerID, modelID := model.ProviderID, model.ModelID
+	if providerID == "" {
+		return ModelConfigPreference{}, fmt.Errorf("provider id is required")
 	}
 	c.mu.Lock()
 	if !c.cfg.HasUsableProvider(providerID) {
@@ -2405,6 +2404,11 @@ func configModelFromPreference(pref ModelConfigPreference) (config.ModelConfig, 
 	sourceModelID := strings.TrimSpace(pref.SourceModelID)
 	if sourceModelID != "" && sourceProviderID == "" {
 		sourceProviderID = providerID
+	}
+	if sourceModelID != "" {
+		// A custom model is served by its base model's provider and listed
+		// there; users choose the base model, never the provider.
+		providerID = sourceProviderID
 	}
 	if pref.ContextWindow <= 0 {
 		return config.ModelConfig{}, fmt.Errorf("context window for %s/%s must be greater than zero", providerID, modelID)

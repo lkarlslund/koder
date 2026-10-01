@@ -3711,3 +3711,19 @@ func TestCodexChatsRejectedWhileCodexDisabled(t *testing.T) {
 		t.Fatalf("CreateTemporaryVoiceChat error = %v, want codex disabled", err)
 	}
 }
+
+func TestCustomModelIsListedUnderItsBaseModelsProvider(t *testing.T) {
+	model, err := configModelFromPreference(ModelConfigPreference{
+		ProviderID:       "elsewhere",
+		ModelID:          "My Qwen",
+		SourceProviderID: "ninfer",
+		SourceModelID:    "Qwen/Qwen3.8-Flash-Next",
+		ContextWindow:    262144,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model.ProviderID != "ninfer" || model.SourceProviderID != "ninfer" || model.ModelID != "My Qwen" {
+		t.Fatalf("custom model = %s/%s based on %s/%s; want it under the base model's provider", model.ProviderID, model.ModelID, model.SourceProviderID, model.SourceModelID)
+	}
+}
