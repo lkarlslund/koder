@@ -3,6 +3,7 @@ package accesssettings
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -157,5 +158,42 @@ func TestMapPathRejectsEphemeralTmp(t *testing.T) {
 	settings := LockedDown()
 	if _, err := MapPath(settings, Request{Path: "/tmp/image.png", ProjectRoot: "/workspace"}); err == nil {
 		t.Fatal("expected ephemeral /tmp to be unavailable outside its command")
+	}
+}
+
+func TestProjectInsideReadOnlySharedFolderStaysWritable(t *testing.T) {
+	shared := filepath.Join(t.TempDir(), "storage")
+	project := filepath.Join(shared, "something")
+	settings := WithInheritedMounts(Settings{Root: ModeReadOnly, Project: ModeReadWrite, Tmp: TmpEphemeral}, []Mount{{Path: shared, Mode: ModeReadOnly}})
+
+	if err := Allows(settings, Request{Kind: AccessWrite, Path: filepath.Join(project, "file.txt"), ProjectRoot: project}); err != nil {
+		t.Fatalf("project under a read-only shared folder must stay writable: %v", err)
+	}
+	if err := Allows(settings, Request{Kind: AccessWrite, Path: filepath.Join(shared, "other", "file.txt"), ProjectRoot: project}); err == nil {
+		t.Fatal("the rest of the read-only shared folder must stay read-only")
+	}
+	// A read-only session folder inside the project still narrows it.
+	narrowed := settings
+	narrowed.Mounts = append(slices.Clone(settings.Mounts), Mount{Path: filepath.Join(project, "vendor"), Mode: ModeReadOnly})
+	if err := Allows(narrowed, Request{Kind: AccessWrite, Path: filepath.Join(project, "vendor", "x"), ProjectRoot: project}); err == nil {
+		t.Fatal("a read-only session folder inside the project must win over the project")
+	}
+}
+
+func TestSessionMountOverridesGlobalMountForSamePath(t *testing.T) {
+	shared := filepath.Join(t.TempDir(), "storage")
+	session := Settings{Root: ModeReadOnly, Project: ModeReadWrite, Tmp: TmpEphemeral, Mounts: []Mount{{Path: shared, Mode: ModeReadWrite}}}
+	settings := WithInheritedMounts(session, []Mount{{Path: shared, Mode: ModeReadOnly}})
+	if err := Allows(settings, Request{Kind: AccessWrite, Path: filepath.Join(shared, "file.txt")}); err != nil {
+		t.Fatalf("session read-write /storage must override global read-only /storage: %v", err)
+	}
+}
+
+func TestSessionMountOverridesDeeperGlobalMount(t *testing.T) {
+	shared := filepath.Join(t.TempDir(), "storage")
+	session := Settings{Root: ModeReadOnly, Project: ModeReadWrite, Tmp: TmpEphemeral, Mounts: []Mount{{Path: shared, Mode: ModeReadWrite}}}
+	settings := WithInheritedMounts(session, []Mount{{Path: filepath.Join(shared, "models"), Mode: ModeReadOnly}})
+	if err := Allows(settings, Request{Kind: AccessWrite, Path: filepath.Join(shared, "models", "weights.bin")}); err != nil {
+		t.Fatalf("session read-write /storage must override global read-only /storage/models: %v", err)
 	}
 }

@@ -165,7 +165,7 @@ The model sees a structured tool surface instead of a vague shell-only environme
 - Chrome or Chromium and `bwrap` are required for native browser automation. Node.js and Playwright are not runtime dependencies.
 - macOS and Windows can run the web UI and non-shell features, but shell sandboxing is currently Linux-oriented.
 
-Folders such as `~/.cache` or `~/go/pkg/mod` can be shared without exposing the rest of the home directory under **Settings → Access → Folders shared with every session**. Each grant is independently read-only or read-write, applies to existing and new Koder and Codex chats, and can also be configured with `[[global_mounts]]` entries in `config.toml`.
+Folders such as `~/.cache` or `~/go/pkg/mod` can be shared without exposing the rest of the home directory under **Settings → Access → Folders shared with every session**. Each grant is independently read-only or read-write, applies to existing and new Koder and Codex chats, and can also be configured with `[[global_mounts]]` entries in `config.toml`. A session's own access (its project folder, home, and session folders) overrides shared folders: a project inside a read-only shared `/storage` stays writable, and a session folder overrides a shared one at the same or a deeper path. Within each, the most specific path wins.
 
 ## Useful Commands
 

@@ -41,6 +41,9 @@ type Settings struct {
 type Mount struct {
 	Path string `toml:"path" json:"path"`
 	Mode Mode   `toml:"mode" json:"mode"`
+	// Inherited marks a folder shared with every session rather than granted
+	// by this session. Session grants override inherited ones.
+	Inherited bool `toml:"-" json:"-"`
 }
 
 type Preset struct {
@@ -166,7 +169,11 @@ func ValidateMounts(mounts []Mount) error {
 // are mounted later so they can safely narrow or widen a parent folder.
 func WithInheritedMounts(settings Settings, inherited []Mount) Settings {
 	settings = Normalize(settings)
-	mounts := append(NormalizeMounts(inherited), settings.Mounts...)
+	inherited = NormalizeMounts(inherited)
+	for idx := range inherited {
+		inherited[idx].Inherited = true
+	}
+	mounts := append(inherited, settings.Mounts...)
 	if len(mounts) == 0 {
 		return settings
 	}
@@ -270,18 +277,51 @@ func hasExplicitMapping(settings Settings, abs string, projectRoot string) bool 
 	return false
 }
 
-func modeForPath(settings Settings, abs string, projectRoot string) Mode {
-	for idx := len(settings.Mounts) - 1; idx >= 0; idx-- {
-		mount := settings.Mounts[idx]
-		if fsutil.Within(mount.Path, abs) {
-			return mount.Mode
+// Grant is a path exposed to sessions with its own access mode.
+type Grant struct {
+	Path      string
+	Mode      Mode
+	inherited bool
+}
+
+// Grants lists the home, project, and mount grants in override order: each
+// grant overrides the ones before it for paths it contains. Folders shared
+// with every session come first, so the session's own grants (home, project,
+// and session folders) override them: a read-only shared /storage leaves a
+// session's /storage/project writable, and a session's read-write /storage
+// overrides a shared read-only /storage/models. Within each layer, deeper
+// paths override shallower ones, and for the same path a mount overrides the
+// project, which overrides home. The sandbox binds grants in this order, and
+// modeForPath resolves a path to the last grant containing it.
+func Grants(settings Settings, projectRoot string) []Grant {
+	grants := make([]Grant, 0, len(settings.Mounts)+2)
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		grants = append(grants, Grant{Path: filepath.Clean(home), Mode: settings.Home})
+	}
+	if projectRoot = strings.TrimSpace(projectRoot); projectRoot != "" {
+		grants = append(grants, Grant{Path: filepath.Clean(projectRoot), Mode: settings.Project})
+	}
+	for _, mount := range settings.Mounts {
+		grants = append(grants, Grant{Path: filepath.Clean(mount.Path), Mode: mount.Mode, inherited: mount.Inherited})
+	}
+	slices.SortStableFunc(grants, func(a, b Grant) int {
+		if a.inherited != b.inherited {
+			if a.inherited {
+				return -1
+			}
+			return 1
 		}
-	}
-	if projectRoot != "" && fsutil.Within(projectRoot, abs) {
-		return settings.Project
-	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" && fsutil.Within(home, abs) {
-		return settings.Home
+		return mountDepth(a.Path) - mountDepth(b.Path)
+	})
+	return grants
+}
+
+func modeForPath(settings Settings, abs string, projectRoot string) Mode {
+	grants := Grants(settings, projectRoot)
+	for idx := len(grants) - 1; idx >= 0; idx-- {
+		if fsutil.Within(grants[idx].Path, abs) {
+			return grants[idx].Mode
+		}
 	}
 	if settings.Tmp == TmpSession && strings.TrimSpace(settings.TmpDir) != "" && fsutil.Within(settings.TmpDir, abs) {
 		return ModeReadWrite

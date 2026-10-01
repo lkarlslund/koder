@@ -235,3 +235,63 @@ func TestBwrapExposesExplicitFolderInsideHiddenHome(t *testing.T) {
 		t.Fatalf("mounted folder output = %q, %v", got, err)
 	}
 }
+
+func TestArgsBindProjectAfterContainingReadOnlyMount(t *testing.T) {
+	shared := filepath.Join(t.TempDir(), "storage")
+	project := filepath.Join(shared, "something")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	args, err := Args(Command{
+		Executable: "/bin/true",
+		Workdir:    project,
+		Settings: accesssettings.Settings{
+			Root: accesssettings.ModeReadOnly, Project: accesssettings.ModeReadWrite, Tmp: accesssettings.TmpEphemeral,
+			Mounts: []accesssettings.Mount{{Path: shared, Mode: accesssettings.ModeReadOnly}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, "\x00")
+	sharedBind := strings.Index(joined, "--ro-bind\x00"+shared+"\x00"+shared)
+	projectBind := strings.Index(joined, "--bind\x00"+project+"\x00"+project)
+	if sharedBind < 0 || projectBind < 0 || projectBind < sharedBind {
+		t.Fatalf("project must be bound read-write after its read-only parent mount: %#v", args)
+	}
+}
+
+func TestSandboxedWriteIntoProjectUnderReadOnlyMount(t *testing.T) {
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("bwrap not installed")
+	}
+	shared := filepath.Join(t.TempDir(), "storage")
+	project := filepath.Join(shared, "something")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(script string) ([]byte, error) {
+		executable, args, err := WrapCommand(Command{
+			Executable: "/bin/sh",
+			Args:       []string{"-c", script},
+			Workdir:    project,
+			Settings: accesssettings.Settings{
+				Root: accesssettings.ModeReadOnly, Project: accesssettings.ModeReadWrite, Tmp: accesssettings.TmpEphemeral,
+				Mounts: []accesssettings.Mount{{Path: shared, Mode: accesssettings.ModeReadOnly}},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return exec.Command(executable, args...).CombinedOutput()
+	}
+	if out, err := run("true"); err != nil {
+		t.Skipf("bwrap cannot run here: %v: %s", err, out)
+	}
+	if out, err := run("echo ok > written.txt"); err != nil {
+		t.Fatalf("write inside the project was denied: %v: %s", err, out)
+	}
+	if data, err := os.ReadFile(filepath.Join(project, "written.txt")); err != nil || strings.TrimSpace(string(data)) != "ok" {
+		t.Fatalf("write inside the project did not land: %q, %v", data, err)
+	}
+}

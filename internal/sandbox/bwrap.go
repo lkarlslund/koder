@@ -62,20 +62,13 @@ func Args(cmd Command) ([]string, error) {
 	}
 	args = append(args, "--dev", "/dev", "--proc", "/proc")
 	args = appendTmp(args, settings)
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		args = appendAccess(args, settings.Home, filepath.Clean(home))
-	}
-	args = appendAccess(args, settings.Project, workdir)
-	for _, mount := range settings.Mounts {
-		path, err := filepath.Abs(strings.TrimSpace(mount.Path))
-		if err != nil || path == "" {
-			return nil, fmt.Errorf("invalid mount path %q", mount.Path)
-		}
-		path = filepath.Clean(path)
-		if mount.Mode == accesssettings.ModeDevice {
-			args = append(args, "--dev-bind", path, path)
+	// Later binds cover earlier ones, so grants go shallowest first and a
+	// deeper grant (a project inside a read-only shared folder) wins.
+	for _, grant := range accesssettings.Grants(settings, workdir) {
+		if grant.Mode == accesssettings.ModeDevice {
+			args = append(args, "--dev-bind", grant.Path, grant.Path)
 		} else {
-			args = appendBind(args, mount.Mode, path, path)
+			args = appendAccess(args, grant.Mode, grant.Path)
 		}
 	}
 	args = append(args, "--chdir", workdir, "--", executable)
