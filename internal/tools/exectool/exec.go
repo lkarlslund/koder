@@ -277,7 +277,7 @@ func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 		TTY:            boolArg(req.Args, "tty", false),
 		Timeout:        durationArg(req.Args, "timeout_ms", 0),
 		YieldTime:      durationArg(req.Args, "yield_time_ms", defaultYieldTime),
-		PreviewBytes:   intArg(req.Args, "max_output_bytes"),
+		PreviewBytes:   outputLimit(runtime, req),
 		AccessSettings: settings,
 	})
 	if err != nil {
@@ -326,7 +326,7 @@ func (statusTool) Call(ctx context.Context, opts tools.Options) (tools.Result, e
 		SessionID: runtime.SessionID,
 		ChatID:    runtime.ChatID,
 		ProcessID: req.Args["process_id"],
-		MaxBytes:  intArg(req.Args, "max_output_bytes"),
+		MaxBytes:  outputLimit(runtime, req),
 	})
 	if err != nil {
 		return tools.Result{}, err
@@ -346,7 +346,7 @@ func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, err
 		SessionID: runtime.SessionID,
 		ChatID:    runtime.ChatID,
 		Scope:     scope,
-		MaxBytes:  intArg(req.Args, "max_output_bytes"),
+		MaxBytes:  outputLimit(runtime, req),
 	})
 	if err != nil {
 		return tools.Result{}, err
@@ -373,7 +373,7 @@ func (writeStdinTool) Call(ctx context.Context, opts tools.Options) (tools.Resul
 		ProcessID:  req.Args["process_id"],
 		Chars:      req.Args["chars"],
 		CloseStdin: boolArg(req.Args, "close_stdin", false),
-		MaxBytes:   intArg(req.Args, "max_output_bytes"),
+		MaxBytes:   outputLimit(runtime, req),
 		YieldTime:  durationArg(req.Args, "yield_time_ms", defaultWriteStdinYieldTime),
 	})
 	if err != nil {
@@ -400,7 +400,7 @@ func (resizeTool) Call(ctx context.Context, opts tools.Options) (tools.Result, e
 		ChatID:    runtime.ChatID,
 		ProcessID: req.Args["process_id"],
 		Size:      execruntime.TerminalSize{Rows: rows, Cols: cols},
-		MaxBytes:  intArg(req.Args, "max_output_bytes"),
+		MaxBytes:  outputLimit(runtime, req),
 	})
 	if err != nil {
 		return tools.Result{}, err
@@ -419,7 +419,7 @@ func (terminateTool) Call(ctx context.Context, opts tools.Options) (tools.Result
 		SessionID: runtime.SessionID,
 		ChatID:    runtime.ChatID,
 		ProcessID: req.Args["process_id"],
-		MaxBytes:  intArg(req.Args, "max_output_bytes"),
+		MaxBytes:  outputLimit(runtime, req),
 	})
 	if err != nil {
 		return tools.Result{}, err
@@ -439,7 +439,7 @@ func (cleanupTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 		SessionID: runtime.SessionID,
 		ChatID:    runtime.ChatID,
 		Scope:     scope,
-		MaxBytes:  intArg(req.Args, "max_output_bytes"),
+		MaxBytes:  outputLimit(runtime, req),
 	})
 	if err != nil {
 		return tools.Result{}, err
@@ -495,19 +495,20 @@ func execResult(stored tools.ExecStoredResult) tools.Result {
 
 func storedFromSnapshot(snap execruntime.Snapshot, message string) tools.ExecStoredResult {
 	return tools.ExecStoredResult{
-		ProcessID:   snap.ProcessID,
-		Command:     snap.Command,
-		Workdir:     snap.Workdir,
-		Shell:       snap.Shell,
-		TTY:         snap.TTY,
-		State:       string(snap.State),
-		ExitCode:    snap.ExitCode,
-		TimeoutMS:   snap.TimeoutMS,
-		Output:      snap.Output,
-		OutputBytes: snap.OutputBytes,
-		OutputMode:  outputMode(snap),
-		StdinClosed: snap.StdinClosed,
-		Message:     message,
+		ProcessID:    snap.ProcessID,
+		Command:      snap.Command,
+		Workdir:      snap.Workdir,
+		Shell:        snap.Shell,
+		TTY:          snap.TTY,
+		State:        string(snap.State),
+		ExitCode:     snap.ExitCode,
+		TimeoutMS:    snap.TimeoutMS,
+		Output:       snap.Output,
+		OutputBytes:  snap.OutputBytes,
+		OmittedBytes: snap.Omitted,
+		OutputMode:   outputMode(snap),
+		StdinClosed:  snap.StdinClosed,
+		Message:      message,
 	}
 }
 
@@ -516,6 +517,15 @@ func execStartMessage(snap execruntime.Snapshot) string {
 		return "Exec session is still running. Use exec_session action=wait for new output, action=send_input to interact with stdin, action=status for one-off inspection, or action=terminate to stop it."
 	}
 	return "Exec session completed during startup grace period."
+}
+
+// outputLimit is the requested max_output_bytes, or else the room the
+// model's context has for one tool output.
+func outputLimit(runtime tools.Runtime, req tools.Request) int {
+	if requested := intArg(req.Args, "max_output_bytes"); requested > 0 {
+		return requested
+	}
+	return runtime.OutputBudgetBytes
 }
 
 func outputMode(snap execruntime.Snapshot) string {
@@ -583,7 +593,7 @@ func missingWriteStdinProcessIDError(ctx context.Context, control execruntime.Co
 		SessionID: runtime.SessionID,
 		ChatID:    runtime.ChatID,
 		Scope:     scope,
-		MaxBytes:  intArg(req.Args, "max_output_bytes"),
+		MaxBytes:  outputLimit(runtime, req),
 	})
 	if err != nil {
 		return fmt.Errorf("process_id is empty. exec_session requires the process_id returned by exec_command. Could not inspect current exec sessions: %w", err)

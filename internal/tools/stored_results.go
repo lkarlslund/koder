@@ -92,8 +92,10 @@ type ExecStoredResult struct {
 	Output      string `json:"output,omitempty"`
 	OutputMode  string `json:"output_mode,omitempty"`
 	OutputBytes int    `json:"output_bytes,omitempty"`
-	StdinClosed bool   `json:"stdin_closed,omitempty"`
-	Message     string `json:"message,omitempty"`
+	// OmittedBytes counts output left out before Output by the size limit.
+	OmittedBytes int    `json:"omitted_bytes,omitempty"`
+	StdinClosed  bool   `json:"stdin_closed,omitempty"`
+	Message      string `json:"message,omitempty"`
 }
 
 type ExecListStoredItem struct {
@@ -1256,6 +1258,9 @@ func formatExecStoredResult(result ExecStoredResult) string {
 	}
 	if mode := strings.TrimSpace(result.OutputMode); mode != "" {
 		lines = append(lines, "output_mode: "+mode)
+	}
+	if result.OmittedBytes > 0 {
+		lines = append(lines, fmt.Sprintf("output truncated: the first %d bytes were left out; showing the last %d. Pass a larger max_output_bytes or narrow the command to see more.", result.OmittedBytes, len(result.Output)))
 	}
 	if output := strings.TrimSpace(result.Output); output != "" {
 		lines = append(lines, output)

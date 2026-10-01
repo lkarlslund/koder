@@ -309,13 +309,35 @@ func TestManagerExecPreviewUsesSixteenKiBAndLineBoundary(t *testing.T) {
 	}
 }
 
-func TestTailOnLineBoundaryDropsPartialAndOversizedSingleLine(t *testing.T) {
+func TestTailOnLineBoundaryDropsPartialLineAndKeepsLongLineTail(t *testing.T) {
 	got := tailOnLineBoundary("first\nsecond\nthird\n", 13)
 	if got != "second\nthird\n" {
 		t.Fatalf("unexpected line-boundary tail: %q", got)
 	}
-	if got := tailOnLineBoundary(strings.Repeat("x", 20), 10); got != "" {
-		t.Fatalf("expected oversized single line to be dropped, got %q", got)
+	if got := tailOnLineBoundary(strings.Repeat("x", 20), 10); got != strings.Repeat("x", 10) {
+		t.Fatalf("expected the tail of an oversized single line, got %q", got)
+	}
+	if got := tailOnLineBoundary("ab"+strings.Repeat("é", 5), 5); got != "éé" {
+		t.Fatalf("expected a cut on a rune boundary, got %q", got)
+	}
+}
+
+func TestSnapshotsReportOmittedOutput(t *testing.T) {
+	p := &process{}
+	for i := range 100 {
+		p.appendOutput(StreamSourceOutput, fmt.Sprintf("line-%03d\n", i))
+	}
+	tail := p.snapshot(90)
+	if tail.Omitted != p.outputBytes-len(tail.Output) || tail.Omitted == 0 || !strings.HasSuffix(tail.Output, "line-099\n") {
+		t.Fatalf("tail snapshot omitted=%d output=%q", tail.Omitted, tail.Output)
+	}
+	drained := p.drainSnapshot(90)
+	if drained.Omitted != 900-len(drained.Output) {
+		t.Fatalf("drain omitted=%d output bytes=%d", drained.Omitted, len(drained.Output))
+	}
+	p.appendOutput(StreamSourceOutput, "next\n")
+	if again := p.drainSnapshot(90); again.Omitted != 0 || again.Output != "next\n" {
+		t.Fatalf("second drain = %+v", again)
 	}
 }
 

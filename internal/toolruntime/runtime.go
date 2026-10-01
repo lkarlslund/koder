@@ -206,6 +206,7 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		SkillCatalogMaxChars:  skillCatalogMax,
 		FileTracker:           codeIntelFileTracker{root: projectRoot},
 		AccessSettings:        r.accessSettings(session),
+		OutputBudgetBytes:     r.outputBudgetBytes(chat),
 	}
 	if owner := r.loadedSession(session.ID); owner != nil {
 		runtime.SessionControl = owner.PlanningForChat(chat)
@@ -231,6 +232,23 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		runtime.Services[key] = service
 	}
 	return runtime
+}
+
+// outputBudgetBytes sizes tool output from the chat model's context window
+// and the chat's last measured usage.
+func (r *Runtime) outputBudgetBytes(chat domain.Chat) int {
+	if r.settings == nil {
+		return 0
+	}
+	model, err := r.settings.Model(chat)
+	if err != nil {
+		return 0
+	}
+	used := 0
+	if chat.ContextTokensKnown {
+		used = chat.LastKnownContextTokens
+	}
+	return tools.OutputBudgetBytes(model.ContextWindow, used)
 }
 
 func withLoadedSkillMounts(current accesssettings.Settings, timeline []domain.TimelineItem) accesssettings.Settings {

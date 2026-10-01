@@ -28,7 +28,7 @@ import (
 const (
 	defaultRows          = 24
 	defaultCols          = 80
-	defaultTailBytes     = 64 * 1024
+	defaultTailBytes     = 256 * 1024
 	defaultPreviewBytes  = 16 * 1024
 	defaultSubscriberCap = 32
 	defaultStdinWait     = 250 * time.Millisecond
@@ -161,6 +161,9 @@ type Snapshot struct {
 	TimeoutMS   int64
 	Output      string
 	OutputBytes int
+	// Omitted counts bytes of this snapshot's output range left out of
+	// Output by the size limit; the kept part is the end.
+	Omitted     int
 	Stream      []StreamEntry
 	Drained     bool
 	StdinClosed bool
@@ -210,6 +213,9 @@ type process struct {
 	lost        bool
 	output      string
 	drainOutput string
+	// drainBytes counts output produced since the last drain, including
+	// bytes the retention limit already dropped from drainOutput.
+	drainBytes  int
 	outputBytes int
 	stream      []StreamEntry
 	proc        *exec.Cmd
@@ -587,6 +593,7 @@ func (p *process) appendOutput(source StreamSource, delta string) {
 	p.output += delta
 	p.drainOutput += delta
 	p.outputBytes += len(delta)
+	p.drainBytes += len(delta)
 	p.appendStreamLocked(source, delta)
 	p.output = tailOnLineBoundary(p.output, defaultTailBytes)
 	p.drainOutput = tailOnLineBoundary(p.drainOutput, defaultTailBytes)
@@ -629,6 +636,7 @@ func (p *process) snapshot(maxBytes int) Snapshot {
 		TimeoutMS:   p.timeout.Milliseconds(),
 		Output:      output,
 		OutputBytes: p.outputBytes,
+		Omitted:     p.outputBytes - len(output),
 		Stream:      tailStream(p.stream, maxBytes),
 		StdinClosed: p.stdinClosed,
 		Lost:        p.lost,
@@ -639,7 +647,8 @@ func (p *process) drainSnapshot(maxBytes int) Snapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	output := p.drainOutput
-	p.drainOutput = ""
+	produced := p.drainBytes
+	p.drainOutput, p.drainBytes = "", 0
 	if maxBytes <= 0 {
 		maxBytes = defaultPreviewBytes
 	}
@@ -661,6 +670,7 @@ func (p *process) drainSnapshot(maxBytes int) Snapshot {
 		Output:      output,
 		OutputBytes: p.outputBytes,
 		Stream:      tailStream(p.stream, maxBytes),
+		Omitted:     produced - len(output),
 		Drained:     true,
 		StdinClosed: p.stdinClosed,
 		Lost:        p.lost,
@@ -708,14 +718,15 @@ func tailOnLineBoundary(output string, maxBytes int) string {
 	if cut == 0 || output[cut-1] == '\n' {
 		return output[cut:]
 	}
-	if idx := strings.IndexByte(output[cut:], '\n'); idx >= 0 {
-		start := cut + idx + 1
-		if start < len(output) {
-			return output[start:]
-		}
-		return ""
+	if idx := strings.IndexByte(output[cut:], '\n'); idx >= 0 && cut+idx+1 < len(output) {
+		return output[cut+idx+1:]
 	}
-	return ""
+	// No line break in the kept tail (one long line): cut on a rune instead
+	// of dropping everything.
+	for cut < len(output) && !utf8.RuneStart(output[cut]) {
+		cut++
+	}
+	return output[cut:]
 }
 
 func (p *process) waitForOutput(ctx context.Context, wait time.Duration) error {

@@ -177,6 +177,27 @@ type Runtime struct {
 	OfferedFiles          *offeredfile.Manager
 	FileTracker           FileTracker
 	AccessSettings        accesssettings.Settings
+	// OutputBudgetBytes bounds one tool's output by the room left in the
+	// model's context; zero means unknown and tools use their own default.
+	OutputBudgetBytes int
+}
+
+const (
+	minOutputBudgetBytes = 4 << 10
+	// maxOutputBudgetBytes matches how much output exec keeps per process.
+	maxOutputBudgetBytes = 256 << 10
+)
+
+// OutputBudgetBytes sizes one tool output as a quarter of the context the
+// chat has left, at about four bytes per token. usedTokens <= 0 means the
+// usage is unknown and the whole window counts as free.
+func OutputBudgetBytes(contextWindow, usedTokens int) int {
+	if contextWindow <= 0 {
+		return 0
+	}
+	const shareOfFree, bytesPerToken = 4, 4
+	freeTokens := contextWindow - max(usedTokens, 0)
+	return min(max(freeTokens/shareOfFree*bytesPerToken, minOutputBudgetBytes), maxOutputBudgetBytes)
 }
 
 // VoiceInteraction reports whether tools are being offered to a voice
