@@ -830,6 +830,7 @@ func (e *Engine) compactChat(ctx context.Context, session domain.Session, rt *ch
 	if err != nil {
 		return err
 	}
+	var performance *domain.ModelPerformance
 	record := func(summary, status string, afterContextTokens int) error {
 		var err error
 		compactionItem, err = rt.UpdateCompaction(context.WithoutCancel(ctx), compactionItem, domain.Compaction{
@@ -839,12 +840,16 @@ func (e *Engine) compactChat(ctx context.Context, session domain.Session, rt *ch
 			FirstKeptItemID:     firstKeptItemID,
 			BeforeContextTokens: beforeContextTokens,
 			AfterContextTokens:  afterContextTokens,
+			Performance:         performance,
 		})
 		return err
 	}
 	emit(out, domain.Event{Kind: domain.EventKindStatus, Text: "Compacting session...", Item: compactionItem, Meta: map[string]string{"refresh": "details", "compaction": "started"}})
 
-	summary, err := e.summarizeInTemporaryChat(ctx, session, tempChat, tempClient, req, out)
+	summary, perf, err := e.summarizeInTemporaryChat(ctx, session, tempChat, tempClient, req, out)
+	if perf.HasAny() {
+		performance = &perf
+	}
 	var afterContextTokens int
 	if err == nil {
 		afterContextTokens = e.estimateCompactedTimelineContextTokens(session, chat, timeline, compactionItem, firstKeptItemID, summary)
@@ -912,7 +917,7 @@ func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, tempC
 // reply. Streamed text stays out of the real chat; only progress is reported.
 // If the prompt overflows the context window, the oldest message is dropped
 // and the request retried.
-func (e *Engine) summarizeInTemporaryChat(ctx context.Context, session domain.Session, tempChat domain.Chat, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (string, error) {
+func (e *Engine) summarizeInTemporaryChat(ctx context.Context, session domain.Session, tempChat domain.Chat, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (string, domain.ModelPerformance, error) {
 	for {
 		resp, err := e.completeWithCompactionProgress(ctx, session, tempChat, client, req, out)
 		if err == nil {
@@ -920,12 +925,12 @@ func (e *Engine) summarizeInTemporaryChat(ctx context.Context, session domain.Se
 			// the history. Fail instead, which keeps the history intact.
 			summary := strings.TrimSpace(resp.Text)
 			if summary == "" && strings.TrimSpace(resp.RawReasoning) != "" {
-				return "", errors.New("compaction model ended after thinking without writing a summary")
+				return "", resp.Performance, errors.New("compaction model ended after thinking without writing a summary")
 			}
-			return summary, nil
+			return summary, resp.Performance, nil
 		}
 		if !provider.IsContextWindowExceeded(err) || !dropOldestCompactionMessage(&req) {
-			return "", err
+			return "", domain.ModelPerformance{}, err
 		}
 		emit(out, domain.Event{Kind: domain.EventKindStatus, Text: "Compaction prompt exceeded the context window; retrying without its oldest item", Meta: map[string]string{"compaction": "progress"}})
 	}

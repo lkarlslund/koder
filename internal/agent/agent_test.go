@@ -5060,7 +5060,7 @@ func TestSummarizeRetriesContextOverflowWithoutOldestHistory(t *testing.T) {
 		{Role: provider.RoleAssistant, Content: "newer history"},
 		{Role: provider.RoleUser, Content: "compact now"},
 	}}
-	summary, err := engine.summarizeInTemporaryChat(context.Background(), domain.Session{}, domain.Chat{ProviderID: "test", ModelID: "test"}, client, req, nil)
+	summary, _, err := engine.summarizeInTemporaryChat(context.Background(), domain.Session{}, domain.Chat{ProviderID: "test", ModelID: "test"}, client, req, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5529,6 +5529,7 @@ func TestCompactSessionStreamsWhenProviderStreamingEnabled(t *testing.T) {
 		sawStream = strings.Contains(string(body), `"stream":true`)
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"streamed compact summary\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[],\"timings\":{\"prompt_n\":1200,\"prompt_ms\":400,\"prompt_per_second\":3000,\"predicted_n\":40,\"predicted_ms\":500,\"predicted_per_second\":80}}\n\n"))
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
@@ -5583,6 +5584,9 @@ func TestCompactSessionStreamsWhenProviderStreamingEnabled(t *testing.T) {
 		}
 		if got := strings.TrimSpace(payload.Summary); got != "streamed compact summary" {
 			t.Fatalf("summary = %q", got)
+		}
+		if perf := payload.Performance; perf == nil || perf.PromptTokensPerSecond != 3000 || perf.GenerationTokensPerSecond != 80 {
+			t.Fatalf("compaction performance = %+v, want pp 3000 and tg 80 tokens/s", perf)
 		}
 		found = true
 	}

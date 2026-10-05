@@ -500,6 +500,9 @@ type Compaction struct {
 	BeforeContextTokens int    `json:"before_context_tokens,omitempty"`
 	AfterContextTokens  int    `json:"after_context_tokens,omitempty"`
 	Usage               *Usage `json:"usage,omitempty"`
+	// Performance holds the compaction request's timings (prompt
+	// processing and generation rates), like an assistant message's.
+	Performance *ModelPerformance `json:"performance,omitempty"`
 }
 
 // TimelineKind returns the timeline payload kind.
