@@ -313,7 +313,9 @@
       `;
     }
     function addedNodesNeedTranscriptEnhancement(mutations) {
-      const selector = '.mermaid-diagram[data-mermaid-state="pending"], .markdown-body img:not([data-lightbox-enhanced]), .markdown-body svg:not([data-lightbox-enhanced])';
+      // Keep in step with enhanceDisplayedMedia: anything it enhances must
+      // schedule it when added, or new messages miss their buttons.
+      const selector = 'pre:not([data-copy-enhanced]), .mermaid-diagram[data-mermaid-state="pending"], .markdown-body img:not([data-lightbox-enhanced]), .markdown-body svg:not([data-lightbox-enhanced])';
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
           if (node.nodeType !== Node.ELEMENT_NODE) continue;
