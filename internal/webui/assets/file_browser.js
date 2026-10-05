@@ -200,6 +200,9 @@
         return '/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/raw?path=' + encodeURIComponent(String(path || '').replace(/^\/+/, ''));
       },
 
+      openFileURL(path) {
+        return this.downloadFileURL(path) + '&inline=1';
+      },
       downloadFileURL(path) {
         return '/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/download?path=' + encodeURIComponent(String(path || '').replace(/^\/+/, ''));
       },

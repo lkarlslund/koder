@@ -262,8 +262,16 @@ func (s *Server) handleSessionFileDownload(w http.ResponseWriter, r *http.Reques
 	if strings.TrimSpace(mimeType) == "" {
 		mimeType = "application/octet-stream"
 	}
+	disposition := "attachment"
+	if r.URL.Query().Get("inline") == "1" {
+		// Opened directly in a tab: the CSP sandbox gives the document an
+		// opaque origin and no scripts, so a project's HTML or SVG cannot
+		// act as Koder.
+		disposition = "inline"
+		w.Header().Set("Content-Security-Policy", "sandbox")
+	}
 	w.Header().Set("Content-Type", mimeType)
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": info.Name()}))
+	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": info.Name()}))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)

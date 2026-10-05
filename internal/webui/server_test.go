@@ -418,6 +418,21 @@ func TestSessionFileBrowserAPI(t *testing.T) {
 		t.Fatalf("unexpected download body: %q", body)
 	}
 
+	resp, err = http.Get(srv.URL() + "/api/sessions/" + string(state.Session.ID) + "/files/download?path=README.md&inline=1")
+	if err != nil {
+		t.Fatalf("open file inline: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected inline open ok, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Disposition"); got != `inline; filename=README.md` {
+		t.Fatalf("expected inline content disposition, got %q", got)
+	}
+	if got := resp.Header.Get("Content-Security-Policy"); got != "sandbox" {
+		t.Fatalf("expected sandboxed inline file, got CSP %q", got)
+	}
+
 	resp, err = http.Get(srv.URL() + "/api/sessions/" + string(state.Session.ID) + "/files/read?path=../outside.txt")
 	if err != nil {
 		t.Fatalf("read traversal: %v", err)
