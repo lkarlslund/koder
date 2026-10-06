@@ -28,7 +28,7 @@ type tool struct {
 
 var specs = []tool{
 	{tools.BrowserStatus, "Browser status", "Inspect the managed browser's health and this chat's tab count.", object(saveToFileProperty)},
-	{tools.BrowserTask, "Browser task", "Complete a bounded browser goal using the lightweight automation backend first and transparently continue in the managed browser when full compatibility is required. Use this for outcome-level requests such as finding and downloading a product manual, rather than narrating individual navigation and interaction steps.", required(object(`"goal":{"type":"string","description":"The concrete outcome to complete."},"start_url":{"type":"string","description":"Absolute HTTP or HTTPS URL where the task starts."},`+saveToFileProperty), "goal", "start_url")},
+	{tools.BrowserTask, "Browser task", "Complete a bounded browser goal with the lightweight automation backend, which reads several public pages quickly and lets a model judge which links to follow; it continues in the managed browser when it cannot finish. outcome=download finds and verifies a file such as a product manual. outcome=information reads pages from start_url outwards and returns the most relevant pages' text, each with a relevance score from 0 to 1, for you to extract the facts from. Pages needing a login, consent clicks or other interaction need the browser tools instead.", required(object(`"goal":{"type":"string","description":"The concrete outcome to complete."},"start_url":{"type":"string","description":"Absolute HTTP or HTTPS URL where the task starts."},"outcome":{"type":"string","enum":["download","information"],"description":"download (default) finishes on a verified file; information finishes with the relevant pages' text."},`+saveToFileProperty), "goal", "start_url")},
 	{tools.BrowserTabList, "List browser pages", "List this chat's browser pages, including tabs and popup windows, plus unowned manual pages without starting Chrome. Pages owned by other chats are hidden.", object(saveToFileProperty)},
 	{tools.BrowserTabNew, "New browser tab", "Create and select a browser tab owned by this chat.", object(`"url":{"type":"string"}`)},
 	{tools.BrowserTabClaim, "Claim browser page", "Atomically claim an unowned manual browser page by its returned opaque ID.", required(object(tabIDProperty), "tab_id")},
@@ -246,7 +246,7 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 		if !ok {
 			return tools.Result{}, errors.New("browser task automation is unavailable")
 		}
-		request := browserapi.TaskRequest{Goal: args["goal"], StartURL: args["start_url"]}
+		request := browserapi.TaskRequest{Goal: args["goal"], StartURL: args["start_url"], Outcome: args["outcome"]}
 		if opts.Progress != nil {
 			request.Progress = func(current string, steps []string) {
 				opts.Progress(domain.ToolProgress{Current: current, Steps: steps})
@@ -265,7 +265,7 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 			result.Meta["source_url"] = taskResult.SourceURL
 			return result, nil
 		}
-		value = taskResult
+		return taskOutput(opts, t.title, args["save_to_file"], taskResult)
 	case tools.BrowserTabList:
 		value, err = service.Tabs(ctx, chat)
 	case tools.BrowserTabNew:
@@ -389,6 +389,56 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 		meta["path"] = saved
 	}
 	return tools.Result{Output: output, Meta: meta, Stored: result}, nil
+}
+
+// taskOutput returns a browser task's result: the pages of a completed
+// information task as markdown, otherwise the status and trace as JSON. Only
+// a completed task is saved to save_to_file; saving a failure would read as
+// success.
+func taskOutput(opts tools.Options, title, path string, result browserapi.TaskResult) (tools.Result, error) {
+	stored := tools.BrowserStoredResult{Kind: tools.BrowserTask.String(), Summary: title}
+	if len(result.Pages) > 0 && result.Status == "completed" {
+		stored.Text = taskPagesMarkdown(result)
+	} else {
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return tools.Result{}, err
+		}
+		stored.Text = string(data)
+		path = ""
+	}
+	meta := map[string]string{"status": result.Status, "backend": result.Backend}
+	output := stored.Text
+	if strings.TrimSpace(path) != "" {
+		saved, err := saveOutput(opts.Runtime, path, []byte(stored.Text))
+		if err != nil {
+			return tools.Result{}, err
+		}
+		stored.Path, stored.Summary = saved, fmt.Sprintf("%s saved to %s", title, saved)
+		output = fmt.Sprintf("Saved %d pages to %s", len(result.Pages), saved)
+		stored.Text = output
+		meta["path"] = saved
+	}
+	return tools.Result{Output: output, Meta: meta, Stored: stored}, nil
+}
+
+func taskPagesMarkdown(result browserapi.TaskResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Read pages from %s; the %d most relevant follow, best first.\n", result.SourceURL, len(result.Pages))
+	for _, page := range result.Pages {
+		title := page.Title
+		if title == "" {
+			title = page.URL
+		}
+		fmt.Fprintf(&b, "\n## %s\nURL: %s\nRelevance: %.2f\n\n%s\n", title, page.URL, page.Relevance, page.Text)
+	}
+	if len(result.Trace) > 0 {
+		b.WriteString("\n## Steps\n")
+		for _, step := range result.Trace {
+			b.WriteString("- " + step + "\n")
+		}
+	}
+	return b.String()
 }
 
 func binaryResult(opts tools.Options, kind, path string, binary browserapi.Binary, err error) (tools.Result, error) {

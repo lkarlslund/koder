@@ -84,7 +84,7 @@ type Manager struct {
 	mu sync.Mutex
 
 	cfg        config.Browser
-	rankers    RankerResolver
+	deciders   DeciderResolver
 	stateDir   string
 	profileDir string
 	state      string
@@ -119,10 +119,11 @@ func (m *Manager) UpdateConfig(cfg config.Browser) {
 	m.mu.Unlock()
 }
 
-// SetRankerResolver sets how browser tasks find their decision model.
-func (m *Manager) SetRankerResolver(resolve RankerResolver) {
+// SetDeciderResolver sets how browser tasks find the model that makes their
+// decisions.
+func (m *Manager) SetDeciderResolver(resolve DeciderResolver) {
 	m.mu.Lock()
-	m.rankers = resolve
+	m.deciders = resolve
 	m.mu.Unlock()
 }
 
@@ -603,6 +604,10 @@ func (m *Manager) discardTab(tabID string) {
 
 func (m *Manager) Navigate(ctx context.Context, chat browserapi.Chat, rawURL, wait string) (browserapi.Tab, error) {
 	tab, tabCtx, err := m.ownedSelected(ctx, chat)
+	if errors.Is(err, errNoSelectedTab) {
+		// Navigating with no tab yet opens one at the URL instead of failing.
+		return m.NewTab(ctx, chat, rawURL)
+	}
 	if err != nil {
 		return browserapi.Tab{}, err
 	}
@@ -1468,6 +1473,8 @@ func (m *Manager) cleanup(ctx context.Context, sessionID, chatID id.ID) {
 	}
 }
 
+var errNoSelectedTab = errors.New("chat has no selected browser tab; create, claim, or select a tab first")
+
 func (m *Manager) ownedSelected(ctx context.Context, chat browserapi.Chat) (*ownedTab, context.Context, error) {
 	if _, err := m.Tabs(ctx, chat); err != nil {
 		return nil, nil, err
@@ -1476,7 +1483,7 @@ func (m *Manager) ownedSelected(ctx context.Context, chat browserapi.Chat) (*own
 	tabID := m.selected[chat.ChatID]
 	m.mu.Unlock()
 	if tabID == "" {
-		return nil, nil, errors.New("chat has no selected browser tab; create, claim, or select a tab first")
+		return nil, nil, errNoSelectedTab
 	}
 	tab, err := m.ownedTab(chat, tabID)
 	if err != nil {

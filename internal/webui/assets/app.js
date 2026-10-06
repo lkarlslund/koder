@@ -5144,8 +5144,9 @@
             return models.filter(model => model.supports_tts || this.modelOptionValue(model) === current);
           }
           if (target?.kind === 'decision') {
+            // Browser tasks can decide with a decision model or a chat model.
             const current = this.modelPickerCurrentValue();
-            return models.filter(model => model.supports_decisions || this.modelOptionValue(model) === current);
+            return models.filter(model => model.supports_decisions || model.supports_chat !== false || this.modelOptionValue(model) === current);
           }
           if (!target || target.chatOnly) return models.filter(model => model.supports_chat !== false);
           return models;

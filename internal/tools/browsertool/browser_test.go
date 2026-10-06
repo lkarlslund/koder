@@ -475,3 +475,62 @@ func (fakeBrowser) Download(context.Context, browserapi.Chat, string) (browserap
 }
 func (fakeBrowser) CleanupChat(context.Context, id.ID)    {}
 func (fakeBrowser) CleanupSession(context.Context, id.ID) {}
+
+// resultTaskBrowser answers browser tasks with a fixed result.
+type resultTaskBrowser struct {
+	fakeBrowser
+	result browserapi.TaskResult
+}
+
+func (b resultTaskBrowser) Task(context.Context, browserapi.Chat, browserapi.TaskRequest) (browserapi.TaskResult, error) {
+	return b.result, nil
+}
+
+func TestBrowserTaskDoesNotSaveAnUnfinishedTask(t *testing.T) {
+	workdir := t.TempDir()
+	browser := resultTaskBrowser{result: browserapi.TaskResult{Status: "needs_browser", Backend: "chrome", Trace: []string{"Examined https://example.com"}}}
+	result, err := (tool{id: tools.BrowserTask, title: "Browser task"}).Call(t.Context(), tools.Options{
+		Runtime: tools.Runtime{Workdir: workdir, Browser: browser, SessionID: "session-1", ChatID: "chat-1"},
+		Request: tools.Request{Tool: tools.BrowserTask, Args: map[string]string{"goal": "find facts", "start_url": "https://example.com", "save_to_file": "notes/facts.md"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(filepath.Join(workdir, "notes", "facts.md")); !os.IsNotExist(statErr) {
+		t.Fatalf("unfinished task was saved: %v", statErr)
+	}
+	if !strings.Contains(result.Output, `"needs_browser"`) || result.Meta["status"] != "needs_browser" {
+		t.Fatalf("result = %#v, want the needs_browser status returned", result)
+	}
+}
+
+func TestBrowserTaskReturnsInformationPagesAsMarkdown(t *testing.T) {
+	workdir := t.TempDir()
+	browser := resultTaskBrowser{result: browserapi.TaskResult{Status: "completed", Backend: "obscura", SourceURL: "https://dr.dk", Pages: []browserapi.TaskPage{
+		{URL: "https://dr.dk/cpr", Title: "CPR-læk", Relevance: 0.82, Text: "8,8 millioner CPR-numre"},
+	}}}
+	call := func(args map[string]string) tools.Result {
+		result, err := (tool{id: tools.BrowserTask, title: "Browser task"}).Call(t.Context(), tools.Options{
+			Runtime: tools.Runtime{Workdir: workdir, Browser: browser, SessionID: "session-1", ChatID: "chat-1"},
+			Request: tools.Request{Tool: tools.BrowserTask, Args: args},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	result := call(map[string]string{"goal": "find facts", "start_url": "https://dr.dk", "outcome": "information"})
+	for _, want := range []string{"## CPR-læk", "URL: https://dr.dk/cpr", "Relevance: 0.82", "8,8 millioner CPR-numre"} {
+		if !strings.Contains(result.Output, want) {
+			t.Fatalf("output %q lacks %q", result.Output, want)
+		}
+	}
+	saved := call(map[string]string{"goal": "find facts", "start_url": "https://dr.dk", "outcome": "information", "save_to_file": "notes/facts.md"})
+	data, err := os.ReadFile(filepath.Join(workdir, "notes", "facts.md"))
+	if err != nil || !strings.Contains(string(data), "8,8 millioner CPR-numre") {
+		t.Fatalf("saved pages = %q, %v", data, err)
+	}
+	if saved.Output != "Saved 1 pages to notes/facts.md" {
+		t.Fatalf("saved output = %q", saved.Output)
+	}
+}

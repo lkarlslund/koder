@@ -126,9 +126,20 @@ type DownloadRecord struct {
 type TaskRequest struct {
 	Goal     string
 	StartURL string
+	// Outcome is "download" (the default) or "information".
+	Outcome string
 	// Progress, when set, receives what the task is doing or waiting on
 	// now and the steps it has finished, each time either changes.
 	Progress func(current string, steps []string)
+}
+
+// TaskPage is a page an information task read, with its readable text and
+// how much it helps the goal (0 to 1).
+type TaskPage struct {
+	URL       string  `json:"url"`
+	Title     string  `json:"title,omitempty"`
+	Relevance float64 `json:"relevance"`
+	Text      string  `json:"text"`
 }
 
 type TaskResult struct {
@@ -136,7 +147,9 @@ type TaskResult struct {
 	Backend   string   `json:"backend"`
 	SourceURL string   `json:"source_url,omitempty"`
 	Trace     []string `json:"trace,omitempty"`
-	File      *Binary  `json:"-"`
+	// Pages holds an information task's most relevant pages, best first.
+	Pages []TaskPage `json:"pages,omitempty"`
+	File  *Binary    `json:"-"`
 }
 
 type Service interface {
