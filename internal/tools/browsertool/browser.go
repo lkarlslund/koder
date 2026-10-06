@@ -15,6 +15,7 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/browserapi"
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -245,7 +246,13 @@ func (t tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error
 		if !ok {
 			return tools.Result{}, errors.New("browser task automation is unavailable")
 		}
-		taskResult, taskErr := taskService.Task(ctx, chat, browserapi.TaskRequest{Goal: args["goal"], StartURL: args["start_url"]})
+		request := browserapi.TaskRequest{Goal: args["goal"], StartURL: args["start_url"]}
+		if opts.Progress != nil {
+			request.Progress = func(current string, steps []string) {
+				opts.Progress(domain.ToolProgress{Current: current, Steps: steps})
+			}
+		}
+		taskResult, taskErr := taskService.Task(ctx, chat, request)
 		if taskErr != nil {
 			return tools.Result{}, taskErr
 		}

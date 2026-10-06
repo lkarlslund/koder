@@ -210,6 +210,9 @@ func (r Runtime) VoiceInteraction() bool {
 type Options struct {
 	Runtime Runtime
 	Request Request
+	// Progress, when set, shows the user what a long-running tool is doing.
+	// Each call replaces the previous report.
+	Progress func(domain.ToolProgress)
 }
 
 type MCPExecutor interface {
@@ -343,7 +346,7 @@ func Call(ctx context.Context, options Options) (Result, error) {
 		}
 		return Result{}, DeniedError{Tool: req.Tool, Reason: err.Error()}
 	}
-	return tool.Call(ctx, Options{Runtime: runtime, Request: req})
+	return tool.Call(ctx, Options{Runtime: runtime, Request: req, Progress: options.Progress})
 }
 
 func checkToolEnabled(runtime Runtime, kind ID) error {

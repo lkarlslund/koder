@@ -4060,6 +4060,22 @@
           return this.toolCallID(tool) && toolStatus(tool) === 'awaiting_approval';
         },
         toolResultHTML(tool) { return renderToolResult(tool); },
+        // A running tool's live report; the finished result replaces it.
+        toolProgressVisible(tool) {
+          return toolStatus(tool) === 'running' && !!(tool?.progress || this.toolProgressGoal(tool));
+        },
+        toolProgressGoal(tool) {
+          const args = toolArgs(tool);
+          const goal = String(args.goal || '').trim();
+          if (!goal) return '';
+          return args.start_url ? goal + ' (from ' + args.start_url + ')' : goal;
+        },
+        toolProgressSteps(tool) {
+          return Array.isArray(tool?.progress?.steps) ? tool.progress.steps : [];
+        },
+        toolProgressCurrent(tool) {
+          return String(tool?.progress?.current || '').trim();
+        },
         toolErrorHTML(tool) { return renderToolError(tool); },
         execProcessID(process) { return process?.process_id || process?.ProcessID || ''; },
         execProcessCommand(process) { return process?.command || process?.Command || ''; },

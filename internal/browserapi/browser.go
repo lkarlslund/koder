@@ -126,6 +126,9 @@ type DownloadRecord struct {
 type TaskRequest struct {
 	Goal     string
 	StartURL string
+	// Progress, when set, receives what the task is doing or waiting on
+	// now and the steps it has finished, each time either changes.
+	Progress func(current string, steps []string)
 }
 
 type TaskResult struct {

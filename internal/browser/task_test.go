@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -87,5 +88,29 @@ func TestTaskURLRejectsNonHTTP(t *testing.T) {
 		if _, err := taskURL(value); err == nil {
 			t.Fatalf("taskURL(%q) unexpectedly succeeded", value)
 		}
+	}
+}
+
+func TestTaskTrackerReportsStepsAndCurrentActivity(t *testing.T) {
+	type report struct {
+		current string
+		steps   int
+	}
+	var reports []report
+	tracker := &taskTracker{report: func(current string, steps []string) {
+		reports = append(reports, report{current, len(steps)})
+	}}
+	tracker.doing("Fetching https://example.com")
+	tracker.step("Examined https://example.com")
+	tracker.doing("Asking the decision model to rank 3 links")
+	tracker.finished = true
+	tracker.step("late step")
+
+	want := []report{{"Fetching https://example.com", 0}, {"", 1}, {"Asking the decision model to rank 3 links", 1}}
+	if !slices.Equal(reports, want) {
+		t.Fatalf("reports = %+v, want %+v", reports, want)
+	}
+	if len(tracker.trace) != 2 {
+		t.Fatalf("trace = %q, want both steps recorded", tracker.trace)
 	}
 }

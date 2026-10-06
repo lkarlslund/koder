@@ -172,6 +172,15 @@
                     <button type="button" class="btn btn-success" @click="rpc('approve', {tool_call_id: toolCallID(tool)})"><i class="bi bi-check-lg"></i> Approve</button>
                     <button type="button" class="btn btn-outline-danger" @click="rpc('deny', {tool_call_id: toolCallID(tool)})"><i class="bi bi-x-lg"></i> Deny</button>
                   </div>
+                  <template x-if="toolProgressVisible(tool)">
+                    <div class="tool-progress mt-2">
+                      <div class="tool-progress-goal" x-show="toolProgressGoal(tool)"><span class="text-secondary">Goal</span> <span x-text="toolProgressGoal(tool)"></span></div>
+                      <ol class="tool-progress-steps" x-show="toolProgressSteps(tool).length">
+                        <template x-for="(step, index) in toolProgressSteps(tool)" :key="index"><li x-text="step"></li></template>
+                      </ol>
+                      <div class="tool-progress-current" x-show="toolProgressCurrent(tool)"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span x-text="toolProgressCurrent(tool)"></span></div>
+                    </div>
+                  </template>
                   <template x-if="tool.result && toolResultHTML(tool)"><div class="tool-result mt-2" x-html="toolResultHTML(tool)"></div></template>
                   <template x-if="tool.error && toolErrorHTML(tool)"><div class="tool-result mt-2" x-html="toolErrorHTML(tool)"></div></template>
                 </div>

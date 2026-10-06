@@ -246,6 +246,16 @@ type ToolCall struct {
 	Approval    *ApprovalRequest  `json:"approval,omitempty"` // legacy read path; new state is Status plus ApprovalID.
 	StartedAt   time.Time         `json:"started_at,omitempty"`
 	CompletedAt time.Time         `json:"completed_at,omitempty"`
+	// Progress is what a running tool last reported doing.
+	Progress *ToolProgress `json:"progress,omitempty"`
+}
+
+// ToolProgress is a running tool's live report: what it is doing or waiting
+// on now, and the steps it has finished so far.
+type ToolProgress struct {
+	Current   string    `json:"current,omitempty"`
+	Steps     []string  `json:"steps,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
 // MarshalJSON stores typed tool result data behind the tool/status discriminator.
@@ -266,6 +276,7 @@ func (c ToolCall) MarshalJSON() ([]byte, error) {
 		ApprovalID  string             `json:"approval_id,omitempty"`
 		StartedAt   time.Time          `json:"started_at,omitempty"`
 		CompletedAt time.Time          `json:"completed_at,omitempty"`
+		Progress    *ToolProgress      `json:"progress,omitempty"`
 	}
 	var result *encodedToolResult
 	if c.Result != nil {
@@ -283,6 +294,7 @@ func (c ToolCall) MarshalJSON() ([]byte, error) {
 	return json.Marshal(encodedToolCall{
 		ToolCallID: c.ToolCallID, Tool: c.Tool, Args: c.Args, Status: c.Status, Result: result,
 		Error: c.Error, ApprovalID: c.ApprovalID, StartedAt: c.StartedAt, CompletedAt: c.CompletedAt,
+		Progress: c.Progress,
 	})
 }
 
@@ -305,6 +317,7 @@ func (c *ToolCall) UnmarshalJSON(data []byte) error {
 		Approval    *ApprovalRequest   `json:"approval,omitempty"`
 		StartedAt   time.Time          `json:"started_at,omitempty"`
 		CompletedAt time.Time          `json:"completed_at,omitempty"`
+		Progress    *ToolProgress      `json:"progress,omitempty"`
 	}
 	var in encodedToolCall
 	if err := json.Unmarshal(data, &in); err != nil {
@@ -326,6 +339,7 @@ func (c *ToolCall) UnmarshalJSON(data []byte) error {
 	*c = ToolCall{
 		ToolCallID: in.ToolCallID, Tool: tool, Args: in.Args, Status: status, Result: result,
 		Error: in.Error, ApprovalID: approvalID, StartedAt: in.StartedAt, CompletedAt: in.CompletedAt,
+		Progress: in.Progress,
 	}
 	return nil
 }

@@ -165,7 +165,7 @@ func (r *Chat) RunToolCall(ctx context.Context, runtime tools.Runtime, req tools
 	}
 	completed := make(chan rawToolCallResult, 1)
 	go func() {
-		result, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: req})
+		result, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: req, Progress: r.toolProgressReporter(ctx, req.ToolCallID)})
 		completed <- rawToolCallResult{result: result, err: err}
 	}()
 	var result tools.Result
@@ -205,6 +205,25 @@ func (r *Chat) RunToolCall(ctx context.Context, runtime tools.Runtime, req tools
 		return []domain.Event{errorEvent}, nil
 	}
 	return []domain.Event{evt}, nil
+}
+
+// toolProgressReporter stores a running tool's progress reports on its
+// call, which pushes them to subscribers. Reports after the call has
+// finished are dropped.
+func (r *Chat) toolProgressReporter(ctx context.Context, toolCallID string) func(domain.ToolProgress) {
+	if strings.TrimSpace(toolCallID) == "" {
+		return nil
+	}
+	return func(progress domain.ToolProgress) {
+		progress.Steps = slices.Clone(progress.Steps)
+		progress.UpdatedAt = time.Now().UTC()
+		_, _ = r.updateToolCall(ctx, toolCallID, func(call *domain.ToolCall) error {
+			if call.Status == domain.ToolStatusRunning {
+				call.Progress = &progress
+			}
+			return nil
+		})
+	}
 }
 
 func (r *Chat) toolRuntimeForExecution(ctx context.Context) (tools.Runtime, error) {

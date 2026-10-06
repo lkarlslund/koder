@@ -37,6 +37,26 @@ type taskLink struct {
 	Score float64
 }
 
+// taskTracker records a task's trace and reports it live: finished steps
+// go into the trace, and the current activity says what the task is doing or
+// waiting on.
+type taskTracker struct {
+	trace    []string
+	report   func(current string, steps []string)
+	finished bool
+}
+
+func (t *taskTracker) step(text string) {
+	t.trace = append(t.trace, text)
+	t.doing("")
+}
+
+func (t *taskTracker) doing(current string) {
+	if t.report != nil && !t.finished {
+		t.report(current, t.trace)
+	}
+}
+
 // Task runs a bounded, goal-oriented public browsing job. Obscura is deliberately
 // ephemeral: authenticated and otherwise incompatible work is handed to the
 // managed visible browser instead of silently weakening its profile semantics.
@@ -52,23 +72,23 @@ func (m *Manager) Task(ctx context.Context, chat browserapi.Chat, request browse
 	m.mu.Lock()
 	cfg, resolveRanker := m.cfg, m.rankers
 	m.mu.Unlock()
+	tracker := &taskTracker{report: request.Progress}
+	defer func() { tracker.finished = true }()
 	if cfg.TaskEngine == "" || cfg.TaskEngine == "obscura" {
 		if executable, lookupErr := exec.LookPath("obscura"); lookupErr == nil {
-			result, taskErr := m.runObscuraTask(ctx, executable, resolveRanker, cfg.TaskMaxSteps, goal, start)
+			result, taskErr := m.runObscuraTask(ctx, executable, resolveRanker, cfg.TaskMaxSteps, goal, start, tracker)
 			if taskErr == nil && result.Status == "completed" {
 				return result, nil
 			}
-			trace := result.Trace
 			if taskErr != nil {
-				trace = append(trace, "Obscura could not complete the task: "+taskErr.Error())
+				tracker.step("Obscura could not complete the task: " + taskErr.Error())
 			}
-			return m.handoffTaskToChrome(ctx, chat, goal, start.String(), trace)
 		}
 	}
-	return m.handoffTaskToChrome(ctx, chat, goal, start.String(), nil)
+	return m.handoffTaskToChrome(ctx, chat, start.String(), tracker)
 }
 
-func (m *Manager) runObscuraTask(ctx context.Context, executable string, resolveRanker RankerResolver, maxSteps int, goal string, start *url.URL) (browserapi.TaskResult, error) {
+func (m *Manager) runObscuraTask(ctx context.Context, executable string, resolveRanker RankerResolver, maxSteps int, goal string, start *url.URL, tracker *taskTracker) (browserapi.TaskResult, error) {
 	if maxSteps <= 0 {
 		maxSteps = 8
 	}
@@ -79,8 +99,9 @@ func (m *Manager) runObscuraTask(ctx context.Context, executable string, resolve
 	defer func() { _ = os.RemoveAll(storage) }()
 
 	result := browserapi.TaskResult{Status: "incomplete", Backend: "obscura"}
-	ranker, trace := taskRanker(ctx, resolveRanker)
-	result.Trace = append(result.Trace, trace)
+	tracker.doing("Finding a decision model to rank links")
+	ranker, rankerNote := taskRanker(ctx, resolveRanker)
+	tracker.step(rankerNote)
 	frontier := []taskLink{{URL: start.String(), Label: start.String()}}
 	visited := map[string]bool{}
 	for step := 0; step < maxSteps && len(frontier) > 0; step++ {
@@ -91,41 +112,49 @@ func (m *Manager) runObscuraTask(ctx context.Context, executable string, resolve
 			continue
 		}
 		visited[current.URL] = true
-		result.Trace = append(result.Trace, fmt.Sprintf("Examined %s", current.URL))
 
 		if likelyDownload(current) {
+			tracker.doing(fmt.Sprintf("Downloading %s (page %d of at most %d)", current.URL, step+1, maxSteps))
 			binary, binaryErr := obscuraDownload(ctx, executable, storage, current)
 			if binaryErr == nil && isUsefulDownload(binary, goal) {
-				result.Status, result.SourceURL, result.File = "completed", current.URL, &binary
-				result.Trace = append(result.Trace, fmt.Sprintf("Downloaded and verified %s (%d bytes)", binary.Name, len(binary.Data)))
+				tracker.step(fmt.Sprintf("Examined %s", current.URL))
+				tracker.step(fmt.Sprintf("Downloaded and verified %s (%d bytes)", binary.Name, len(binary.Data)))
+				result.Status, result.SourceURL, result.File, result.Trace = "completed", current.URL, &binary, tracker.trace
 				return result, nil
 			}
 		}
 
+		tracker.doing(fmt.Sprintf("Fetching %s (page %d of at most %d)", current.URL, step+1, maxSteps))
 		links, fetchErr := obscuraLinks(ctx, executable, storage, current.URL)
+		tracker.step(fmt.Sprintf("Examined %s", current.URL))
 		if fetchErr != nil {
-			result.Trace = append(result.Trace, "Lightweight fetch failed: "+fetchErr.Error())
+			tracker.step("Lightweight fetch failed: " + fetchErr.Error())
 			continue
 		}
 		links = normalizeTaskLinks(current.URL, links, visited)
 		if len(links) == 0 {
 			continue
 		}
+		if ranker != nil && len(links) > 1 {
+			tracker.doing(fmt.Sprintf("Asking the decision model to rank %d links from %s", len(links), current.URL))
+		}
 		if err := rankTaskLinks(ctx, ranker, goal, current.URL, links); err != nil {
-			result.Trace = append(result.Trace, "Decision model failed, ranked links by keywords: "+err.Error())
+			tracker.step("Decision model failed, ranked links by keywords: " + err.Error())
 		}
 		frontier = mergeTaskFrontier(frontier, links, maxSteps*taskCandidateLimit)
 	}
+	result.Trace = tracker.trace
 	return result, errors.New("no verified download was found within the lightweight browsing limit")
 }
 
-func (m *Manager) handoffTaskToChrome(ctx context.Context, chat browserapi.Chat, goal, start string, trace []string) (browserapi.TaskResult, error) {
+func (m *Manager) handoffTaskToChrome(ctx context.Context, chat browserapi.Chat, start string, tracker *taskTracker) (browserapi.TaskResult, error) {
+	tracker.doing("Waiting for the managed browser to open " + start)
 	tab, err := m.NewTab(ctx, chat, start)
 	if err != nil {
 		return browserapi.TaskResult{}, fmt.Errorf("start visible browser fallback: %w", err)
 	}
-	trace = append(trace, "Continued in the managed browser because the lightweight backend did not complete the goal")
-	return browserapi.TaskResult{Status: "needs_browser", Backend: "chrome", SourceURL: tab.URL, Trace: trace}, nil
+	tracker.step("Continued in the managed browser because the lightweight backend did not complete the goal")
+	return browserapi.TaskResult{Status: "needs_browser", Backend: "chrome", SourceURL: tab.URL, Trace: tracker.trace}, nil
 }
 
 func obscuraLinks(ctx context.Context, executable, storage, rawURL string) ([]taskLink, error) {

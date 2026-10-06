@@ -216,6 +216,11 @@
     .markdown-body th { background: var(--bs-secondary-bg); font-weight: 600; }
     .markdown-body code { color: #c9d1d9; background: #0d1117; border-radius: .25rem; padding: .1rem .25rem; }
     .markdown-body pre { background: #0d1117; color: #c9d1d9; border-radius: .45rem; padding: .75rem; overflow: auto; white-space: pre; }
+    .tool-progress { display: grid; gap: .35rem; font-size: .85rem; }
+    .tool-progress-goal { overflow-wrap: anywhere; }
+    .tool-progress-steps { margin: 0; padding-left: 1.4rem; max-height: 12rem; overflow: auto; color: var(--bs-secondary-color); overflow-wrap: anywhere; }
+    .tool-progress-current { display: flex; align-items: center; gap: .45rem; overflow-wrap: anywhere; }
+    .tool-progress-current .spinner-border { flex: 0 0 auto; width: .8rem; height: .8rem; border-width: .12rem; }
     .copyable-mono { position: relative; min-width: 0; }
     .copyable-mono > pre { padding-right: 2.65rem; }
     .markdown-body pre code { background: transparent; color: inherit; padding: 0; border-radius: 0; }
