@@ -19,7 +19,9 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
+	"github.com/lkarlslund/koder/internal/memory"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/toolruntime"
 	"github.com/lkarlslund/koder/internal/tools"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -517,5 +519,36 @@ func TestSessionEnvironmentPromptBuildsOncePerSession(t *testing.T) {
 	second := runtime.sessionEnvironmentPrompt(session)
 	if second != "cached prompt" {
 		t.Fatalf("expected cached environment prompt, got %q", second)
+	}
+}
+
+func TestBaseInstructionsCarryAFrozenMemoryIndex(t *testing.T) {
+	store := memory.NewStore(t.TempDir(), t.TempDir())
+	runtime := New(Config{Config: config.Default().WithStateDir(t.TempDir())})
+	runtime.SetToolsRuntime(toolruntime.New(toolruntime.Config{Memory: store}))
+	session := domain.Session{ProjectRoot: "/work/koder"}
+	if _, err := store.Create(memory.Memory{Scope: memory.ScopeGlobal, Name: "terse-answers", Description: "User wants terse answers", Content: "c"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	memoryBlock := func(chat domain.Chat) string {
+		for _, block := range runtime.BaseInstructionsForChat(session, chat) {
+			if block.Kind == provider.InstructionKindMemory {
+				return block.Text
+			}
+		}
+		return ""
+	}
+	first := memoryBlock(domain.Chat{ID: "chat-1"})
+	if !strings.Contains(first, "- terse-answers: User wants terse answers") || !strings.Contains(first, "Project memory (/work/koder)") {
+		t.Fatalf("memory block = %q", first)
+	}
+	if _, err := store.Create(memory.Memory{Scope: memory.ScopeProject, Name: "deploy", Description: "Deploy steps", Content: "c"}, "/work/koder"); err != nil {
+		t.Fatal(err)
+	}
+	if again := memoryBlock(domain.Chat{ID: "chat-1"}); again != first {
+		t.Fatalf("memory block changed within a chat:\n%s", again)
+	}
+	if other := memoryBlock(domain.Chat{ID: "chat-2"}); !strings.Contains(other, "- deploy: Deploy steps") {
+		t.Fatalf("a new chat does not see the new memory: %q", other)
 	}
 }

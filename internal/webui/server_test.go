@@ -3130,7 +3130,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(document, `toggle-switch-track`) {
 		t.Fatalf("expected tools settings and boolean preferences to use shared toggle sliders")
 	}
-	if !strings.Contains(fullPage, `settingsTabs() { return ['overview', 'models', 'integrations', 'backends', 'tools', 'skills', 'voice', 'conversation', 'access', 'prompts']; }`) ||
+	if !strings.Contains(fullPage, `settingsTabs() { return ['overview', 'models', 'integrations', 'backends', 'tools', 'skills', 'memory', 'voice', 'conversation', 'access', 'prompts']; }`) ||
 		!strings.Contains(document, `data-settings-open`) ||
 		!strings.Contains(document, `settingsTabIssueCount(tab)`) ||
 		!strings.Contains(fullPage, `settings_health`) ||

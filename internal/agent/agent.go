@@ -25,6 +25,7 @@ import (
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
+	"github.com/lkarlslund/koder/internal/memory"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/modelruntime"
 	"github.com/lkarlslund/koder/internal/offeredfile"
@@ -76,6 +77,23 @@ func (e *Engine) SetPhoneDeviceControl(control phonedevice.Control) {
 	if e != nil && e.toolsRuntime != nil {
 		e.toolsRuntime.SetPhoneDeviceControl(control)
 	}
+}
+
+// memoryConfigDir is where global memory lives: beside the config file, or
+// in the state directory for a config without a file, as in tests.
+func memoryConfigDir(cfg config.Config) string {
+	if strings.TrimSpace(cfg.Path()) == "" {
+		return cfg.StateDir()
+	}
+	return filepath.Dir(cfg.Path())
+}
+
+// Memory returns the notes the model keeps across chats.
+func (e *Engine) Memory() *memory.Store {
+	if e == nil {
+		return nil
+	}
+	return e.toolsRuntime.Memory()
 }
 
 const (
@@ -156,6 +174,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		ManagedSkillsDir: filepath.Join(cfg.ManagedAssetsDir(), "skills"),
 		DisabledSkills:   cfg.Skills.Disabled,
 		SkillCatalogMax:  cfg.Skills.CatalogMaxChars,
+		Memory:           memory.NewStore(memoryConfigDir(cfg), cfg.StateDir()),
 	})
 	e.SetToolsRuntime(e.toolsRuntime)
 	if e.codex != nil {

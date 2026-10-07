@@ -59,6 +59,8 @@ type Runtime struct {
 	promptProgress   map[string]config.Provider
 	envMu            sync.Mutex
 	envCache         map[string]string
+	memoryMu         sync.Mutex
+	memoryIndex      map[id.ID]string
 }
 
 const (

@@ -11,6 +11,7 @@ const (
 	InstructionKindEnvironment         InstructionKind = "environment"
 	InstructionKindProjectInstructions InstructionKind = "project_instructions"
 	InstructionKindSkills              InstructionKind = "skills"
+	InstructionKindMemory              InstructionKind = "memory"
 	InstructionKindSessionNote         InstructionKind = "session_note"
 	InstructionKindContinuation        InstructionKind = "continuation"
 	InstructionKindRuntime             InstructionKind = "runtime"

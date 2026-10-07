@@ -20,6 +20,7 @@ import (
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
+	"github.com/lkarlslund/koder/internal/memory"
 	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/phonedevice"
@@ -35,6 +36,7 @@ import (
 )
 
 type Runtime struct {
+	memory           *memory.Store
 	settings         *settings.Store
 	debug            *debugsrv.Recorder
 	sessions         *sessionpkg.Registry
@@ -65,6 +67,7 @@ type Config struct {
 	SkillCatalogMax  int
 	VoiceSessions    sessiontool.Control
 	PhoneDevice      phonedevice.Control
+	Memory           *memory.Store
 }
 
 func New(cfg Config) *Runtime {
@@ -86,7 +89,16 @@ func New(cfg Config) *Runtime {
 		skillCatalogMax:  cfg.SkillCatalogMax,
 		voiceSessions:    cfg.VoiceSessions,
 		phoneDevice:      cfg.PhoneDevice,
+		memory:           cfg.Memory,
 	}
+}
+
+// Memory returns the notes the model keeps across chats.
+func (r *Runtime) Memory() *memory.Store {
+	if r == nil {
+		return nil
+	}
+	return r.memory
 }
 
 func (r *Runtime) SetPhoneDeviceControl(control phonedevice.Control) {
@@ -183,6 +195,7 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		FileTracker:           codeIntelFileTracker{root: projectRoot},
 		AccessSettings:        r.accessSettings(session),
 		OutputBudgetBytes:     r.outputBudgetBytes(chat),
+		Memory:                r.memory,
 	}
 	if owner := r.loadedSession(session.ID); owner != nil {
 		runtime.SessionControl = owner.PlanningForChat(chat)

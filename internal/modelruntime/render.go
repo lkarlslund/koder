@@ -485,7 +485,37 @@ func (r *Runtime) BaseInstructionsForChat(session domain.Session, chat domain.Ch
 			Text: skillText,
 		})
 	}
+	if memoryText := r.memoryInstructions(session, chat); memoryText != "" {
+		instructions = append(instructions, provider.InstructionBlock{
+			Kind: provider.InstructionKindMemory,
+			Text: memoryText,
+		})
+	}
 	return instructions
+}
+
+// memoryInstructions returns the memory index for a chat. It is read once
+// per chat and then kept, so memories written during the chat do not change
+// its instructions and break the provider's prompt cache; the memory tool
+// shows the live state.
+func (r *Runtime) memoryInstructions(session domain.Session, chat domain.Chat) string {
+	store := r.tools.Memory()
+	if store == nil {
+		return ""
+	}
+	r.memoryMu.Lock()
+	defer r.memoryMu.Unlock()
+	if text, ok := r.memoryIndex[chat.ID]; ok && chat.ID != "" {
+		return text
+	}
+	text := store.Instructions(sessionProjectRoot(session))
+	if chat.ID != "" {
+		if r.memoryIndex == nil {
+			r.memoryIndex = map[id.ID]string{}
+		}
+		r.memoryIndex[chat.ID] = text
+	}
+	return text
 }
 
 func CompactedHistoryMessage(summary string) provider.Message {

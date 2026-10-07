@@ -952,6 +952,7 @@
         case 'browser_network':
         case 'browser_downloads': return actionLabel(toolAction(tool)) + ' ' + kind.replaceAll('_', ' ');
         case 'chat_send': return 'Message chat ' + (firstValue(args, ['chat_id', 'ChatID']) || '');
+        case 'memory': return ['Memory', toolAction(tool), firstValue(args, ['scope']), firstValue(args, ['name'])].filter(Boolean).join(' ');
         default: return kind || 'Tool';
       }
     }
@@ -1101,7 +1102,7 @@
 		showPhoneBinding: false, phoneBinding: null, phoneBindingLoading: false, phoneBindingError: '', voiceDevices: [], voiceDevicesLoading: false, voiceDevicesError: '',
         showSessions: false, sessionTypeFilters: {sessions: true, chats: true, voice: true}, sessionStatusFilters: {active: true, starred: false, archived: false}, sessionSearchQuery: '', sessionSearchIDs: null, sessionSearchTimer: null, sessionSearchSeq: 0, sessionSearching: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, folderPicker: {open: false, target: '', path: '', parent: '', folders: [], loading: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         confirmationDialog: {open: false, title: '', message: '', confirmLabel: 'Confirm', danger: false}, confirmationResolver: null,
-		providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerStep: 'details', providerProbe: null, providerNeedsKey: false, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
+		memoryState: null, memoryEditor: null, memoryStatus: '', providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerStep: 'details', providerProbe: null, providerNeedsKey: false, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
 		showModelDetails: false, modelDetails: null, settingsModelQuery: '', showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
 		settingsSkillQuery: '', showSkillInspector: false, skillInspection: null, skillInspectionLoading: false,
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary', mcpTesting: false, mcpSaving: false,
@@ -5863,18 +5864,49 @@
 		normalizeSettingsTab(tab) {
 		  return {general: 'overview', providers: 'integrations', codex: 'backends', browser: 'tools', mcp: 'integrations', security: 'voice', tts: 'voice', compaction: 'conversation', thinking: 'conversation'}[tab] || tab || 'overview';
 		},
-		settingsTabs() { return ['overview', 'models', 'integrations', 'backends', 'tools', 'skills', 'voice', 'conversation', 'access', 'prompts']; },
+		settingsTabs() { return ['overview', 'models', 'integrations', 'backends', 'tools', 'skills', 'memory', 'voice', 'conversation', 'access', 'prompts']; },
         selectSettingsTab(tab) {
 		  tab = this.normalizeSettingsTab(tab);
           this.settingsTab = tab;
           if (tab === 'models') this.ensureDetectedDefaultModel();
 		  if (tab === 'voice') this.loadVoiceDevices();
+		  if (tab === 'memory') this.loadMemories();
         },
+		loadMemories() {
+		  this.rpc('memories', {session_id: this.currentSessionID()}).then(state => { this.memoryState = state; }).catch(err => { this.memoryStatus = err.message; });
+		},
+		memoryItems(scope) { return (this.memoryState && this.memoryState[scope]) || []; },
+		newMemory(scope) {
+		  this.memoryStatus = '';
+		  this.memoryEditor = {scope, name: '', description: '', content: '', create: true};
+		},
+		editMemory(item) {
+		  this.memoryStatus = '';
+		  this.memoryEditor = {scope: item.scope, name: item.name, description: item.description, content: item.content, create: false};
+		},
+		saveMemoryEditor() {
+		  const editor = this.memoryEditor;
+		  if (!editor) return;
+		  this.rpc('save_memory', Object.assign({session_id: this.currentSessionID()}, editor)).then(state => {
+			this.memoryState = state;
+			this.memoryEditor = null;
+			this.memoryStatus = '';
+		  }).catch(err => { this.memoryStatus = err.message; });
+		},
+		async deleteMemoryEditor() {
+		  const editor = this.memoryEditor;
+		  if (!editor || editor.create) return;
+		  if (!await this.requestConfirmation({title: 'Delete memory?', message: 'Delete the ' + editor.scope + ' memory "' + editor.name + '"?', confirmLabel: 'Delete', danger: true})) return;
+		  this.rpc('delete_memory', {session_id: this.currentSessionID(), scope: editor.scope, name: editor.name}).then(state => {
+			this.memoryState = state;
+			this.memoryEditor = null;
+		  }).catch(err => { this.memoryStatus = err.message; });
+		},
         settingsTabLabel(tab) {
-		  return {overview: 'Overview', models: 'Models', integrations: 'Integrations', backends: 'Backends', tools: 'Tools', skills: 'Skills', voice: 'Voice & devices', conversation: 'Conversation', access: 'Access', prompts: 'Prompts'}[tab] || tab;
+		  return {overview: 'Overview', models: 'Models', integrations: 'Integrations', backends: 'Backends', tools: 'Tools', skills: 'Skills', memory: 'Memory', voice: 'Voice & devices', conversation: 'Conversation', access: 'Access', prompts: 'Prompts'}[tab] || tab;
         },
 		settingsTabIcon(tab) {
-		  return {overview: 'bi-grid', models: 'bi-cpu', integrations: 'bi-plug', backends: 'bi-terminal', tools: 'bi-tools', skills: 'bi-stars', voice: 'bi-mic', conversation: 'bi-chat-square-text', access: 'bi-shield-lock', prompts: 'bi-braces-asterisk'}[tab] || 'bi-gear';
+		  return {overview: 'bi-grid', models: 'bi-cpu', integrations: 'bi-plug', backends: 'bi-terminal', tools: 'bi-tools', skills: 'bi-stars', memory: 'bi-journal-text', voice: 'bi-mic', conversation: 'bi-chat-square-text', access: 'bi-shield-lock', prompts: 'bi-braces-asterisk'}[tab] || 'bi-gear';
 		},
         settingsTabDescription(tab) {
           return {
@@ -5884,6 +5916,7 @@
 			backends: 'Engines that execute chat turns',
 			tools: 'Built-in tools and the managed browser',
 			skills: 'Portable project, shared, and built-in workflows',
+			memory: 'Notes the model keeps across chats',
 			voice: 'Speech output and registered Android devices',
 			conversation: this.settings?.compaction?.current_selection_text || 'Turn limits, context management, and reasoning',
             access: 'Default sandbox access for new sessions',

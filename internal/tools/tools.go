@@ -24,6 +24,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/memory"
 	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/provider"
 )
@@ -177,6 +178,8 @@ type Runtime struct {
 	OfferedFiles          *offeredfile.Manager
 	FileTracker           FileTracker
 	AccessSettings        accesssettings.Settings
+	// Memory holds the notes the model keeps across chats.
+	Memory *memory.Store
 	// OutputBudgetBytes bounds one tool's output by the room left in the
 	// model's context; zero means unknown and tools use their own default.
 	OutputBudgetBytes int

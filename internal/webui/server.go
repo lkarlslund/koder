@@ -41,6 +41,7 @@ import (
 	"github.com/lkarlslund/koder/internal/deviceauth"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
+	"github.com/lkarlslund/koder/internal/memory"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/voice"
@@ -1664,6 +1665,30 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return s.controller.NewProviderDraft(in.TemplateID)
+	case "memories":
+		var in struct {
+			SessionID id.ID `json:"session_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.Memories(ctx, in.SessionID)
+	case "save_memory":
+		var in app.MemoryEdit
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.SaveMemory(ctx, in)
+	case "delete_memory":
+		var in struct {
+			SessionID id.ID        `json:"session_id"`
+			Scope     memory.Scope `json:"scope"`
+			Name      string       `json:"name"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.DeleteMemory(ctx, in.SessionID, in.Scope, in.Name)
 	case "test_provider":
 		var in app.ProviderDraft
 		if err := decodeParams(params, &in); err != nil {

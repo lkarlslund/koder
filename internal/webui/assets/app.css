@@ -221,6 +221,10 @@
     .tool-progress-steps { margin: 0; padding-left: 1.4rem; max-height: 12rem; overflow: auto; color: var(--bs-secondary-color); overflow-wrap: anywhere; }
     .tool-progress-current { display: flex; align-items: center; gap: .45rem; overflow-wrap: anywhere; }
     .tool-progress-current .spinner-border { flex: 0 0 auto; width: .8rem; height: .8rem; border-width: .12rem; }
+    .settings-memory-scope { display: grid; gap: .35rem; margin-bottom: 1.25rem; }
+    .settings-memory-row { display: grid; gap: .1rem; width: 100%; text-align: left; padding: .5rem .65rem; border: 1px solid var(--bs-border-color); border-radius: .4rem; background: var(--bs-tertiary-bg); color: inherit; }
+    .settings-memory-row:hover, .settings-memory-row:focus-visible { border-color: var(--bs-primary); }
+    .settings-memory-editor { display: grid; gap: .35rem; padding: .75rem; border: 1px solid var(--bs-border-color); border-radius: .4rem; }
     .copyable-mono { position: relative; min-width: 0; }
     .copyable-mono > pre { padding-right: 2.65rem; }
     .markdown-body pre code { background: transparent; color: inherit; padding: 0; border-radius: 0; }

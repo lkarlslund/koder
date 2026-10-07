@@ -1572,6 +1572,44 @@
 				</div>
               </div>
 
+			  <div class="settings-page-block" x-show="settingsTab === 'memory'">
+				<template x-for="scope in ['global', 'project']" :key="scope">
+				  <section class="settings-memory-scope" x-show="scope === 'global' || memoryState?.project_root">
+					<div class="settings-list-header">
+					  <div>
+						<div class="fw-semibold" x-text="scope === 'global' ? 'Global memory' : 'Project memory'"></div>
+						<div class="small text-secondary text-break" x-text="(scope === 'global' ? 'The user, their machine, and preferences for every project' : memoryState?.project_root) + ' · ' + memoryItems(scope).length + ' of 100'"></div>
+					  </div>
+					  <button type="button" class="btn btn-sm btn-outline-secondary" :title="'New ' + scope + ' memory'" :aria-label="'New ' + scope + ' memory'" @click="newMemory(scope)"><i class="bi bi-plus-lg"></i></button>
+					</div>
+					<template x-if="memoryItems(scope).length === 0"><div class="settings-empty">No memories yet.</div></template>
+					<template x-for="item in memoryItems(scope)" :key="scope + item.name">
+					  <button type="button" class="settings-memory-row" @click="editMemory(item)">
+						<span class="settings-item-title" x-text="item.name"></span>
+						<span class="settings-item-subtitle" x-text="item.description"></span>
+					  </button>
+					</template>
+					<div class="small text-secondary text-break mt-1" x-text="'Stored in ' + (scope === 'global' ? memoryState?.global_dir : memoryState?.project_dir)"></div>
+				  </section>
+				</template>
+				<template x-if="memoryEditor">
+				  <div class="settings-memory-editor">
+					<div class="fw-semibold" x-text="(memoryEditor.create ? 'New ' : 'Edit ') + memoryEditor.scope + ' memory'"></div>
+					<label class="form-label small mb-0" for="settings-memory-name">Name</label>
+					<input id="settings-memory-name" class="form-control" x-model="memoryEditor.name" :readonly="!memoryEditor.create" placeholder="prefers-terse-answers" autocomplete="off">
+					<label class="form-label small mb-0" for="settings-memory-description">Description</label>
+					<input id="settings-memory-description" class="form-control" x-model="memoryEditor.description" placeholder="One line, shown in every chat's memory index" autocomplete="off">
+					<label class="form-label small mb-0" for="settings-memory-content">Content</label>
+					<textarea id="settings-memory-content" class="form-control" rows="8" x-model="memoryEditor.content"></textarea>
+					<div class="alert alert-danger py-2 mb-0" x-show="memoryStatus" x-text="memoryStatus"></div>
+					<div class="settings-actions">
+					  <button type="button" class="btn btn-primary btn-sm" @click="saveMemoryEditor()">Save</button>
+					  <button type="button" class="btn btn-outline-secondary btn-sm" @click="memoryEditor = null; memoryStatus = ''">Cancel</button>
+					  <button type="button" class="btn btn-outline-danger btn-sm ms-auto" x-show="!memoryEditor.create" @click="deleteMemoryEditor()">Delete</button>
+					</div>
+				  </div>
+				</template>
+			  </div>
 			  <div class="settings-page-block" x-show="settingsTab === 'skills'">
                 <div class="settings-list-header">
                   <div>
