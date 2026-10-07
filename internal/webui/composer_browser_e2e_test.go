@@ -12,7 +12,7 @@ import (
 )
 
 func TestComposerBrowserScrollsKeyboardSelection(t *testing.T) {
-	chromium := memoryBrowserChromium(t)
+	chromium := chromiumForTest(t)
 	workdir := t.TempDir()
 	for i := range 60 {
 		if err := os.WriteFile(filepath.Join(workdir, fmt.Sprintf("example-%02d.txt", i)), []byte("example"), 0o644); err != nil {
@@ -32,7 +32,7 @@ func TestComposerBrowserScrollsKeyboardSelection(t *testing.T) {
 	ctrl := newTestControllerWithWorkdir(t, workdir)
 	state := selectedTestState(t, ctrl)
 	serverCtx, stopServer := context.WithCancel(context.Background())
-	server := startMemoryBrowserTestServer(t, serverCtx, ctrl)
+	server := startBrowserTestServer(t, serverCtx, ctrl)
 	t.Cleanup(func() { stopServer(); _ = server.server.Close() })
 	options := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(chromium), chromedp.Flag("no-sandbox", true), chromedp.Flag("disable-dev-shm-usage", true))
 	allocator, stopAllocator := chromedp.NewExecAllocator(context.Background(), options...)

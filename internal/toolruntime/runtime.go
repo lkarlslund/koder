@@ -20,7 +20,6 @@ import (
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
-	memoryService "github.com/lkarlslund/koder/internal/memory/service"
 	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/phonedevice"
@@ -31,7 +30,6 @@ import (
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
-	"github.com/lkarlslund/koder/internal/tools/memorytool"
 	"github.com/lkarlslund/koder/internal/tools/phonetool"
 	"github.com/lkarlslund/koder/internal/tools/sessiontool"
 )
@@ -51,8 +49,6 @@ type Runtime struct {
 	skillCatalogMax  int
 	voiceSessions    sessiontool.Control
 	phoneDevice      phonedevice.Control
-	memoryMu         sync.RWMutex
-	memory           *memoryService.Service
 }
 
 type Config struct {
@@ -103,26 +99,6 @@ func (r *Runtime) SetVoiceSessionControl(control sessiontool.Control) {
 	if r != nil {
 		r.voiceSessions = control
 	}
-}
-
-// SetMemoryService changes the process-wide durable Memory capability.
-// Nil removes the capability from subsequent tool runtime snapshots.
-func (r *Runtime) SetMemoryService(service *memoryService.Service) {
-	if r != nil {
-		r.memoryMu.Lock()
-		defer r.memoryMu.Unlock()
-		r.memory = service
-	}
-}
-
-// MemoryService returns the process-wide durable Memory capability.
-func (r *Runtime) MemoryService() *memoryService.Service {
-	if r == nil {
-		return nil
-	}
-	r.memoryMu.RLock()
-	defer r.memoryMu.RUnlock()
-	return r.memory
 }
 
 func (r *Runtime) UpdateSettings(store *settings.Store) {
@@ -220,12 +196,6 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		runtime.Services[key] = service
 	}
 	for key, service := range phonetool.RuntimeService(r.phoneDevice) {
-		if runtime.Services == nil {
-			runtime.Services = map[string]any{}
-		}
-		runtime.Services[key] = service
-	}
-	for key, service := range memorytool.RuntimeService(r.MemoryService()) {
 		if runtime.Services == nil {
 			runtime.Services = map[string]any{}
 		}

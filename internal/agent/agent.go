@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/agents"
@@ -26,8 +25,6 @@ import (
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
-	"github.com/lkarlslund/koder/internal/memory/curation"
-	memoryService "github.com/lkarlslund/koder/internal/memory/service"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/modelruntime"
 	"github.com/lkarlslund/koder/internal/offeredfile"
@@ -58,16 +55,11 @@ type Engine struct {
 	settings      *settings.Store
 	modelOverlays modeloverlay.Catalog
 	*modelruntime.Runtime
-	toolsRuntime      *toolruntime.Runtime
-	browser           *browser.Manager
-	codex             *codexdriver.Manager
-	registry          *sessionpkg.Registry
-	retryPause        func(context.Context, time.Duration, func(time.Duration)) error
-	curationMu        sync.RWMutex
-	curation          *curation.Coordinator
-	curationReview    *curation.ReviewManager
-	curationPatternMu sync.Mutex
-	curationPatterns  map[string]curationPatternObservation
+	toolsRuntime *toolruntime.Runtime
+	browser      *browser.Manager
+	codex        *codexdriver.Manager
+	registry     *sessionpkg.Registry
+	retryPause   func(context.Context, time.Duration, func(time.Duration)) error
 }
 
 // SetVoiceSessionControl connects the native voice profile to process-wide
@@ -84,23 +76,6 @@ func (e *Engine) SetPhoneDeviceControl(control phonedevice.Control) {
 	if e != nil && e.toolsRuntime != nil {
 		e.toolsRuntime.SetPhoneDeviceControl(control)
 	}
-}
-
-// SetMemoryService exposes the optional process-wide Memory service to
-// chat tool runtimes. Passing nil keeps Memory unavailable without affecting
-// normal chat operation.
-func (e *Engine) SetMemoryService(service *memoryService.Service) {
-	if e != nil && e.toolsRuntime != nil {
-		e.toolsRuntime.SetMemoryService(service)
-	}
-}
-
-// MemoryService returns the optional process-wide Memory service.
-func (e *Engine) MemoryService() *memoryService.Service {
-	if e == nil || e.toolsRuntime == nil {
-		return nil
-	}
-	return e.toolsRuntime.MemoryService()
 }
 
 const (

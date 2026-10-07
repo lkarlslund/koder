@@ -51,11 +51,11 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 		ScrollWidth    float64 `json:"scrollWidth"`
 		FirstCellWidth float64 `json:"firstCellWidth"`
 	}
-	chromium := memoryBrowserChromium(t)
+	chromium := chromiumForTest(t)
 	ctrl := newTestController(t)
 	state := selectedTestState(t, ctrl)
 	serverCtx, stopServer := context.WithCancel(context.Background())
-	server := startMemoryBrowserTestServer(t, serverCtx, ctrl)
+	server := startBrowserTestServer(t, serverCtx, ctrl)
 	t.Cleanup(func() {
 		stopServer()
 		_ = server.server.Close()

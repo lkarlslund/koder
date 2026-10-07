@@ -31,9 +31,6 @@ import (
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
-	"github.com/lkarlslund/koder/internal/memory"
-	memoryService "github.com/lkarlslund/koder/internal/memory/service"
-	memoryBackend "github.com/lkarlslund/koder/internal/memory/store/memory"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/phonedevice"
@@ -430,55 +427,6 @@ func TestControllerStartDoesNotActivateSession(t *testing.T) {
 			t.Fatalf("expected subscriptions to avoid unsolicited full snapshots, got %q", event.Type)
 		}
 	case <-time.After(20 * time.Millisecond):
-	}
-}
-
-func TestControllerPublishesMemoryMutations(t *testing.T) {
-	cfg := config.Default().WithStateDir(t.TempDir())
-	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	ctrl := New(cfg, agent.New(cfg, st, nil, nil))
-	events, unsubscribe := ctrl.Subscribe()
-	defer unsubscribe()
-
-	memoryStore := memoryBackend.New()
-	t.Cleanup(func() { _ = memoryStore.Close() })
-	ids := []string{"01a01688-fc5d-7f7d-8bb8-de244977f8a1", "01a01688-fc5d-7f7d-8bb8-de244977f8a2"}
-	service, err := memoryService.New(memoryService.Config{
-		Store: memoryStore,
-		Actor: func(context.Context) (memory.Actor, error) {
-			return memory.Actor{Kind: memory.ActorKindUser, ID: "user:test"}, nil
-		},
-		NewID: func() string {
-			value := ids[0]
-			ids = ids[1:]
-			return value
-		},
-	})
-	if err != nil {
-		t.Fatalf("new memory service: %v", err)
-	}
-	ctrl.SetMemoryService(service)
-	t.Cleanup(func() { _ = ctrl.Shutdown(context.Background()) })
-	created, err := service.CreateChunk(context.Background(), memoryService.CreateChunkRequest{Chunk: memory.Chunk{
-		Title: "Live memory", Kind: memory.ChunkKindReference,
-		Scope: memory.Scope{Kind: memory.ScopeKindGlobal},
-	}})
-	if err != nil {
-		t.Fatalf("create chunk: %v", err)
-	}
-
-	select {
-	case event := <-events:
-		mutation, ok := event.Payload.(memoryService.MutationEvent)
-		if event.Type != "memory_delta" || !ok || mutation.Object.ID != string(created.Chunk.ID) || mutation.Sequence != 1 {
-			t.Fatalf("controller event = %#v", event)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for memory_delta")
 	}
 }
 

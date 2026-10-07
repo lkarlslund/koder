@@ -33,7 +33,6 @@ Use the host and port from that URL:
 BASE=http://127.0.0.1:7979
 curl -sS "$BASE/debug/health" | jq .
 curl -sS "$BASE/debug/runtime" | jq .
-curl -sS "$BASE/debug/memory" | jq .
 curl -sS "$BASE/debug/sessions" | jq .
 ```
 
@@ -96,10 +95,8 @@ Response fields:
 
 - `ok`: always `true` when the server responds.
 - `debug`: debug API base URL known by the process.
-- `subsystems`: sanitized runtime health for optional process subsystems. The
-  `memory` entry reports whether Memory is enabled, required, available,
-  or read-only, plus its backend, schema version, and index generation. Paths
-  and raw backend errors are never exposed.
+- `subsystems`: sanitized runtime health for optional process subsystems.
+  Paths and raw backend errors are never exposed.
 
 ### `GET /debug/runtime`
 
@@ -145,25 +142,6 @@ The response is the same shape as `GET /debug/runtime`.
 
 Deep debug is intended for short-lived investigation. It can increase retained
 diagnostic detail and should not be left on casually.
-
-### `GET /debug/memory`
-
-Returns the authorized, content-free Memory operational snapshot used by the
-authenticated Memory status API. The service applies its operational policy before
-the response is produced; policy denial returns `403`, and an unavailable Memory
-service returns `503`.
-
-```sh
-curl -sS "$BASE/debug/memory" \
-  | jq '.status | {store, lexical_index, semantic_index, mutation_checkpoint, operations}'
-```
-
-The response contains backend/schema/index/storage state, sanitized Pebble storage and
-compaction details, rebuild and semantic-index state, the mutation checkpoint, and the
-bounded search/import/curation operation snapshot. It does not contain the store path,
-canonical record text or labels, search queries, package contents, model output, or raw
-errors. Operation records contain only server-generated operation/audit IDs, registered
-operation classes, outcomes, timing, and numeric counts.
 
 ## Client Endpoints
 

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -47,7 +48,7 @@ func NewRootCommand() *cobra.Command {
 		RunE:          func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	bindRootFlags(cmd, &opts)
-	cmd.AddCommand(newServeCommand(&opts), newDoctorCommand(&opts), newVersionCommand(), newSessionCommand(&opts), newDebugCommand(), newSkillCommand(&opts), newExecCommand(&opts), newMemoryCommand(&opts))
+	cmd.AddCommand(newServeCommand(&opts), newDoctorCommand(&opts), newVersionCommand(), newSessionCommand(&opts), newDebugCommand(), newSkillCommand(&opts), newExecCommand(&opts))
 	return cmd
 }
 
@@ -117,29 +118,13 @@ func runKoder(ctx context.Context, mode app.StartupMode, serveOpts serveConfig) 
 	if err := syncManagedUserAssets(ctx, cfg); err != nil {
 		return err
 	}
+	removeRetiredMemoryStores(cfg.StateDir())
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: cfg.Store.Backend})
 	if err != nil {
 		return err
 	}
 	defer func() { _ = st.Close() }()
-	memory, err := openConfiguredDefaultMemoryStore(cfg.StateDir(), cfg.Memory)
-	if err != nil {
-		return err
-	}
-	if memory.OpenError != nil {
-		slog.Warn("memory store unavailable; continuing without Memory", "error", memory.OpenError)
-	} else if !memory.Enabled {
-		slog.Info("memory store disabled")
-	} else {
-		slog.Info("memory store opened")
-	}
-	defer func() {
-		if err := memory.Close(); err != nil {
-			slog.Error("close memory store", "error", err)
-		}
-	}()
 	recorder := debugsrv.NewRecorder()
-	recorder.UpdateSubsystemHealth("memory", memory.OperationalHealth(ctx))
 
 	mcpManager, err := mcp.NewManager(cfg.MCPServers)
 	if err != nil {
@@ -151,15 +136,24 @@ func runKoder(ctx context.Context, mode app.StartupMode, serveOpts serveConfig) 
 	}()
 
 	engine := agent.New(cfg, st, recorder, mcpManager)
-	engine.SetMemoryService(memory.Service)
-	if memory.Service != nil {
-		if err := engine.StartMemoryCuration(ctx, memory.Service); err != nil {
-			slog.Warn("memory curation unavailable; continuing without background learning", "error", err)
+	return runWeb(ctx, cfg, engine, mode, recorder, serveOpts)
+}
+
+// removeRetiredMemoryStores deletes the Pebble stores of the memory and
+// knowledge-graph system that memory files replaced. Their data is not
+// migrated.
+func removeRetiredMemoryStores(stateDir string) {
+	for _, name := range []string{"memory-pebble-v1", "knowledge-pebble-v1"} {
+		path := filepath.Join(stateDir, name)
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		if err := os.RemoveAll(path); err != nil {
+			slog.Warn("remove retired memory store", "path", path, "error", err)
 		} else {
-			defer engine.StopMemoryCuration()
+			slog.Info("removed retired memory store", "path", path)
 		}
 	}
-	return runWeb(ctx, cfg, engine, mode, recorder, serveOpts)
 }
 
 func syncManagedUserAssets(ctx context.Context, cfg config.Config) error {

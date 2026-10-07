@@ -34,7 +34,6 @@ func (e *Engine) ChatDeps() chatpkg.Deps {
 		Life:    e.toolsRuntime,
 		Pending: e.toolsRuntime,
 		Compact: e,
-		Turns:   e,
 	}
 }
 

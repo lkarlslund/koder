@@ -1117,20 +1117,6 @@ func TestWebSocketStatusDeltaDoesNotSerializeTimeline(t *testing.T) {
 	}
 }
 
-func TestWebSocketPassesMemoryDeltaFromController(t *testing.T) {
-	original := app.Event{Seq: 13, Type: "memory_delta", Payload: map[string]any{
-		"stream_id": "stream-1", "sequence": uint64(4),
-	}}
-	event, ok := webEventFromControllerEvent(original)
-	if !ok || event.Seq != original.Seq || event.Type != original.Type {
-		t.Fatalf("web event = %#v, %v", event, ok)
-	}
-	payload, ok := event.Payload.(map[string]any)
-	if !ok || payload["stream_id"] != "stream-1" || payload["sequence"] != uint64(4) {
-		t.Fatalf("memory payload = %#v", event.Payload)
-	}
-}
-
 func TestWebSocketReplaceTimelineDeltaIsOnlyTimelineCarrier(t *testing.T) {
 	item := domain.TimelineItem{
 		ID:      "item-1",
@@ -2322,19 +2308,6 @@ func TestIndexServesHTML(t *testing.T) {
 			t.Fatalf("expected canonical action renderer %q", canonicalRenderer)
 		}
 	}
-	for _, memoryRenderer := range []string{
-		`case 'memory': return memoryActionLabel(toolAction(tool))`,
-		`if (kind === 'memory') return renderMemoryBlock`,
-		`function memoryExplorerHref(kind = '', id = '', query = '')`,
-		`params.set('object_kind', String(kind))`,
-		`params.set('return', location.pathname)`,
-		`class="tool-memory-row"`,
-		`.tool-memory-row:hover`,
-	} {
-		if !strings.Contains(fullPage, memoryRenderer) {
-			t.Fatalf("expected memory result rendering fragment %q", memoryRenderer)
-		}
-	}
 	if !strings.Contains(fullPage, `function chatSendMessage(args)`) ||
 		!strings.Contains(fullPage, `case 'chat_send': return 'Message chat '`) ||
 		!strings.Contains(fullPage, `if (String((tool && tool.tool) || '') === 'chat_send') return chatSendMessage(args)`) ||
@@ -2578,11 +2551,6 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `reconnectStaleSocket`) ||
 		!strings.Contains(fullPage, `websocket message failed`) {
 		t.Fatalf("expected websocket heartbeat/watchdog handling for stale live-update sockets")
-	}
-	if !strings.Contains(fullPage, `/assets/memory_live.js`) ||
-		!strings.Contains(fullPage, `observeMemoryCheckpoint`) ||
-		!strings.Contains(fullPage, `koder:memory-refetch`) {
-		t.Fatalf("expected memory live updates to detect gaps and request a snapshot refetch")
 	}
 	if !strings.Contains(fullPage, `}, 500);`) || !strings.Contains(fullPage, `Math.min(2000`) || !strings.Contains(fullPage, `reconnectDelay: 150`) {
 		t.Fatalf("expected reconnect timing to back off without spamming")

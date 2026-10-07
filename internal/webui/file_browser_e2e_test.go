@@ -12,12 +12,12 @@ import (
 )
 
 func TestFileManagerBrowserUploadMoveDelete(t *testing.T) {
-	chromium := memoryBrowserChromium(t)
+	chromium := chromiumForTest(t)
 	project := t.TempDir()
 	ctrl := newTestControllerWithWorkdir(t, project)
 	state := selectedTestState(t, ctrl)
 	serverCtx, stopServer := context.WithCancel(context.Background())
-	srv := startMemoryBrowserTestServer(t, serverCtx, ctrl)
+	srv := startBrowserTestServer(t, serverCtx, ctrl)
 	t.Cleanup(func() { stopServer(); _ = srv.server.Close() })
 	opts := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(chromium), chromedp.Flag("no-sandbox", true), chromedp.Flag("disable-dev-shm-usage", true))
 	allocCtx, stopAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
