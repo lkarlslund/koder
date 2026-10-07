@@ -1589,7 +1589,7 @@
 						<span class="settings-item-subtitle" x-text="item.description"></span>
 					  </button>
 					</template>
-					<div class="small text-secondary text-break mt-1" x-text="'Stored in ' + (scope === 'global' ? memoryState?.global_dir : memoryState?.project_dir)"></div>
+					<div class="small text-secondary text-break mt-1" x-show="scope === 'global' ? memoryState?.global_dir : memoryState?.project_dir" x-text="'Stored in ' + (scope === 'global' ? memoryState?.global_dir : memoryState?.project_dir)"></div>
 				  </section>
 				</template>
 				<template x-if="memoryEditor">

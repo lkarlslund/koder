@@ -5803,6 +5803,7 @@
           this.rpc('preferences_state', {}).then(state => {
             this.setSettingsState(state);
 			if (this.settingsTab === 'voice') this.loadVoiceDevices();
+			if (this.settingsTab === 'memory') this.loadMemories();
           }).finally(() => { this.settingsLoading = false; });
         },
         async closeSettingsDialog() {
