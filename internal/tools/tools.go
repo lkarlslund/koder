@@ -27,6 +27,7 @@ import (
 	"github.com/lkarlslund/koder/internal/memory"
 	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/skills"
 )
 
 type chatIDContextKey struct{}
@@ -201,6 +202,19 @@ func OutputBudgetBytes(contextWindow, usedTokens int) int {
 	const shareOfFree, bytesPerToken = 4, 4
 	freeTokens := contextWindow - max(usedTokens, 0)
 	return min(max(freeTokens/shareOfFree*bytesPerToken, minOutputBudgetBytes), maxOutputBudgetBytes)
+}
+
+// SkillOptions returns the skill discovery options for this runtime.
+func (r Runtime) SkillOptions() skills.DiscoverOptions {
+	var managed []string
+	if dir := strings.TrimSpace(r.ManagedSkillsDir); dir != "" {
+		managed = []string{dir}
+	}
+	return skills.DiscoverOptions{
+		ManagedRoots:    managed,
+		DisabledPaths:   r.DisabledSkillPaths,
+		CatalogMaxChars: r.SkillCatalogMaxChars,
+	}
 }
 
 // VoiceInteraction reports whether tools are being offered to a voice

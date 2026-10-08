@@ -2,11 +2,9 @@ package toolruntime
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"maps"
-	"os"
-	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -162,7 +160,6 @@ func (r *Runtime) ToolRuntime(ctx context.Context, rt *chatpkg.Chat) (tools.Runt
 		rt.SetSession(session)
 	}
 	runtime := r.Runtime(session, chat)
-	runtime.AccessSettings = withLoadedSkillMounts(runtime.AccessSettings, snapshot.Timeline)
 	runtime.ChatStatusControl = rt
 	return runtime, nil
 }
@@ -197,6 +194,7 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		OutputBudgetBytes:     r.outputBudgetBytes(chat),
 		Memory:                r.memory,
 	}
+	runtime.AccessSettings = withSkillMounts(runtime.AccessSettings, projectRoot, skills.InspectWithOptions(projectRoot, runtime.SkillOptions()))
 	if owner := r.loadedSession(session.ID); owner != nil {
 		runtime.SessionControl = owner.PlanningForChat(chat)
 		runtime.TaskControl = owner
@@ -234,75 +232,29 @@ func (r *Runtime) outputBudgetBytes(chat domain.Chat) int {
 	return tools.OutputBudgetBytes(model.ContextWindow, used)
 }
 
-func withLoadedSkillMounts(current accesssettings.Settings, timeline []domain.TimelineItem) accesssettings.Settings {
-	mounts := make([]accesssettings.Mount, 0)
-	seen := map[string]struct{}{}
-	add := func(result *domain.ToolResult) {
-		path := loadedSkillPath(result)
-		if path == "" {
-			return
-		}
-		if _, err := skills.InspectFile(path); err != nil {
-			return
-		}
-		dir := filepath.Dir(path)
-		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
-			dir = resolved
-		}
-		info, err := os.Stat(dir)
-		if err != nil || !info.IsDir() {
-			return
-		}
-		dir, err = filepath.Abs(dir)
-		if err != nil {
-			return
-		}
-		if _, ok := seen[dir]; ok {
-			return
-		}
-		seen[dir] = struct{}{}
-		mounts = append(mounts, accesssettings.Mount{Path: dir, Mode: accesssettings.ModeReadOnly})
-	}
-	for _, item := range timeline {
-		switch content := item.Content.(type) {
-		case domain.AssistantMessage:
-			for _, call := range content.Tools {
-				if call.Tool == domain.ToolKindSkill {
-					add(call.Result)
-				}
-			}
-		case domain.ToolExecution:
-			if content.Tool == domain.ToolKindSkill {
-				add(content.Result)
-			}
+// withSkillMounts makes every skill folder readable, so tools can read a
+// skill's references and run its scripts whatever the session's access
+// settings. Folders the session can already read keep their access, so a
+// project's own skills stay writable.
+func withSkillMounts(settings accesssettings.Settings, projectRoot string, catalog skills.Catalog) accesssettings.Settings {
+	dirs := make([]string, 0, len(catalog.Roots)+len(catalog.Items))
+	for _, root := range catalog.Roots {
+		if root.Exists {
+			dirs = append(dirs, root.Path)
 		}
 	}
-	return accesssettings.WithInheritedMounts(current, mounts)
-}
-
-func loadedSkillPath(result *domain.ToolResult) string {
-	if result == nil {
-		return ""
+	// A skill folder may be a symlink to somewhere outside its root.
+	for _, skill := range catalog.Items {
+		dirs = append(dirs, skill.CanonicalDirectory)
 	}
-	switch data := result.Data.(type) {
-	case tools.SkillStoredResult:
-		return strings.TrimSpace(data.Path)
-	case *tools.SkillStoredResult:
-		if data != nil {
-			return strings.TrimSpace(data.Path)
+	settings.Mounts = slices.Clone(settings.Mounts)
+	for _, dir := range dirs {
+		if dir == "" || accesssettings.Allows(settings, accesssettings.Request{Kind: accesssettings.AccessRead, Path: dir, ProjectRoot: projectRoot}) == nil {
+			continue
 		}
-	case json.RawMessage:
-		var stored tools.SkillStoredResult
-		if json.Unmarshal(data, &stored) == nil {
-			return strings.TrimSpace(stored.Path)
-		}
-	case []byte:
-		var stored tools.SkillStoredResult
-		if json.Unmarshal(data, &stored) == nil {
-			return strings.TrimSpace(stored.Path)
-		}
+		settings.Mounts = append(settings.Mounts, accesssettings.Mount{Path: dir, Mode: accesssettings.ModeReadOnly})
 	}
-	return ""
+	return settings
 }
 
 func (r *Runtime) Definitions(session domain.Session, chat domain.Chat) []provider.ToolDefinition {
