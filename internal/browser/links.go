@@ -10,10 +10,10 @@ import (
 // junkLink matches links that never help a browsing goal: sharing,
 // accounts, legal and consent pages, feeds and wiki tooling.
 var junkLink = regexp.MustCompile(`(?i)(` +
-	`/share|sharer|share\?|[?&](text|status)=https?|wa\.me/|mailto:|/intent/|` +
-	`/login|/signin|/sign-in|/signup|/register|/account|/cart|/checkout|` +
-	`/privacy|/cookie|/terms|/legal|/impressum|/disclaimer|/copyright|` +
-	`/advertis|/careers|/jobs|/press|/feed|\.rss|/rss|` +
+	`sharer|share\?|[?&](text|status)=https?|wa\.me/|mailto:|/intent/|` +
+	// Path words end at a boundary, so /press is junk but /pressure is not.
+	`/(share|login|signin|sign-in|signup|register|account|cart|checkout|privacy|cookies?|terms|legal|impressum|disclaimer|copyright|` +
+	`advertis\w*|careers|jobs|press|feed|rss)([/?#.-]|$)|\.rss|` +
 	`[?&]action=|[?&]mobileaction=|[?&]useparsoid=|[?&]oldid=|[?&]printable=|/Special:|/Talk:|/User:` +
 	`)`)
 
@@ -26,11 +26,12 @@ var socialHosts = []string{"facebook.com", "twitter.com", "x.com", "linkedin.com
 // under.
 var secondLevelLabels = []string{"co", "com", "net", "org", "gov", "edu", "ac", "gob", "nic", "mil", "ltd", "plc", "or", "ne", "go"}
 
-// canonicalURL drops what makes one page look like many: the fragment,
-// tracking parameters and a trailing slash.
-func canonicalURL(parsed *url.URL) string {
+// fetchURL drops what never changes the page fetched: the fragment and
+// tracking parameters. It keeps a trailing slash, which relative links on
+// the page resolve against.
+func fetchURL(parsed *url.URL) *url.URL {
 	out := *parsed
-	out.Fragment = ""
+	out.Fragment, out.RawFragment = "", ""
 	if out.RawQuery != "" {
 		query := out.Query()
 		for key := range query {
@@ -41,11 +42,28 @@ func canonicalURL(parsed *url.URL) string {
 		}
 		out.RawQuery = query.Encode()
 	}
+	return &out
+}
+
+// canonicalURL is a page's identity: its fetch URL without a trailing
+// slash, so one page does not look like many.
+func canonicalURL(parsed *url.URL) string {
+	out := fetchURL(parsed)
 	if len(out.Path) > 1 {
 		out.Path = strings.TrimSuffix(out.Path, "/")
 		out.RawPath = ""
 	}
 	return out.String()
+}
+
+// pageKey is the canonical URL of a raw URL, or the raw URL when it does
+// not parse.
+func pageKey(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	return canonicalURL(parsed)
 }
 
 // siteOf returns the registrable part of a host, such as wikipedia.org for

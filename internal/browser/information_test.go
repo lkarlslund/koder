@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/browserapi"
 )
@@ -24,18 +25,22 @@ func TestNormalizeTaskLinksDropsJunkAndOtherSites(t *testing.T) {
 		{URL: "/w/index.php?title=Rail&action=info", Label: "Page information"},
 		{URL: "https://www.cloudflare.com/careers/?utm_source=challenge", Label: "Careers"},
 		{URL: "https://other.org/rail", Label: "Rail elsewhere"},
+		{URL: "/press/2026-rail", Label: "Press"},
+		{URL: "/account/", Label: "Account"},
+		{URL: "/wiki/Air_pressure", Label: "Air pressure on the rail"},
 	}
 	got := normalizeTaskLinks("https://www.example.com/start", links, map[string]bool{}, "rail airport", linkScope{site: "example.com"}, taskCandidateLimit)
 	var urls []string
 	for _, link := range got {
 		urls = append(urls, link.URL)
 	}
-	want := []string{"https://www.example.com/rail", "https://blog.example.com/airport"}
+	// "airport" is on fewer links than "rail", so it weighs more.
+	want := []string{"https://blog.example.com/airport", "https://www.example.com/rail", "https://www.example.com/wiki/Air_pressure"}
 	if strings.Join(urls, " ") != strings.Join(want, " ") {
 		t.Fatalf("links = %q, want %q", urls, want)
 	}
 	// Without a site, other sites are kept but junk still goes.
-	if got := normalizeTaskLinks("https://www.example.com/start", links, map[string]bool{}, "rail", linkScope{}, taskCandidateLimit); len(got) != 3 {
+	if got := normalizeTaskLinks("https://www.example.com/start", links, map[string]bool{}, "rail", linkScope{}, taskCandidateLimit); len(got) != 4 {
 		t.Fatalf("links without a site = %#v", got)
 	}
 }
@@ -110,7 +115,7 @@ func (x fakeExtractor) Extract(_ context.Context, request ExtractRequest) (Extra
 }
 
 func TestExtractTaskPageKeepsFactsPicksLinksAndFallsBackToText(t *testing.T) {
-	text := strings.Repeat("Some readable article text about the goal. ", 20)
+	text := strings.Repeat("Some readable article text about the goal. ", 20) + "Lisbon averaged €6.124/m² in Q1 2026."
 	links := []taskLink{{URL: "https://a/1", Label: "One"}, {URL: "https://a/2", Label: "Two"}, {URL: "https://a/3", Label: "Three"}}
 	reads := []readTaskPage{
 		{page: taskPage{URL: "https://a", Text: text, Data: text}, links: slices.Clone(links)},
@@ -189,7 +194,7 @@ func TestInformationTaskFollowsSiteLinksAndReturnsFacts(t *testing.T) {
 		"index": "# Rail\n\n" + prose("the rail plan") +
 			"[Lisbon to Porto line](https://www.example.com/porto)\n[Blocked page](https://www.example.com/blocked)\n" +
 			"[Share](https://twitter.com/share?url=https://www.example.com/porto)\n[Elsewhere](https://other.org/rail)\n",
-		"porto":   "# Porto line\n\n" + prose("the Porto line"),
+		"porto":   "# Porto line\n\n" + prose("the Porto line, which opens in 2030"),
 		"blocked": "# Just a moment...\n\nChecking your browser before accessing the site.\n",
 	})
 	var seen []ExtractRequest
@@ -257,6 +262,122 @@ func TestNormalizeTaskLinksSkipsTranslations(t *testing.T) {
 	}
 	if strings.Join(urls, " ") != "https://www.example.com/news/2026/tourism https://www.example.com/usa/travel" {
 		t.Fatalf("links = %q", urls)
+	}
+}
+
+func TestNormalizeTaskLinksResolvesAgainstADirectoryPage(t *testing.T) {
+	links := []taskLink{{URL: "rust-2021/index.html", Label: "Rust 2021"}, {URL: "/edition-guide", Label: "This page"}}
+	visited := map[string]bool{pageKey("https://doc.example.org/edition-guide/"): true}
+	got := normalizeTaskLinks("https://doc.example.org/edition-guide/", links, visited, "rust 2021", linkScope{site: "example.org"}, taskCandidateLimit)
+	if len(got) != 1 || got[0].URL != "https://doc.example.org/edition-guide/rust-2021/index.html" {
+		t.Fatalf("links = %#v", got)
+	}
+}
+
+func TestNormalizeTaskLinksWeighsRareGoalWords(t *testing.T) {
+	links := []taskLink{
+		{URL: "/wiki/Everest_season", Label: "Everest 2018 season summary"},
+		{URL: "/wiki/Everest_summiters", Label: "Everest summiters"},
+		{URL: "/wiki/South_Summit", Label: "South Summit of Everest"},
+		{URL: "/wiki/Summit_records", Label: "Records to the summit"},
+		{URL: "/wiki/Everest_deaths", Label: "Deaths on Everest"},
+		{URL: "/wiki/Atmospheric_pressure", Label: "Atmospheric pressure"},
+	}
+	got := normalizeTaskLinks("https://en.example.org/wiki/Mount_Everest", links, map[string]bool{}, "air pressure at the summit of Everest compared to sea level", linkScope{site: "example.org"}, taskCandidateLimit)
+	if got[0].URL != "https://en.example.org/wiki/Atmospheric_pressure" || got[len(got)-1].Score != got[len(got)-2].Score {
+		t.Fatalf("links = %#v", got)
+	}
+}
+
+func TestParseMarkdownPageKeepsParenthesesInLinks(t *testing.T) {
+	page := parseMarkdownPage("https://en.example.org/wiki/Everest", "# Everest\n\nSee [South Summit](https://en.example.org/wiki/South_Summit_(Mount_Everest)) and [base](/wiki/Base \"title\").\n")
+	if len(page.Links) != 2 || page.Links[0].URL != "https://en.example.org/wiki/South_Summit_(Mount_Everest)" || page.Links[1].URL != "/wiki/Base" {
+		t.Fatalf("links = %#v", page.Links)
+	}
+}
+
+func TestObscuraPageRendersAPageWithoutScriptsWhenRenderingFails(t *testing.T) {
+	dir := t.TempDir()
+	// Rendering the live URL fails; the served HTML has a script, and the
+	// local copy rendered from it must not.
+	script := "#!/bin/sh\nfor last; do :; done\n" +
+		"case \"$*\" in *original*) echo '<!doctype html><title>Tower</title><script>while(1){}</script><p>The tower is 330 m tall.</p>'; exit 0;; esac\n" +
+		"case \"$last\" in file://*) path=${last#file://}; grep -q '<script' \"$path\" && exit 1; printf '# Tower\\n\\nThe tower is 330 m tall, which made it the tallest structure in the world for decades.\\n'; exit 0;; esac\n" +
+		"exit 1\n"
+	executable := filepath.Join(dir, "obscura")
+	if err := os.WriteFile(executable, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	page, err := obscuraPage(context.Background(), executable, t.TempDir(), "https://en.example.org/wiki/Tower")
+	if err != nil || page.URL != "https://en.example.org/wiki/Tower" || !strings.Contains(page.Text, "330 m") {
+		t.Fatalf("page = %#v, %v", page, err)
+	}
+}
+
+func TestGroundedFactsDropsFiguresFromElsewhereAndEmptyHeadings(t *testing.T) {
+	text := "Chania averages €3.102 per m² in Q2 2026, up 6,9% on the year. Notary fees are 0.8% up to €120,000 and 0.7% to €380,000."
+	facts := strings.Join([]string{
+		"**Prices**",
+		"- Chania: €3,102/m² (Q2 2026), up 6.9%",
+		"- Notary: 0.8% to €120,000; 0.7% from €120,001 to €380,000",
+		"- Supplementary tax above €250,000",
+		"**Short-let fee (TAKK/€100 per night)**",
+		"**Risks**",
+		"- Title checks matter",
+	}, "\n")
+	got, dropped := groundedFacts(facts, text)
+	want := "**Prices**\n- Chania: €3,102/m² (Q2 2026), up 6.9%\n- Notary: 0.8% to €120,000; 0.7% from €120,001 to €380,000\n**Risks**\n- Title checks matter"
+	if got != want || dropped != 1 {
+		t.Fatalf("groundedFacts() = %q, %d", got, dropped)
+	}
+	if got, dropped := groundedFacts("**Prices**\n- Supplementary tax above €250,000", text); got != "" || dropped != 1 {
+		t.Fatalf("groundedFacts() with nothing grounded = %q, %d", got, dropped)
+	}
+}
+
+func TestObscuraPageUsesAScriptFreeArticleWhileTheFullRenderIsSlow(t *testing.T) {
+	defer func(delay time.Duration) { staticRenderDelay = delay }(staticRenderDelay)
+	staticRenderDelay = 10 * time.Millisecond
+	dir := t.TempDir()
+	article := strings.Repeat("The tower is 330 m tall, which made it the tallest structure in the world for decades. ", 30)
+	script := "#!/bin/sh\nfor last; do :; done\n" +
+		"case \"$*\" in *original*) echo '<!doctype html><html><head><title>Tower</title></head><body><script>while(1){}</script><p>text</p></body></html>'; exit 0;; esac\n" +
+		"case \"$last\" in file://*) grep -q '<base href=\"https://en.example.org/wiki/Tower\">' \"${last#file://}\" || exit 1; printf '# Tower\\n\\n" + article + "\\n'; exit 0;; esac\n" +
+		"sleep 10\n"
+	executable := filepath.Join(dir, "obscura")
+	if err := os.WriteFile(executable, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	page, err := obscuraPage(context.Background(), executable, t.TempDir(), "https://en.example.org/wiki/Tower")
+	if err != nil || !strings.Contains(page.Text, "330 m") || time.Since(started) > 5*time.Second {
+		t.Fatalf("page = %#v, %v after %s", page, err, time.Since(started))
+	}
+}
+
+func TestInformationTaskFollowsBackupLinksWhenThePicksAreDead(t *testing.T) {
+	prose := strings.Repeat("This paragraph explains the summit air pressure in enough words to count as readable text. ", 5) + "\n"
+	executable := fakeObscura(t, map[string]string{
+		"index": "# Everest\n\n" + prose +
+			"[Summit air pressure calculator](https://www.example.com/dead1)\n[Summit air pressure archive](https://www.example.com/dead2)\n" +
+			"[Summit air pressure copy](https://www.example.com/dead3)\n[Atmospheric pressure](https://www.example.com/pressure)\n[Unpicked](https://www.example.com/other)\n",
+		"pressure": "# Pressure\n\n" + prose + "At the summit the pressure is about 34 kPa.\n",
+	})
+	extractor := fakeExtractor{facts: map[string]string{
+		"https://www.example.com":          "- The threat is low pressure",
+		"https://www.example.com/pressure": "- Summit pressure is about 34 kPa",
+	}, follow: map[string][]string{
+		"https://www.example.com": {"https://www.example.com/dead1", "https://www.example.com/dead2", "https://www.example.com/dead3", "https://www.example.com/pressure"},
+	}}
+	start, _ := url.Parse("https://www.example.com")
+	result, err := (&Manager{}).runInformationTask(context.Background(), executable, nil, extractor, 8, "summit air pressure", start, &taskTracker{})
+	trace := strings.Join(result.Trace, "\n")
+	if err != nil || len(result.Pages) != 2 || result.Pages[1].Facts != "- Summit pressure is about 34 kPa" {
+		t.Fatalf("pages = %#v, %v\ntrace:\n%s", result.Pages, err, trace)
+	}
+	if strings.Index(trace, "Could not read https://www.example.com/dead3") > strings.Index(trace, "Read https://www.example.com/pressure") ||
+		strings.Contains(trace, "example.com/other") {
+		t.Fatalf("backup read before the picks failed, or an unpicked link read:\n%s", trace)
 	}
 }
 

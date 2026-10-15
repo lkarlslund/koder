@@ -5,12 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"mime"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -156,11 +158,11 @@ func (m *Manager) runObscuraTask(ctx context.Context, executable string, decider
 	for step := 0; step < maxSteps && len(frontier) > 0; step++ {
 		current := frontier[0]
 		frontier = frontier[1:]
-		if visited[current.URL] {
+		if visited[pageKey(current.URL)] {
 			step--
 			continue
 		}
-		visited[current.URL] = true
+		visited[pageKey(current.URL)] = true
 
 		if likelyDownload(current) {
 			tracker.doing(fmt.Sprintf("Downloading %s (page %d of at most %d)", current.URL, step+1, maxSteps))
@@ -207,6 +209,10 @@ const (
 	// chooses from, and informationFollow how many it picks.
 	informationLinkChoices = 40
 	informationFollow      = 3
+	// informationBackups is how many more links the extractor picks as
+	// backups, followed only when the picked links lead nowhere, such as
+	// when they are dead.
+	informationBackups = 2
 	// informationFoundFacts bounds the facts found so far that the
 	// extractor sees when it picks links.
 	informationFoundFacts = 6000
@@ -238,7 +244,7 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 	// The extractor picks links knowing the goal, so it may follow a page's
 	// sources to other sites; a decider stays within the start site.
 	scope := linkScope{site: siteOf(start.Hostname()), otherSites: extractor != nil}
-	frontier := []taskLink{{URL: canonicalURL(start), Label: start.String()}}
+	frontier := []taskLink{{URL: fetchURL(start).String(), Label: start.String()}}
 	visited := map[string]bool{}
 	var pages []browserapi.TaskPage
 	withFacts := 0
@@ -252,13 +258,18 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 	// walled records a bot challenge or access wall, which the visible
 	// browser may get past.
 	walled := false
-	for read := 0; read < maxSteps && len(frontier) > 0 && withFacts < informationEnoughPages; {
+	// backups are links followed only once the frontier runs dry.
+	var backups []taskLink
+	for read := 0; read < maxSteps && len(frontier)+len(backups) > 0 && withFacts < informationEnoughPages; {
+		if len(frontier) == 0 {
+			frontier, backups = mergeTaskFrontier(nil, backups, maxSteps*taskCandidateLimit), nil
+		}
 		var batch []string
 		for len(frontier) > 0 && len(batch) < min(informationBatch, maxSteps-read) {
 			next := frontier[0].URL
 			frontier = frontier[1:]
-			if !visited[next] {
-				visited[next] = true
+			if !visited[pageKey(next)] {
+				visited[pageKey(next)] = true
 				batch = append(batch, next)
 			}
 		}
@@ -299,6 +310,7 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 		wg.Wait()
 		for _, page := range readable {
 			frontier = mergeTaskFrontier(frontier, page.links, maxSteps*taskCandidateLimit)
+			backups = append(backups, page.backups...)
 			if page.result != nil && page.result.Facts != "" {
 				if page.result.Facts = newFacts(page.result.Facts, seenFacts); page.result.Facts == "" {
 					tracker.step(fmt.Sprintf("Dropped the facts from %s: all were found before", page.page.URL))
@@ -331,11 +343,12 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 }
 
 // readTaskPage is a page an information task read, the links on it worth
-// following, and what the task made of it.
+// following and the backups to them, and what the task made of it.
 type readTaskPage struct {
-	page   taskPage
-	links  []taskLink
-	result *browserapi.TaskPage
+	page    taskPage
+	links   []taskLink
+	backups []taskLink
+	result  *browserapi.TaskPage
 }
 
 // judgeTaskPage has the decider score a page's links and judge how much
@@ -370,7 +383,7 @@ func extractTaskPage(ctx context.Context, extractor Extractor, goal, found strin
 	}
 	tracker.doing("Pulling facts for the goal out of " + page.URL)
 	extraction, err := extractor.Extract(ctx, ExtractRequest{
-		Goal: goal, PageURL: page.URL, Text: page.Data, Found: found, Links: descriptions, Follow: informationFollow,
+		Goal: goal, PageURL: page.URL, Text: page.Data, Found: found, Links: descriptions, Follow: informationFollow + informationBackups,
 	})
 	if err != nil {
 		read.links = read.links[:min(len(read.links), informationFollow)]
@@ -388,13 +401,94 @@ func extractTaskPage(ctx context.Context, extractor Extractor, goal, found strin
 			follow = append(follow, link)
 		}
 	}
-	read.links = follow
+	read.links, read.backups = follow[:min(len(follow), informationFollow)], follow[min(len(follow), informationFollow):]
 	held := "nothing for the goal"
-	if facts := strings.TrimSpace(extraction.Facts); facts != "" {
+	facts, dropped := groundedFacts(extraction.Facts, page.Data)
+	if facts != "" {
 		read.result = &browserapi.TaskPage{URL: page.URL, Title: page.Title, Facts: facts}
 		held = "found facts for the goal"
 	}
-	tracker.step(fmt.Sprintf("Read %s: %s, following %d of its %d links", page.URL, held, len(follow), len(descriptions)))
+	if dropped > 0 {
+		held += fmt.Sprintf(" (dropped %d with figures the page does not have)", dropped)
+	}
+	tracker.step(fmt.Sprintf("Read %s: %s, following %d of its %d links", page.URL, held, len(read.links), len(descriptions)))
+}
+
+// groundedFacts drops the bullets of a page's facts whose figures are
+// mostly not in the page's text, which models write when they restate a
+// fact found on another page as this one's, and the headings left with no
+// bullets. It returns "" when no bullet is left, and how many it dropped.
+func groundedFacts(facts, text string) (string, int) {
+	figures := map[string]bool{}
+	for _, figure := range factFigures(text) {
+		figures[figure] = true
+	}
+	var kept []string
+	dropped := 0
+	for line := range strings.SplitSeq(strings.TrimSpace(facts), "\n") {
+		if factKey(line) != "" {
+			missing, all := 0, factFigures(line)
+			for _, figure := range all {
+				if !figures[figure] {
+					missing++
+				}
+			}
+			if missing*2 > len(all) {
+				dropped++
+				continue
+			}
+		}
+		kept = append(kept, line)
+	}
+	var out []string
+	bullets := false
+	for i, line := range kept {
+		if factHeading(line) && !headingHasBullets(kept[i+1:]) {
+			continue
+		}
+		bullets = bullets || factKey(line) != ""
+		out = append(out, line)
+	}
+	if !bullets {
+		return "", dropped
+	}
+	return strings.TrimSpace(strings.Join(out, "\n")), dropped
+}
+
+// factFigure matches a number, with its thousands and decimal separators.
+var factFigure = regexp.MustCompile(`\d+(?:[.,]\d+)*`)
+
+// factFigures returns the numbers of two or more digits in text, without
+// separators, so 3,102 and 3.102 are both 3102.
+func factFigures(text string) []string {
+	var out []string
+	for _, match := range factFigure.FindAllString(text, -1) {
+		if digits := strings.NewReplacer(",", "", ".", "").Replace(match); len(digits) >= 2 {
+			out = append(out, digits)
+		}
+	}
+	return out
+}
+
+// factHeading reports whether a line of facts is a heading: markdown, or
+// a bold line of its own.
+func factHeading(line string) bool {
+	line = strings.TrimSpace(line)
+	return strings.HasPrefix(line, "#") || (strings.HasPrefix(line, "**") && strings.HasSuffix(strings.TrimSuffix(line, ":"), "**"))
+}
+
+// headingHasBullets reports whether the lines after a heading hold a bullet
+// before the next heading.
+func headingHasBullets(lines []string) bool {
+	for _, line := range lines {
+		if factHeading(line) {
+			return false
+		}
+		if factKey(line) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // newFacts drops the bullets of a page's facts that were found before and
@@ -421,10 +515,12 @@ func newFacts(facts string, seen map[string]bool) string {
 }
 
 // factKey identifies a bullet by its words and figures, ignoring markup
-// and punctuation. Lines that are not bullets have no key.
+// and punctuation. Lines that are not bullets, bold headings among them,
+// have no key.
 func factKey(line string) string {
 	line = strings.TrimSpace(line)
-	if !strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "*") && !strings.HasPrefix(line, "•") {
+	marker, _ := utf8.DecodeRuneInString(line)
+	if rest := strings.TrimPrefix(line, string(marker)); !strings.ContainsRune("-*•", marker) || rest == "" || !unicode.IsSpace(rune(rest[0])) {
 		return ""
 	}
 	return strings.Join(strings.FieldsFunc(strings.ToLower(line), func(r rune) bool {
@@ -630,13 +726,53 @@ func normalizeTaskLinks(baseURL string, links []taskLink, visited map[string]boo
 			continue
 		}
 		seen[canonical] = true
-		link.URL = canonical
-		link.Score = lexicalRelevance(link.Label+" "+link.URL, hint)
+		link.URL = fetchURL(parsed).String()
 		out = append(out, link)
 	}
+	scoreLinksByRareWords(out, hint)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Score > out[j].Score })
 	if len(out) > limit {
 		out = out[:limit]
+	}
+	return out
+}
+
+// scoreLinksByRareWords scores links by the hint's words they contain,
+// each weighted by how few of the links contain it. A word on most links,
+// such as the page's own subject, says little about any one of them.
+func scoreLinksByRareWords(links []taskLink, hint string) {
+	words := goalWords(hint)
+	matches := make([][]string, len(links))
+	counts := map[string]int{}
+	for i, link := range links {
+		matches[i] = wordsIn(link.Label+" "+link.URL, words)
+		for _, word := range matches[i] {
+			counts[word]++
+		}
+	}
+	for i := range links {
+		links[i].Score = 0
+		for _, word := range matches[i] {
+			links[i].Score += math.Log(float64(len(links)+1) / float64(counts[word]))
+		}
+	}
+}
+
+// wordSuffixes are the endings a word may take and still match.
+var wordSuffixes = []string{"", "s", "es", "ed", "er", "ers", "ing"}
+
+// wordsIn returns the words that are a word of text or one of its common
+// forms, so "summit" matches "summits" but "sea" does not match "season".
+func wordsIn(text string, words []string) []string {
+	tokens := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+	var out []string
+	for _, word := range words {
+		if !slices.Contains(out, word) && slices.ContainsFunc(tokens, func(token string) bool {
+			suffix, found := strings.CutPrefix(token, word)
+			return found && slices.Contains(wordSuffixes, suffix)
+		}) {
+			out = append(out, word)
+		}
 	}
 	return out
 }

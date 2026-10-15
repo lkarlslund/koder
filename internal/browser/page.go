@@ -4,18 +4,30 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	htmlpkg "html"
+	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 )
+
+// staticRenderDelay is how long a page may render before it is also
+// rendered without its scripts.
+var staticRenderDelay = 6 * time.Second
 
 // blockedMissing is the reason a page is a stand-in for one that does not
 // exist, which, unlike a bot challenge, no browser gets past.
 const blockedMissing = "a missing page"
 
 const (
+	// staticArticleText is how much readable text a page rendered without
+	// its scripts needs to be used instead of waiting for the full render.
+	staticArticleText = 2000
 	// minReadableLine is the shortest line of prose a page's readable text
 	// keeps; shorter lines are navigation, buttons and captions.
 	minReadableLine = 60
@@ -26,8 +38,14 @@ const (
 
 var (
 	markdownImage = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
-	markdownLink  = regexp.MustCompile(`\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)`)
+	// markdownLink matches a link whose target may hold one level of
+	// parentheses, as Wikipedia's do.
+	markdownLink  = regexp.MustCompile(`\[([^\]]*)\]\(((?:[^()\s]|\([^()\s]*\))+)(?:\s+"[^"]*")?\)`)
 	markdownTitle = regexp.MustCompile(`(?m)^#\s+(.+)$`)
+	htmlDocument  = regexp.MustCompile(`(?i)<(!doctype html|html)`)
+	scriptElement = regexp.MustCompile(`(?is)<script\b.*?</script\s*>`)
+	baseElement   = regexp.MustCompile(`(?i)<base\s`)
+	headElement   = regexp.MustCompile(`(?i)<head\b[^>]*>`)
 	// consentLine matches cookie banners and consent-manager declarations,
 	// which can run to thousands of lines of seemingly readable text.
 	consentLine = regexp.MustCompile(`(?i)cookie|consent|gdpr|storage duration|local storage|personal data|` +
@@ -62,17 +80,110 @@ type taskPage struct {
 }
 
 // obscuraPage fetches a page as markdown with Obscura and splits it into
-// readable text and links.
+// readable text and links. Some pages' scripts keep them from rendering for
+// long, such as long Wikipedia articles, so a page that is slow to render is
+// also rendered without its scripts, and that copy is used when it holds an
+// article or the full render fails.
 func obscuraPage(ctx context.Context, executable, storage, rawURL string) (taskPage, error) {
-	commandCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type rendering struct {
+		markdown string
+		err      error
+	}
+	full, static := make(chan rendering, 1), make(chan rendering, 1)
+	go func() {
+		markdown, err := obscuraMarkdown(ctx, executable, storage, rawURL, 30*time.Second)
+		full <- rendering{markdown, err}
+	}()
+	slow := time.NewTimer(staticRenderDelay)
+	defer slow.Stop()
+	var fullErr error
+	started, waiting := false, false
+	startStatic := func() {
+		started = true
+		go func() {
+			markdown, err := obscuraStaticMarkdown(ctx, executable, storage, rawURL)
+			static <- rendering{markdown, err}
+		}()
+	}
+	var standby *rendering
+	for {
+		select {
+		case got := <-full:
+			if got.err == nil {
+				return parseMarkdownPage(rawURL, got.markdown), nil
+			}
+			if ctx.Err() != nil {
+				return taskPage{}, got.err
+			}
+			fullErr, full = got.err, nil
+			if standby != nil {
+				if standby.err != nil {
+					return taskPage{}, fullErr
+				}
+				return parseMarkdownPage(rawURL, standby.markdown), nil
+			}
+			if !started {
+				startStatic()
+			}
+			waiting = true
+		case <-slow.C:
+			if !started {
+				startStatic()
+			}
+		case got := <-static:
+			if got.err == nil && (waiting || len(readableText(mainContent(got.markdown))) >= staticArticleText) {
+				return parseMarkdownPage(rawURL, got.markdown), nil
+			}
+			if waiting {
+				return taskPage{}, fullErr
+			}
+			standby = &got
+		}
+	}
+}
+
+// obscuraMarkdown renders a URL as markdown with Obscura.
+func obscuraMarkdown(ctx context.Context, executable, storage, rawURL string, timeout time.Duration) (string, error) {
+	commandCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(commandCtx, executable, "fetch", "--quiet", "--dump", "markdown", "--storage-dir", storage, rawURL)
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	cmd.Stdout, cmd.Stderr, cmd.WaitDelay = &stdout, &stderr, time.Second
 	if err := cmd.Run(); err != nil {
-		return taskPage{}, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 	}
-	return parseMarkdownPage(rawURL, stdout.String()), nil
+	return stdout.String(), nil
+}
+
+// obscuraStaticMarkdown fetches a page's HTML as served and renders it
+// without its scripts.
+func obscuraStaticMarkdown(ctx context.Context, executable, storage, rawURL string) (string, error) {
+	commandCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	html, err := exec.CommandContext(commandCtx, executable, "fetch", "--quiet", "--dump", "original", rawURL).Output()
+	if err != nil {
+		return "", err
+	}
+	if !htmlDocument.Match(html[:min(len(html), 1024)]) {
+		return "", errors.New("not an HTML page")
+	}
+	html = scriptElement.ReplaceAll(html, nil)
+	storage = filepath.Join(storage, "static")
+	if err := os.MkdirAll(storage, 0o700); err != nil {
+		return "", err
+	}
+	path := filepath.Join(storage, "page.html")
+	// The copy is rendered from a local file, whose links resolve there
+	// unless the page names its own base.
+	if !baseElement.Match(html) {
+		html = headElement.ReplaceAll(html, []byte(`$0<base href="`+htmlpkg.EscapeString(rawURL)+`">`))
+	}
+	if err := os.WriteFile(path, html, 0o600); err != nil {
+		return "", err
+	}
+	return obscuraMarkdown(ctx, executable, storage, (&url.URL{Scheme: "file", Path: path}).String(), 15*time.Second)
 }
 
 // obscuraStatus returns the HTTP status of a URL from a raw fetch, which
