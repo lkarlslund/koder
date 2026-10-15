@@ -28,7 +28,7 @@ type tool struct {
 
 var specs = []tool{
 	{tools.BrowserStatus, "Browser status", "Inspect the managed browser's health and this chat's tab count.", object(saveToFileProperty)},
-	{tools.BrowserTask, "Browser task", "Complete a bounded browser goal with the lightweight automation backend, which reads several public pages quickly and lets a model judge which links to follow; it continues in the managed browser when it cannot finish. outcome=download finds and verifies a file such as a product manual. outcome=information reads pages from start_url outwards within its site, skipping bot challenges and error pages, and returns the facts for the goal that your model pulled out of the most relevant pages, each page with its URL and a relevance score from 0 to 1; the steps list every page read and what it held. Pages needing a login, consent clicks or other interaction need the browser tools instead.", required(object(`"goal":{"type":"string","description":"The concrete outcome to complete."},"start_url":{"type":"string","description":"Absolute HTTP or HTTPS URL where the task starts."},"outcome":{"type":"string","enum":["download","information"],"description":"download (default) finishes on a verified file; information finishes with the facts for the goal from the relevant pages."},`+saveToFileProperty), "goal", "start_url")},
+	{tools.BrowserTask, "Browser task", "Complete a bounded browser goal with the lightweight automation backend, which reads several public pages quickly and lets a model judge which links to follow; it continues in the managed browser when it cannot finish. outcome=download finds and verifies a file such as a product manual. outcome=information reads pages from start_url outwards within its site, skipping bot challenges and error pages, and returns the facts for the goal that your model pulled out of each page, with the page's URL, even when save_to_file also saves them; the steps list every page read and what it held. Pages needing a login, consent clicks or other interaction need the browser tools instead.", required(object(`"goal":{"type":"string","description":"The concrete outcome to complete."},"start_url":{"type":"string","description":"Absolute HTTP or HTTPS URL where the task starts."},"outcome":{"type":"string","enum":["download","information"],"description":"download (default) finishes on a verified file; information finishes with the facts for the goal from the relevant pages."},`+saveToFileProperty), "goal", "start_url")},
 	{tools.BrowserTabList, "List browser pages", "List this chat's browser pages, including tabs and popup windows, plus unowned manual pages without starting Chrome. Pages owned by other chats are hidden.", object(saveToFileProperty)},
 	{tools.BrowserTabNew, "New browser tab", "Create and select a browser tab owned by this chat.", object(`"url":{"type":"string"}`)},
 	{tools.BrowserTabClaim, "Claim browser page", "Atomically claim an unowned manual browser page by its returned opaque ID.", required(object(tabIDProperty), "tab_id")},
@@ -416,11 +416,19 @@ func taskOutput(opts tools.Options, title, path string, result browserapi.TaskRe
 		}
 		stored.Path, stored.Summary = saved, fmt.Sprintf("%s saved to %s", title, saved)
 		output = fmt.Sprintf("Saved %s to %s", taskPagesSummary(result), saved)
+		// Facts are short enough to return as well, which saves reading
+		// the file back.
+		if len(stored.Text) <= inlineTaskFacts && len(result.Pages) > 0 && result.Pages[0].Facts != "" {
+			output += ":\n\n" + stored.Text
+		}
 		stored.Text = output
 		meta["path"] = saved
 	}
 	return tools.Result{Output: output, Meta: meta, Stored: stored}, nil
 }
+
+// inlineTaskFacts is the most saved task text also returned to the model.
+const inlineTaskFacts = 24 << 10
 
 func taskPagesMarkdown(result browserapi.TaskResult) string {
 	var b strings.Builder
@@ -428,7 +436,7 @@ func taskPagesMarkdown(result browserapi.TaskResult) string {
 	case len(result.Pages) == 0:
 		fmt.Fprintf(&b, "Read pages from %s; none had facts for the goal. The steps show what each page held.\n", result.SourceURL)
 	case result.Pages[0].Facts != "":
-		fmt.Fprintf(&b, "Read pages from %s; facts for the goal from the %d most relevant follow, best first.\n", result.SourceURL, len(result.Pages))
+		fmt.Fprintf(&b, "Read pages from %s; facts for the goal from %d of them follow.\n", result.SourceURL, len(result.Pages))
 	default:
 		fmt.Fprintf(&b, "Read pages from %s; the %d most relevant follow, best first.\n", result.SourceURL, len(result.Pages))
 	}
@@ -437,7 +445,11 @@ func taskPagesMarkdown(result browserapi.TaskResult) string {
 		if title == "" {
 			title = page.URL
 		}
-		fmt.Fprintf(&b, "\n## %s\nURL: %s\nRelevance: %.2f\n\n", title, page.URL, page.Relevance)
+		fmt.Fprintf(&b, "\n## %s\nURL: %s\n", title, page.URL)
+		if page.Relevance > 0 {
+			fmt.Fprintf(&b, "Relevance: %.2f\n", page.Relevance)
+		}
+		b.WriteString("\n")
 		if page.Facts != "" {
 			b.WriteString(page.Facts + "\n")
 		} else {

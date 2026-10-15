@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/browser"
 	"github.com/lkarlslund/koder/internal/browserapi"
 	"github.com/lkarlslund/koder/internal/config"
 )
@@ -177,7 +179,7 @@ func TestBrowserExtractorUsesTheChatModelAndReadsNone(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		bodies = append(bodies, body)
 		prompt := body["messages"].([]any)[0].(map[string]any)["content"].(string)
-		reply := "- Lisbon: €6,124/m² (Q1 2026)"
+		reply := "- Lisbon: €6,124/m² (Q1 2026)\n\n**FOLLOW:** 1, 0, 7"
 		if strings.Contains(prompt, "cookie policy") {
 			reply = "- NONE"
 		}
@@ -198,12 +200,20 @@ func TestBrowserExtractorUsesTheChatModelAndReadsNone(t *testing.T) {
 	if name != "local/qwen3.8" {
 		t.Fatalf("name = %q", name)
 	}
-	facts, err := extractor.ExtractFacts(context.Background(), "house prices", "https://example.com/prices", "Lisbon asking prices reached €6,124/m² in Q1 2026.")
-	if err != nil || facts != "- Lisbon: €6,124/m² (Q1 2026)" {
-		t.Fatalf("facts = %q, %v", facts, err)
+	got, err := extractor.Extract(context.Background(), browser.ExtractRequest{Goal: "house prices", PageURL: "https://example.com/prices",
+		Text: "Lisbon asking prices reached €6,124/m² in Q1 2026.", Found: "- Porto: €3,900/m²",
+		Links: []string{"Porto — https://example.com/porto", "Faro — https://example.com/faro"}, Follow: 2})
+	if err != nil || got.Facts != "- Lisbon: €6,124/m² (Q1 2026)" || !slices.Equal(got.Follow, []int{1, 0}) {
+		t.Fatalf("extraction = %#v, %v", got, err)
 	}
-	if facts, err := extractor.ExtractFacts(context.Background(), "house prices", "https://example.com/cookies", "Our cookie policy."); err != nil || facts != "" {
-		t.Fatalf("facts for an empty page = %q, %v", facts, err)
+	prompt := bodies[0]["messages"].([]any)[0].(map[string]any)["content"].(string)
+	for _, want := range []string{"- Porto: €3,900/m²", "1: Faro — https://example.com/faro", "FOLLOW:"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+	if got, err := extractor.Extract(context.Background(), browser.ExtractRequest{Goal: "house prices", PageURL: "https://example.com/cookies", Text: "Our cookie policy."}); err != nil || got.Facts != "" || got.Follow != nil {
+		t.Fatalf("extraction of an empty page = %#v, %v", got, err)
 	}
 	if bodies[0]["max_tokens"] == nil {
 		t.Fatal("extraction has no max_tokens")
@@ -213,5 +223,19 @@ func TestBrowserExtractorUsesTheChatModelAndReadsNone(t *testing.T) {
 	}
 	if kwargs, _ := bodies[0]["chat_template_kwargs"].(map[string]any); kwargs["enable_thinking"] != false {
 		t.Fatalf("extraction did not turn thinking off: %v", bodies[0])
+	}
+}
+
+func TestParseExtraction(t *testing.T) {
+	for reply, want := range map[string]browser.Extraction{
+		"- a fact\nFOLLOW: 2":                {Facts: "- a fact", Follow: []int{2}},
+		"NONE\n\nFOLLOW: 3, 1":               {Follow: []int{3, 1}},
+		"- NONE\nFOLLOW: NONE":               {},
+		"- a fact":                           {Facts: "- a fact"},
+		"- a fact\n- **Follow:** 0, 1, 2, 3": {Facts: "- a fact", Follow: []int{0, 1, 2}},
+	} {
+		if got := parseExtraction(reply, 3); got.Facts != want.Facts || !slices.Equal(got.Follow, want.Follow) {
+			t.Errorf("parseExtraction(%q) = %#v, want %#v", reply, got, want)
+		}
 	}
 }

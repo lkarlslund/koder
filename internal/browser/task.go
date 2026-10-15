@@ -106,17 +106,20 @@ func (m *Manager) Task(ctx context.Context, chat browserapi.Chat, request browse
 	defer tracker.finish()
 	if cfg.TaskEngine == "" || cfg.TaskEngine == "obscura" {
 		if executable, lookupErr := exec.LookPath("obscura"); lookupErr == nil {
-			tracker.doing("Finding a model for decisions")
-			decider, deciderNote := taskDecider(ctx, resolveDecider)
-			tracker.step(deciderNote)
 			var result browserapi.TaskResult
 			var taskErr error
 			if outcome == TaskOutcomeInformation {
+				// The extractor reads each page anyway, so it also picks the
+				// links; the decider only steps in without one.
 				extractor, extractorNote := taskExtractor(ctx, resolveExtractor, chat)
 				tracker.step(extractorNote)
+				var decider Decider
+				if extractor == nil {
+					decider = m.findTaskDecider(ctx, resolveDecider, tracker)
+				}
 				result, taskErr = m.runInformationTask(ctx, executable, decider, extractor, cfg.TaskMaxSteps, goal, start, tracker)
 			} else {
-				result, taskErr = m.runObscuraTask(ctx, executable, decider, cfg.TaskMaxSteps, goal, start, tracker)
+				result, taskErr = m.runObscuraTask(ctx, executable, m.findTaskDecider(ctx, resolveDecider, tracker), cfg.TaskMaxSteps, goal, start, tracker)
 			}
 			if taskErr == nil && result.Status == "completed" {
 				return result, nil
@@ -127,6 +130,14 @@ func (m *Manager) Task(ctx context.Context, chat browserapi.Chat, request browse
 		}
 	}
 	return m.handoffTaskToChrome(ctx, chat, start.String(), tracker)
+}
+
+// findTaskDecider resolves the task's decider and records the choice.
+func (m *Manager) findTaskDecider(ctx context.Context, resolve DeciderResolver, tracker *taskTracker) Decider {
+	tracker.doing("Finding a model for decisions")
+	decider, note := taskDecider(ctx, resolve)
+	tracker.step(note)
+	return decider
 }
 
 func (m *Manager) runObscuraTask(ctx context.Context, executable string, decider Decider, maxSteps int, goal string, start *url.URL, tracker *taskTracker) (browserapi.TaskResult, error) {
@@ -169,7 +180,7 @@ func (m *Manager) runObscuraTask(ctx context.Context, executable string, decider
 			tracker.step("Lightweight fetch failed: " + fetchErr.Error())
 			continue
 		}
-		links = normalizeTaskLinks(current.URL, links, visited, downloadLinkHint, "")
+		links = normalizeTaskLinks(current.URL, links, visited, downloadLinkHint, "", taskCandidateLimit)
 		frontier = mergeTaskFrontier(frontier, m.scoreTaskLinks(ctx, decider, goal, current.URL, links, tracker), maxSteps*taskCandidateLimit)
 	}
 	result.Trace = tracker.steps()
@@ -189,19 +200,23 @@ const (
 	informationResultText = 48 << 10
 	// informationEnoughPages ends a task once this many pages gave facts.
 	informationEnoughPages = 4
-	// extractMinRelevance is the least relevance a page needs before a model
-	// reads it for facts.
-	extractMinRelevance = 0.05
 	// informationLinkCandidates is how many of a page's links, filtered and
 	// ranked by keywords, the decider judges.
 	informationLinkCandidates = 8
+	// informationLinkChoices is how many of a page's links the extractor
+	// chooses from, and informationFollow how many it picks.
+	informationLinkChoices = 40
+	informationFollow      = 3
+	// informationFoundFacts bounds the facts found so far that the
+	// extractor sees when it picks links.
+	informationFoundFacts = 6000
 )
 
 // runInformationTask reads pages from the start URL outwards within its
-// site. The decider judges how much each page helps the goal and which links
-// to follow, and the extractor pulls the facts for the goal out of the
-// relevant pages. Without an extractor it returns the most relevant pages'
-// text instead.
+// site. The extractor pulls the facts for the goal out of each page and
+// picks the links to follow for what is still missing. Without an
+// extractor, the decider judges how much each page helps and which links to
+// follow, and the task returns the most relevant pages' text.
 func (m *Manager) runInformationTask(ctx context.Context, executable string, decider Decider, extractor Extractor, maxSteps int, goal string, start *url.URL, tracker *taskTracker) (browserapi.TaskResult, error) {
 	if maxSteps <= 0 {
 		maxSteps = 8
@@ -225,6 +240,10 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 	visited := map[string]bool{}
 	var pages []browserapi.TaskPage
 	withFacts := 0
+	linkLimit := informationLinkCandidates
+	if extractor != nil {
+		linkLimit = informationLinkChoices
+	}
 	// walled records a bot challenge or access wall, which the visible
 	// browser may get past.
 	walled := false
@@ -258,16 +277,19 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 			// Links found once the reading budget is spent are never
 			// followed, so they are not worth judging.
 			if read < maxSteps {
-				page.links = normalizeTaskLinks(page.page.URL, page.page.Links, visited, goal, site)
-				page.links = page.links[:min(len(page.links), informationLinkCandidates)]
+				page.links = normalizeTaskLinks(page.page.URL, page.page.Links, visited, goal, site, linkLimit)
 			}
 			readable = append(readable, page)
 		}
-		// The batch's pages are judged and read for facts concurrently, so
-		// the extractor works while the decider judges the next page.
+		// The batch's pages are read concurrently.
+		found := foundFacts(pages)
 		var wg sync.WaitGroup
 		for i := range readable {
-			wg.Go(func() { m.judgeTaskPage(ctx, decider, extractor, goal, &readable[i], tracker) })
+			if extractor != nil {
+				wg.Go(func() { extractTaskPage(ctx, extractor, goal, found, &readable[i], tracker) })
+			} else {
+				wg.Go(func() { m.judgeTaskPage(ctx, decider, goal, &readable[i], tracker) })
+			}
 		}
 		wg.Wait()
 		for _, page := range readable {
@@ -305,9 +327,9 @@ type readTaskPage struct {
 	result *browserapi.TaskPage
 }
 
-// judgeTaskPage scores a page's links, judges how much the page helps the
-// goal and, when it may help, has the extractor pull out its facts.
-func (m *Manager) judgeTaskPage(ctx context.Context, decider Decider, extractor Extractor, goal string, read *readTaskPage, tracker *taskTracker) {
+// judgeTaskPage has the decider score a page's links and judge how much
+// the page helps the goal.
+func (m *Manager) judgeTaskPage(ctx context.Context, decider Decider, goal string, read *readTaskPage, tracker *taskTracker) {
 	page := read.page
 	if len(read.links) > 0 {
 		read.links = m.scoreTaskLinks(ctx, decider, goal, page.URL, read.links, tracker)
@@ -318,42 +340,80 @@ func (m *Manager) judgeTaskPage(ctx context.Context, decider Decider, extractor 
 	}
 	tracker.doing("Judging how much " + page.URL + " helps the goal")
 	read.result = &browserapi.TaskPage{URL: page.URL, Title: page.Title, Relevance: m.pageRelevance(ctx, decider, goal, page, tracker), Text: page.Data}
-	if extractor == nil || read.result.Relevance < extractMinRelevance {
-		tracker.step(fmt.Sprintf("Read %s: relevance %.2f, %d characters of text", page.URL, read.result.Relevance, len(page.Text)))
-		return
-	}
-	tracker.doing("Pulling facts for the goal out of " + page.URL)
-	extractPageFacts(ctx, extractor, goal, read.result, tracker)
+	tracker.step(fmt.Sprintf("Read %s: relevance %.2f, %d characters of text", page.URL, read.result.Relevance, len(page.Text)))
 }
 
-// extractPageFacts has the extractor pull the facts for the goal out of a
-// page. A page the extractor fails on keeps its text so the caller can
-// still read it.
-func extractPageFacts(ctx context.Context, extractor Extractor, goal string, page *browserapi.TaskPage, tracker *taskTracker) {
-	facts, err := extractor.ExtractFacts(ctx, goal, page.URL, page.Text)
-	switch {
-	case err != nil:
-		page.Text = truncateOnLine(page.Text, informationPageText)
-		tracker.step(fmt.Sprintf("Read %s: relevance %.2f, but pulling out facts failed, so its text is kept: %v", page.URL, page.Relevance, err))
-	case strings.TrimSpace(facts) == "":
-		page.Text = ""
-		tracker.step(fmt.Sprintf("Read %s: relevance %.2f, nothing for the goal", page.URL, page.Relevance))
-	default:
-		page.Facts, page.Text = strings.TrimSpace(facts), ""
-		tracker.step(fmt.Sprintf("Read %s: relevance %.2f, found facts for the goal", page.URL, page.Relevance))
+// extractTaskPage has the extractor pull a page's facts for the goal and
+// pick its links to follow. When the extractor fails, the page keeps its
+// text so the caller can still read it, and its links are ranked by
+// keywords.
+func extractTaskPage(ctx context.Context, extractor Extractor, goal, found string, read *readTaskPage, tracker *taskTracker) {
+	page := read.page
+	if page.Data == "" && len(read.links) == 0 {
+		tracker.step(fmt.Sprintf("Read %s: no text and no links to follow", page.URL))
+		return
 	}
+	descriptions := make([]string, len(read.links))
+	for i, link := range read.links {
+		descriptions[i] = strings.TrimSpace(link.Label + " — " + link.URL)
+	}
+	tracker.doing("Pulling facts for the goal out of " + page.URL)
+	extraction, err := extractor.Extract(ctx, ExtractRequest{
+		Goal: goal, PageURL: page.URL, Text: page.Data, Found: found, Links: descriptions, Follow: informationFollow,
+	})
+	if err != nil {
+		read.links = read.links[:min(len(read.links), informationFollow)]
+		if len(page.Text) >= informationMinText {
+			read.result = &browserapi.TaskPage{URL: page.URL, Title: page.Title, Text: truncateOnLine(page.Data, informationPageText)}
+		}
+		tracker.step(fmt.Sprintf("Read %s, but pulling out facts failed, so its text is kept: %v", page.URL, err))
+		return
+	}
+	var follow []taskLink
+	for rank, index := range extraction.Follow {
+		if index >= 0 && index < len(read.links) && !slices.ContainsFunc(follow, func(link taskLink) bool { return link.URL == read.links[index].URL }) {
+			link := read.links[index]
+			link.Score = float64(len(extraction.Follow) - rank)
+			follow = append(follow, link)
+		}
+	}
+	read.links = follow
+	held := "nothing for the goal"
+	if facts := strings.TrimSpace(extraction.Facts); facts != "" {
+		read.result = &browserapi.TaskPage{URL: page.URL, Title: page.Title, Facts: facts}
+		held = "found facts for the goal"
+	}
+	tracker.step(fmt.Sprintf("Read %s: %s, following %d of its %d links", page.URL, held, len(follow), len(descriptions)))
+}
+
+// foundFacts joins the facts pages gave so far, keeping the most recent
+// when they run long.
+func foundFacts(pages []browserapi.TaskPage) string {
+	var parts []string
+	for _, page := range pages {
+		if page.Facts != "" {
+			parts = append(parts, page.Facts)
+		}
+	}
+	found := strings.Join(parts, "\n")
+	if len(found) > informationFoundFacts {
+		found = found[len(found)-informationFoundFacts:]
+		if cut := strings.IndexByte(found, '\n'); cut >= 0 {
+			found = found[cut+1:]
+		}
+	}
+	return found
 }
 
 // pagesWithFacts returns the pages that gave facts, or kept their text
-// because extraction failed, best first.
+// because extraction failed, in the order they were read.
 func pagesWithFacts(pages []browserapi.TaskPage) []browserapi.TaskPage {
 	var out []browserapi.TaskPage
 	for _, page := range pages {
-		if page.Facts != "" || (page.Text != "" && page.Relevance >= extractMinRelevance) {
+		if page.Facts != "" || page.Text != "" {
 			out = append(out, page)
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Relevance > out[j].Relevance })
 	return mostRelevantPages(out)
 }
 
@@ -488,9 +548,9 @@ const downloadLinkHint = "manual pdf download documentation guide support"
 
 // normalizeTaskLinks resolves, canonicalizes and dedupes a page's links,
 // drops sharing, account, legal and other junk links and, when site is set,
-// links to other sites, and keeps the taskCandidateLimit best by keyword
+// links to other sites, and keeps the limit best by keyword
 // relevance to hint.
-func normalizeTaskLinks(baseURL string, links []taskLink, visited map[string]bool, hint, site string) []taskLink {
+func normalizeTaskLinks(baseURL string, links []taskLink, visited map[string]bool, hint, site string, limit int) []taskLink {
 	base, _ := url.Parse(baseURL)
 	seen := map[string]bool{}
 	out := make([]taskLink, 0, len(links))
@@ -520,8 +580,8 @@ func normalizeTaskLinks(baseURL string, links []taskLink, visited map[string]boo
 		out = append(out, link)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Score > out[j].Score })
-	if len(out) > taskCandidateLimit {
-		out = out[:taskCandidateLimit]
+	if len(out) > limit {
+		out = out[:limit]
 	}
 	return out
 }
@@ -637,6 +697,19 @@ func isUsefulDownload(binary browserapi.Binary, goal string) bool {
 	return !strings.HasPrefix(strings.ToLower(binary.MIME), "text/html")
 }
 
+// commonWords are English function words and the words goals use to ask
+// for information, which say nothing about where it is.
+var commonWords = map[string]bool{}
+
+func init() {
+	for word := range strings.FieldsSeq("the and for any are but not all can its has have had was were been with from that this these those " +
+		"what which who whom whose when where why how than then there their them they you your our out into onto over under about " +
+		"also such only each per may will would should could more most other some very just get got give find list show tell " +
+		"extract facts fact information info details detail including include includes etc") {
+		commonWords[word] = true
+	}
+}
+
 func lexicalRelevance(value, goal string) float64 {
 	value = strings.ToLower(value)
 	score := 0.0
@@ -648,11 +721,12 @@ func lexicalRelevance(value, goal string) float64 {
 	return score
 }
 
-// goalWords returns the goal's words worth matching: longer than two letters.
+// goalWords returns the goal's words worth matching: longer than two
+// letters and not a common word, which would match any link or page.
 func goalWords(goal string) []string {
 	var words []string
 	for _, word := range strings.FieldsFunc(strings.ToLower(goal), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
-		if len(word) > 2 {
+		if len(word) > 2 && !commonWords[word] {
 			words = append(words, word)
 		}
 	}

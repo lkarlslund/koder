@@ -21,10 +21,33 @@ type Decider interface {
 // name for the task trace.
 type DeciderResolver func(ctx context.Context) (Decider, string, error)
 
-// Extractor pulls the facts that answer a goal out of a page. It returns
-// "" when the page holds none.
+// Extractor reads a page for an information task: it pulls out the facts
+// that answer the goal and picks the page's links most likely to lead to
+// what is still missing.
 type Extractor interface {
-	ExtractFacts(ctx context.Context, goal, pageURL, text string) (string, error)
+	Extract(ctx context.Context, request ExtractRequest) (Extraction, error)
+}
+
+// ExtractRequest is one page for an Extractor.
+type ExtractRequest struct {
+	Goal    string
+	PageURL string
+	Text    string
+	// Found is the facts other pages already gave, so links are picked for
+	// what is still missing.
+	Found string
+	// Links describes the page's links worth following, as "label — URL".
+	Links []string
+	// Follow is the most links to pick.
+	Follow int
+}
+
+// Extraction is what an Extractor made of a page: its facts, "" when it
+// holds none, and the links to follow as indexes into the request's Links,
+// best first.
+type Extraction struct {
+	Facts  string
+	Follow []int
 }
 
 // ExtractorResolver picks the extractor for a chat's task, usually the

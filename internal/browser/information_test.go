@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -24,7 +25,7 @@ func TestNormalizeTaskLinksDropsJunkAndOtherSites(t *testing.T) {
 		{URL: "https://www.cloudflare.com/careers/?utm_source=challenge", Label: "Careers"},
 		{URL: "https://other.org/rail", Label: "Rail elsewhere"},
 	}
-	got := normalizeTaskLinks("https://www.example.com/start", links, map[string]bool{}, "rail airport", "example.com")
+	got := normalizeTaskLinks("https://www.example.com/start", links, map[string]bool{}, "rail airport", "example.com", taskCandidateLimit)
 	var urls []string
 	for _, link := range got {
 		urls = append(urls, link.URL)
@@ -34,7 +35,7 @@ func TestNormalizeTaskLinksDropsJunkAndOtherSites(t *testing.T) {
 		t.Fatalf("links = %q, want %q", urls, want)
 	}
 	// Without a site, other sites are kept but junk still goes.
-	if got := normalizeTaskLinks("https://www.example.com/start", links, map[string]bool{}, "rail", ""); len(got) != 3 {
+	if got := normalizeTaskLinks("https://www.example.com/start", links, map[string]bool{}, "rail", "", taskCandidateLimit); len(got) != 3 {
 		t.Fatalf("links without a site = %#v", got)
 	}
 }
@@ -82,46 +83,79 @@ func TestParseMarkdownPageDetectsStandInPages(t *testing.T) {
 	}
 }
 
-// fakeExtractor returns facts per page URL, or fails.
+// fakeExtractor returns facts per page URL, or fails. It follows the links
+// listed for a page, or without a list every link it may.
 type fakeExtractor struct {
-	facts map[string]string
-	fail  map[string]bool
+	facts  map[string]string
+	follow map[string][]string
+	fail   map[string]bool
+	seen   *[]ExtractRequest
 }
 
-func (x fakeExtractor) ExtractFacts(_ context.Context, _, pageURL, _ string) (string, error) {
-	if x.fail[pageURL] {
-		return "", errors.New("model unavailable")
+func (x fakeExtractor) Extract(_ context.Context, request ExtractRequest) (Extraction, error) {
+	if x.seen != nil {
+		*x.seen = append(*x.seen, request)
 	}
-	return x.facts[pageURL], nil
+	if x.fail[request.PageURL] {
+		return Extraction{}, errors.New("model unavailable")
+	}
+	out := Extraction{Facts: x.facts[request.PageURL]}
+	for index, link := range request.Links {
+		want, listed := x.follow[request.PageURL]
+		if len(out.Follow) < request.Follow && (!listed || slices.ContainsFunc(want, func(url string) bool { return strings.HasSuffix(link, " "+url) })) {
+			out.Follow = append(out.Follow, index)
+		}
+	}
+	return out, nil
 }
 
-func TestExtractTaskFactsKeepsFactsAndFallsBackToText(t *testing.T) {
+func TestExtractTaskPageKeepsFactsPicksLinksAndFallsBackToText(t *testing.T) {
 	text := strings.Repeat("Some readable article text about the goal. ", 20)
-	pages := []browserapi.TaskPage{
-		{URL: "https://a", Relevance: 0.9, Text: text},
-		{URL: "https://b", Relevance: 0.5, Text: text},
-		{URL: "https://c", Relevance: 0.4, Text: text},
+	links := []taskLink{{URL: "https://a/1", Label: "One"}, {URL: "https://a/2", Label: "Two"}, {URL: "https://a/3", Label: "Three"}}
+	reads := []readTaskPage{
+		{page: taskPage{URL: "https://a", Text: text, Data: text}, links: slices.Clone(links)},
+		{page: taskPage{URL: "https://b", Text: text, Data: text}},
+		{page: taskPage{URL: "https://c", Text: text, Data: text}, links: slices.Clone(links)},
 	}
-	extractor := fakeExtractor{facts: map[string]string{"https://a": "- Lisbon: €6,124/m² (Q1 2026)"}, fail: map[string]bool{"https://c": true}}
+	var seen []ExtractRequest
+	extractor := fakeExtractor{
+		facts:  map[string]string{"https://a": "- Lisbon: €6,124/m² (Q1 2026)"},
+		follow: map[string][]string{"https://a": {"https://a/3", "https://a/1"}},
+		fail:   map[string]bool{"https://c": true},
+		seen:   &seen,
+	}
 	tracker := &taskTracker{}
-	for i := range pages {
-		extractPageFacts(context.Background(), extractor, "prices", &pages[i], tracker)
+	for i := range reads {
+		extractTaskPage(context.Background(), extractor, "prices", "- found before", &reads[i], tracker)
 	}
-	if pages[0].Facts != "- Lisbon: €6,124/m² (Q1 2026)" || pages[0].Text != "" {
-		t.Fatalf("page with facts = %#v", pages[0])
+	if reads[0].result == nil || reads[0].result.Facts != "- Lisbon: €6,124/m² (Q1 2026)" || reads[0].result.Text != "" {
+		t.Fatalf("page with facts = %#v", reads[0].result)
 	}
-	if pages[1].Facts != "" || pages[1].Text != "" {
-		t.Fatalf("page without facts = %#v", pages[1])
+	if got := reads[0].links; len(got) != 2 || got[0].URL != "https://a/1" || got[1].URL != "https://a/3" || got[0].Score <= got[1].Score {
+		t.Fatalf("followed links = %#v, want the picks only, best first", got)
 	}
-	if pages[2].Text == "" {
-		t.Fatal("page whose extraction failed lost its text")
+	if seen[0].Found != "- found before" || len(seen[0].Links) != 3 || seen[0].Links[0] != "One — https://a/1" {
+		t.Fatalf("extract request = %#v", seen[0])
 	}
-	kept := pagesWithFacts(pages)
+	if reads[1].result != nil {
+		t.Fatalf("page without facts = %#v", reads[1].result)
+	}
+	if reads[2].result == nil || reads[2].result.Text == "" || len(reads[2].links) != informationFollow {
+		t.Fatalf("page whose extraction failed = %#v, links %d", reads[2].result, len(reads[2].links))
+	}
+	kept := pagesWithFacts([]browserapi.TaskPage{*reads[0].result, *reads[2].result})
 	if len(kept) != 2 || kept[0].URL != "https://a" || kept[1].URL != "https://c" {
 		t.Fatalf("pagesWithFacts = %#v", kept)
 	}
-	if trace := strings.Join(tracker.trace, "\n"); !strings.Contains(trace, "nothing for the goal") || !strings.Contains(trace, "pulling out facts failed") {
+	if trace := strings.Join(tracker.trace, "\n"); !strings.Contains(trace, "nothing for the goal") || !strings.Contains(trace, "pulling out facts failed") ||
+		!strings.Contains(trace, "following 2 of its 3 links") {
 		t.Fatalf("trace = %s", trace)
+	}
+}
+
+func TestGoalWordsSkipCommonWords(t *testing.T) {
+	if got := strings.Join(goalWords("Extract the facts about prices and any warnings for Crete"), " "); got != "prices warnings crete" {
+		t.Fatalf("goalWords = %q", got)
 	}
 }
 
@@ -208,7 +242,7 @@ func TestNormalizeTaskLinksSkipsTranslations(t *testing.T) {
 		{URL: "/br/noticias/2026/turismo", Label: "Turismo"},
 		{URL: "/usa/travel", Label: "Travel"},
 	}
-	got := normalizeTaskLinks("https://www.example.com/news/2026/start", links, map[string]bool{}, "tourism", "example.com")
+	got := normalizeTaskLinks("https://www.example.com/news/2026/start", links, map[string]bool{}, "tourism", "example.com", taskCandidateLimit)
 	var urls []string
 	for _, link := range got {
 		urls = append(urls, link.URL)

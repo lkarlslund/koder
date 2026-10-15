@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -233,15 +234,10 @@ func (d chatModelDecider) PageRelevance(ctx context.Context, goal, pageURL, text
 }
 
 func (d chatModelDecider) answer(ctx context.Context, prompt string, maxTokens int) (map[string]float64, error) {
-	body := maps.Clone(d.extraBody)
-	if body == nil {
-		body = map[string]any{}
-	}
-	body["max_tokens"] = maxTokens
 	response, err := d.client.CompleteChat(ctx, provider.ChatRequest{
 		Model:     d.model,
 		Messages:  []provider.Message{{Role: provider.RoleUser, Content: prompt}},
-		ExtraBody: body,
+		ExtraBody: withMaxTokens(d.extraBody, maxTokens),
 	})
 	if err != nil {
 		return nil, err
@@ -250,42 +246,95 @@ func (d chatModelDecider) answer(ctx context.Context, prompt string, maxTokens i
 }
 
 // chatModelExtractor asks a chat model for the facts on a page that help a
-// goal, as markdown bullets.
+// goal, as markdown bullets, and for the page's links that most likely lead
+// to what is still missing.
 type chatModelExtractor struct {
 	client    *provider.Client
 	model     string
 	extraBody map[string]any
 }
 
-const extractNothing = "NONE"
+const (
+	extractNothing = "NONE"
+	extractFollow  = "FOLLOW:"
+)
 
-func (x chatModelExtractor) ExtractFacts(ctx context.Context, goal, pageURL, text string) (string, error) {
-	prompt := fmt.Sprintf("Goal: %s\n\nText of %s:\n<<<\n%s\n>>>\n\n"+
-		"List every fact in this text that helps the goal, as short markdown bullets. "+
-		"Keep numbers, dates, names and units exactly as written, and say what period or place each figure is for when the text does. "+
-		"Use only this text, not what you know. If it holds nothing that helps the goal, reply with only %s.",
-		goal, pageURL, clip(text, extractPageChars), extractNothing)
-	body := maps.Clone(x.extraBody)
+func (x chatModelExtractor) Extract(ctx context.Context, request browser.ExtractRequest) (browser.Extraction, error) {
+	response, err := x.client.CompleteChat(ctx, provider.ChatRequest{
+		Model:     x.model,
+		Messages:  []provider.Message{{Role: provider.RoleUser, Content: extractPrompt(request)}},
+		ExtraBody: withMaxTokens(x.extraBody, extractMaxTokens),
+	})
+	if err != nil {
+		return browser.Extraction{}, err
+	}
+	reply := strings.TrimSpace(response.Text)
+	if reply == "" {
+		return browser.Extraction{}, errors.New("the model returned no text")
+	}
+	return parseExtraction(reply, request.Follow), nil
+}
+
+func extractPrompt(request browser.ExtractRequest) string {
+	var prompt strings.Builder
+	fmt.Fprintf(&prompt, "Goal: %s\n\n", request.Goal)
+	if request.Found != "" {
+		fmt.Fprintf(&prompt, "Facts already found on other pages:\n<<<\n%s\n>>>\n\n", request.Found)
+	}
+	fmt.Fprintf(&prompt, "Text of %s:\n<<<\n%s\n>>>\n\n", request.PageURL, clip(request.Text, extractPageChars))
+	if len(request.Links) > 0 {
+		prompt.WriteString("Links on this page:\n")
+		for index, link := range request.Links {
+			fmt.Fprintf(&prompt, "%d: %s\n", index, link)
+		}
+		prompt.WriteString("\n")
+	}
+	prompt.WriteString("List every fact in this text that helps the goal, as short markdown bullets. " +
+		"Keep numbers, dates, names and units exactly as written, and say what period or place each figure is for when the text does. " +
+		"Use only this text, not what you know. If it holds nothing that helps the goal, write only " + extractNothing + ".")
+	if len(request.Links) > 0 && request.Follow > 0 {
+		fmt.Fprintf(&prompt, "\n\nThen, on a last line, write %s and the numbers of at most %d links most likely to lead to what the goal asks for "+
+			"that is not found yet, best first, e.g. \"%s 4, 0\". Write \"%s %s\" if no link is likely to.",
+			extractFollow, request.Follow, extractFollow, extractFollow, extractNothing)
+	}
+	return prompt.String()
+}
+
+var (
+	// followLine matches the line of an extraction reply that picks links.
+	followLine = regexp.MustCompile(`(?im)^[\s*_#>-]*FOLLOW\s*:(.*)$`)
+	digits     = regexp.MustCompile(`\d+`)
+)
+
+// parseExtraction splits an extraction reply into its facts, "" for NONE,
+// and the links it picks.
+func parseExtraction(reply string, limit int) browser.Extraction {
+	var out browser.Extraction
+	facts := reply
+	if loc := followLine.FindAllStringSubmatchIndex(reply, -1); loc != nil {
+		last := loc[len(loc)-1]
+		facts = reply[:last[0]]
+		for _, number := range digits.FindAllString(reply[last[2]:last[3]], -1) {
+			if index, err := strconv.Atoi(number); err == nil && len(out.Follow) < limit {
+				out.Follow = append(out.Follow, index)
+			}
+		}
+	}
+	facts = strings.TrimSpace(facts)
+	if strings.Trim(facts, " .*`-•\n") != extractNothing {
+		out.Facts = facts
+	}
+	return out
+}
+
+// withMaxTokens returns a copy of a request's extra body with max_tokens set.
+func withMaxTokens(extraBody map[string]any, maxTokens int) map[string]any {
+	body := maps.Clone(extraBody)
 	if body == nil {
 		body = map[string]any{}
 	}
-	body["max_tokens"] = extractMaxTokens
-	response, err := x.client.CompleteChat(ctx, provider.ChatRequest{
-		Model:     x.model,
-		Messages:  []provider.Message{{Role: provider.RoleUser, Content: prompt}},
-		ExtraBody: body,
-	})
-	if err != nil {
-		return "", err
-	}
-	facts := strings.TrimSpace(response.Text)
-	if facts == "" {
-		return "", errors.New("the model returned no text")
-	}
-	if strings.Trim(facts, " .*`-•\n") == extractNothing {
-		return "", nil
-	}
-	return facts, nil
+	body["max_tokens"] = maxTokens
+	return body
 }
 
 // parseScores reads the JSON object in a chat reply, tolerating text or a
