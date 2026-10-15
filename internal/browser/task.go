@@ -170,7 +170,7 @@ const (
 	extractMinRelevance = 0.05
 	// informationLinkCandidates is how many of a page's links, filtered and
 	// ranked by keywords, the decider judges.
-	informationLinkCandidates = 12
+	informationLinkCandidates = 8
 )
 
 // runInformationTask reads pages from the start URL outwards within its
@@ -220,9 +220,13 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 				tracker.step(fmt.Sprintf("Skipped %s: it is %s, not the page", page.URL, page.Blocked))
 				continue
 			}
-			links := normalizeTaskLinks(page.URL, page.Links, visited, goal, site)
-			links = links[:min(len(links), informationLinkCandidates)]
-			frontier = mergeTaskFrontier(frontier, m.scoreTaskLinks(ctx, decider, goal, page.URL, links, tracker), maxSteps*taskCandidateLimit)
+			// Links found once the reading budget is spent are never
+			// followed, so they are not worth judging.
+			if read < maxSteps {
+				links := normalizeTaskLinks(page.URL, page.Links, visited, goal, site)
+				links = links[:min(len(links), informationLinkCandidates)]
+				frontier = mergeTaskFrontier(frontier, m.scoreTaskLinks(ctx, decider, goal, page.URL, links, tracker), maxSteps*taskCandidateLimit)
+			}
 			if len(page.Text) < informationMinText {
 				tracker.step(fmt.Sprintf("Read %s: no article text, following its links", page.URL))
 				continue

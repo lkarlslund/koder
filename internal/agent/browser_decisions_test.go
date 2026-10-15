@@ -179,20 +179,23 @@ func TestBrowserExtractorUsesTheChatModelAndReadsNone(t *testing.T) {
 		prompt := body["messages"].([]any)[0].(map[string]any)["content"].(string)
 		reply := "- Lisbon: €6,124/m² (Q1 2026)"
 		if strings.Contains(prompt, "cookie policy") {
-			reply = "NONE."
+			reply = "- NONE"
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": reply}}}})
 	}))
 	defer server.Close()
 
 	cfg := testConfig(t)
-	cfg.Providers["local"] = config.Provider{BaseURL: server.URL + "/v1", Features: &config.ProviderFeatures{Chat: true}}
-	cfg.SetModelConfig(config.ModelConfig{ProviderID: "local", ModelID: "qwen", ContextWindow: 32768})
-	extractor, name, err := New(cfg, nil, nil, nil).resolveBrowserExtractor(context.Background(), browserapi.Chat{ProviderID: "local", ModelID: "qwen"})
+	cfg.Providers["local"] = config.Provider{BaseURL: server.URL + "/v1", Transport: "ninfer", Features: &config.ProviderFeatures{Chat: true}}
+	// A thinking variant: its effort must not reach a request with thinking
+	// off, which servers reject as conflicting.
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "local", ModelID: "qwen3.8", ContextWindow: 32768,
+		Options: map[string]any{"thinking_mode": "enabled", "reasoning_effort": "medium", "preserve_thinking": "enabled"}})
+	extractor, name, err := New(cfg, nil, nil, nil).resolveBrowserExtractor(context.Background(), browserapi.Chat{ProviderID: "local", ModelID: "qwen3.8"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if name != "local/qwen" {
+	if name != "local/qwen3.8" {
 		t.Fatalf("name = %q", name)
 	}
 	facts, err := extractor.ExtractFacts(context.Background(), "house prices", "https://example.com/prices", "Lisbon asking prices reached €6,124/m² in Q1 2026.")
@@ -204,5 +207,11 @@ func TestBrowserExtractorUsesTheChatModelAndReadsNone(t *testing.T) {
 	}
 	if bodies[0]["max_tokens"] == nil {
 		t.Fatal("extraction has no max_tokens")
+	}
+	if _, ok := bodies[0]["reasoning_effort"]; ok {
+		t.Fatalf("extraction with thinking off sent a reasoning effort: %v", bodies[0])
+	}
+	if kwargs, _ := bodies[0]["chat_template_kwargs"].(map[string]any); kwargs["enable_thinking"] != false {
+		t.Fatalf("extraction did not turn thinking off: %v", bodies[0])
 	}
 }

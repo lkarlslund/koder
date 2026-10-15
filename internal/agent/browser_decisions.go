@@ -45,13 +45,18 @@ func (e *Engine) resolveBrowserDecider(ctx context.Context) (browser.Decider, st
 
 // quickChatBody is the extra request body for a quick answer from a chat
 // model: thinking off, which the overlay maps onto whatever field the
-// server uses for it, and no progress events.
+// server uses for it, and no progress events. The model's thinking settings
+// go, since servers reject a reasoning effort with thinking off.
 func (e *Engine) quickChatBody(model settings.ModelSettings) map[string]any {
 	modelCfg := model.Model
 	modelCfg.Options = maps.Clone(modelCfg.Options)
 	if modelCfg.Options == nil {
 		modelCfg.Options = map[string]any{}
 	}
+	for _, option := range []string{"reasoning_effort", "thinking_budget", "preserve_thinking"} {
+		delete(modelCfg.Options, option)
+	}
+	modelCfg.ReasoningEffort, modelCfg.ThinkingBudget = "", 0
 	modelCfg.Options["thinking_mode"] = "disabled"
 	extra := provider.RequestExtraBody(model.Provider, modelCfg, e.modelOverlays)
 	delete(extra, "return_progress")
@@ -277,7 +282,7 @@ func (x chatModelExtractor) ExtractFacts(ctx context.Context, goal, pageURL, tex
 	if facts == "" {
 		return "", errors.New("the model returned no text")
 	}
-	if strings.Trim(facts, " .*`\n") == extractNothing {
+	if strings.Trim(facts, " .*`-•\n") == extractNothing {
 		return "", nil
 	}
 	return facts, nil
