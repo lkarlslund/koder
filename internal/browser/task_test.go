@@ -157,7 +157,7 @@ func TestTaskTrackerReportsStepsAndCurrentActivity(t *testing.T) {
 	tracker.doing("Fetching https://example.com")
 	tracker.step("Examined https://example.com")
 	tracker.doing("Asking the decision model to rank 3 links")
-	tracker.finished = true
+	tracker.finish()
 	tracker.step("late step")
 
 	want := []report{{"Fetching https://example.com", 0}, {"", 1}, {"Asking the decision model to rank 3 links", 1}}

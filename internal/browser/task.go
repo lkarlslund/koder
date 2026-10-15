@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -33,20 +34,43 @@ type taskLink struct {
 // go into the trace, and the current activity says what the task is doing or
 // waiting on.
 type taskTracker struct {
+	mu       sync.Mutex
 	trace    []string
 	report   func(current string, steps []string)
 	finished bool
 }
 
 func (t *taskTracker) step(text string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.trace = append(t.trace, text)
-	t.doing("")
+	t.reportLocked("")
 }
 
 func (t *taskTracker) doing(current string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.reportLocked(current)
+}
+
+func (t *taskTracker) reportLocked(current string) {
 	if t.report != nil && !t.finished {
-		t.report(current, t.trace)
+		t.report(current, slices.Clone(t.trace))
 	}
+}
+
+// finish stops reporting; the task has returned.
+func (t *taskTracker) finish() {
+	t.mu.Lock()
+	t.finished = true
+	t.mu.Unlock()
+}
+
+// steps returns the finished steps.
+func (t *taskTracker) steps() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return slices.Clone(t.trace)
 }
 
 // Task outcomes: a download finishes on a verified file; information
@@ -79,7 +103,7 @@ func (m *Manager) Task(ctx context.Context, chat browserapi.Chat, request browse
 	cfg, resolveDecider, resolveExtractor := m.cfg, m.deciders, m.extractors
 	m.mu.Unlock()
 	tracker := &taskTracker{report: request.Progress}
-	defer func() { tracker.finished = true }()
+	defer tracker.finish()
 	if cfg.TaskEngine == "" || cfg.TaskEngine == "obscura" {
 		if executable, lookupErr := exec.LookPath("obscura"); lookupErr == nil {
 			tracker.doing("Finding a model for decisions")
@@ -133,7 +157,7 @@ func (m *Manager) runObscuraTask(ctx context.Context, executable string, decider
 			if binaryErr == nil && isUsefulDownload(binary, goal) {
 				tracker.step(fmt.Sprintf("Examined %s", current.URL))
 				tracker.step(fmt.Sprintf("Downloaded and verified %s (%d bytes)", binary.Name, len(binary.Data)))
-				result.Status, result.SourceURL, result.File, result.Trace = "completed", current.URL, &binary, tracker.trace
+				result.Status, result.SourceURL, result.File, result.Trace = "completed", current.URL, &binary, tracker.steps()
 				return result, nil
 			}
 		}
@@ -148,7 +172,7 @@ func (m *Manager) runObscuraTask(ctx context.Context, executable string, decider
 		links = normalizeTaskLinks(current.URL, links, visited, downloadLinkHint, "")
 		frontier = mergeTaskFrontier(frontier, m.scoreTaskLinks(ctx, decider, goal, current.URL, links, tracker), maxSteps*taskCandidateLimit)
 	}
-	result.Trace = tracker.trace
+	result.Trace = tracker.steps()
 	return result, errors.New("no verified download was found within the lightweight browsing limit")
 }
 
@@ -193,7 +217,7 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 	// sometimes guess article URLs.
 	if status, statusErr := obscuraStatus(ctx, executable, start.String()); statusErr == nil && (status == http.StatusNotFound || status == http.StatusGone) {
 		tracker.step(fmt.Sprintf("Skipped %s: it is %s (HTTP %d)", start.String(), blockedMissing, status))
-		result.Status, result.SourceURL, result.Trace = "completed", start.String(), tracker.trace
+		result.Status, result.SourceURL, result.Trace = "completed", start.String(), tracker.steps()
 		return result, nil
 	}
 	site := siteOf(start.Hostname())
@@ -218,42 +242,45 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 			break
 		}
 		tracker.doing("Reading " + strings.Join(batch, ", "))
-		var judged []int
+		var readable []readTaskPage
 		for index, fetched := range fetchTaskPages(ctx, executable, storage, batch) {
 			read++
 			if fetched.err != nil {
 				tracker.step(fmt.Sprintf("Could not read %s: %v", batch[index], fetched.err))
 				continue
 			}
-			page := fetched.page
-			if page.Blocked != "" {
-				tracker.step(fmt.Sprintf("Skipped %s: it is %s, not the page", page.URL, page.Blocked))
-				walled = walled || page.Blocked != blockedMissing
+			page := readTaskPage{page: fetched.page}
+			if page.page.Blocked != "" {
+				tracker.step(fmt.Sprintf("Skipped %s: it is %s, not the page", page.page.URL, page.page.Blocked))
+				walled = walled || page.page.Blocked != blockedMissing
 				continue
 			}
 			// Links found once the reading budget is spent are never
 			// followed, so they are not worth judging.
 			if read < maxSteps {
-				links := normalizeTaskLinks(page.URL, page.Links, visited, goal, site)
-				links = links[:min(len(links), informationLinkCandidates)]
-				frontier = mergeTaskFrontier(frontier, m.scoreTaskLinks(ctx, decider, goal, page.URL, links, tracker), maxSteps*taskCandidateLimit)
+				page.links = normalizeTaskLinks(page.page.URL, page.page.Links, visited, goal, site)
+				page.links = page.links[:min(len(page.links), informationLinkCandidates)]
 			}
-			if len(page.Text) < informationMinText {
-				tracker.step(fmt.Sprintf("Read %s: no article text, following its links", page.URL))
-				continue
-			}
-			tracker.doing("Judging how much " + page.URL + " helps the goal")
-			relevance := m.pageRelevance(ctx, decider, goal, page, tracker)
-			pages = append(pages, browserapi.TaskPage{URL: page.URL, Title: page.Title, Relevance: relevance, Text: page.Data})
-			if extractor == nil || relevance < extractMinRelevance {
-				tracker.step(fmt.Sprintf("Read %s: relevance %.2f, %d characters of text", page.URL, relevance, len(page.Text)))
-				continue
-			}
-			judged = append(judged, len(pages)-1)
+			readable = append(readable, page)
 		}
-		withFacts += extractTaskFacts(ctx, extractor, goal, pages, judged, tracker)
+		// The batch's pages are judged and read for facts concurrently, so
+		// the extractor works while the decider judges the next page.
+		var wg sync.WaitGroup
+		for i := range readable {
+			wg.Go(func() { m.judgeTaskPage(ctx, decider, extractor, goal, &readable[i], tracker) })
+		}
+		wg.Wait()
+		for _, page := range readable {
+			frontier = mergeTaskFrontier(frontier, page.links, maxSteps*taskCandidateLimit)
+			if page.result != nil {
+				pages = append(pages, *page.result)
+				if page.result.Facts != "" {
+					withFacts++
+				}
+			}
+		}
 	}
-	result.Trace = tracker.trace
+	result.Trace = tracker.steps()
 	if len(pages) == 0 && walled {
 		return result, errors.New("the pages are behind a bot challenge or access wall")
 	}
@@ -270,44 +297,51 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 	return result, nil
 }
 
-// extractTaskFacts has the extractor read the given pages concurrently and
-// keeps their facts, returning how many pages had some. A page the extractor
-// fails on keeps its text so the caller can still read it.
-func extractTaskFacts(ctx context.Context, extractor Extractor, goal string, pages []browserapi.TaskPage, indexes []int, tracker *taskTracker) int {
-	if len(indexes) == 0 {
-		return 0
+// readTaskPage is a page an information task read, the links on it worth
+// following, and what the task made of it.
+type readTaskPage struct {
+	page   taskPage
+	links  []taskLink
+	result *browserapi.TaskPage
+}
+
+// judgeTaskPage scores a page's links, judges how much the page helps the
+// goal and, when it may help, has the extractor pull out its facts.
+func (m *Manager) judgeTaskPage(ctx context.Context, decider Decider, extractor Extractor, goal string, read *readTaskPage, tracker *taskTracker) {
+	page := read.page
+	if len(read.links) > 0 {
+		read.links = m.scoreTaskLinks(ctx, decider, goal, page.URL, read.links, tracker)
 	}
-	urls := make([]string, len(indexes))
-	for i, index := range indexes {
-		urls[i] = pages[index].URL
+	if len(page.Text) < informationMinText {
+		tracker.step(fmt.Sprintf("Read %s: no article text, following its links", page.URL))
+		return
 	}
-	tracker.doing("Pulling facts for the goal out of " + strings.Join(urls, ", "))
-	facts := make([]string, len(indexes))
-	errs := make([]error, len(indexes))
-	var wg sync.WaitGroup
-	for i, index := range indexes {
-		wg.Go(func() {
-			facts[i], errs[i] = extractor.ExtractFacts(ctx, goal, pages[index].URL, pages[index].Text)
-		})
+	tracker.doing("Judging how much " + page.URL + " helps the goal")
+	read.result = &browserapi.TaskPage{URL: page.URL, Title: page.Title, Relevance: m.pageRelevance(ctx, decider, goal, page, tracker), Text: page.Data}
+	if extractor == nil || read.result.Relevance < extractMinRelevance {
+		tracker.step(fmt.Sprintf("Read %s: relevance %.2f, %d characters of text", page.URL, read.result.Relevance, len(page.Text)))
+		return
 	}
-	wg.Wait()
-	found := 0
-	for i, index := range indexes {
-		page := &pages[index]
-		switch {
-		case errs[i] != nil:
-			page.Text = truncateOnLine(page.Text, informationPageText)
-			tracker.step(fmt.Sprintf("Read %s: relevance %.2f, but pulling out facts failed, so its text is kept: %v", page.URL, page.Relevance, errs[i]))
-		case strings.TrimSpace(facts[i]) == "":
-			page.Text = ""
-			tracker.step(fmt.Sprintf("Read %s: relevance %.2f, nothing for the goal", page.URL, page.Relevance))
-		default:
-			page.Facts, page.Text = strings.TrimSpace(facts[i]), ""
-			found++
-			tracker.step(fmt.Sprintf("Read %s: relevance %.2f, found facts for the goal", page.URL, page.Relevance))
-		}
+	tracker.doing("Pulling facts for the goal out of " + page.URL)
+	extractPageFacts(ctx, extractor, goal, read.result, tracker)
+}
+
+// extractPageFacts has the extractor pull the facts for the goal out of a
+// page. A page the extractor fails on keeps its text so the caller can
+// still read it.
+func extractPageFacts(ctx context.Context, extractor Extractor, goal string, page *browserapi.TaskPage, tracker *taskTracker) {
+	facts, err := extractor.ExtractFacts(ctx, goal, page.URL, page.Text)
+	switch {
+	case err != nil:
+		page.Text = truncateOnLine(page.Text, informationPageText)
+		tracker.step(fmt.Sprintf("Read %s: relevance %.2f, but pulling out facts failed, so its text is kept: %v", page.URL, page.Relevance, err))
+	case strings.TrimSpace(facts) == "":
+		page.Text = ""
+		tracker.step(fmt.Sprintf("Read %s: relevance %.2f, nothing for the goal", page.URL, page.Relevance))
+	default:
+		page.Facts, page.Text = strings.TrimSpace(facts), ""
+		tracker.step(fmt.Sprintf("Read %s: relevance %.2f, found facts for the goal", page.URL, page.Relevance))
 	}
-	return found
 }
 
 // pagesWithFacts returns the pages that gave facts, or kept their text
@@ -388,7 +422,7 @@ func (m *Manager) handoffTaskToChrome(ctx context.Context, chat browserapi.Chat,
 		return browserapi.TaskResult{}, fmt.Errorf("start visible browser fallback: %w", err)
 	}
 	tracker.step("Continued in the managed browser because the lightweight backend did not complete the goal")
-	return browserapi.TaskResult{Status: "needs_browser", Backend: "chrome", SourceURL: tab.URL, Trace: tracker.trace}, nil
+	return browserapi.TaskResult{Status: "needs_browser", Backend: "chrome", SourceURL: tab.URL, Trace: tracker.steps()}, nil
 }
 
 func obscuraLinks(ctx context.Context, executable, storage, rawURL string) ([]taskLink, error) {

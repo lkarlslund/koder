@@ -104,8 +104,8 @@ func TestExtractTaskFactsKeepsFactsAndFallsBackToText(t *testing.T) {
 	}
 	extractor := fakeExtractor{facts: map[string]string{"https://a": "- Lisbon: €6,124/m² (Q1 2026)"}, fail: map[string]bool{"https://c": true}}
 	tracker := &taskTracker{}
-	if found := extractTaskFacts(context.Background(), extractor, "prices", pages, []int{0, 1, 2}, tracker); found != 1 {
-		t.Fatalf("found = %d, want 1", found)
+	for i := range pages {
+		extractPageFacts(context.Background(), extractor, "prices", &pages[i], tracker)
 	}
 	if pages[0].Facts != "- Lisbon: €6,124/m² (Q1 2026)" || pages[0].Text != "" {
 		t.Fatalf("page with facts = %#v", pages[0])
