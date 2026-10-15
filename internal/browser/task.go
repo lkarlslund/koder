@@ -180,7 +180,7 @@ func (m *Manager) runObscuraTask(ctx context.Context, executable string, decider
 			tracker.step("Lightweight fetch failed: " + fetchErr.Error())
 			continue
 		}
-		links = normalizeTaskLinks(current.URL, links, visited, downloadLinkHint, "", taskCandidateLimit)
+		links = normalizeTaskLinks(current.URL, links, visited, downloadLinkHint, linkScope{}, taskCandidateLimit)
 		frontier = mergeTaskFrontier(frontier, m.scoreTaskLinks(ctx, decider, goal, current.URL, links, tracker), maxSteps*taskCandidateLimit)
 	}
 	result.Trace = tracker.steps()
@@ -235,7 +235,9 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 		result.Status, result.SourceURL, result.Trace = "completed", start.String(), tracker.steps()
 		return result, nil
 	}
-	site := siteOf(start.Hostname())
+	// The extractor picks links knowing the goal, so it may follow a page's
+	// sources to other sites; a decider stays within the start site.
+	scope := linkScope{site: siteOf(start.Hostname()), otherSites: extractor != nil}
 	frontier := []taskLink{{URL: canonicalURL(start), Label: start.String()}}
 	visited := map[string]bool{}
 	var pages []browserapi.TaskPage
@@ -280,7 +282,7 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 			// Links found once the reading budget is spent are never
 			// followed, so they are not worth judging.
 			if read < maxSteps {
-				page.links = normalizeTaskLinks(page.page.URL, page.page.Links, visited, goal, site, linkLimit)
+				page.links = normalizeTaskLinks(page.page.URL, page.page.Links, visited, goal, scope, linkLimit)
 			}
 			readable = append(readable, page)
 		}
@@ -590,11 +592,18 @@ func obscuraDownload(ctx context.Context, executable, storage string, link taskL
 // sees them.
 const downloadLinkHint = "manual pdf download documentation guide support"
 
+// linkScope says which links a task may follow: with a site, links within
+// it, minus copies of a page in other languages, and, with otherSites,
+// links to other sites too.
+type linkScope struct {
+	site       string
+	otherSites bool
+}
+
 // normalizeTaskLinks resolves, canonicalizes and dedupes a page's links,
-// drops sharing, account, legal and other junk links and, when site is set,
-// links to other sites, and keeps the limit best by keyword
-// relevance to hint.
-func normalizeTaskLinks(baseURL string, links []taskLink, visited map[string]bool, hint, site string, limit int) []taskLink {
+// drops sharing, account, legal and other junk links and those out of
+// scope, and keeps the limit best by keyword relevance to hint.
+func normalizeTaskLinks(baseURL string, links []taskLink, visited map[string]bool, hint string, scope linkScope, limit int) []taskLink {
 	base, _ := url.Parse(baseURL)
 	seen := map[string]bool{}
 	out := make([]taskLink, 0, len(links))
@@ -607,11 +616,13 @@ func normalizeTaskLinks(baseURL string, links []taskLink, visited map[string]boo
 		if parsed.Scheme != "http" && parsed.Scheme != "https" {
 			continue
 		}
-		if junkLink.MatchString(parsed.String()) || isSocialHost(parsed.Hostname()) || (site != "" && siteOf(parsed.Hostname()) != site) {
+		if junkLink.MatchString(parsed.String()) || isSocialHost(parsed.Hostname()) ||
+			(scope.site != "" && !scope.otherSites && siteOf(parsed.Hostname()) != scope.site) {
 			continue
 		}
 		// A copy of the page in another language repeats what was read.
-		if language := languageOf(parsed); site != "" && language != "" && language != languageOf(base) {
+		sameSite := siteOf(parsed.Hostname()) == siteOf(base.Hostname())
+		if language := languageOf(parsed); scope.site != "" && sameSite && language != "" && language != languageOf(base) {
 			continue
 		}
 		canonical := canonicalURL(parsed)

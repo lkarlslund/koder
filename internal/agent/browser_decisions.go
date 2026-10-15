@@ -298,7 +298,8 @@ func extractPrompt(request browser.ExtractRequest) string {
 	prompt.WriteString(" If it holds nothing new that helps the goal, write only " + extractNothing + ".")
 	if len(request.Links) > 0 && request.Follow > 0 {
 		fmt.Fprintf(&prompt, "\n\nThen, on a last line, write %s and the numbers of at most %d links most likely to lead to what the goal asks for "+
-			"that is not found yet, best first, e.g. \"%s 4, 0\". Check each part of the goal: write \"%s %s\" only if the facts found "+
+			"that is not found yet, best first, e.g. \"%s 4, 0\". Links to other sites are fine, and official or primary sources are best. "+
+			"Check each part of the goal: write \"%s %s\" only if the facts found "+
 			"already answer every part, or no link is likely to help with what is missing.",
 			extractFollow, request.Follow, extractFollow, extractFollow, extractNothing)
 	}

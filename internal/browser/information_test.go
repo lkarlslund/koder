@@ -25,7 +25,7 @@ func TestNormalizeTaskLinksDropsJunkAndOtherSites(t *testing.T) {
 		{URL: "https://www.cloudflare.com/careers/?utm_source=challenge", Label: "Careers"},
 		{URL: "https://other.org/rail", Label: "Rail elsewhere"},
 	}
-	got := normalizeTaskLinks("https://www.example.com/start", links, map[string]bool{}, "rail airport", "example.com", taskCandidateLimit)
+	got := normalizeTaskLinks("https://www.example.com/start", links, map[string]bool{}, "rail airport", linkScope{site: "example.com"}, taskCandidateLimit)
 	var urls []string
 	for _, link := range got {
 		urls = append(urls, link.URL)
@@ -35,7 +35,7 @@ func TestNormalizeTaskLinksDropsJunkAndOtherSites(t *testing.T) {
 		t.Fatalf("links = %q, want %q", urls, want)
 	}
 	// Without a site, other sites are kept but junk still goes.
-	if got := normalizeTaskLinks("https://www.example.com/start", links, map[string]bool{}, "rail", "", taskCandidateLimit); len(got) != 3 {
+	if got := normalizeTaskLinks("https://www.example.com/start", links, map[string]bool{}, "rail", linkScope{}, taskCandidateLimit); len(got) != 3 {
 		t.Fatalf("links without a site = %#v", got)
 	}
 }
@@ -192,10 +192,13 @@ func TestInformationTaskFollowsSiteLinksAndReturnsFacts(t *testing.T) {
 		"porto":   "# Porto line\n\n" + prose("the Porto line"),
 		"blocked": "# Just a moment...\n\nChecking your browser before accessing the site.\n",
 	})
+	var seen []ExtractRequest
 	extractor := fakeExtractor{facts: map[string]string{
 		"https://www.example.com/porto": "- Lisbon–Porto opens in 2030",
 		"https://www.example.com":       "- The plan has three phases",
-	}}
+	}, follow: map[string][]string{
+		"https://www.example.com": {"https://www.example.com/porto", "https://www.example.com/blocked"},
+	}, seen: &seen}
 	start, _ := url.Parse("https://www.example.com")
 	tracker := &taskTracker{}
 	result, err := (&Manager{}).runInformationTask(context.Background(), executable, fakeDecider{relevance: 0.8}, extractor, 8, "rail plan Porto", start, tracker)
@@ -210,7 +213,12 @@ func TestInformationTaskFollowsSiteLinksAndReturnsFacts(t *testing.T) {
 		t.Fatalf("blocked page not reported:\n%s", trace)
 	}
 	if strings.Contains(trace, "twitter.com") || strings.Contains(trace, "other.org") {
-		t.Fatalf("followed junk or another site:\n%s", trace)
+		t.Fatalf("followed junk or an unpicked site:\n%s", trace)
+	}
+	// Other sites are offered, as a page's sources may be there; junk is not.
+	offered := strings.Join(seen[0].Links, "\n")
+	if !strings.Contains(offered, "https://other.org/rail") || strings.Contains(offered, "twitter.com") {
+		t.Fatalf("offered links:\n%s", offered)
 	}
 }
 
@@ -242,7 +250,7 @@ func TestNormalizeTaskLinksSkipsTranslations(t *testing.T) {
 		{URL: "/br/noticias/2026/turismo", Label: "Turismo"},
 		{URL: "/usa/travel", Label: "Travel"},
 	}
-	got := normalizeTaskLinks("https://www.example.com/news/2026/start", links, map[string]bool{}, "tourism", "example.com", taskCandidateLimit)
+	got := normalizeTaskLinks("https://www.example.com/news/2026/start", links, map[string]bool{}, "tourism", linkScope{site: "example.com"}, taskCandidateLimit)
 	var urls []string
 	for _, link := range got {
 		urls = append(urls, link.URL)
