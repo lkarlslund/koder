@@ -204,6 +204,8 @@ func TestNormalizeTaskLinksSkipsTranslations(t *testing.T) {
 		{URL: "/news/2026/tourism", Label: "Tourism"},
 		{URL: "/fr/nouvelles/2026/tourism", Label: "Tourisme"},
 		{URL: "/ru/ru-news/2026/tourism", Label: "Туризм"},
+		{URL: "/se/nyheter/2026/turism", Label: "Turism"},
+		{URL: "/br/noticias/2026/turismo", Label: "Turismo"},
 		{URL: "/usa/travel", Label: "Travel"},
 	}
 	got := normalizeTaskLinks("https://www.example.com/news/2026/start", links, map[string]bool{}, "tourism", "example.com")

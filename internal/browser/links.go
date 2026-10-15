@@ -68,9 +68,11 @@ func isSocialHost(host string) bool {
 	return slices.Contains(socialHosts, siteOf(host))
 }
 
-// languages are the path prefixes sites put translated pages under.
+// languages are the path prefixes sites put translated pages under:
+// language codes, and the country codes some sites use instead.
 var languages = []string{"ar", "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "he", "hi", "hr", "hu", "id", "it", "ja", "ko",
-	"lt", "lv", "nl", "no", "pl", "pt", "ro", "ru", "sk", "sl", "sr", "sv", "th", "tr", "uk", "vi", "zh"}
+	"lt", "lv", "nl", "no", "pl", "pt", "ro", "ru", "sk", "sl", "sr", "sv", "th", "tr", "uk", "vi", "zh",
+	"at", "be", "br", "ch", "cn", "cz", "dk", "gr", "jp", "kr", "mx", "nb", "se", "ua"}
 
 // languageOf returns the language prefix of a URL's path, such as "fr" for
 // /fr/nouvelles/x or "pt" for /pt-br/x, or "" when it has none.
