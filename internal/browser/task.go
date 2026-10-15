@@ -194,6 +194,9 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 	visited := map[string]bool{}
 	var pages []browserapi.TaskPage
 	withFacts := 0
+	// walled records a bot challenge or access wall, which the visible
+	// browser may get past.
+	walled := false
 	for read := 0; read < maxSteps && len(frontier) > 0 && withFacts < informationEnoughPages; {
 		var batch []string
 		for len(frontier) > 0 && len(batch) < min(informationBatch, maxSteps-read) {
@@ -218,6 +221,7 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 			page := fetched.page
 			if page.Blocked != "" {
 				tracker.step(fmt.Sprintf("Skipped %s: it is %s, not the page", page.URL, page.Blocked))
+				walled = walled || page.Blocked != blockedMissing
 				continue
 			}
 			// Links found once the reading budget is spent are never
@@ -233,7 +237,7 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 			}
 			tracker.doing("Judging how much " + page.URL + " helps the goal")
 			relevance := m.pageRelevance(ctx, decider, goal, page, tracker)
-			pages = append(pages, browserapi.TaskPage{URL: page.URL, Title: page.Title, Relevance: relevance, Text: page.Text})
+			pages = append(pages, browserapi.TaskPage{URL: page.URL, Title: page.Title, Relevance: relevance, Text: page.Data})
 			if extractor == nil || relevance < extractMinRelevance {
 				tracker.step(fmt.Sprintf("Read %s: relevance %.2f, %d characters of text", page.URL, relevance, len(page.Text)))
 				continue
@@ -243,9 +247,13 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 		withFacts += extractTaskFacts(ctx, extractor, goal, pages, judged, tracker)
 	}
 	result.Trace = tracker.trace
-	if len(pages) == 0 {
+	if len(pages) == 0 && walled {
+		return result, errors.New("the pages are behind a bot challenge or access wall")
+	}
+	if len(pages) == 0 && extractor == nil {
 		return result, errors.New("no page with readable text was found within the lightweight browsing limit")
 	}
+	// Without pages, the steps say what each page was.
 	result.Status, result.SourceURL = "completed", start.String()
 	if extractor == nil {
 		result.Pages = mostRelevantPages(pages)
@@ -455,6 +463,10 @@ func normalizeTaskLinks(baseURL string, links []taskLink, visited map[string]boo
 			continue
 		}
 		if junkLink.MatchString(parsed.String()) || isSocialHost(parsed.Hostname()) || (site != "" && siteOf(parsed.Hostname()) != site) {
+			continue
+		}
+		// A copy of the page in another language repeats what was read.
+		if language := languageOf(parsed); site != "" && language != "" && language != languageOf(base) {
 			continue
 		}
 		canonical := canonicalURL(parsed)

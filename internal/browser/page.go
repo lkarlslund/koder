@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+// blockedMissing is the reason a page is a stand-in for one that does not
+// exist, which, unlike a bot challenge, no browser gets past.
+const blockedMissing = "a missing page"
+
 const (
 	// minReadableLine is the shortest line of prose a page's readable text
 	// keeps; shorter lines are navigation, buttons and captions.
@@ -29,24 +33,29 @@ var (
 		`personali[sz]ed (ads|content)|ads? (measurement|personali[sz]ation)|fingerprint|technical storage|subpoena|` +
 		`\d+ partners|our partners|tracking technolog|analytics partners|(visitors?|users?)'? behaviou?r|` +
 		`website (owner|operator)|enable javascript`)
+	// consentRow matches a consent manager's cookie table row: a cookie
+	// name glued to its description.
+	consentRow = regexp.MustCompile(`^\S{2,}( \[x\d+\])?\*\*`)
 	// blockedPage matches pages that stand in for the real one: bot
 	// challenges, errors and access walls.
 	blockedPage = []struct {
 		reason  string
 		pattern *regexp.Regexp
 	}{
-		{"a bot challenge", regexp.MustCompile(`(?i)just a moment\.\.\.|checking (if the site connection is secure|your browser)|verify(ing)? you are (a )?human|cf-chl-|challenges\.cloudflare\.com|attention required! \| cloudflare|ddos protection by|please enable cookies`)},
+		{"a bot challenge", regexp.MustCompile(`(?i)just a moment\.\.\.|performing security verification|verifies you are not a bot|checking (if the site connection is secure|your browser)|verify(ing)? you are (a )?human|cf-chl-|challenges\.cloudflare\.com|attention required! \| cloudflare|ddos protection by|please enable cookies`)},
 		{"an access wall", regexp.MustCompile(`(?i)^(access denied|403 forbidden|you have been blocked)`)},
-		{"a missing page", regexp.MustCompile(`(?i)^(404|page not found|not found|error 404|oops)`)},
+		{blockedMissing, regexp.MustCompile(`(?i)^(404|page not found|not found|error 404|oops)`)},
 	}
 )
 
-// taskPage is one page a task read: its readable text and its links, or
-// why it is not the page asked for.
+// taskPage is one page a task read: its prose, its data (the prose with
+// short lines such as figures and table cells), its links, or why it is not
+// the page asked for.
 type taskPage struct {
 	URL     string
 	Title   string
 	Text    string
+	Data    string
 	Links   []taskLink
 	Blocked string
 }
@@ -66,13 +75,25 @@ func obscuraPage(ctx context.Context, executable, storage, rawURL string) (taskP
 }
 
 func parseMarkdownPage(rawURL, markdown string) taskPage {
-	page := taskPage{URL: rawURL, Text: readableText(markdown), Links: markdownLinks(markdown)}
+	page := taskPage{URL: rawURL, Links: markdownLinks(markdown)}
 	if match := markdownTitle.FindStringSubmatch(markdown); match != nil {
 		title := markdownLink.ReplaceAllString(match[1], "$1")
 		page.Title = strings.Join(strings.Fields(strings.NewReplacer("**", "", "__", "").Replace(title)), " ")
 	}
+	page.Text, page.Data = readableText(mainContent(markdown)), dataText(mainContent(markdown))
 	page.Blocked = blockedReason(page.Title, markdown, page.Text)
 	return page
+}
+
+// mainContent drops what comes before a page's main heading, which is
+// navigation and consent text that can run to megabytes, unless the page
+// has no readable text after it.
+func mainContent(markdown string) string {
+	loc := markdownTitle.FindStringIndex(markdown)
+	if loc == nil || loc[0] == 0 || len(readableText(markdown[loc[0]:])) < 200 {
+		return markdown
+	}
+	return markdown[loc[0]:]
 }
 
 // blockedReason says why a page is a stand-in rather than the page asked
@@ -103,7 +124,7 @@ func readableText(markdown string) string {
 			linkText += len(match[1])
 		}
 		line = strings.Trim(markdownLink.ReplaceAllString(line, "$1"), " -#*>\t")
-		if len(line) < minReadableLine || linkText*2 >= len(line) || consentLine.MatchString(line) {
+		if len(line) < minReadableLine || linkText*2 >= len(line) || consentLine.MatchString(line) || consentRow.MatchString(line) {
 			continue
 		}
 		if size += len(line) + 1; size > maxReadableText {
@@ -123,4 +144,44 @@ func markdownLinks(markdown string) []taskLink {
 		links = append(links, taskLink{URL: match[2], Label: strings.TrimSpace(strings.Trim(match[1], "*_"))})
 	}
 	return links
+}
+
+// dataText keeps a page's prose together with its short lines, such as
+// figures, labels and table cells, joining runs of short lines so a
+// statistic reads as one line: "Download 209.01 Mbps". It drops link lists
+// and consent text like readableText.
+func dataText(markdown string) string {
+	var out []string
+	var run []string
+	size := 0
+	flush := func() {
+		if len(run) > 0 {
+			out = append(out, strings.Join(run, " "))
+			size += len(out[len(out)-1]) + 1
+			run = run[:0]
+		}
+	}
+	for line := range strings.SplitSeq(markdown, "\n") {
+		if size > maxReadableText {
+			break
+		}
+		line = markdownImage.ReplaceAllString(line, "")
+		linkText := 0
+		for _, match := range markdownLink.FindAllStringSubmatch(line, -1) {
+			linkText += len(match[1])
+		}
+		line = strings.Trim(markdownLink.ReplaceAllString(line, "$1"), " -#*>|\t")
+		if line == "" || (linkText > 0 && linkText*2 >= len(line)) || consentLine.MatchString(line) || consentRow.MatchString(line) {
+			continue
+		}
+		if len(line) < minReadableLine {
+			run = append(run, line)
+			continue
+		}
+		flush()
+		out = append(out, line)
+		size += len(line) + 1
+	}
+	flush()
+	return truncateOnLine(strings.Join(out, "\n"), maxReadableText)
 }

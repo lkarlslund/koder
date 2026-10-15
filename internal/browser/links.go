@@ -67,3 +67,18 @@ func siteOf(host string) string {
 func isSocialHost(host string) bool {
 	return slices.Contains(socialHosts, siteOf(host))
 }
+
+// languages are the path prefixes sites put translated pages under.
+var languages = []string{"ar", "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "he", "hi", "hr", "hu", "id", "it", "ja", "ko",
+	"lt", "lv", "nl", "no", "pl", "pt", "ro", "ru", "sk", "sl", "sr", "sv", "th", "tr", "uk", "vi", "zh"}
+
+// languageOf returns the language prefix of a URL's path, such as "fr" for
+// /fr/nouvelles/x or "pt" for /pt-br/x, or "" when it has none.
+func languageOf(parsed *url.URL) string {
+	segment, _, _ := strings.Cut(strings.TrimPrefix(parsed.Path, "/"), "/")
+	language, _, _ := strings.Cut(strings.ToLower(segment), "-")
+	if len(segment) > 5 || !slices.Contains(languages, language) {
+		return ""
+	}
+	return language
+}

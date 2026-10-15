@@ -175,3 +175,54 @@ func TestInformationTaskFollowsSiteLinksAndReturnsFacts(t *testing.T) {
 		t.Fatalf("followed junk or another site:\n%s", trace)
 	}
 }
+
+func TestParseMarkdownPageStartsAtTheMainHeadingAndKeepsFigures(t *testing.T) {
+	consent := strings.Repeat("_ga**Used to send data to Google Analytics about the visitor's device and behavior across sites.\n", 2000)
+	markdown := "[Home](/)[News](/news)\n" + consent +
+		"# Portugal Median Country Speeds\n\n" +
+		"Ranking mobile and fixed broadband speeds from around the world on a monthly basis, updated mid-month.\n" +
+		"Mobile\nRank\n28\nDownload\n209.01\nMbps\n\n" +
+		"Results are updated mid-month for the previous three months, using the Precision Threshold.\n"
+	page := parseMarkdownPage("https://www.speedtest.net/global-index/portugal", markdown)
+	if strings.Contains(page.Text, "Google Analytics") || strings.Contains(page.Data, "Google Analytics") {
+		t.Fatal("consent text before the main heading was kept")
+	}
+	if !strings.Contains(page.Data, "Mobile Rank 28 Download 209.01 Mbps") {
+		t.Fatalf("data = %q, want the figures joined into one line", page.Data)
+	}
+	if strings.Contains(page.Text, "209.01") {
+		t.Fatalf("prose kept the short figure lines: %q", page.Text)
+	}
+}
+
+func TestNormalizeTaskLinksSkipsTranslations(t *testing.T) {
+	links := []taskLink{
+		{URL: "/news/2026/tourism", Label: "Tourism"},
+		{URL: "/fr/nouvelles/2026/tourism", Label: "Tourisme"},
+		{URL: "/ru/ru-news/2026/tourism", Label: "Туризм"},
+		{URL: "/usa/travel", Label: "Travel"},
+	}
+	got := normalizeTaskLinks("https://www.example.com/news/2026/start", links, map[string]bool{}, "tourism", "example.com")
+	var urls []string
+	for _, link := range got {
+		urls = append(urls, link.URL)
+	}
+	if strings.Join(urls, " ") != "https://www.example.com/news/2026/tourism https://www.example.com/usa/travel" {
+		t.Fatalf("links = %q", urls)
+	}
+}
+
+func TestInformationTaskReportsAMissingStartPageButHandsOffAWall(t *testing.T) {
+	start, _ := url.Parse("https://www.example.com")
+	run := func(markdown string) (browserapi.TaskResult, error) {
+		executable := fakeObscura(t, map[string]string{"index": markdown})
+		return (&Manager{}).runInformationTask(context.Background(), executable, fakeDecider{relevance: 0.8}, fakeExtractor{}, 8, "rail plan", start, &taskTracker{})
+	}
+	result, err := run("# 404\n\nThe page you were looking for could not be found on this server, sorry about that.\n")
+	if err != nil || result.Status != "completed" || !strings.Contains(strings.Join(result.Trace, "\n"), "it is a missing page") {
+		t.Fatalf("missing start page: %#v, %v", result, err)
+	}
+	if _, err := run("# www.example.com\n\n## Performing security verification\n\nThis website uses a security service to protect against malicious bots.\n"); err == nil {
+		t.Fatal("a bot challenge did not hand the task to the visible browser")
+	}
+}
