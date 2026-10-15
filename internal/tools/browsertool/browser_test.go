@@ -534,3 +534,28 @@ func TestBrowserTaskReturnsInformationPagesAsMarkdown(t *testing.T) {
 		t.Fatalf("saved output = %q", saved.Output)
 	}
 }
+
+func TestBrowserTaskReturnsFactsAndSaysWhenThereAreNone(t *testing.T) {
+	call := func(result browserapi.TaskResult) string {
+		out, err := (tool{id: tools.BrowserTask, title: "Browser task"}).Call(t.Context(), tools.Options{
+			Runtime: tools.Runtime{Workdir: t.TempDir(), Browser: resultTaskBrowser{result: result}, SessionID: "session-1", ChatID: "chat-1"},
+			Request: tools.Request{Tool: tools.BrowserTask, Args: map[string]string{"goal": "house prices", "start_url": "https://example.com", "outcome": "information"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.Output
+	}
+	output := call(browserapi.TaskResult{Status: "completed", Backend: "obscura", SourceURL: "https://example.com", Pages: []browserapi.TaskPage{
+		{URL: "https://example.com/prices", Title: "Prices", Relevance: 0.9, Facts: "- Lisbon: €6,124/m²"},
+	}, Trace: []string{"Read https://example.com/prices: relevance 0.90, found facts for the goal"}})
+	for _, want := range []string{"facts for the goal from the 1 most relevant", "## Prices", "- Lisbon: €6,124/m²", "## Steps"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output %q lacks %q", output, want)
+		}
+	}
+	none := call(browserapi.TaskResult{Status: "completed", Backend: "obscura", SourceURL: "https://example.com", Trace: []string{"Read https://example.com: relevance 0.02, nothing for the goal"}})
+	if !strings.Contains(none, "none had facts for the goal") || !strings.Contains(none, "nothing for the goal") {
+		t.Fatalf("output without facts = %q", none)
+	}
+}

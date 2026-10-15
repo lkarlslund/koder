@@ -10,6 +10,10 @@ import (
 type Chat struct {
 	SessionID id.ID
 	ChatID    id.ID
+	// ProviderID and ModelID name the chat's model, which an information
+	// task uses to pull facts out of the pages it reads.
+	ProviderID string
+	ModelID    string
 }
 
 type Status struct {
@@ -133,13 +137,15 @@ type TaskRequest struct {
 	Progress func(current string, steps []string)
 }
 
-// TaskPage is a page an information task read, with its readable text and
-// how much it helps the goal (0 to 1).
+// TaskPage is a page an information task read: how much it helps the goal
+// (0 to 1), the facts a model pulled from it for the goal, and its readable
+// text when no model could pull facts out.
 type TaskPage struct {
 	URL       string  `json:"url"`
 	Title     string  `json:"title,omitempty"`
 	Relevance float64 `json:"relevance"`
-	Text      string  `json:"text"`
+	Facts     string  `json:"facts,omitempty"`
+	Text      string  `json:"text,omitempty"`
 }
 
 type TaskResult struct {

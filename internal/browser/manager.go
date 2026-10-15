@@ -85,6 +85,7 @@ type Manager struct {
 
 	cfg        config.Browser
 	deciders   DeciderResolver
+	extractors ExtractorResolver
 	stateDir   string
 	profileDir string
 	state      string
@@ -124,6 +125,14 @@ func (m *Manager) UpdateConfig(cfg config.Browser) {
 func (m *Manager) SetDeciderResolver(resolve DeciderResolver) {
 	m.mu.Lock()
 	m.deciders = resolve
+	m.mu.Unlock()
+}
+
+// SetExtractorResolver sets how information tasks find the model that
+// pulls facts out of the pages they read.
+func (m *Manager) SetExtractorResolver(resolve ExtractorResolver) {
+	m.mu.Lock()
+	m.extractors = resolve
 	m.mu.Unlock()
 }
 

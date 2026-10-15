@@ -12,9 +12,11 @@ import (
 	"sync"
 
 	"github.com/lkarlslund/koder/internal/browser"
+	"github.com/lkarlslund/koder/internal/browserapi"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/settings"
 )
 
 // resolveBrowserDecider returns the decider browser tasks use: the model
@@ -38,8 +40,13 @@ func (e *Engine) resolveBrowserDecider(ctx context.Context) (browser.Decider, st
 	if servesDecisions(ctx, client, model.Provider, model.SourceModelID) {
 		return decisionModelDecider{client: client, model: model.SourceModelID}, name, nil
 	}
-	// A chat model answers quickly without thinking; the overlay maps this
-	// onto whatever field the server uses for it.
+	return chatModelDecider{client: client, model: model.SourceModelID, extraBody: e.quickChatBody(model)}, name + " (chat model)", nil
+}
+
+// quickChatBody is the extra request body for a quick answer from a chat
+// model: thinking off, which the overlay maps onto whatever field the
+// server uses for it, and no progress events.
+func (e *Engine) quickChatBody(model settings.ModelSettings) map[string]any {
 	modelCfg := model.Model
 	modelCfg.Options = maps.Clone(modelCfg.Options)
 	if modelCfg.Options == nil {
@@ -48,7 +55,21 @@ func (e *Engine) resolveBrowserDecider(ctx context.Context) (browser.Decider, st
 	modelCfg.Options["thinking_mode"] = "disabled"
 	extra := provider.RequestExtraBody(model.Provider, modelCfg, e.modelOverlays)
 	delete(extra, "return_progress")
-	return chatModelDecider{client: client, model: model.SourceModelID, extraBody: extra}, name + " (chat model)", nil
+	return extra
+}
+
+// resolveBrowserExtractor returns the chat's own model for pulling facts
+// out of the pages an information task reads.
+func (e *Engine) resolveBrowserExtractor(_ context.Context, chat browserapi.Chat) (browser.Extractor, string, error) {
+	model, err := e.settings.Model(domain.Chat{ID: chat.ChatID, ProviderID: chat.ProviderID, ModelID: chat.ModelID})
+	if err != nil {
+		return nil, "", err
+	}
+	client, err := provider.New(model.SourceProviderID, model.Provider, e.debug, e.health)
+	if err != nil {
+		return nil, "", err
+	}
+	return chatModelExtractor{client: client, model: model.SourceModelID, extraBody: e.quickChatBody(model)}, model.SourceProviderID + "/" + model.SourceModelID, nil
 }
 
 // servesDecisions reports whether a model answers decision requests rather
@@ -94,13 +115,19 @@ func (e *Engine) firstDecisionModel(ctx context.Context, cfg config.Config) (bro
 }
 
 const (
-	// Decision models read a short state (laya keeps 512 tokens), so they
-	// get one link or a page excerpt per question, with a shortened goal.
+	// Decision models get one link or a page excerpt per question, with a
+	// shortened goal. A model with a short state (laya keeps 512 tokens)
+	// rejects a long excerpt, which is then halved until it fits.
 	decisionGoalChars    = 400
-	decisionExcerptChars = 1200
+	decisionExcerptChars = 6000
+	decisionMinExcerpt   = 600
 	decisionConcurrency  = 8
 	// chatPageChars bounds the page text a chat model judges.
 	chatPageChars = 8000
+	// extractPageChars bounds the page text a chat model reads for facts,
+	// and extractMaxTokens the facts it writes.
+	extractPageChars = 24000
+	extractMaxTokens = 1500
 )
 
 // decisionModelDecider asks a decision model one yes/no question per link
@@ -128,8 +155,13 @@ func (d decisionModelDecider) ScoreLinks(ctx context.Context, goal, pageURL stri
 }
 
 func (d decisionModelDecider) PageRelevance(ctx context.Context, goal, pageURL, text string) (float64, error) {
-	return d.yes(ctx, map[string]string{"goal": clip(goal, decisionGoalChars), "page": pageURL, "text": clip(text, decisionExcerptChars)},
-		"Does this page contain information that helps complete the goal?")
+	for excerpt := decisionExcerptChars; ; excerpt /= 2 {
+		score, err := d.yes(ctx, map[string]string{"goal": clip(goal, decisionGoalChars), "page": pageURL, "text": clip(text, excerpt)},
+			"Does this page contain information that helps complete the goal?")
+		if err == nil || !errors.Is(err, provider.ErrDecisionTooLong) || excerpt/2 < decisionMinExcerpt || len(text) <= excerpt/2 {
+			return score, err
+		}
+	}
 }
 
 func (d decisionModelDecider) yes(ctx context.Context, state map[string]string, question string) (float64, error) {
@@ -210,6 +242,45 @@ func (d chatModelDecider) answer(ctx context.Context, prompt string, maxTokens i
 		return nil, err
 	}
 	return parseScores(response.Text)
+}
+
+// chatModelExtractor asks a chat model for the facts on a page that help a
+// goal, as markdown bullets.
+type chatModelExtractor struct {
+	client    *provider.Client
+	model     string
+	extraBody map[string]any
+}
+
+const extractNothing = "NONE"
+
+func (x chatModelExtractor) ExtractFacts(ctx context.Context, goal, pageURL, text string) (string, error) {
+	prompt := fmt.Sprintf("Goal: %s\n\nText of %s:\n<<<\n%s\n>>>\n\n"+
+		"List every fact in this text that helps the goal, as short markdown bullets. "+
+		"Keep numbers, dates, names and units exactly as written, and say what period or place each figure is for when the text does. "+
+		"Use only this text, not what you know. If it holds nothing that helps the goal, reply with only %s.",
+		goal, pageURL, clip(text, extractPageChars), extractNothing)
+	body := maps.Clone(x.extraBody)
+	if body == nil {
+		body = map[string]any{}
+	}
+	body["max_tokens"] = extractMaxTokens
+	response, err := x.client.CompleteChat(ctx, provider.ChatRequest{
+		Model:     x.model,
+		Messages:  []provider.Message{{Role: provider.RoleUser, Content: prompt}},
+		ExtraBody: body,
+	})
+	if err != nil {
+		return "", err
+	}
+	facts := strings.TrimSpace(response.Text)
+	if facts == "" {
+		return "", errors.New("the model returned no text")
+	}
+	if strings.Trim(facts, " .*`\n") == extractNothing {
+		return "", nil
+	}
+	return facts, nil
 }
 
 // parseScores reads the JSON object in a chat reply, tolerating text or a

@@ -1,6 +1,10 @@
 package browser
 
-import "context"
+import (
+	"context"
+
+	"github.com/lkarlslund/koder/internal/browserapi"
+)
 
 // Decider makes the judgments a browser task needs. Scores run from 0 (no
 // help) to 1 (certainly helps the goal). Koder backs it with a decision
@@ -16,3 +20,13 @@ type Decider interface {
 // DeciderResolver picks the decider for one task and returns its model's
 // name for the task trace.
 type DeciderResolver func(ctx context.Context) (Decider, string, error)
+
+// Extractor pulls the facts that answer a goal out of a page. It returns
+// "" when the page holds none.
+type Extractor interface {
+	ExtractFacts(ctx context.Context, goal, pageURL, text string) (string, error)
+}
+
+// ExtractorResolver picks the extractor for a chat's task, usually the
+// chat's own model, and returns its name for the task trace.
+type ExtractorResolver func(ctx context.Context, chat browserapi.Chat) (Extractor, string, error)

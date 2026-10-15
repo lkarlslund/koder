@@ -154,11 +154,15 @@ type Presentation struct {
 }
 
 type Runtime struct {
-	Workdir               string
-	HTTPClient            *http.Client
-	SessionID             id.ID
-	SessionKind           domain.SessionKind
-	ChatID                id.ID
+	Workdir     string
+	HTTPClient  *http.Client
+	SessionID   id.ID
+	SessionKind domain.SessionKind
+	ChatID      id.ID
+	// ChatProviderID and ChatModelID name the chat's model, for tools
+	// that ask it for help, such as pulling facts out of web pages.
+	ChatProviderID        string
+	ChatModelID           string
 	ChatRole              chatrole.Role
 	InteractionMode       chatinteraction.Mode
 	ActiveMilestoneKey    string

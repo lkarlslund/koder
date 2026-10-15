@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/browserapi"
 	"github.com/lkarlslund/koder/internal/config"
 )
 
@@ -127,5 +128,81 @@ func TestParseScoresRejectsRepliesWithoutNumbers(t *testing.T) {
 	}
 	if _, err := parseScores(`{"0": "high"}`); err == nil {
 		t.Fatal("expected an error for non-numeric scores")
+	}
+}
+
+func TestDecisionPageRelevanceShortensTextUntilTheModelReadsIt(t *testing.T) {
+	var lengths []int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"models":[{"name":"laya"}]}`))
+		case "/v1/systemone":
+			var body struct {
+				State map[string]string `json:"state"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			lengths = append(lengths, len(body.State["text"]))
+			if len(body.State["text"]) > 1600 {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_, _ = w.Write([]byte(`{"error":{"message":"Question 'q' exceeds state context limit (486 tokens)","status":422}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"answers":{"q":{"probabilities":{"yes":0.7,"no":0.3}}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers["decisions"] = config.Provider{BaseURL: server.URL + "/v1", Features: &config.ProviderFeatures{Decisions: true}}
+	decider, _, err := New(cfg, nil, nil, nil).resolveBrowserDecider(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	score, err := decider.PageRelevance(context.Background(), "rail plan", "https://example.com", strings.Repeat("word ", 2000))
+	if err != nil || score != 0.7 {
+		t.Fatalf("score = %v, %v", score, err)
+	}
+	if len(lengths) != 3 || lengths[0] != 6000 || lengths[2] != 1500 {
+		t.Fatalf("excerpt lengths = %v, want 6000 halved until it fits", lengths)
+	}
+}
+
+func TestBrowserExtractorUsesTheChatModelAndReadsNone(t *testing.T) {
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
+		prompt := body["messages"].([]any)[0].(map[string]any)["content"].(string)
+		reply := "- Lisbon: €6,124/m² (Q1 2026)"
+		if strings.Contains(prompt, "cookie policy") {
+			reply = "NONE."
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": reply}}}})
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers["local"] = config.Provider{BaseURL: server.URL + "/v1", Features: &config.ProviderFeatures{Chat: true}}
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "local", ModelID: "qwen", ContextWindow: 32768})
+	extractor, name, err := New(cfg, nil, nil, nil).resolveBrowserExtractor(context.Background(), browserapi.Chat{ProviderID: "local", ModelID: "qwen"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "local/qwen" {
+		t.Fatalf("name = %q", name)
+	}
+	facts, err := extractor.ExtractFacts(context.Background(), "house prices", "https://example.com/prices", "Lisbon asking prices reached €6,124/m² in Q1 2026.")
+	if err != nil || facts != "- Lisbon: €6,124/m² (Q1 2026)" {
+		t.Fatalf("facts = %q, %v", facts, err)
+	}
+	if facts, err := extractor.ExtractFacts(context.Background(), "house prices", "https://example.com/cookies", "Our cookie policy."); err != nil || facts != "" {
+		t.Fatalf("facts for an empty page = %q, %v", facts, err)
+	}
+	if bodies[0]["max_tokens"] == nil {
+		t.Fatal("extraction has no max_tokens")
 	}
 }

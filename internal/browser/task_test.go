@@ -17,7 +17,7 @@ func TestNormalizeTaskLinksResolvesFiltersAndBounds(t *testing.T) {
 		{URL: "mailto:support@example.com", Label: "email"},
 		{URL: "/manual.pdf", Label: "duplicate"},
 	}
-	got := normalizeTaskLinks("https://example.com/products/widget", links, map[string]bool{"https://example.com/products/widget": true}, downloadLinkHint)
+	got := normalizeTaskLinks("https://example.com/products/widget", links, map[string]bool{"https://example.com/products/widget": true}, downloadLinkHint, "")
 	if len(got) != 1 || got[0].URL != "https://example.com/manual.pdf" {
 		t.Fatalf("normalizeTaskLinks() = %#v", got)
 	}

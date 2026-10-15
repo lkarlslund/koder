@@ -175,6 +175,8 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		SessionID:             session.ID,
 		SessionKind:           session.Kind,
 		ChatID:                chat.ID,
+		ChatProviderID:        chat.ProviderID,
+		ChatModelID:           chat.ModelID,
 		ChatRole:              chat.EffectiveWorkflowRole(),
 		InteractionMode:       chat.EffectiveInteractionMode(),
 		ActiveMilestoneKey:    chat.ActiveMilestoneKey,

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,6 +39,10 @@ type DecisionResponse struct {
 	Answers map[string]DecisionAnswer `json:"answers"`
 }
 
+// ErrDecisionTooLong reports a decision request whose state is longer
+// than the model reads.
+var ErrDecisionTooLong = errors.New("decision state is too long for the model")
+
 // Decide sends a decision request to the provider's /systemone endpoint.
 func (c *Client) Decide(ctx context.Context, input DecisionRequest) (response DecisionResponse, err error) {
 	started := time.Now()
@@ -57,12 +62,17 @@ func (c *Client) Decide(ctx context.Context, input DecisionRequest) (response De
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		return DecisionResponse{}, &APIError{
+		apiErr := &APIError{
 			Operation:  "decide",
 			StatusCode: resp.StatusCode,
 			Body:       strings.TrimSpace(string(raw)),
 			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
 		}
+		// Decision servers answer 422 when the state is longer than they read.
+		if resp.StatusCode == http.StatusUnprocessableEntity && strings.Contains(strings.ToLower(apiErr.Body), "context") {
+			return DecisionResponse{}, fmt.Errorf("%w: %w", ErrDecisionTooLong, apiErr)
+		}
+		return DecisionResponse{}, apiErr
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return DecisionResponse{}, fmt.Errorf("decode decision response: %w", err)
