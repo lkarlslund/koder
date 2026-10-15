@@ -135,7 +135,11 @@ func fakeObscura(t *testing.T, pages map[string]string) string {
 			t.Fatal(err)
 		}
 	}
-	script := "#!/bin/sh\nfor last; do :; done\nname=${last##*/}\ncase \"$name\" in *.*|'') name=index;; esac\ncat \"" + dir + "/$name.md\" 2>/dev/null || exit 1\n"
+	// Batch mode (--file -) prints a status line, 404 for pages it lacks.
+	script := "#!/bin/sh\nif [ \"$2\" = --file ]; then read -r last; else for last; do :; done; fi\n" +
+		"name=${last##*/}\ncase \"$name\" in *.*|'') name=index;; esac\n" +
+		"if [ \"$2\" = --file ]; then status=404; [ -f \"" + dir + "/$name.md\" ] && status=200; echo \"{\\\"status\\\":$status}\"; exit 0; fi\n" +
+		"cat \"" + dir + "/$name.md\" 2>/dev/null || exit 1\n"
 	path := filepath.Join(dir, "obscura")
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -209,6 +213,15 @@ func TestNormalizeTaskLinksSkipsTranslations(t *testing.T) {
 	}
 	if strings.Join(urls, " ") != "https://www.example.com/news/2026/tourism https://www.example.com/usa/travel" {
 		t.Fatalf("links = %q", urls)
+	}
+}
+
+func TestInformationTaskReportsAStartPageThatDoesNotExist(t *testing.T) {
+	executable := fakeObscura(t, map[string]string{"index": "# Home\n\n" + strings.Repeat("Readable text about other things entirely. ", 10)})
+	start, _ := url.Parse("https://www.example.com/news/guessed-article")
+	result, err := (&Manager{}).runInformationTask(context.Background(), executable, fakeDecider{relevance: 0.8}, fakeExtractor{}, 8, "rail plan", start, &taskTracker{})
+	if err != nil || result.Status != "completed" || len(result.Trace) != 1 || !strings.Contains(result.Trace[0], "it is a missing page (HTTP 404)") {
+		t.Fatalf("result = %#v, %v", result, err)
 	}
 }
 

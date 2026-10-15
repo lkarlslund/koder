@@ -3,6 +3,7 @@ package browser
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -72,6 +73,26 @@ func obscuraPage(ctx context.Context, executable, storage, rawURL string) (taskP
 		return taskPage{}, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return parseMarkdownPage(rawURL, stdout.String()), nil
+}
+
+// obscuraStatus returns the HTTP status of a URL from a raw fetch, which
+// tells a page that does not exist from one that merely looks empty.
+func obscuraStatus(ctx context.Context, executable, rawURL string) (int, error) {
+	commandCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(commandCtx, executable, "fetch", "--file", "-")
+	cmd.Stdin = strings.NewReader(rawURL + "\n")
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	var line struct {
+		Status int `json:"status"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(output), &line); err != nil {
+		return 0, fmt.Errorf("read status: %w", err)
+	}
+	return line.Status, nil
 }
 
 func parseMarkdownPage(rawURL, markdown string) taskPage {

@@ -189,6 +189,13 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 	defer func() { _ = os.RemoveAll(storage) }()
 
 	result := browserapi.TaskResult{Status: "incomplete", Backend: "obscura"}
+	// A start page that does not exist is reported at once; models
+	// sometimes guess article URLs.
+	if status, statusErr := obscuraStatus(ctx, executable, start.String()); statusErr == nil && (status == http.StatusNotFound || status == http.StatusGone) {
+		tracker.step(fmt.Sprintf("Skipped %s: it is %s (HTTP %d)", start.String(), blockedMissing, status))
+		result.Status, result.SourceURL, result.Trace = "completed", start.String(), tracker.trace
+		return result, nil
+	}
 	site := siteOf(start.Hostname())
 	frontier := []taskLink{{URL: canonicalURL(start), Label: start.String()}}
 	visited := map[string]bool{}
