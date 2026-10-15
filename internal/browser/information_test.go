@@ -275,3 +275,16 @@ func TestInformationTaskReportsAMissingStartPageButHandsOffAWall(t *testing.T) {
 		t.Fatal("a bot challenge did not hand the task to the visible browser")
 	}
 }
+
+func TestNewFactsDropsBulletsFoundBefore(t *testing.T) {
+	seen := map[string]bool{}
+	if got := newFacts("- Lisbon: €6,124/m²\n- Porto: €3,900/m²", seen); got != "- Lisbon: €6,124/m²\n- Porto: €3,900/m²" {
+		t.Fatalf("first page = %q", got)
+	}
+	if got := newFacts("**Prices**\n*   Lisbon: €6,124/m².\n- Faro: €4,000/m²", seen); got != "**Prices**\n- Faro: €4,000/m²" {
+		t.Fatalf("second page = %q", got)
+	}
+	if got := newFacts("- **Porto**: €3,900/m²", seen); got != "" {
+		t.Fatalf("page with only repeats = %q", got)
+	}
+}

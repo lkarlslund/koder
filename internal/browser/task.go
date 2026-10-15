@@ -240,6 +240,9 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 	visited := map[string]bool{}
 	var pages []browserapi.TaskPage
 	withFacts := 0
+	// seenFacts holds the facts found so far, so a page repeating them
+	// (models copy from the facts they are shown) adds nothing.
+	seenFacts := map[string]bool{}
 	linkLimit := informationLinkCandidates
 	if extractor != nil {
 		linkLimit = informationLinkChoices
@@ -294,6 +297,12 @@ func (m *Manager) runInformationTask(ctx context.Context, executable string, dec
 		wg.Wait()
 		for _, page := range readable {
 			frontier = mergeTaskFrontier(frontier, page.links, maxSteps*taskCandidateLimit)
+			if page.result != nil && page.result.Facts != "" {
+				if page.result.Facts = newFacts(page.result.Facts, seenFacts); page.result.Facts == "" {
+					tracker.step(fmt.Sprintf("Dropped the facts from %s: all were found before", page.page.URL))
+					continue
+				}
+			}
 			if page.result != nil {
 				pages = append(pages, *page.result)
 				if page.result.Facts != "" {
@@ -384,6 +393,41 @@ func extractTaskPage(ctx context.Context, extractor Extractor, goal, found strin
 		held = "found facts for the goal"
 	}
 	tracker.step(fmt.Sprintf("Read %s: %s, following %d of its %d links", page.URL, held, len(follow), len(descriptions)))
+}
+
+// newFacts drops the bullets of a page's facts that were found before and
+// records the rest. It returns "" when no bullet is new.
+func newFacts(facts string, seen map[string]bool) string {
+	var out []string
+	fresh := false
+	for line := range strings.SplitSeq(facts, "\n") {
+		key := factKey(line)
+		if key == "" {
+			out = append(out, line)
+			continue
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key], fresh = true, true
+		out = append(out, line)
+	}
+	if !fresh {
+		return ""
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
+// factKey identifies a bullet by its words and figures, ignoring markup
+// and punctuation. Lines that are not bullets have no key.
+func factKey(line string) string {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "*") && !strings.HasPrefix(line, "•") {
+		return ""
+	}
+	return strings.Join(strings.FieldsFunc(strings.ToLower(line), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '%' && r != '€'
+	}), " ")
 }
 
 // foundFacts joins the facts pages gave so far, keeping the most recent

@@ -291,10 +291,15 @@ func extractPrompt(request browser.ExtractRequest) string {
 	}
 	prompt.WriteString("List every fact in this text that helps the goal, as short markdown bullets. " +
 		"Keep numbers, dates, names and units exactly as written, and say what period or place each figure is for when the text does. " +
-		"Use only this text, not what you know. If it holds nothing that helps the goal, write only " + extractNothing + ".")
+		"Use only this text, not what you know, and list only what it says, not what it leaves out.")
+	if request.Found != "" {
+		prompt.WriteString(" Skip facts already found unless this text adds to them or says otherwise.")
+	}
+	prompt.WriteString(" If it holds nothing new that helps the goal, write only " + extractNothing + ".")
 	if len(request.Links) > 0 && request.Follow > 0 {
 		fmt.Fprintf(&prompt, "\n\nThen, on a last line, write %s and the numbers of at most %d links most likely to lead to what the goal asks for "+
-			"that is not found yet, best first, e.g. \"%s 4, 0\". Write \"%s %s\" if no link is likely to.",
+			"that is not found yet, best first, e.g. \"%s 4, 0\". Check each part of the goal: write \"%s %s\" only if the facts found "+
+			"already answer every part, or no link is likely to help with what is missing.",
 			extractFollow, request.Follow, extractFollow, extractFollow, extractNothing)
 	}
 	return prompt.String()
@@ -304,6 +309,15 @@ var (
 	// followLine matches the line of an extraction reply that picks links.
 	followLine = regexp.MustCompile(`(?im)^[\s*_#>-]*FOLLOW\s*:(.*)$`)
 	digits     = regexp.MustCompile(`\d+`)
+	bullet     = regexp.MustCompile(`^\s*[-*•]\s+\S`)
+	// absentFact matches a bullet that only says the text lacks something,
+	// which models write despite being asked not to.
+	absentFact = regexp.MustCompile(`(?i)^\s*[-*•]\s*(` +
+		// It starts, after any label, by saying so,
+		`(\*\*[^*]*\*\*:?|[^:*]{1,80}:)?\s*(NONE\b|not (mentioned|provided|stated|given|specified|listed|covered|included)\b|` +
+		`(the|this) (text|page|article) (does not|doesn't|provides no|lists no|contains no|gives no|has no|mentions no)\b)` +
+		// or ends saying so.
+		`|.*(\bNONE\b|\bnot (mentioned|provided|stated|given|specified|listed|covered|included)( in (this|the) (text|page|article))?)[\s.)*_]*$)`)
 )
 
 // parseExtraction splits an extraction reply into its facts, "" for NONE,
@@ -320,9 +334,19 @@ func parseExtraction(reply string, limit int) browser.Extraction {
 			}
 		}
 	}
-	facts = strings.TrimSpace(facts)
-	if strings.Trim(facts, " .*`-•\n") != extractNothing {
-		out.Facts = facts
+	var kept []string
+	bullets := 0
+	for line := range strings.SplitSeq(facts, "\n") {
+		if absentFact.MatchString(line) {
+			continue
+		}
+		kept = append(kept, line)
+		if bullet.MatchString(line) && strings.Trim(line, " .*`-•") != extractNothing {
+			bullets++
+		}
+	}
+	if bullets > 0 {
+		out.Facts = strings.TrimSpace(strings.Join(kept, "\n"))
 	}
 	return out
 }

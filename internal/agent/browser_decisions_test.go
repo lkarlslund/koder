@@ -233,6 +233,10 @@ func TestParseExtraction(t *testing.T) {
 		"- NONE\nFOLLOW: NONE":               {},
 		"- a fact":                           {Facts: "- a fact"},
 		"- a fact\n- **Follow:** 0, 1, 2, 3": {Facts: "- a fact", Follow: []int{0, 1, 2}},
+		"- a fact\n*   **Earthquakes:** NONE (Not mentioned).\n- Brackets for 2026 are not provided in the text.\n- There is no income threshold mentioned.\nFOLLOW: NONE": {
+			Facts: "- a fact\n- There is no income threshold mentioned."},
+		"- Earthquakes: not mentioned\nFOLLOW: 1": {Follow: []int{1}},
+		"**Prices**\n- Lisbon: not mentioned":     {},
 	} {
 		if got := parseExtraction(reply, 3); got.Facts != want.Facts || !slices.Equal(got.Follow, want.Follow) {
 			t.Errorf("parseExtraction(%q) = %#v, want %#v", reply, got, want)
