@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/browser"
 	"github.com/lkarlslund/koder/internal/browserapi"
@@ -259,12 +261,31 @@ const (
 	extractFollow  = "FOLLOW:"
 )
 
+// extractRetries is how many times a page's extraction is retried when the
+// model's server is too busy to take it, which happens when a task reads
+// several pages at once.
+const extractRetries = 2
+
 func (x chatModelExtractor) Extract(ctx context.Context, request browser.ExtractRequest) (browser.Extraction, error) {
-	response, err := x.client.CompleteChat(ctx, provider.ChatRequest{
-		Model:     x.model,
-		Messages:  []provider.Message{{Role: provider.RoleUser, Content: extractPrompt(request)}},
-		ExtraBody: withMaxTokens(x.extraBody, extractMaxTokens),
-	})
+	var response provider.ChatResponse
+	var err error
+	for attempt := 0; ; attempt++ {
+		response, err = x.client.CompleteChat(ctx, provider.ChatRequest{
+			Model:     x.model,
+			Messages:  []provider.Message{{Role: provider.RoleUser, Content: extractPrompt(request)}},
+			ExtraBody: withMaxTokens(x.extraBody, extractMaxTokens),
+		})
+		var apiErr *provider.APIError
+		if attempt == extractRetries || !errors.As(err, &apiErr) ||
+			(apiErr.StatusCode != http.StatusTooManyRequests && apiErr.StatusCode != http.StatusServiceUnavailable) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return browser.Extraction{}, err
+		case <-time.After(max(apiErr.RetryAfter, time.Duration(attempt+1)*time.Second)):
+		}
+	}
 	if err != nil {
 		return browser.Extraction{}, err
 	}
@@ -291,7 +312,8 @@ func extractPrompt(request browser.ExtractRequest) string {
 	}
 	prompt.WriteString("List every fact in this text that helps the goal, as short markdown bullets. " +
 		"Keep numbers, dates, names and units exactly as written, and say what period or place each figure is for when the text does. " +
-		"Use only this text, not what you know, and list only what it says, not what it leaves out.")
+		"Use only this text, not what you know, and list only what it says, not what it leaves out. " +
+		"State the facts themselves; do not describe the text, its headings or its links.")
 	if request.Found != "" {
 		prompt.WriteString(" Skip facts already found unless this text adds to them or says otherwise.")
 	}
@@ -318,7 +340,15 @@ var (
 		`(\*\*[^*]*\*\*:?|[^:*]{1,80}:)?\s*(NONE\b|not (mentioned|provided|stated|given|specified|listed|covered|included)\b|` +
 		`(the|this) (text|page|article) (does not|doesn't|provides no|lists no|contains no|gives no|has no|mentions no)\b)` +
 		// or ends saying so.
-		`|.*(\bNONE\b|\bnot (mentioned|provided|stated|given|specified|listed|covered|included)( in (this|the) (text|page|article))?)[\s.)*_]*$)`)
+		`|.*(\bNONE\b|\bnot (mentioned|provided|stated|given|specified|listed|covered|included)( in (this|the) (text|page|article))?)[\s.)*_]*$` +
+		// or is about one of the links it was shown.
+		`|(\*\*)?[Ll]inks? \[?\d+)`)
+	// linkNote matches a fact's reference to the links the model was shown,
+	// such as "(Link 6)", which means nothing to the reader.
+	linkNote = regexp.MustCompile(`\s*\((see )?[Ll]inks? \[?\d+\]?((,| and) \[?\d+\]?)*\)`)
+	// lacksClause matches the end of a fact that goes on to say what the
+	// text does not say.
+	lacksClause = regexp.MustCompile(`(?i),?\s+(but|though|although|however)\b[^.]*\b(does not|doesn't|do not)\b.*$`)
 )
 
 // parseExtraction splits an extraction reply into its facts, "" for NONE,
@@ -340,6 +370,9 @@ func parseExtraction(reply string, limit int) browser.Extraction {
 	for line := range strings.SplitSeq(facts, "\n") {
 		if absentFact.MatchString(line) {
 			continue
+		}
+		if bullet.MatchString(line) {
+			line = lacksClause.ReplaceAllString(linkNote.ReplaceAllString(line, ""), ".")
 		}
 		kept = append(kept, line)
 		if bullet.MatchString(line) && strings.Trim(line, " .*`-•") != extractNothing {

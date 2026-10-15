@@ -237,6 +237,9 @@ func TestParseExtraction(t *testing.T) {
 			Facts: "- a fact\n- There is no income threshold mentioned."},
 		"- Earthquakes: not mentioned\nFOLLOW: 1": {Follow: []int{1}},
 		"**Prices**\n- Lisbon: not mentioned":     {},
+		"- Rust 1.56.0 stabilized it\n- Link 15 points to a blog post that likely has the date\n*   **Link 5** is titled \"Go 1.22\"\n- Additions to the prelude (Link 6)\n" +
+			"- Non-residents pay only on Greek income, but the text does not list rates for them.": {
+			Facts: "- Rust 1.56.0 stabilized it\n- Additions to the prelude\n- Non-residents pay only on Greek income."},
 	} {
 		if got := parseExtraction(reply, 3); got.Facts != want.Facts || !slices.Equal(got.Follow, want.Follow) {
 			t.Errorf("parseExtraction(%q) = %#v, want %#v", reply, got, want)
