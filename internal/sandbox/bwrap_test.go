@@ -295,3 +295,62 @@ func TestSandboxedWriteIntoProjectUnderReadOnlyMount(t *testing.T) {
 		t.Fatalf("write inside the project did not land: %q, %v", data, err)
 	}
 }
+
+func TestResolveExecutableMountsOnlyHiddenRuntimeTree(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.MkdirTemp(home, "koder-agent-runtime-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	versionRoot := filepath.Join(root, "versions", "1")
+	binDir := filepath.Join(versionRoot, "bin")
+	libDir := filepath.Join(versionRoot, "lib")
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(libDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	realExecutable := filepath.Join(libDir, "agent-real")
+	if err := os.WriteFile(realExecutable, []byte("test"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(binDir, "agent")
+	if err := os.Symlink(filepath.Join("..", "lib", "agent-real"), link); err != nil {
+		t.Fatal(err)
+	}
+	executable, mount, err := ResolveExecutable(link, accesssettings.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executable != link || mount != versionRoot {
+		t.Fatalf("executable = %q, mount = %q, want %q and %q", executable, mount, link, versionRoot)
+	}
+}
+
+func TestArgsAppliesBindsAfterGrants(t *testing.T) {
+	workdir := t.TempDir()
+	args, err := Args(Command{
+		Executable: "/bin/true",
+		Workdir:    workdir,
+		Settings:   accesssettings.Default(),
+		Binds:      []Bind{{Source: "/host/credentials.json", Target: filepath.Join(workdir, "config", "credentials.json")}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bind := slices.Index(args, "/host/credentials.json")
+	if bind < 1 || args[bind-1] != "--bind" || args[bind+1] != filepath.Join(workdir, "config", "credentials.json") {
+		t.Fatalf("args = %q", args)
+	}
+	if project := slices.Index(args, workdir); project < 0 || project > bind {
+		t.Fatalf("bind must follow the project grant: %q", args)
+	}
+	if _, err := Args(Command{Executable: "/bin/true", Workdir: workdir, Binds: []Bind{{Source: "relative", Target: "/x"}}}); err == nil {
+		t.Fatal("relative bind source was accepted")
+	}
+}

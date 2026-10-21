@@ -9,14 +9,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/codexapp"
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/fsutil"
 	"github.com/lkarlslund/koder/internal/sandbox"
 )
 
@@ -81,7 +79,7 @@ func (f *sandboxProcessFactory) ChatConfig(_ context.Context, session domain.Ses
 	settings.Mounts = append(settings.Mounts, accesssettings.Mount{Path: home, Mode: accesssettings.ModeReadWrite})
 
 	client := normalizedClientConfig(f.cfg.Client)
-	executable, runtimeMount, err := resolveAgentExecutable(client.Executable, settings)
+	executable, runtimeMount, err := sandbox.ResolveExecutable(client.Executable, settings)
 	if err != nil {
 		return ChatProcessConfig{}, err
 	}
@@ -120,44 +118,6 @@ func (f *sandboxProcessFactory) ChatConfig(_ context.Context, session domain.Ses
 	}
 	digest := sha256.Sum256(encoded)
 	return ChatProcessConfig{Client: client, Fingerprint: hex.EncodeToString(digest[:]), Network: settings.Network}, nil
-}
-
-func resolveAgentExecutable(executable string, settings accesssettings.Settings) (string, string, error) {
-	path, err := exec.LookPath(strings.TrimSpace(executable))
-	if err != nil {
-		return "", "", fmt.Errorf("find Codex executable %q: %w", executable, err)
-	}
-	path, err = filepath.Abs(path)
-	if err != nil {
-		return "", "", fmt.Errorf("resolve Codex executable %q: %w", executable, err)
-	}
-	path = filepath.Clean(path)
-	home, homeErr := os.UserHomeDir()
-	if homeErr != nil || settings.Home != accesssettings.ModeNone || !fsutil.Within(home, path) {
-		return path, "", nil
-	}
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return "", "", fmt.Errorf("resolve Codex executable symlink %q: %w", path, err)
-	}
-	mount := commonAncestor(filepath.Dir(path), filepath.Dir(resolved))
-	if mount == "" || !fsutil.Within(home, mount) {
-		mount = filepath.Dir(path)
-	}
-	return path, mount, nil
-}
-
-func commonAncestor(first, second string) string {
-	first = filepath.Clean(first)
-	second = filepath.Clean(second)
-	for !fsutil.Within(first, second) {
-		parent := filepath.Dir(first)
-		if parent == first {
-			return ""
-		}
-		first = parent
-	}
-	return first
 }
 
 func (f *sandboxProcessFactory) RemoveChat(chatID domain.ID) error {
