@@ -53,6 +53,9 @@ import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import com.lkarlslund.koder.diagnostics.AppLog
+import com.lkarlslund.koder.diagnostics.PhoneSync
+import com.lkarlslund.koder.diagnostics.showPopup
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -253,7 +256,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         pendingPhoneCapability = null
         val granted = phoneCapabilityAvailable(capability)
         if (granted) applyPhoneActionPolicy(pendingPhoneAction, pendingPhonePolicy) else {
-            Toast.makeText(this, "${capability.title} permission was not granted", Toast.LENGTH_LONG).show()
+            showPopup(this, "${capability.title} permission was not granted", Toast.LENGTH_LONG)
 			selectPhoneActionPolicy(pendingPhoneAction, PhoneActionPolicy.OFF)
         }
     }
@@ -268,8 +271,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		pendingImageSave = null
 		if (uri == null || image == null) return@registerForActivityResult
 		runCatching { contentResolver.openOutputStream(uri)?.use { it.write(image.bytes) } ?: error("Could not open destination") }
-			.onSuccess { Toast.makeText(this, "Saved ${image.name}", Toast.LENGTH_SHORT).show() }
-			.onFailure { Toast.makeText(this, it.message ?: "Could not save image", Toast.LENGTH_LONG).show() }
+			.onSuccess { showPopup(this, "Saved ${image.name}", Toast.LENGTH_SHORT) }
+			.onFailure { showPopup(this, it.message ?: "Could not save image", Toast.LENGTH_LONG) }
 	}
 	private val cameraPhotoLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { captured ->
 		val uri = pendingCameraPhotoUri
@@ -282,8 +285,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+		AppLog.init(this)
         secureSettings = SecureSettings(this)
 		phoneIdentity = PhoneIdentity.from(this)
+		AppLog.i("app", "Started ${phoneIdentity.appVersion} on ${phoneIdentity.name}, Android ${phoneIdentity.androidVersion}")
+		PhoneSync.get(this).armBackground()
 		bindingClient = PhoneBindingClient(phoneIdentity)
 		sessionClient = VoiceSessionClient(identity = phoneIdentity)
 		voiceHaptics = AndroidVoiceHaptics(this)
@@ -340,6 +346,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	override fun onStart() {
 		super.onStart()
 		appVisible = true
+		PhoneSync.get(this).setVisible(true)
 	}
 
 	override fun onResume() {
@@ -349,6 +356,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 	override fun onStop() {
 		appVisible = false
+		PhoneSync.get(this).setVisible(false)
 		super.onStop()
 	}
 
@@ -455,7 +463,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			}
 			if (snapshot.turnErrorId.isNotBlank() && snapshot.turnErrorId != lastTurnErrorId) {
 				lastTurnErrorId = snapshot.turnErrorId
-				Toast.makeText(this, snapshot.detail.ifBlank { "Voice request failed" }, Toast.LENGTH_LONG).show()
+				showPopup(this, snapshot.detail.ifBlank { "Voice request failed" }, Toast.LENGTH_LONG)
 			}
 			if (screen != Screen.CHAT) return@runOnUiThread
 			voiceOrb?.apply {
@@ -1130,7 +1138,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			contentDescription = "Open voice adjustments and readiness check"
 			setOnClickListener {
 				val home = readinessHome
-				if (home == null) Toast.makeText(this@MainActivity, "Conversations are still loading", Toast.LENGTH_SHORT).show()
+				if (home == null) showPopup(this@MainActivity, "Conversations are still loading", Toast.LENGTH_SHORT)
 				else showReadiness(home, fromSettings = true, step = 0)
 			}
 		}, spaced(bottom = 24))
@@ -1505,7 +1513,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			append("Voice connections: ${info.voiceConnectionCount} active devices")
         }
         getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Koder server info", text))
-        Toast.makeText(this, "Server info copied", Toast.LENGTH_SHORT).show()
+        showPopup(this, "Server info copied", Toast.LENGTH_SHORT)
     }
 
     private fun formatUptime(totalSeconds: Long): String {
@@ -1774,7 +1782,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		val backend = readinessHome?.chatBackends.orEmpty().firstOrNull { it.id == "koder" }
 		val models = backend?.models.orEmpty()
 		if (models.isEmpty()) {
-			Toast.makeText(this, "Koder could not load any available chat models", Toast.LENGTH_LONG).show()
+			showPopup(this, "Koder could not load any available chat models", Toast.LENGTH_LONG)
 			return
 		}
 		val labels = models.map { model ->
@@ -1806,7 +1814,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 									startAfterModelRecovery = false
 									requestCallStart()
 								} else if (::controller.isInitialized) controller.resumeAfterRecovery()
-								Toast.makeText(this, "Model changed to ${model.name}", Toast.LENGTH_SHORT).show()
+								showPopup(this, "Model changed to ${model.name}", Toast.LENGTH_SHORT)
 							},
 							onFailure = ::showManagementError,
 						)
@@ -1858,7 +1866,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	}
 
 	private fun showManagementError(error: Throwable) {
-		Toast.makeText(this, error.message ?: "The change could not be completed", Toast.LENGTH_LONG).show()
+		showPopup(this, error.message ?: "The change could not be completed", Toast.LENGTH_LONG)
 	}
 
     private fun showAbout() {
@@ -2000,7 +2008,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 							result.fold(onSuccess = { home ->
 								showHome(home)
 								showOrganizationUndo("Conversation deleted", session) { updateVoiceSession(session, deleted = false) }
-							}, onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() })
+							}, onFailure = { showPopup(this, it.message, Toast.LENGTH_LONG) })
 						}
 					}
 			}
@@ -2019,7 +2027,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			archived = archived, pinned = pinned, deleted = deleted,
 		) { result ->
 			runOnUiThread {
-				result.fold(onSuccess = onSuccess ?: ::showHome, onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() })
+				result.fold(onSuccess = onSuccess ?: ::showHome, onFailure = { showPopup(this, it.message, Toast.LENGTH_LONG) })
 			}
 		}
 	}
@@ -2041,7 +2049,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			.setNegativeButton("Cancel", null)
 			.setPositiveButton("Rename") { _, _ ->
 				sessionClient.rename(settings.server, settings.token, session.id, field.text.toString().trim()) { result ->
-					runOnUiThread { result.fold(onSuccess = ::showHome, onFailure = { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }) }
+					runOnUiThread { result.fold(onSuccess = ::showHome, onFailure = { showPopup(this, it.message, Toast.LENGTH_LONG) }) }
 				}
 			}
 			.show()
@@ -2076,7 +2084,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                     onSuccess = ::showHome,
                     onFailure = {
                         indicator.isRefreshing = false
-                        Toast.makeText(this, it.message ?: "Could not refresh conversations", Toast.LENGTH_LONG).show()
+                        showPopup(this, it.message ?: "Could not refresh conversations", Toast.LENGTH_LONG)
                     },
                 )
             }
@@ -2224,7 +2232,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				val milestone = milestoneField.text.toString().trim()
 				val task = taskField.text.toString().trim()
 				if (milestone.isNotBlank() && task.isNotBlank()) {
-					Toast.makeText(this, "Choose a milestone or a task, not both", Toast.LENGTH_LONG).show()
+					showPopup(this, "Choose a milestone or a task, not both", Toast.LENGTH_LONG)
 					return@setPositiveButton
 				}
 				create(VoiceChatCreateSpec(
@@ -2247,7 +2255,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				result.fold(
 					onSuccess = { home -> home.createdChat?.let(::openChat) ?: showSession(session, home) },
 					onFailure = {
-						Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
+						showPopup(this, it.message, Toast.LENGTH_LONG)
 						loadSession(session)
 					},
 				)
@@ -2305,7 +2313,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			}
 		}.onFailure {
 			pendingCameraPhotoUri = null
-			Toast.makeText(this, it.message ?: "Could not open camera", Toast.LENGTH_LONG).show()
+			showPopup(this, it.message ?: "Could not open camera", Toast.LENGTH_LONG)
 		}
 	}
 
@@ -2338,7 +2346,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				renderPendingPhotoControls()
 				uploadPendingPhonePhoto()
 			}.onFailure {
-				Toast.makeText(this@MainActivity, it.message ?: "Could not read photo", Toast.LENGTH_LONG).show()
+				showPopup(this@MainActivity, it.message ?: "Could not read photo", Toast.LENGTH_LONG)
 			}
 		}
 	}
@@ -2359,7 +2367,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 					pendingPhonePhoto = current.copy(uploading = false, error = failure.message ?: "Upload failed")
 					controller.removePendingAttachment()
 					renderPendingPhotoControls()
-					Toast.makeText(this, failure.message ?: "Could not upload photo", Toast.LENGTH_LONG).show()
+					showPopup(this, failure.message ?: "Could not upload photo", Toast.LENGTH_LONG)
 				})
 			}
 		}
@@ -2368,7 +2376,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private fun sendPendingPhonePhoto() {
 		val photo = pendingPhonePhoto ?: return
 		when {
-			photo.uploading -> Toast.makeText(this, "Photo is still uploading", Toast.LENGTH_SHORT).show()
+			photo.uploading -> showPopup(this, "Photo is still uploading", Toast.LENGTH_SHORT)
 			photo.draft == null -> uploadPendingPhonePhoto()
 			else -> controller.submit("")
 		}
@@ -2645,7 +2653,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 val message = typedMessage?.text?.toString().orEmpty()
 				val photo = pendingPhonePhoto
 				if (photo?.uploading == true) {
-					Toast.makeText(this@MainActivity, "Photo is still uploading", Toast.LENGTH_SHORT).show()
+					showPopup(this@MainActivity, "Photo is still uploading", Toast.LENGTH_SHORT)
 				} else if (message.isNotBlank() || photo?.draft != null) {
                     controller.submit(message)
                     typedMessage?.text?.clear()
@@ -3110,11 +3118,11 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 	private fun openPresentationLink(resource: String) {
 		val resolved = runCatching { VoiceProtocol.resourceUrl(settings.server, resource) }.getOrElse {
-			Toast.makeText(this, it.message ?: "Invalid link", Toast.LENGTH_LONG).show()
+			showPopup(this, it.message ?: "Invalid link", Toast.LENGTH_LONG)
 			return
 		}
 		runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(resolved))) }
-			.onFailure { Toast.makeText(this, "No app can open this link", Toast.LENGTH_LONG).show() }
+			.onFailure { showPopup(this, "No app can open this link", Toast.LENGTH_LONG) }
 	}
 
 	private fun showImageViewer(image: PresentedImage) {
@@ -3173,7 +3181,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 			}
 			startActivity(Intent.createChooser(share, "Share ${image.name}"))
-		}.onFailure { Toast.makeText(this, it.message ?: "Could not share image", Toast.LENGTH_LONG).show() }
+		}.onFailure { showPopup(this, it.message ?: "Could not share image", Toast.LENGTH_LONG) }
 	}
 
 	private fun imageName(uri: String, title: String): String {
@@ -3284,7 +3292,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
     private fun downloadAndOpen(part: VoicePart) {
         controller.loadBytes(part.url) { bytes, error ->
             if (bytes == null) {
-                runOnUiThread { Toast.makeText(this, error ?: "Could not download attachment", Toast.LENGTH_LONG).show() }
+                runOnUiThread { showPopup(this, error ?: "Could not download attachment", Toast.LENGTH_LONG) }
                 return@loadBytes
             }
             try {
@@ -3296,7 +3304,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 val uri = FileProvider.getUriForFile(this, "$packageName.presentations", file)
                 runOnUiThread { openPresentation(uri, part.mimeType) }
             } catch (failure: Exception) {
-                runOnUiThread { Toast.makeText(this, failure.message ?: "Could not open attachment", Toast.LENGTH_LONG).show() }
+                runOnUiThread { showPopup(this, failure.message ?: "Could not open attachment", Toast.LENGTH_LONG) }
             }
         }
     }
@@ -3309,7 +3317,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         try {
             startActivity(intent)
         } catch (_: Exception) {
-            Toast.makeText(this, "No app can open ${mimeType.ifBlank { "this attachment" }}", Toast.LENGTH_LONG).show()
+            showPopup(this, "No app can open ${mimeType.ifBlank { "this attachment" }}", Toast.LENGTH_LONG)
         }
     }
 
@@ -3330,7 +3338,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 	private fun copyMessage(who: String, text: String) {
 		(getSystemService(ClipboardManager::class.java)).setPrimaryClip(ClipData.newPlainText("$who message", text))
-		Toast.makeText(this, "Message copied", Toast.LENGTH_SHORT).show()
+		showPopup(this, "Message copied", Toast.LENGTH_SHORT)
 	}
 
 	private fun showResponseActions(bubble: View, entryId: String, text: String) {
@@ -3357,7 +3365,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				indicator.visibility = if (indicator.text.isBlank()) View.GONE else View.VISIBLE
 			}
 		}
-		Toast.makeText(this, if (saved) "${kind.label} saved" else "${kind.label} removed", Toast.LENGTH_SHORT).show()
+		showPopup(this, if (saved) "${kind.label} saved" else "${kind.label} removed", Toast.LENGTH_SHORT)
 	}
 
 	private fun savedResponseLabels(entryId: String): String = savedResponses

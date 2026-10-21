@@ -2,7 +2,9 @@ package com.lkarlslund.koder.voice
 
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioRouting
 import android.media.AudioTrack
+import com.lkarlslund.koder.diagnostics.AppLog
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
@@ -26,9 +28,13 @@ class AndroidStreamingAudioPlayback(
     @Volatile private var track: AudioTrack? = null
 	@Volatile private var sampleRate = 0
 	@Volatile private var bytesWritten = 0L
+	/** When the playback thread entered a blocking write, or 0 when it is not in one. */
+	@Volatile private var writeStartedNanos = 0L
+	@Volatile private var droppedWithoutTrack = false
 
     @Synchronized
     override fun start(format: VoiceAudioFormat) {
+		reportStuckWrite("start")
         stop()
         require(format.encoding == "pcm_s16le" && format.channels == 1) {
             "Playback requires mono pcm_s16le"
@@ -53,27 +59,62 @@ class AndroidStreamingAudioPlayback(
             .setTransferMode(AudioTrack.MODE_STREAM)
             .setBufferSizeInBytes(max(minimum * 2, format.sampleRate / 2))
             .build()
-        check(audioTrack.state == AudioTrack.STATE_INITIALIZED) { "Audio playback initialization failed" }
+        if (audioTrack.state != AudioTrack.STATE_INITIALIZED) {
+			AppLog.e(LOG_TAG, "AudioTrack did not initialize at ${format.sampleRate} Hz (state ${audioTrack.state})")
+			audioTrack.release()
+			error("Audio playback initialization failed")
+		}
+		audioTrack.addOnRoutingChangedListener(AudioRouting.OnRoutingChangedListener { router ->
+			val device = router.routedDevice
+			AppLog.i(LOG_TAG, "Output routed to ${device?.productName ?: "nothing"} (type ${device?.type ?: "-"})")
+		}, null)
+		AppLog.d(LOG_TAG, "Track ready: ${format.sampleRate} Hz, buffer ${audioTrack.bufferSizeInFrames} frames")
+		droppedWithoutTrack = false
         track = audioTrack
 		sampleRate = format.sampleRate
 		bytesWritten = 0
         val currentGeneration = generation.incrementAndGet()
         executor.execute {
-            if (generation.get() == currentGeneration && track === audioTrack) audioTrack.play()
+            if (generation.get() == currentGeneration && track === audioTrack) {
+				try {
+					audioTrack.play()
+				} catch (error: IllegalStateException) {
+					AppLog.e(LOG_TAG, "AudioTrack.play failed", error)
+					throw error
+				}
+				if (audioTrack.playState != AudioTrack.PLAYSTATE_PLAYING) AppLog.w(LOG_TAG, "Track not playing after play(): state ${audioTrack.playState}")
+			}
         }
     }
 
     override fun write(pcm: ByteArray) {
         if (pcm.isEmpty()) return
-        val audioTrack = track ?: return
+        val audioTrack = track ?: run {
+			if (!droppedWithoutTrack) {
+				droppedWithoutTrack = true
+				AppLog.w(LOG_TAG, "Dropping ${pcm.size} bytes of speech: no playback track (not started, or already finished)")
+			}
+			return
+		}
         val currentGeneration = generation.get()
         val copy = pcm.copyOf()
         executor.execute {
             if (generation.get() != currentGeneration || track !== audioTrack) return@execute
             var offset = 0
             while (offset < copy.size) {
-                val written = audioTrack.write(copy, offset, copy.size - offset, AudioTrack.WRITE_BLOCKING)
+				val startedAt = System.nanoTime()
+				writeStartedNanos = startedAt
+                val written = try {
+					audioTrack.write(copy, offset, copy.size - offset, AudioTrack.WRITE_BLOCKING)
+				} finally {
+					writeStartedNanos = 0
+				}
+				val tookMillis = (System.nanoTime() - startedAt) / 1_000_000
+				if (tookMillis >= SLOW_WRITE_MILLIS) {
+					AppLog.w(LOG_TAG, "AudioTrack.write blocked ${tookMillis} ms (playState ${audioTrack.playState}, head ${audioTrack.playbackHeadPosition})")
+				}
                 if (written < 0) {
+					AppLog.e(LOG_TAG, "AudioTrack.write returned $written (playState ${audioTrack.playState})")
                     onError("Audio playback failed ($written)")
                     return@execute
                 }
@@ -89,9 +130,13 @@ class AndroidStreamingAudioPlayback(
 		val currentGeneration = generation.get()
 		executor.execute {
 			if (audioTrack != null && generation.get() == currentGeneration && track === audioTrack) {
-				awaitPlaybackDrain(audioTrack, bytesWritten / PCM16_MONO_FRAME_BYTES, sampleRate) {
+				val target = bytesWritten / PCM16_MONO_FRAME_BYTES
+				awaitPlaybackDrain(audioTrack, target, sampleRate) {
 					generation.get() == currentGeneration && track === audioTrack
 				}
+				val played = audioTrack.playbackHeadPosition.toLong() and UINT32_MASK
+				if (played < target) AppLog.w(LOG_TAG, "Playback drain ended at frame $played of $target (playState ${audioTrack.playState})")
+				if (audioTrack.underrunCount > 0) AppLog.d(LOG_TAG, "Playback had ${audioTrack.underrunCount} underruns")
 				if (generation.get() == currentGeneration && track === audioTrack) {
 					try {
 						audioTrack.stop()
@@ -138,6 +183,7 @@ class AndroidStreamingAudioPlayback(
 
     @Synchronized
     override fun stop() {
+		reportStuckWrite("stop")
         generation.incrementAndGet()
         val current = track
         track = null
@@ -156,12 +202,24 @@ class AndroidStreamingAudioPlayback(
 
     override fun close() = stop()
 
+	/** Notes a blocking write that never returned: everything queued behind it, including this call, waits. */
+	private fun reportStuckWrite(caller: String) {
+		val since = writeStartedNanos
+		if (since == 0L) return
+		val stuckMillis = (System.nanoTime() - since) / 1_000_000
+		if (stuckMillis >= SLOW_WRITE_MILLIS) {
+			AppLog.e(LOG_TAG, "Playback thread stuck in AudioTrack.write for $stuckMillis ms; $caller is queued behind it")
+		}
+	}
+
 	private companion object {
 		const val PCM16_MONO_FRAME_BYTES = 2
 		const val UINT32_MASK = 0xffff_ffffL
 		const val NANOS_PER_SECOND = 1_000_000_000L
 		const val DRAIN_GRACE_NANOS = 500_000_000L
 		const val MAX_DRAIN_NANOS = 60_000_000_000L
+		const val SLOW_WRITE_MILLIS = 2_000L
+		const val LOG_TAG = "playback"
 	}
 }
 

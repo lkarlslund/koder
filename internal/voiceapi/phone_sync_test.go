@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -84,5 +87,43 @@ func TestPhoneSyncStoresLogsForBoundDeviceAndDeliversAlerts(t *testing.T) {
 	}
 	if response, _ := post(binding.Token, `{"protocol":"voice.v0"}`); response.StatusCode != http.StatusBadRequest {
 		t.Fatalf("wrong protocol status = %d", response.StatusCode)
+	}
+}
+
+// The fixtures are shared with the Android client's PhoneSyncTest.
+func TestPhoneSyncMatchesSharedFixtures(t *testing.T) {
+	read := func(name string) []byte {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join("..", "..", "protocol", "voice", "v1", "testdata", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	var request phonesync.SyncRequest
+	if err := json.Unmarshal(read("device_sync_request.json"), &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.LogEpoch != "epoch-fixture-1" || len(request.Logs) != 2 || request.Logs[1].Tag != "playback" ||
+		request.Logs[0].Time.UnixMilli()%1000 != 250 || len(request.Alerts) != 1 || request.Alerts[0].Status != phonesync.AlertScheduled {
+		t.Fatalf("request fixture decoded as %+v", request)
+	}
+	var fixture, encoded map[string]any
+	if err := json.Unmarshal(read("device_sync_response.json"), &fixture); err != nil {
+		t.Fatal(err)
+	}
+	var response phonesync.SyncResponse
+	if err := json.Unmarshal(read("device_sync_response.json"), &response); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &encoded); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(fixture, encoded) {
+		t.Fatalf("server response shape drifted from fixture:\n%s", data)
 	}
 }

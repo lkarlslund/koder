@@ -1,0 +1,11 @@
+{
+  "protocol": "voice.v1",
+  "log_epoch": "epoch-fixture-1",
+  "logs": [
+    {"seq": 1, "time": "2026-10-21T10:00:00.250Z", "level": "W", "tag": "popup", "message": "Speech audio arrived out of order"},
+    {"seq": 2, "time": "2026-10-21T10:00:01Z", "level": "E", "tag": "playback", "message": "Playback thread stuck in AudioTrack.write for 9000 ms; stop is queued behind it"}
+  ],
+  "alerts": [
+    {"id": "alert-fixture-1", "status": "scheduled", "detail": "exact"}
+  ]
+}

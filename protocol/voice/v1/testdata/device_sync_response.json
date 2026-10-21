@@ -1,0 +1,9 @@
+{
+  "protocol": "voice.v1",
+  "logs_enabled": true,
+  "log_cursor": 2,
+  "alerts": [
+    {"id": "alert-fixture-2", "title": "Stretch", "body": "Stand up for a minute", "fire_at": "2026-10-21T15:00:00Z"}
+  ],
+  "cancel_alerts": ["alert-fixture-0"]
+}

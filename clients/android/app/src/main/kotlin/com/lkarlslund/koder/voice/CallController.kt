@@ -5,6 +5,8 @@ import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.app.Activity
+import com.lkarlslund.koder.diagnostics.AppLog
+import com.lkarlslund.koder.diagnostics.PhoneSync
 import com.lkarlslund.koder.phone.AndroidPhoneToolProvider
 import com.lkarlslund.koder.phone.PhoneDeviceConnection
 import com.lkarlslund.koder.phone.PhoneIdentity
@@ -84,6 +86,7 @@ class CallController(
 	private val diagnostics = AudioDiagnosticsTracker()
 	private val connection = VoiceConnection(object : VoiceConnection.Listener {
 		override fun onConnected() = onMain {
+			AppLog.i(LOG_CONNECTION, "Connected${if (utteranceId.isNotBlank()) " during speech" else ""}")
 			if (utteranceId.isNotBlank()) update(Stage.RECORDING, "Reconnected · sending buffered speech…")
 			else update(Stage.CONNECTING, "Loading conversation…")
 		}
@@ -94,6 +97,7 @@ class CallController(
 		override fun onAudioFrame(frame: VoiceAudioFrame) = onMain { handleOutputAudio(frame) }
 		override fun onRoundTripMillis(milliseconds: Long) = diagnostics.recordRoundTrip(milliseconds)
 		override fun onDisconnected(reason: String) = onMain {
+			AppLog.w(LOG_CONNECTION, "Disconnected: $reason (running=$running stage=${snapshot.stage} speaking=$acceptingOutput)")
 			serverReady = false
 			phoneDevice.close()
 			acceptingOutput = false
@@ -124,6 +128,7 @@ class CallController(
     private val telecom = TelecomVoiceCall(context, object : TelecomVoiceCall.Listener {
         override fun onCallReady() = onMain { telecomReady = true; maybeListen() }
         override fun onCallHeld(held: Boolean) = onMain {
+			AppLog.i(LOG_TELECOM, if (held) "Call put on hold" else "Call resumed from hold")
 			telecomHeld = held
 			if (held) {
 				stopMicrophone()
@@ -137,6 +142,7 @@ class CallController(
         }
 
         override fun onAudioEndpoint(name: String) = onMain {
+            if (name != audioEndpoint) AppLog.i(LOG_TELECOM, "Audio endpoint $audioEndpoint -> $name")
             audioEndpoint = name
             if (snapshot.stage == Stage.LISTENING) update(Stage.LISTENING, "Listening · $name")
         }
@@ -147,8 +153,12 @@ class CallController(
 			publish()
 		}
 
-        override fun onCallEnded() = onMain { if (running) end() }
+        override fun onCallEnded() = onMain {
+			AppLog.i(LOG_TELECOM, "Telecom ended the call (running=$running)")
+			if (running) end()
+		}
         override fun onTelecomUnavailable(message: String) = onMain {
+			AppLog.w(LOG_TELECOM, "Telecom unavailable: $message")
             audioEndpoint = "phone audio"
             telecomReady = true
             update(Stage.CONNECTING, "$message; using phone audio")
@@ -169,6 +179,8 @@ class CallController(
     private var outputSequence = 0L
 	private var outputOpusDecoder: OpusAudioDecoder? = null
 	private var outputPlaybackFormat: VoiceAudioFormat? = null
+	/** Logs only the first dropped frame of a run, not every one. */
+	private var outputDropLogged = false
 	private var outputUtteranceId = ""
 	    @Volatile private var acceptingOutput = false
 		private var listeningEndpointConfig = EndpointConfig(sampleRate = endpointSampleRate, frameSamples = endpointFrameSamples)
@@ -195,6 +207,7 @@ class CallController(
 		outputCompression: AudioCompression = AudioCompression.OPUS_BALANCED,
 	) {
         if (running) end()
+		AppLog.i(LOG_CALL, "Conversation starting: chat=$chatId route=$builtInAudioRoute input=$inputCompression output=$outputCompression")
         running = true
 		diagnostics.reset()
         serverReady = false
@@ -387,6 +400,8 @@ class CallController(
 
     fun end() {
         if (!running) return
+		AppLog.i(LOG_CALL, "Conversation ending at stage ${snapshot.stage}")
+		PhoneSync.get(appContext).requestSoon()
         running = false
         serverReady = false
 		stopMicrophone()
@@ -507,6 +522,8 @@ class CallController(
 					}
 					outputPlaybackFormat = format
 					configureEndpointForOutput(true)
+					AppLog.d(LOG_AUDIO, "Speech ${frame.utteranceId} starting: ${format.sampleRate} Hz via ${audioConfig?.selectedOutputTransport()?.encoding ?: "pcm"} on $audioEndpoint")
+					outputDropLogged = false
                     playback.start(format)
                     update(Stage.SPEAKING, "Koder is speaking…", "")
 					audioConfig?.input?.let { startMicrophone(it, showListeningState = false) }
@@ -515,7 +532,9 @@ class CallController(
             "tts_end" -> {
 				if (acceptingOutput) {
 					val completedUtteranceId = frame.utteranceId
+					AppLog.d(LOG_AUDIO, "Speech $completedUtteranceId ended after $outputSequence frames; draining playback")
 					playback.finish {
+						AppLog.d(LOG_AUDIO, "Speech $completedUtteranceId playback drained")
 						onMain {
 							if (outputUtteranceId != completedUtteranceId) return@onMain
 							acceptingOutput = false
@@ -535,6 +554,7 @@ class CallController(
 				}
             }
             "error" -> {
+				AppLog.w(LOG_CALL, "Server error ${frame.errorCode.ifBlank { "-" }}: ${frame.error.ifBlank { "Voice request failed" }}")
                 acceptingOutput = false
 				outputUtteranceId = ""
 				outputSequence = 0
@@ -557,7 +577,13 @@ class CallController(
 
     @Synchronized
 	private fun handleOutputAudio(frame: VoiceAudioFrame) {
-        if (!running || !acceptingOutput) return
+        if (!running || !acceptingOutput) {
+			if (!outputDropLogged) {
+				outputDropLogged = true
+				AppLog.w(LOG_AUDIO, "Dropping speech audio frame ${frame.sequence}: running=$running acceptingOutput=$acceptingOutput stage=${snapshot.stage}")
+			}
+			return
+		}
 		val config = audioConfig ?: return
 		val expectedKind = if (config.selectedOutputTransport().encoding == VoiceProtocol.OPUS_ENCODING) {
 			VoiceAudioFrameKind.OUTPUT_OPUS
@@ -565,6 +591,7 @@ class CallController(
 			VoiceAudioFrameKind.OUTPUT_PCM
 		}
         if (frame.kind != expectedKind || frame.sequence != outputSequence) {
+			AppLog.w(LOG_AUDIO, "Speech audio out of order: got ${frame.kind} #${frame.sequence}, expected $expectedKind #$outputSequence")
             acceptingOutput = false
             playback.stop()
 			onMain {
@@ -576,6 +603,7 @@ class CallController(
 		val pcm = try {
 			outputOpusDecoder?.decode(frame.payload) ?: frame.payload
 		} catch (error: Exception) {
+			AppLog.e(LOG_AUDIO, "Could not decode speech frame ${frame.sequence}", error)
 			acceptingOutput = false
 			playback.stop()
 			onMain {
@@ -626,6 +654,7 @@ class CallController(
 			microphone.start(format, endpointFrameSamples, object : MicrophoneCapture.Listener {
 				override fun onFrame(samples: ShortArray) = processMicrophoneFrame(format, samples)
 				override fun onCaptureError(message: String) = onMain {
+					AppLog.e(LOG_AUDIO, "Microphone capture failed: $message")
 					captureActive = false
 					update(Stage.ERROR, message)
 				}
@@ -738,6 +767,8 @@ class CallController(
 
     private fun update(stage: Stage, detail: String, partial: String = snapshot.partialTranscript) {
         val previousStage = snapshot.stage
+		if (stage == Stage.ERROR && (previousStage != stage || detail != snapshot.detail)) AppLog.w(LOG_CALL, "Error shown: $detail")
+		else if (stage != previousStage) AppLog.d(LOG_CALL, "$previousStage -> $stage: $detail")
 		when (workingSoundAction(previousStage, stage)) {
 			WorkingSoundAction.KEEP -> Unit
 			WorkingSoundAction.START -> {
@@ -770,3 +801,8 @@ class CallController(
     }
 
 }
+
+private const val LOG_CALL = "call"
+private const val LOG_AUDIO = "audio"
+private const val LOG_CONNECTION = "connection"
+private const val LOG_TELECOM = "telecom"
