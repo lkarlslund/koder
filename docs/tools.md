@@ -91,9 +91,11 @@ An action resource builds its action enum dynamically from the operations that
 survive those checks. This preserves narrow execution-chat policy without
 creating separate model-facing names.
 
-Codex receives the same canonical Koder planning, chat, presentation, and phone
-resources as dynamic tools. Native Codex filesystem, shell, search, and MCP tools
-remain native rather than being duplicated by Koder.
+Codex and Claude Code receive the same canonical Koder planning, chat,
+presentation, and phone resources: Codex as dynamic tools, Claude Code as an MCP
+server named `koder` that Koder hosts over the CLI's own stdio. Their native
+filesystem, shell, search, and MCP tools remain native rather than being
+duplicated by Koder.
 
 ## Compatibility and Safety
 

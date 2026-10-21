@@ -1098,7 +1098,7 @@
         ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, lastWSMessageBytes: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
         tabActivityIcon: null,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
-		showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'overview', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', settingsHealth: {issue_count: 0, needs_setup: false, issues: []}, showBrowserEditor: false, showCodexEditor: false, showObservability: false,
+		showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'overview', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', settingsHealth: {issue_count: 0, needs_setup: false, issues: []}, showBrowserEditor: false, showCodexEditor: false, showClaudeEditor: false, showObservability: false,
 		showPhoneBinding: false, phoneBinding: null, phoneBindingLoading: false, phoneBindingError: '', voiceDevices: [], voiceDevicesLoading: false, voiceDevicesError: '',
         showSessions: false, sessionTypeFilters: {sessions: true, chats: true, voice: true}, sessionStatusFilters: {active: true, starred: false, archived: false}, sessionSearchQuery: '', sessionSearchIDs: null, sessionSearchTimer: null, sessionSearchSeq: 0, sessionSearching: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, folderPicker: {open: false, target: '', path: '', parent: '', folders: [], loading: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         confirmationDialog: {open: false, title: '', message: '', confirmLabel: 'Confirm', danger: false}, confirmationResolver: null,
@@ -3108,6 +3108,7 @@
 		  if (this.browserPreview?.open) return 'browser_preview';
           if (this.showBrowserEditor) return 'browser_settings';
           if (this.showCodexEditor) return 'codex_settings';
+          if (this.showClaudeEditor) return 'claude_settings';
           if (this.showProviderEditor) return 'provider';
           if (this.showModelConfigEditor) return 'model_config';
           if (this.showMCPEditor) return 'mcp';
@@ -4464,7 +4465,7 @@
 		  this.rpc('chat_backends', {}).then(backends => {
 			this.chatCreator.backends = Array.isArray(backends) ? backends : [];
 			this.configureChatCreatorInheritedModel();
-			(this.chatCreatorBackend('codex')?.additional_tools || []).forEach(tool => { this.chatCreator.draft.tool_states[tool.id] = true; });
+			this.chatCreator.backends.forEach(backend => (backend.additional_tools || []).forEach(tool => { this.chatCreator.draft.tool_states[tool.id] = true; }));
 			this.chatCreator.loading = false;
 		  }).catch(err => { this.chatCreator.loading = false; this.chatCreator.error = err.message; });
 		},
@@ -4518,7 +4519,8 @@
 		  const model = this.activeModel();
 		  return provider && model ? `Automatic — ${provider} / ${model}` : 'Automatic model assignment';
 		},
-		codexToolChoices() { return this.chatCreatorBackend('codex')?.additional_tools || []; },
+		externalToolChoices() { return this.chatCreatorBackend(this.chatCreator.draft.backend)?.additional_tools || []; },
+		chatBackendIcon(backend, fallback) { return {codex: 'bi-terminal', claude: 'bi-asterisk'}[backend] || fallback; },
 		createChatFromDraft() {
 		  const draft = this.chatCreator.draft;
 		  const backend = this.chatCreatorBackend(draft.backend);
@@ -4526,7 +4528,7 @@
 		  this.chatCreator.busy = true; this.chatCreator.error = '';
 		  const payload = {...draft, title: String(draft.title || '').trim()};
 		  if (draft.workflow_role !== 'execution') { payload.milestone_key = ''; payload.task_ref = ''; }
-		  if (draft.backend !== 'codex') payload.tool_states = {};
+		  if (draft.backend === 'koder') payload.tool_states = {};
 		  this.rpc('new_chat', payload).then(s => { this.chatCreator.open = false; this.chatCreator.busy = false; this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); this.closeMobileSidebar(); }).catch(err => { this.chatCreator.busy = false; this.chatCreator.error = err.message; });
 		},
 		newChat(role = 'normal') { this.openChatCreator(); if (role === 'voice') this.chatCreator.draft.interaction_mode = 'voice'; },
@@ -4536,7 +4538,7 @@
 		  if (rect) this.newChatMenuPosition = {top: Math.round(rect.bottom + 6) + 'px', right: Math.max(8, Math.round(window.innerWidth - rect.right)) + 'px'};
 		  this.newChatMenuOpen = true;
 		},
-		chatTypeIcon(chat) { if (this.chatArchived(chat)) return 'bi-archive'; if ((chat.interaction_mode || chat.InteractionMode) === 'voice' || (chat.workflow_role || chat.WorkflowRole) === 'voice') return 'bi-mic-fill'; return (chat.backend || chat.Backend) === 'codex' ? 'bi-terminal' : 'bi-chat-left-text'; },
+		chatTypeIcon(chat) { if (this.chatArchived(chat)) return 'bi-archive'; if ((chat.interaction_mode || chat.InteractionMode) === 'voice' || (chat.workflow_role || chat.WorkflowRole) === 'voice') return 'bi-mic-fill'; return this.chatBackendIcon(chat.backend || chat.Backend, 'bi-chat-left-text'); },
         renameChat(chat) {
           const id = this.chatID(chat);
           if (!id) return;
@@ -5809,7 +5811,7 @@
         async closeSettingsDialog() {
           if (this.settingsDirty() && !await this.requestConfirmation({title: 'Discard changes?', message: 'Discard unsaved settings changes?', confirmLabel: 'Discard', danger: true})) return;
 		  this.showSettings = false; this.settings = null; this.settingsBaselineJSON = ''; this.settingsStatus = '';
-		  this.closeBrowserEditor(); this.closeCodexEditor(); this.closeProviderEditor(); this.closeModelDetails(); this.closeModelConfigEditor(); this.closeMCPEditor(); this.closeSkillInspector(); this.reportClientStateSoon();
+		  this.closeBrowserEditor(); this.closeCodexEditor(); this.closeClaudeEditor(); this.closeProviderEditor(); this.closeModelDetails(); this.closeModelConfigEditor(); this.closeMCPEditor(); this.closeSkillInspector(); this.reportClientStateSoon();
         },
         setSettingsState(state) {
           this.settings = state || {};
@@ -5819,6 +5821,7 @@
 		  if (!this.settings.ui.tts) this.settings.ui.tts = {enabled: false, provider_id: '', model_id: '', voice: 'alloy', response_format: 'wav', speed: 1, pcm_sample_rate: 24000};
 		  if (!this.settings.browser) this.settings.browser = {enabled: true, executable: '', headed: true, operation_timeout_seconds: 30, max_tabs_per_chat: 8, max_tabs_global: 32, task_engine: 'obscura', task_decision_provider_id: '', task_decision_model_id: '', task_max_steps: 8};
 		  if (!this.settings.codex) this.settings.codex = {configured: true, enabled: true, executable: 'codex', home: ''};
+		  if (!this.settings.claude) this.settings.claude = {configured: true, enabled: true, executable: 'claude', config_dir: ''};
 		  if (!this.settings.access) this.settings.access = {settings: this.cloneAccessSettings({}), presets: [], global_mounts: []};
 		  if (!Array.isArray(this.settings.access.global_mounts)) this.settings.access.global_mounts = [];
 		  if (!this.settings.skills) this.settings.skills = {items: [], roots: [], disabled_paths: [], catalog_max_chars: 12000};
@@ -5852,7 +5855,7 @@
           return !!(this.settings && this.settingsBaselineJSON && this.settingsSnapshotJSON() !== this.settingsBaselineJSON);
         },
         discardSettingsChanges() {
-		  this.closeBrowserEditor(); this.closeCodexEditor(); this.closeProviderEditor(); this.closeModelConfigEditor(); this.closeMCPEditor(); this.closeSkillInspector();
+		  this.closeBrowserEditor(); this.closeCodexEditor(); this.closeClaudeEditor(); this.closeProviderEditor(); this.closeModelConfigEditor(); this.closeMCPEditor(); this.closeSkillInspector();
           this.settingsLoading = true; this.settingsStatus = ''; this.settingsStatusKind = 'secondary';
           this.rpc('preferences_state', {}).then(state => {
             this.setSettingsState(state);
@@ -5863,7 +5866,7 @@
           }).finally(() => { this.settingsLoading = false; });
         },
 		normalizeSettingsTab(tab) {
-		  return {general: 'overview', providers: 'integrations', codex: 'backends', browser: 'tools', mcp: 'integrations', security: 'voice', tts: 'voice', compaction: 'conversation', thinking: 'conversation'}[tab] || tab || 'overview';
+		  return {general: 'overview', providers: 'integrations', codex: 'backends', claude: 'backends', browser: 'tools', mcp: 'integrations', security: 'voice', tts: 'voice', compaction: 'conversation', thinking: 'conversation'}[tab] || tab || 'overview';
 		},
 		settingsTabs() { return ['overview', 'models', 'integrations', 'backends', 'tools', 'skills', 'memory', 'voice', 'conversation', 'access', 'prompts']; },
         selectSettingsTab(tab) {
@@ -5967,6 +5970,8 @@
 		closeBrowserEditor() { this.showBrowserEditor = false; this.reportClientStateSoon(); },
 		openCodexEditor() { this.showCodexEditor = true; this.reportClientStateSoon(); },
 		closeCodexEditor() { this.showCodexEditor = false; this.reportClientStateSoon(); },
+		openClaudeEditor() { this.showClaudeEditor = true; this.reportClientStateSoon(); },
+		closeClaudeEditor() { this.showClaudeEditor = false; this.reportClientStateSoon(); },
 		openPhoneBinding() {
 			this.showPhoneBinding = true;
 			this.refreshPhoneBinding();
@@ -6913,6 +6918,7 @@
               ui: source.ui,
               browser: source.browser,
 			  codex: source.codex,
+			  claude: source.claude,
               compaction: source.compaction,
               thinking: source.thinking,
               prompts: source.prompts,
@@ -6942,6 +6948,7 @@
             this.settingsStatus = 'Saved settings'; this.settingsStatusKind = 'success';
 			if (closeEditor === 'browser') this.closeBrowserEditor();
 			if (closeEditor === 'codex') this.closeCodexEditor();
+			if (closeEditor === 'claude') this.closeClaudeEditor();
           }).catch(err => { this.settingsStatus = err.message; this.settingsStatusKind = 'danger'; }).finally(() => { this.settingsSaving = false; });
         },
         resetPrompt(target) {

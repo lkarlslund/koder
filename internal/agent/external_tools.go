@@ -5,17 +5,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/chatinteraction"
+	"github.com/lkarlslund/koder/internal/chatrole"
+	"github.com/lkarlslund/koder/internal/claudedriver"
 	"github.com/lkarlslund/koder/internal/codexdriver"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
-// These are Koder capabilities that complement rather than duplicate Codex's
-// native coding, shell, filesystem, search, and MCP tools.
-var codexAdditionalTools = map[tools.ID]struct{}{
+// These are Koder capabilities that complement rather than duplicate the
+// native coding, shell, filesystem, search, and MCP tools of an external agent
+// backend such as Codex or Claude Code.
+var externalAgentTools = map[tools.ID]struct{}{
 	tools.Milestones: {}, tools.Tasks: {},
 	tools.Chats: {}, tools.ChatStatus: {},
 	tools.Sessions:    {},
@@ -25,20 +30,20 @@ var codexAdditionalTools = map[tools.ID]struct{}{
 	tools.PhoneClock: {}, tools.PhoneClipboard: {}, tools.PhoneApps: {}, tools.PhoneMedia: {}, tools.PhoneShare: {}, tools.PhoneOpen: {}, tools.PhonePhotos: {},
 }
 
-// CodexAdditionalToolIDs returns the Koder tools that may complement Codex's
-// native tool set. Availability for a particular role and interaction mode is
-// still enforced when the thread is started and when a call is executed.
-func CodexAdditionalToolIDs() []tools.ID {
-	ids := make([]tools.ID, 0, len(codexAdditionalTools))
+// ExternalAgentToolIDs returns the Koder tools that may complement an external
+// agent's native tool set. Availability for a particular role and interaction
+// mode is still enforced when the agent starts and when a call is executed.
+func ExternalAgentToolIDs() []tools.ID {
+	ids := make([]tools.ID, 0, len(externalAgentTools))
 	for _, toolID := range tools.RegisteredIDs() {
-		if _, ok := codexAdditionalTools[toolID]; ok {
+		if _, ok := externalAgentTools[toolID]; ok {
 			ids = append(ids, toolID)
 		}
 	}
 	return slices.Clone(ids)
 }
 
-func (e *Engine) codexToolDefinitions(ctx context.Context, rt *chatpkg.Chat) ([]codexdriver.DynamicTool, error) {
+func (e *Engine) externalToolDefinitions(ctx context.Context, rt *chatpkg.Chat) ([]provider.ToolDefinition, error) {
 	if e == nil || e.toolsRuntime == nil {
 		return nil, fmt.Errorf("koder tool runtime is unavailable")
 	}
@@ -46,37 +51,19 @@ func (e *Engine) codexToolDefinitions(ctx context.Context, rt *chatpkg.Chat) ([]
 	if err != nil {
 		return nil, err
 	}
-	var definitions []codexdriver.DynamicTool
+	var definitions []provider.ToolDefinition
 	for _, id := range tools.RegisteredIDs() {
-		if _, allowed := codexAdditionalTools[id]; !allowed {
+		if _, allowed := externalAgentTools[id]; !allowed {
 			continue
 		}
-		definition, ok := codexAdditionalToolDefinition(id, runtime)
-		if !ok {
-			continue
+		if definition, ok := tools.DefinitionFor(id, runtime); ok {
+			definitions = append(definitions, definition)
 		}
-		definitions = append(definitions, definition)
 	}
 	return definitions, nil
 }
 
-func codexAdditionalToolDefinition(id tools.ID, runtime tools.Runtime) (codexdriver.DynamicTool, bool) {
-	if _, allowed := codexAdditionalTools[id]; !allowed {
-		return codexdriver.DynamicTool{}, false
-	}
-	definition, ok := tools.DefinitionFor(id, runtime)
-	if !ok {
-		return codexdriver.DynamicTool{}, false
-	}
-	return codexdriver.DynamicTool{
-		Type:        "function",
-		Name:        definition.Function.Name,
-		Description: definition.Function.Description,
-		InputSchema: append(json.RawMessage(nil), definition.Function.Parameters...),
-	}, true
-}
-
-func (e *Engine) codexToolCall(ctx context.Context, rt *chatpkg.Chat, name, callID string, arguments json.RawMessage) (domain.ToolResult, error) {
+func (e *Engine) externalToolCall(ctx context.Context, rt *chatpkg.Chat, name, callID string, arguments json.RawMessage) (domain.ToolResult, error) {
 	if e == nil || e.toolsRuntime == nil {
 		return domain.ToolResult{}, fmt.Errorf("koder tool runtime is unavailable")
 	}
@@ -90,8 +77,8 @@ func (e *Engine) codexToolCall(ctx context.Context, rt *chatpkg.Chat, name, call
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
-	if _, ok := codexAdditionalTools[request.Tool]; !ok {
-		return domain.ToolResult{}, fmt.Errorf("%s is not an enabled Koder addition for Codex", request.Tool)
+	if _, ok := externalAgentTools[request.Tool]; !ok {
+		return domain.ToolResult{}, fmt.Errorf("%s is not an enabled Koder addition for external agents", request.Tool)
 	}
 	e.toolsRuntime.ToolExecutionStarted(ctx, rt, request)
 	result, err := tools.Call(ctx, tools.Options{Runtime: runtime, Request: request})
@@ -104,12 +91,51 @@ func (e *Engine) codexToolCall(ctx context.Context, rt *chatpkg.Chat, name, call
 	return finalized, err
 }
 
+// externalAgentInstructions are the Koder instructions an external agent
+// receives on top of its own: the chat's workflow role and interaction mode.
+func externalAgentInstructions(_ domain.Session, chatRecord domain.Chat) string {
+	parts := []string{
+		strings.TrimSpace(chatrole.SystemPromptForChat(chatRecord)),
+		strings.TrimSpace(chatinteraction.SystemPrompt(chatRecord.EffectiveInteractionMode())),
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
 type codexToolBridge struct{ engine *Engine }
 
 func (b codexToolBridge) Definitions(ctx context.Context, rt *chatpkg.Chat) ([]codexdriver.DynamicTool, error) {
-	return b.engine.codexToolDefinitions(ctx, rt)
+	definitions, err := b.engine.externalToolDefinitions(ctx, rt)
+	out := make([]codexdriver.DynamicTool, 0, len(definitions))
+	for _, definition := range definitions {
+		out = append(out, codexdriver.DynamicTool{
+			Type:        "function",
+			Name:        definition.Function.Name,
+			Description: definition.Function.Description,
+			InputSchema: append(json.RawMessage(nil), definition.Function.Parameters...),
+		})
+	}
+	return out, err
 }
 
 func (b codexToolBridge) Call(ctx context.Context, rt *chatpkg.Chat, name, callID string, arguments json.RawMessage) (domain.ToolResult, error) {
-	return b.engine.codexToolCall(ctx, rt, name, callID, arguments)
+	return b.engine.externalToolCall(ctx, rt, name, callID, arguments)
+}
+
+type claudeToolBridge struct{ engine *Engine }
+
+func (b claudeToolBridge) Definitions(ctx context.Context, rt *chatpkg.Chat) ([]claudedriver.Tool, error) {
+	definitions, err := b.engine.externalToolDefinitions(ctx, rt)
+	out := make([]claudedriver.Tool, 0, len(definitions))
+	for _, definition := range definitions {
+		out = append(out, claudedriver.Tool{
+			Name:        definition.Function.Name,
+			Description: definition.Function.Description,
+			InputSchema: append(json.RawMessage(nil), definition.Function.Parameters...),
+		})
+	}
+	return out, err
+}
+
+func (b claudeToolBridge) Call(ctx context.Context, rt *chatpkg.Chat, name, callID string, arguments json.RawMessage) (domain.ToolResult, error) {
+	return b.engine.externalToolCall(ctx, rt, name, callID, arguments)
 }

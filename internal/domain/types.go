@@ -437,8 +437,9 @@ func (r WorkflowRole) String() string {
 type ChatBackend string
 
 const (
-	ChatBackendKoder ChatBackend = "koder"
-	ChatBackendCodex ChatBackend = "codex"
+	ChatBackendKoder  ChatBackend = "koder"
+	ChatBackendCodex  ChatBackend = "codex"
+	ChatBackendClaude ChatBackend = "claude"
 )
 
 func (b ChatBackend) String() string { return string(b) }
@@ -455,7 +456,7 @@ func (b ChatBackend) OrDefault() ChatBackend {
 // Validate rejects backends Koder cannot run. An empty backend means Koder.
 func (b ChatBackend) Validate() error {
 	switch b.OrDefault() {
-	case ChatBackendKoder, ChatBackendCodex:
+	case ChatBackendKoder, ChatBackendCodex, ChatBackendClaude:
 		return nil
 	default:
 		return fmt.Errorf("chat backend %q is not supported", b)
@@ -463,8 +464,8 @@ func (b ChatBackend) Validate() error {
 }
 
 // UsesKoderModels reports whether chats on this backend run on Koder's
-// configured providers and models. Codex picks its own model and has no
-// Koder provider.
+// configured providers and models. Codex and Claude Code pick their own
+// models and have no Koder provider.
 func (b ChatBackend) UsesKoderModels() bool {
 	return b.OrDefault() == ChatBackendKoder
 }

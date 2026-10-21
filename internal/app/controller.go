@@ -326,6 +326,7 @@ type PreferencesState struct {
 	Browser        NativeBrowserPreferences `json:"browser"`
 	BrowserRuntime browserapi.Status        `json:"browser_runtime"`
 	Codex          CodexPreferences         `json:"codex"`
+	Claude         ClaudePreferences        `json:"claude"`
 	Health         SettingsHealth           `json:"health"`
 	RestartKeys    []string                 `json:"restart_keys,omitempty"`
 }
@@ -413,6 +414,13 @@ type CodexPreferences struct {
 	Enabled    bool   `json:"enabled"`
 	Executable string `json:"executable"`
 	Home       string `json:"home"`
+}
+
+type ClaudePreferences struct {
+	Configured bool   `json:"configured"`
+	Enabled    bool   `json:"enabled"`
+	Executable string `json:"executable"`
+	ConfigDir  string `json:"config_dir"`
 }
 
 // GeneralPreferences contains global non-provider settings.
@@ -701,24 +709,33 @@ func (c *Controller) ChatBackends(ctx context.Context) []ChatBackendState {
 			})
 		}
 	}
-	states := []ChatBackendState{koder}
+	// Each external backend starts a discovery process; probe them together.
+	var codex, claude ChatBackendState
+	var probes sync.WaitGroup
+	probes.Go(func() { codex = c.codexBackendState(ctx, permissions) })
+	probes.Go(func() { claude = c.claudeBackendState(ctx, permissions) })
+	probes.Wait()
+	return []ChatBackendState{koder, codex, claude}
+}
+
+func (c *Controller) codexBackendState(ctx context.Context, permissions []ChatPermissionOption) ChatBackendState {
 	codex := ChatBackendState{ID: domain.ChatBackendCodex, Label: "Codex", PermissionProfiles: permissions}
-	for _, toolID := range agent.CodexAdditionalToolIDs() {
+	for _, toolID := range agent.ExternalAgentToolIDs() {
 		spec := tools.Info(toolID)
 		codex.AdditionalTools = append(codex.AdditionalTools, ChatCreationToolOption{ID: string(toolID), Label: spec.Title, Description: spec.Description})
 	}
 	if c == nil || !c.cfg.Codex.Enabled {
 		codex.Detail = "Disabled in Koder configuration"
-		return append(states, codex)
+		return codex
 	}
 	if c.agent == nil {
 		codex.Detail = "Koder agent is unavailable"
-		return append(states, codex)
+		return codex
 	}
 	models, err := c.agent.CodexModels(ctx)
 	if err != nil {
 		codex.Detail = err.Error()
-		return append(states, codex)
+		return codex
 	}
 	codex.Available = true
 	for _, model := range models {
@@ -742,7 +759,45 @@ func (c *Controller) ChatBackends(ctx context.Context) []ChatBackendState {
 		codex.Available = false
 		codex.Detail = "Codex returned no usable models"
 	}
-	return append(states, codex)
+	return codex
+}
+
+func (c *Controller) claudeBackendState(ctx context.Context, permissions []ChatPermissionOption) ChatBackendState {
+	claude := ChatBackendState{ID: domain.ChatBackendClaude, Label: "Claude Code", PermissionProfiles: permissions}
+	for _, toolID := range agent.ExternalAgentToolIDs() {
+		spec := tools.Info(toolID)
+		claude.AdditionalTools = append(claude.AdditionalTools, ChatCreationToolOption{ID: string(toolID), Label: spec.Title, Description: spec.Description})
+	}
+	if c == nil || !c.cfg.Claude.Enabled {
+		claude.Detail = "Disabled in Koder configuration"
+		return claude
+	}
+	if c.agent == nil {
+		claude.Detail = "Koder agent is unavailable"
+		return claude
+	}
+	models, err := c.agent.ClaudeModels(ctx)
+	if err != nil {
+		claude.Detail = err.Error()
+		return claude
+	}
+	for _, model := range models {
+		if strings.TrimSpace(model.Value) == "" {
+			continue
+		}
+		claude.Models = append(claude.Models, ChatBackendModelOption{
+			ID:               model.Value,
+			Name:             model.DisplayName,
+			Description:      model.Description,
+			ReasoningEfforts: append([]string(nil), model.SupportedEffortLevels...),
+			Default:          model.Value == "default",
+		})
+	}
+	claude.Available = len(claude.Models) > 0
+	if !claude.Available {
+		claude.Detail = "Claude Code returned no models"
+	}
+	return claude
 }
 
 func (c *Controller) validateChatModelAvailable(ctx context.Context, chatRecord domain.Chat) error {

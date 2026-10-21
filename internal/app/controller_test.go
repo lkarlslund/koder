@@ -435,8 +435,11 @@ func TestChatBackendsExposeConfiguredCreationPolicy(t *testing.T) {
 	cfg.Permissions.Profiles["careful"] = config.PermissionProfile{Network: false, Root: "readonly", Workspace: "readonly"}
 	controller := &Controller{cfg: cfg}
 	backends := controller.ChatBackends(context.Background())
-	if len(backends) != 2 {
-		t.Fatalf("expected two backend options, got %#v", backends)
+	if len(backends) != 3 || backends[2].ID != domain.ChatBackendClaude {
+		t.Fatalf("expected Koder, Codex, and Claude backend options, got %#v", backends)
+	}
+	if len(backends[2].AdditionalTools) != len(backends[1].AdditionalTools) {
+		t.Fatalf("Claude and Codex should offer the same Koder additions: %#v", backends[2].AdditionalTools)
 	}
 	var foundProfile bool
 	for _, profile := range backends[0].PermissionProfiles {

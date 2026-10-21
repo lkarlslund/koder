@@ -392,6 +392,10 @@ func (c *Controller) SavePreferences(ctx context.Context, prefs PreferencesState
 		c.mu.Unlock()
 		return PreferencesState{}, err
 	}
+	if err := applyClaudePreferences(&next, prefs.Claude); err != nil {
+		c.mu.Unlock()
+		return PreferencesState{}, err
+	}
 	if err := applyCompactionPreferences(&next, prefs.Compaction); err != nil {
 		c.mu.Unlock()
 		return PreferencesState{}, err
@@ -1341,6 +1345,7 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 		Browser:        nativeBrowserPreferencesFromConfig(c.cfg.Browser),
 		BrowserRuntime: nativeBrowserRuntimeState(c.agent),
 		Codex:          codexPreferencesFromConfig(c.cfg.Codex),
+		Claude:         claudePreferencesFromConfig(c.cfg.Claude),
 		Health:         c.settingsHealthLocked(),
 	}
 	for idx := range state.ModelConfigs {
@@ -1363,6 +1368,22 @@ func applyCodexPreferences(cfg *config.Config, prefs CodexPreferences) error {
 		return fmt.Errorf("codex home must be an absolute path")
 	}
 	cfg.Codex = config.Codex{Enabled: prefs.Enabled, Executable: strings.TrimSpace(prefs.Executable), Home: home}
+	return nil
+}
+
+func claudePreferencesFromConfig(cfg config.Claude) ClaudePreferences {
+	return ClaudePreferences{Configured: true, Enabled: cfg.Enabled, Executable: cfg.Executable, ConfigDir: cfg.ConfigDir}
+}
+
+func applyClaudePreferences(cfg *config.Config, prefs ClaudePreferences) error {
+	if !prefs.Configured {
+		return nil
+	}
+	configDir := strings.TrimSpace(prefs.ConfigDir)
+	if configDir != "" && !filepath.IsAbs(configDir) {
+		return fmt.Errorf("claude configuration directory must be an absolute path")
+	}
+	cfg.Claude = config.Claude{Enabled: prefs.Enabled, Executable: strings.TrimSpace(prefs.Executable), ConfigDir: configDir}
 	return nil
 }
 
@@ -2304,6 +2325,18 @@ func (c *Controller) settingsHealthLocked() SettingsHealth {
 		}
 		if _, err := exec.LookPath("bwrap"); err != nil {
 			add("backends", "codex", "codex-sandbox", "error", "Codex is enabled but bubblewrap (bwrap) was not found")
+		}
+	}
+	if c.cfg.Claude.Enabled {
+		executable := strings.TrimSpace(c.cfg.Claude.Executable)
+		if executable == "" {
+			executable = "claude"
+		}
+		if _, err := exec.LookPath(executable); err != nil {
+			add("backends", "claude", "claude", "error", "Claude Code is enabled but its executable was not found")
+		}
+		if _, err := exec.LookPath("bwrap"); err != nil {
+			add("backends", "claude", "claude-sandbox", "error", "Claude Code is enabled but bubblewrap (bwrap) was not found")
 		}
 	}
 

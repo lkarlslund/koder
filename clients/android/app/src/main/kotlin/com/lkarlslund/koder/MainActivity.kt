@@ -2162,7 +2162,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			orientation = LinearLayout.VERTICAL
 			addView(label("Koder additions"), spaced(top = 12))
 			addView(toolContainer)
-			addView(helper("Codex keeps its native tools. These Koder capabilities can be disabled for this conversation."), spaced(top = 4))
+			addView(helper("Codex and Claude Code keep their native tools. These Koder capabilities can be disabled for this conversation."), spaced(top = 4))
 		}
 		val toolChecks = linkedMapOf<String, CheckBox>()
 		val roles = listOf("orchestrator", "planning", "execution", "standalone")

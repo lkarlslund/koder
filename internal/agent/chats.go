@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/claudedriver"
 	"github.com/lkarlslund/koder/internal/codexapp"
 	"github.com/lkarlslund/koder/internal/domain"
 )
@@ -15,6 +16,14 @@ func (e *Engine) CodexModels(ctx context.Context) ([]codexapp.Model, error) {
 		return nil, fmt.Errorf("codex backend is disabled")
 	}
 	return e.codex.Models(ctx)
+}
+
+// ClaudeModels probes Claude Code and returns the models it offers.
+func (e *Engine) ClaudeModels(ctx context.Context) ([]claudedriver.Model, error) {
+	if e == nil || !e.cfg.Claude.Enabled || e.claude == nil {
+		return nil, fmt.Errorf("claude backend is disabled")
+	}
+	return e.claude.Models(ctx)
 }
 
 func (e *Engine) Chat(ctx context.Context, session domain.Session, chatRecord domain.Chat) (*chatpkg.Chat, error) {
@@ -47,6 +56,11 @@ func (e *Engine) DriverForChat(chatRecord domain.Chat) chatpkg.TurnDriver {
 	case domain.ChatBackendCodex:
 		if e != nil && e.cfg.Codex.Enabled && e.codex != nil {
 			return e.codex
+		}
+		return nil
+	case domain.ChatBackendClaude:
+		if e != nil && e.cfg.Claude.Enabled && e.claude != nil {
+			return e.claude
 		}
 		return nil
 	default:

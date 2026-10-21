@@ -15,8 +15,8 @@ import (
 	"github.com/lkarlslund/koder/internal/browser"
 	"github.com/lkarlslund/koder/internal/browserapi"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
-	"github.com/lkarlslund/koder/internal/chatinteraction"
 	"github.com/lkarlslund/koder/internal/chatrole"
+	"github.com/lkarlslund/koder/internal/claudedriver"
 	"github.com/lkarlslund/koder/internal/codexapp"
 	"github.com/lkarlslund/koder/internal/codexdriver"
 	"github.com/lkarlslund/koder/internal/config"
@@ -60,6 +60,7 @@ type Engine struct {
 	toolsRuntime *toolruntime.Runtime
 	browser      *browser.Manager
 	codex        *codexdriver.Manager
+	claude       *claudedriver.Manager
 	registry     *sessionpkg.Registry
 	retryPause   func(context.Context, time.Duration, func(time.Duration)) error
 }
@@ -143,13 +144,13 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		},
 		StateDir: cfg.StateDir(),
 		Access:   settingsStore.Access,
-	}), st, func(_ domain.Session, chatRecord domain.Chat) string {
-		parts := []string{
-			strings.TrimSpace(chatrole.SystemPromptForChat(chatRecord)),
-			strings.TrimSpace(chatinteraction.SystemPrompt(chatRecord.EffectiveInteractionMode())),
-		}
-		return strings.TrimSpace(strings.Join(parts, "\n\n"))
-	})
+	}), st, externalAgentInstructions)
+	e.claude = claudedriver.New(claudedriver.NewSandboxProcessFactory(claudedriver.SandboxProcessConfig{
+		Executable: cfg.Claude.Executable,
+		ConfigDir:  cfg.Claude.ConfigDir,
+		StateDir:   cfg.StateDir(),
+		Access:     settingsStore.Access,
+	}), st, externalAgentInstructions)
 	e.Runtime = modelruntime.New(modelruntime.Config{
 		Config:   cfg,
 		Store:    st,
@@ -188,6 +189,9 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 	e.SetToolsRuntime(e.toolsRuntime)
 	if e.codex != nil {
 		e.codex.SetToolBridge(codexToolBridge{engine: e})
+	}
+	if e.claude != nil {
+		e.claude.SetToolBridge(claudeToolBridge{engine: e})
 	}
 	return e
 }
@@ -251,6 +255,16 @@ func (e *Engine) updateConfig(cfg config.Config, connectMCPAsync bool) error {
 			Access:   e.settings.Access,
 		})); err != nil {
 			slog.Warn("stop stale Codex chat processes after configuration change", "error", err)
+		}
+	}
+	if e.claude != nil {
+		if err := e.claude.UpdateProcessFactory(claudedriver.NewSandboxProcessFactory(claudedriver.SandboxProcessConfig{
+			Executable: cfg.Claude.Executable,
+			ConfigDir:  cfg.Claude.ConfigDir,
+			StateDir:   cfg.StateDir(),
+			Access:     e.settings.Access,
+		})); err != nil {
+			slog.Warn("stop stale Claude chat processes after configuration change", "error", err)
 		}
 	}
 	if e.mcp != nil {

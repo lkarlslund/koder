@@ -2210,8 +2210,11 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(document, `x-show="showSettings && showBrowserEditor"`) ||
 		!strings.Contains(document, `@click="openCodexEditor()"`) ||
 		!strings.Contains(document, `x-show="showSettings && showCodexEditor"`) ||
+		!strings.Contains(document, `@click="openClaudeEditor()"`) ||
+		!strings.Contains(document, `x-show="showSettings && showClaudeEditor"`) ||
+		!strings.Contains(appJS, `claude: source.claude,`) ||
 		strings.Contains(document, `Browser tools</span>`) {
-		t.Fatalf("expected separate integrations and skills tabs plus row-based Browser and Codex configuration")
+		t.Fatalf("expected separate integrations and skills tabs plus row-based Browser, Codex, and Claude configuration")
 	}
 	if !strings.Contains(fullPage, `x-effect="renderTimelineMarkdownElement($el, item, item.content?.text || '', itemMarkdownOptions(item))"`) {
 		t.Fatalf("expected assistant text to render through item-aware timeline markdown element renderer")

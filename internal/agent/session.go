@@ -35,20 +35,37 @@ func (e *Engine) sessionRegistryConfig(defaults settings.NewSessionDefaults) ses
 		if backend == domain.ChatBackendCodex && (e == nil || !e.cfg.Codex.Enabled) {
 			return fmt.Errorf("codex backend is disabled")
 		}
+		if backend == domain.ChatBackendClaude && (e == nil || !e.cfg.Claude.Enabled) {
+			return fmt.Errorf("claude backend is disabled")
+		}
 		return nil
 	}
-	if e != nil && e.codex != nil {
+	if e != nil {
+		// Each driver ignores chats on other backends.
 		cfg.BeforeChatUpdate = func(ctx context.Context, before domain.Chat, update chattool.UpdateRequest) error {
-			return e.codex.UpdateChat(ctx, before, update.Title, update.Archived)
+			return errors.Join(
+				e.codex.UpdateChat(ctx, before, update.Title, update.Archived),
+				e.claude.UpdateChat(ctx, before, update.Title, update.Archived),
+			)
 		}
-		cfg.BeforeChatDelete = e.codex.DeleteChat
+		cfg.BeforeChatDelete = func(ctx context.Context, chatRecord domain.Chat) error {
+			return errors.Join(e.codex.DeleteChat(ctx, chatRecord), e.claude.DeleteChat(ctx, chatRecord))
+		}
 	}
 	return cfg
 }
 
 func (e *Engine) prepareChatCreateSpec(ctx context.Context, spec domain.ChatCreateSpec) (domain.ChatCreateSpec, error) {
 	spec = spec.Normalized()
-	if spec.Backend != domain.ChatBackendCodex || strings.TrimSpace(spec.ModelID) != "" {
+	if strings.TrimSpace(spec.ModelID) != "" {
+		return spec, nil
+	}
+	if spec.Backend == domain.ChatBackendClaude {
+		// Claude Code's "default" model follows the account's recommendation.
+		spec.ModelID = "default"
+		return spec, nil
+	}
+	if spec.Backend != domain.ChatBackendCodex {
 		return spec, nil
 	}
 	models, err := e.CodexModels(ctx)
@@ -260,16 +277,9 @@ func (e *Engine) Shutdown(ctx context.Context, reason chat.CancelReason) error {
 	if e.mcp != nil {
 		mcpErr = e.mcp.Close()
 	}
-	if e.registry == nil {
-		if e.codex != nil {
-			return errors.Join(browserErr, mcpErr, e.codex.Close())
-		}
-		return errors.Join(browserErr, mcpErr)
+	var registryErr error
+	if e.registry != nil {
+		registryErr = e.registry.Shutdown(ctx, reason)
 	}
-	registryErr := e.registry.Shutdown(ctx, reason)
-	var codexErr error
-	if e.codex != nil {
-		codexErr = e.codex.Close()
-	}
-	return errors.Join(browserErr, mcpErr, registryErr, codexErr)
+	return errors.Join(browserErr, mcpErr, registryErr, e.codex.Close(), e.claude.Close())
 }

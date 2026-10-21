@@ -93,6 +93,15 @@ com.lkarlslund.koder.voice.VoiceConnectionInstrumentedTest
 Prefer a class or single test selector during development. Use the three-device
 compatibility group only for layout, API-level, or device-compatibility risks.
 
+For Claude Code backend changes, drive the installed `claude` CLI through real
+turns: a Koder tool call, a Bash call, resume after a process restart, and an
+interrupt. It runs without the sandbox on the account's own login and spends a
+few cheap model calls:
+
+```sh
+KODER_CLAUDE_LIVE=1 go test ./internal/claudedriver -run TestLiveClaudeCode -count=1
+```
+
 For managed-browser launch or sandbox changes, run the local Chromium flow:
 
 ```sh

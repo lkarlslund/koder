@@ -115,6 +115,15 @@ type Codex struct {
 	Home       string `toml:"home"`
 }
 
+// Claude configures the per-chat Claude Code turn backend. Every chat shares
+// the credentials in the OS account's Claude Code configuration unless
+// ConfigDir selects another CLAUDE_CONFIG_DIR.
+type Claude struct {
+	Enabled    bool   `toml:"enabled"`
+	Executable string `toml:"executable"`
+	ConfigDir  string `toml:"config_dir"`
+}
+
 type Provider struct {
 	TemplateID              string            `toml:"template_id"`
 	Kind                    string            `toml:"kind"`
@@ -205,6 +214,7 @@ type Config struct {
 	Thinking         Thinking                `toml:"thinking"`
 	Browser          Browser                 `toml:"browser"`
 	Codex            Codex                   `toml:"codex"`
+	Claude           Claude                  `toml:"claude"`
 	path             string
 	configDir        string
 	stateDir         string
@@ -317,6 +327,9 @@ func LoadWithOptions(opts LoadOptions) (Config, error) {
 	if !strings.Contains(string(data), "[codex]") {
 		cfg.Codex = Default().Codex
 	}
+	if !strings.Contains(string(data), "[claude]") {
+		cfg.Claude = Default().Claude
+	}
 	cfg.configDir = paths.configDir
 	cfg.stateDir = paths.stateDir
 	cfg.cacheDir = paths.cacheDir
@@ -354,6 +367,7 @@ func Default() Config {
 			TaskMaxSteps:     defaultBrowserTaskMaxSteps,
 		},
 		Codex:      Codex{Enabled: true, Executable: "codex"},
+		Claude:     Claude{Enabled: true, Executable: "claude"},
 		Providers:  map[string]Provider{},
 		Models:     []ModelConfig{},
 		MCPServers: map[string]MCPServer{},
@@ -423,6 +437,10 @@ func (c *Config) applyDefaults() {
 	c.Codex.Executable = strings.TrimSpace(c.Codex.Executable)
 	if c.Codex.Executable == "" {
 		c.Codex.Executable = def.Codex.Executable
+	}
+	c.Claude.Executable = strings.TrimSpace(c.Claude.Executable)
+	if c.Claude.Executable == "" {
+		c.Claude.Executable = def.Claude.Executable
 	}
 	if c.MaxToolLoopSteps <= 0 {
 		c.MaxToolLoopSteps = def.MaxToolLoopSteps

@@ -31,7 +31,7 @@ Before opening a live WebSocket, native clients use the authenticated session
 and chat endpoints:
 
 - `GET /voice/v1/sessions` lists normal Koder sessions in `sessions`, live
-  `chat_backends` (including Codex models and availability), and an optional
+  `chat_backends` (including Codex and Claude Code models and availability), and an optional
   signed Android update;
 - `GET /voice/v1/sessions/<session-id>/chats` lists every chat in a session.
   Clients show ordinary chats as context but only select chats whose

@@ -14,7 +14,8 @@ session or agent. It is one way the user interacts with a normal chat.
 
 Every newly created chat stores these independent choices:
 
-- **Backend**: who executes each turn (`koder`, `codex`, or a future driver).
+- **Backend**: who executes each turn (`koder`, `codex`, `claude`, or a future
+  driver).
 - **Workflow role**: what the chat is responsible for (`orchestrator`,
   `planning`, `execution`, `general`, or `standalone`).
 - **Interaction mode**: how input and output are adapted (`text` or `voice`).
@@ -22,8 +23,8 @@ Every newly created chat stores these independent choices:
 - **Optional scope**: one milestone or one task for a focused execution chat.
 - **Tool states**: per-chat switches for optional tools.
 
-This permits Koder + voice and Codex + voice without implementing a separate
-voice agent. It also permits a Codex orchestrator and a Koder execution chat.
+This permits Koder + voice, Codex + voice, and Claude Code + voice without
+implementing a separate voice agent. It also permits a Codex orchestrator and a Koder execution chat.
 The role controls which Koder tools are offered regardless of backend.
 
 Legacy records with the old composite `voice` role are normalized to an
@@ -41,18 +42,20 @@ At the start of a turn it resolves the chat's backend to a turn driver:
 browser / Android / `chats` with `action=send`
               |
               v
-       persistent chat actor
-       /                   \
-Koder native driver     Codex app-server driver
-       \                   /
-        canonical Koder timeline
+              persistent chat actor
+       /               |                \
+Koder native    Codex app-server    Claude Code
+   driver           driver        stream-json driver
+       \               |                /
+            canonical Koder timeline
               |
        Web UI / voice rendering
 ```
 
 `NativeTurnDriver` adapts the existing Koder provider/tool loop. The Codex
 driver supervises one `codex app-server --stdio` process per hydrated Codex
-chat. Adding another backend requires a driver and backend discovery option;
+chat, and the Claude driver one `claude -p --input-format stream-json` process
+per hydrated Claude chat. Adding another backend requires a driver and backend discovery option;
 it does not require a new session type, transcript format, or client protocol.
 
 The driver emits the same domain events used by native turns. Consequently
@@ -85,6 +88,32 @@ permission profiles to both chat creators. Users can disable additions per
 chat, and Koder rechecks role, interaction, and permission policy when a call
 executes.
 
+## Claude Code equivalence
+
+A Claude-backed chat works the same way through Claude Code's stream-json mode,
+the protocol its Agent SDKs use. Koder starts a new Claude Code session with a
+session id it chooses, stores the chat-to-session binding once Claude Code has
+seen a message, and resumes that session with `--resume` whenever it starts the
+chat's process again. A session that can no longer be resumed is replaced by a
+new one with a warning in the log, rather than leaving the chat unusable.
+
+Streamed text and thinking, Claude Code's own tool calls (Bash, Read, Edit,
+Write, Glob, Grep, WebFetch, WebSearch, and others), their results, and turn
+errors become canonical timeline items. Tools without a Koder equivalent show
+as MCP calls of a `claude` server; subagent output stays inside the subagent.
+
+Koder's additions reach Claude Code as an SDK-hosted MCP server named `koder`:
+Claude Code sends the MCP messages for it as control requests over its own
+stdout, and Koder answers on stdin. No socket or network is involved, so the
+tools also work in a session without network. Claude Code calls them
+`mcp__koder__<tool>`.
+
+Cancelling a turn sends Claude Code an interrupt and waits for it to finish the
+turn. A process that does not stop in time is discarded, so a late result can
+never end the next turn. Claude Code has no thread title, so renames stay in
+Koder; archiving stops the process, and deleting removes the binding and the
+chat's private configuration, including its session.
+
 ## External-agent isolation
 
 Koder treats an external agent process as untrusted execution even when that
@@ -99,9 +128,19 @@ agent may operate autonomously. Each Codex chat therefore has:
 - a policy fingerprint that restarts the process before the next turn whenever
   effective access settings change.
 
+Each Claude chat is isolated the same way. It has its own `claude` process and
+a private `CLAUDE_CONFIG_DIR`, and runs inside the session's bubblewrap policy
+with `--permission-mode bypassPermissions`. Only the account's
+`.credentials.json` is bound into the private directory. Claude Code rewrites
+that file in place when it refreshes a token, so every chat and the account
+itself keep using the newest token. The account's history, settings, hooks,
+and other sessions stay out of reach. The process fingerprint covers the model,
+the Koder instructions, and the offered Koder tools as well as the sandbox, so
+changing any of them restarts the process and resumes the session.
+
 Processes start lazily, stop after an idle period, and are stopped immediately
-when a chat is archived or deleted, Koder shuts down, or Codex configuration is
-changed. Deleting a chat also removes its private Codex home. Koder uses a
+when a chat is archived or deleted, Koder shuts down, or the backend's
+configuration is changed. Deleting a chat also removes its private Codex home. Koder uses a
 short-lived discovery process for the model catalog; it is not shared with a
 chat.
 
@@ -140,6 +179,6 @@ backend to the calling chat, so either an ordinary or Codex orchestrator can
 create a peer on either backend. `chats` with `action=list` returns backend and interaction
 metadata so an orchestrator can choose an appropriate existing chat.
 
-Backend discovery is live. Opening a creator probes Codex app-server for its
-current model catalog; a disabled, missing, or unhealthy backend remains
+Backend discovery is live. Opening a creator probes Codex app-server and Claude
+Code (through its initialize handshake) for their current model catalogs; a disabled, missing, or unhealthy backend remains
 visible with its error but cannot be selected.

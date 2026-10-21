@@ -40,7 +40,7 @@ Android Core-Telecom call
   -> authenticated voice.v1 WebSocket
   -> remote OpenAI-compatible STT
   -> normal persistent chat with voice interaction behavior
-  -> Koder-native or Codex turn driver
+  -> Koder-native, Codex, or Claude Code turn driver
   -> optional permission-gated tool call to the connected Android phone
   -> standard tools, including native chat coordination
   -> optional sibling chat and its normal tools
@@ -125,6 +125,8 @@ mechanics; the role prompt only defines the generic conversational behavior.
   remains outside the driver.
 - `internal/codexapp` and `internal/codexdriver` supervise Codex app-server and
   adapt its durable threads and events to normal Koder chats.
+- `internal/claudeapp` and `internal/claudedriver` do the same for Claude Code's
+  stream-json mode and its sessions.
 - `internal/voiceapi` owns HTTP/WebSocket authentication and `voice.v1` wire
   DTOs.
 - `internal/app/voice.go` adapts the controller, sessions, providers, chat
