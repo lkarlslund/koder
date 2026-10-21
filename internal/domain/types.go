@@ -116,6 +116,8 @@ const (
 	ToolKindPhonePhotosThumbs   ToolKind = "phone_photos_thumbs"
 	ToolKindPhonePhotoView      ToolKind = "phone_photo_view"
 	ToolKindPhonePhotoTransfer  ToolKind = "phone_photo_transfer"
+	ToolKindPhoneLogs           ToolKind = "phone_logs"
+	ToolKindPhoneAlerts         ToolKind = "phone_alerts"
 	ToolKindPresent             ToolKind = "present"
 	ToolKindPresentContentOld   ToolKind = "present_content_legacy"
 	ToolKindSkill               ToolKind = "skill"
@@ -243,7 +245,7 @@ var builtinToolKinds = []ToolKind{
 	ToolKindPhonePhotosSearch,
 	ToolKindPhonePhotosThumbs,
 	ToolKindPhonePhotoView,
-	ToolKindPhonePhotoTransfer,
+	ToolKindPhonePhotoTransfer, ToolKindPhoneLogs, ToolKindPhoneAlerts,
 	ToolKindPresent,
 	ToolKindPresentContentOld,
 	ToolKindSkill,

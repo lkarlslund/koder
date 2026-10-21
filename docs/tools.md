@@ -39,6 +39,15 @@ Phone capabilities are grouped by domain rather than put into one argument bag:
 `phone_photos`. This keeps read-only lookup separate from communication,
 navigation, state changes, and user-facing actions.
 
+`phone_logs` and `phone_alerts` differ from the call-bound phone resources: the
+Android app syncs them with the server on its own (see "Phone sync" in
+`protocol/voice/v1/README.md`), so any chat can use them while the phone is away.
+Both are off until the user enables them in tool settings, and are offered only
+once a phone has synced. `phone_logs` reads the app's uploaded diagnostic log,
+and enabling it is also what allows the phone to upload. `phone_alerts`
+(`schedule`, `list`, `cancel`) queues notifications that the phone schedules
+locally at its next sync.
+
 Some operations intentionally remain first-class tools:
 
 - `exec_command` starts a command; `exec_session` manages one after it outlives

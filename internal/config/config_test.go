@@ -413,8 +413,10 @@ file_read = true
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Tools.Enabled[domain.ToolKindBash] {
-		t.Fatalf("expected missing bash default to backfill disabled: %#v", cfg.Tools.Enabled)
+	for _, kind := range []domain.ToolKind{domain.ToolKindBash, domain.ToolKindPhoneLogs, domain.ToolKindPhoneAlerts} {
+		if cfg.Tools.Enabled[kind] {
+			t.Fatalf("expected missing %s default to backfill disabled: %#v", kind, cfg.Tools.Enabled)
+		}
 	}
 	if !cfg.Tools.Enabled[domain.ToolKindExecCommand] {
 		t.Fatalf("expected missing exec_command default to backfill enabled: %#v", cfg.Tools.Enabled)

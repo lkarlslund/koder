@@ -79,6 +79,8 @@ const (
 	PhonePhotosThumbs   ID = domain.ToolKindPhonePhotosThumbs
 	PhonePhotoView      ID = domain.ToolKindPhonePhotoView
 	PhonePhotoTransfer  ID = domain.ToolKindPhonePhotoTransfer
+	PhoneLogs           ID = domain.ToolKindPhoneLogs
+	PhoneAlerts         ID = domain.ToolKindPhoneAlerts
 	Present             ID = domain.ToolKindPresent
 	PresentContentOld   ID = domain.ToolKindPresentContentOld
 	Skill               ID = domain.ToolKindSkill

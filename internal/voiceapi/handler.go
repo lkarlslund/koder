@@ -67,6 +67,7 @@ type Handler struct {
 	Lease   *voice.CallLease
 	Updates androidUpdateSource
 	Devices *phonedevice.Hub
+	Sync    PhoneSync
 	Auth    *deviceauth.Registry
 	turns   *turnRegistry
 	browser browserTickets
@@ -115,6 +116,9 @@ func NewHandler(backend backend, token string) *Handler {
 	handler := &Handler{Backend: backend, Token: token, Lease: voice.NewCallLease(), Updates: androidupdate.Embedded(), turns: newTurnRegistry()}
 	if source, ok := backend.(interface{ PhoneDeviceHub() *phonedevice.Hub }); ok {
 		handler.Devices = source.PhoneDeviceHub()
+	}
+	if source, ok := backend.(PhoneSync); ok {
+		handler.Sync = source
 	}
 	return handler
 }
@@ -342,6 +346,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/voice/v1/device" {
 		h.servePhoneDevice(w, r)
+		return
+	}
+	if r.URL.Path == "/voice/v1/device/sync" {
+		h.servePhoneSync(w, r)
 		return
 	}
 	if r.URL.Path == "/voice/v1/attachments/images" {
