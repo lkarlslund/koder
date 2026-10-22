@@ -933,8 +933,10 @@ func (e *Engine) buildCompactionRequestForTimeline(session domain.Session, tempC
 // summarizeInTemporaryChat sends the temporary chat's request and returns the
 // reply. Streamed text stays out of the real chat; only progress is reported.
 // If the prompt overflows the context window, the oldest message is dropped
-// and the request retried.
+// and the request retried. A model that ends while still thinking is asked
+// once more with thinking turned off.
 func (e *Engine) summarizeInTemporaryChat(ctx context.Context, session domain.Session, tempChat domain.Chat, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (string, domain.ModelPerformance, error) {
+	thinkingRetried := false
 	for {
 		resp, err := e.completeWithCompactionProgress(ctx, session, tempChat, client, req, out)
 		if err == nil {
@@ -942,6 +944,11 @@ func (e *Engine) summarizeInTemporaryChat(ctx context.Context, session domain.Se
 			// the history. Fail instead, which keeps the history intact.
 			summary := strings.TrimSpace(resp.Text)
 			if summary == "" && strings.TrimSpace(resp.RawReasoning) != "" {
+				if next, ok := provider.WithoutThinking(req); ok && !thinkingRetried {
+					thinkingRetried, req = true, next
+					emit(out, domain.Event{Kind: domain.EventKindStatus, Text: "Compaction model only thought; retrying without thinking", Meta: map[string]string{"compaction": "progress"}})
+					continue
+				}
 				return "", resp.Performance, errors.New("compaction model ended after thinking without writing a summary")
 			}
 			return summary, resp.Performance, nil

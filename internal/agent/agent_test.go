@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -5911,6 +5912,77 @@ func TestCompactSessionRejectsReasoningOnlySummary(t *testing.T) {
 	if !failed {
 		t.Fatal("expected a failed compaction record")
 	}
+}
+
+func TestCompactSessionRetriesReasoningOnlySummaryWithoutThinking(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var thinking []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Kwargs map[string]any `json:"chat_template_kwargs"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		thinking = append(thinking, body.Kwargs["enable_thinking"])
+		mu.Unlock()
+		if body.Kwargs["enable_thinking"] == false {
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"## Goal\nsay hello"}}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":null,"reasoning":"thinking about the summary"}}]}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
+	cfg.SetModelConfig(config.ModelConfig{
+		ProviderID: "test", ModelID: "test-model", ContextWindow: 32768,
+		ExtraBody: map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": true}},
+	})
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	engine := New(cfg, st, nil)
+	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	appendUserTimelineItem(t, st, chat.ID, "hello")
+
+	client, err := provider.New("test", cfg.Providers["test"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := compactTestChat(t, engine, session, chat, client, "manual", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !reflect.DeepEqual(thinking, []any{true, false}) {
+		t.Fatalf("enable_thinking per request = %v, want a retry without thinking", thinking)
+	}
+	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range timeline {
+		if payload, ok := item.Content.(domain.Compaction); ok && payload.Status == "completed" && strings.Contains(payload.Summary, "say hello") {
+			return
+		}
+	}
+	t.Fatal("expected the retried summary to complete the compaction")
 }
 
 func TestHandleModelToolCallRequiresApprovalForSkill(t *testing.T) {
