@@ -437,18 +437,19 @@ class MainActivityInstrumentedTest {
 				scenario.onActivity { activity ->
 					val root = activity.findViewById<View>(android.R.id.content)
 					val scroll = root.firstScrollView()
-					val target = root.findByDescription("On Device status")
+					val target = root.findByDescription("Device status policy")
 					val bounds = android.graphics.Rect().also(target::getDrawingRect)
 					scroll.offsetDescendantRectToMyCoords(target, bounds)
 					scroll.scrollTo(0, bounds.top.coerceAtLeast(0))
 					scrollBefore = scroll.scrollY
-					target.performClick()
+					target.tapSegment(2)
 					scrollAfter = scroll.scrollY
 				}
 				assertTrue(scrollBefore > 0)
 				assertTrue("tool toggle reset scroll from $scrollBefore to $scrollAfter", kotlin.math.abs(scrollAfter - scrollBefore) <= 2)
+				assertEquals(PhoneActionPolicy.ON, SecureSettings(context).load().phoneActionPolicies["device_status"])
 				scenario.onActivity { activity ->
-					activity.findViewById<View>(android.R.id.content).findByDescription("Ask Device status").performClick()
+					activity.findViewById<View>(android.R.id.content).findByDescription("Device status policy").tapSegment(1)
 				}
 				assertEquals(PhoneActionPolicy.ASK, SecureSettings(context).load().phoneActionPolicies["device_status"])
 				assertEquals(PhoneActionPolicy.OFF, SecureSettings(context).load().phoneActionPolicies["list_apps"])
@@ -1095,4 +1096,16 @@ class MainActivityInstrumentedTest {
 
 	private fun Notification.action(title: String): Notification.Action = actions?.firstOrNull { it.title.toString() == title }
 		?: error("Notification action $title is missing")
+
+	/** Taps the policy switch's segment 0 (No), 1 (Ask) or 2 (Yes) like a finger would. */
+	private fun View.tapSegment(segment: Int) {
+		val x = width * (segment + 0.5f) / 3
+		val y = height / 2f
+		val time = android.os.SystemClock.uptimeMillis()
+		listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP).forEach { action ->
+			val event = android.view.MotionEvent.obtain(time, time, action, x, y, 0)
+			dispatchTouchEvent(event)
+			event.recycle()
+		}
+	}
 }

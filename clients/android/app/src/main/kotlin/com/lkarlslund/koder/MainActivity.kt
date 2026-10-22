@@ -71,6 +71,7 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.lkarlslund.koder.update.AndroidAppUpdater
 import com.lkarlslund.koder.phone.PhoneCapabilities
 import com.lkarlslund.koder.phone.PhoneCapability
+import com.lkarlslund.koder.phone.PolicySwitch
 import com.lkarlslund.koder.phone.permissionsForCurrentDevice
 import com.lkarlslund.koder.phone.PhoneActionPolicy
 import com.lkarlslund.koder.phone.actionTitle
@@ -204,7 +205,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var presentationFeed: LinearLayout? = null
 	private var presentationShown = false
 	private var speechAutomaticCheck: CheckBox? = null
-	private val phoneActionGroups = mutableMapOf<String, RadioGroup>()
+	private val phoneActionSwitches = mutableMapOf<String, PolicySwitch>()
 	private var composerView: View? = null
 	private var voicePhotoControls: LinearLayout? = null
 	private var composerPhotoPreview: LinearLayout? = null
@@ -1306,25 +1307,21 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		addView(body(capability.title).apply { setTypeface(typeface, Typeface.BOLD) }, matchWrap())
 		addView(helper(capability.description), spaced(top = 3, bottom = 8))
 		capability.actions.sorted().forEach { action ->
-			addView(helper(actionTitle(action)).apply { setTypeface(typeface, Typeface.BOLD) }, spaced(top = 7))
-			addView(RadioGroup(this@MainActivity).apply {
-				orientation = RadioGroup.HORIZONTAL
-				gravity = Gravity.END
-				phoneActionGroups[action] = this
-				PhoneActionPolicy.entries.forEach { policy ->
-					addView(RadioButton(this@MainActivity).apply {
-						id = View.generateViewId()
-						tag = policy
-						text = policy.label
-						contentDescription = "${policy.label} ${actionTitle(action)}"
-					})
-				}
-				selectPhoneActionPolicy(action, settings.phoneActionPolicies[action] ?: PhoneActionPolicy.OFF)
-				setOnCheckedChangeListener { group, checkedID ->
-					val policy = group.findViewById<RadioButton>(checkedID)?.tag as? PhoneActionPolicy ?: return@setOnCheckedChangeListener
-					requestPhoneActionPolicy(capability, action, policy)
-				}
-			}, matchWrap())
+			addView(LinearLayout(this@MainActivity).apply {
+				orientation = LinearLayout.HORIZONTAL
+				gravity = Gravity.CENTER_VERTICAL
+				addView(helper(actionTitle(action)).apply { setTypeface(typeface, Typeface.BOLD) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+				addView(PolicySwitch(
+					this@MainActivity,
+					trackColor = withAlpha(themeColor(android.R.attr.textColorPrimary), 28),
+					labelColor = themeColor(android.R.attr.textColorSecondary),
+				).apply {
+					contentDescription = "${actionTitle(action)} policy"
+					phoneActionSwitches[action] = this
+					select(settings.phoneActionPolicies[action] ?: PhoneActionPolicy.OFF, animate = false)
+					onChange = { policy -> requestPhoneActionPolicy(capability, action, policy) }
+				})
+			}, spaced(top = 8))
 		}
     }
 
@@ -1357,10 +1354,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	}
 
 	private fun selectPhoneActionPolicy(action: String, policy: PhoneActionPolicy) {
-		val group = phoneActionGroups[action] ?: return
-		val button = (0 until group.childCount).map(group::getChildAt)
-			.filterIsInstance<RadioButton>().firstOrNull { it.tag == policy } ?: return
-		if (group.checkedRadioButtonId != button.id) group.check(button.id)
+		phoneActionSwitches[action]?.select(policy)
 	}
 
     private fun phoneCapabilityAvailable(capability: PhoneCapability) =
@@ -3555,7 +3549,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		presentationPanel = null
 		presentationFeed = null
 		speechAutomaticCheck = null
-		phoneActionGroups.clear()
+		phoneActionSwitches.clear()
 		composerView = null
 		voicePhotoControls = null
 		composerPhotoPreview = null
