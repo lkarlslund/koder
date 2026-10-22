@@ -13,8 +13,10 @@ class PhoneSyncTest {
 	fun requestCarriesLogsAndAlertReports() {
 		val logs = listOf(AppLogEntry(7, Instant.parse("2026-10-21T10:00:00.250Z"), "W", "popup", "Speech audio arrived out of order"))
 		val reports = listOf(PhoneAlert("alert-1", "Tea", "", 0, PhoneAlert.SCHEDULED, "exact"))
-		val root = JSONObject(PhoneSyncProtocol.request("epoch-1", logs, reports))
+		val root = JSONObject(PhoneSyncProtocol.request("epoch-1", logs, reports, logsAllowed = true, alertsAllowed = false))
 		assertEquals("voice.v1", root.getString("protocol"))
+		assertTrue(root.getBoolean("logs_allowed"))
+		assertFalse(root.getBoolean("alerts_allowed"))
 		assertEquals("epoch-1", root.getString("log_epoch"))
 		val line = root.getJSONArray("logs").getJSONObject(0)
 		assertEquals(7, line.getLong("seq"))
@@ -56,6 +58,8 @@ class PhoneSyncTest {
 				AppLogEntry(2, Instant.parse("2026-10-21T10:00:01Z"), "E", "playback", "Playback thread stuck in AudioTrack.write for 9000 ms; stop is queued behind it"),
 			),
 			listOf(PhoneAlert("alert-fixture-1", "", "", 0, PhoneAlert.SCHEDULED, "exact")),
+			logsAllowed = true,
+			alertsAllowed = true,
 		)
 		assertEquals(canonical(JSONObject(fixture("device_sync_request.json"))), canonical(JSONObject(request)))
 	}

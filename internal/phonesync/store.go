@@ -30,6 +30,9 @@ const (
 	maxAlertText      = 500
 )
 
+// AlertsOffDetail explains alerts the phone refused.
+const AlertsOffDetail = "alerts are turned off in the Koder app on the phone"
+
 // Levels in increasing severity. The phone sends the single-letter form.
 var levels = []string{"D", "I", "W", "E"}
 
@@ -86,6 +89,10 @@ type Device struct {
 	LastSync  time.Time `json:"last_sync"`
 	LogCursor uint64    `json:"log_cursor"`
 	LogEpoch  string    `json:"log_epoch,omitempty"`
+	// LogsAllowed and AlertsAllowed are the switches the user set in the app
+	// at the last sync.
+	LogsAllowed   bool `json:"logs_allowed,omitempty"`
+	AlertsAllowed bool `json:"alerts_allowed,omitempty"`
 }
 
 type deviceState struct {
@@ -104,9 +111,13 @@ type AlertReport struct {
 type SyncRequest struct {
 	Protocol string `json:"protocol"`
 	// LogEpoch changes when the phone's log restarts its sequence numbers.
-	LogEpoch string        `json:"log_epoch"`
-	Logs     []LogEntry    `json:"logs,omitempty"`
-	Alerts   []AlertReport `json:"alerts,omitempty"`
+	LogEpoch string `json:"log_epoch"`
+	// LogsAllowed and AlertsAllowed say whether the user shares the log and
+	// accepts alerts on this phone.
+	LogsAllowed   bool          `json:"logs_allowed"`
+	AlertsAllowed bool          `json:"alerts_allowed"`
+	Logs          []LogEntry    `json:"logs,omitempty"`
+	Alerts        []AlertReport `json:"alerts,omitempty"`
 }
 
 // SyncAlert is an alert the phone should schedule.
@@ -139,7 +150,8 @@ func Open(stateDir string) *Store {
 }
 
 // Sync stores an upload from deviceID and returns the phone's next work.
-// Logs are kept only while logsEnabled; otherwise the phone is told to stop.
+// Logs are kept only while logsEnabled and the phone shares them; otherwise
+// the phone is told to stop. A phone that refuses alerts fails pending ones.
 func (s *Store) Sync(deviceID, name string, req SyncRequest, logsEnabled bool) (SyncResponse, error) {
 	dir, err := s.deviceDir(deviceID)
 	if err != nil {
@@ -156,6 +168,8 @@ func (s *Store) Sync(deviceID, name string, req SyncRequest, logsEnabled bool) (
 	if name = strings.TrimSpace(name); name != "" {
 		state.Name = name
 	}
+	state.LogsAllowed, state.AlertsAllowed = req.LogsAllowed, req.AlertsAllowed
+	logsEnabled = logsEnabled && req.LogsAllowed
 	if epoch := strings.TrimSpace(req.LogEpoch); epoch != state.LogEpoch {
 		state.LogEpoch, state.LogCursor = epoch, 0
 	}
@@ -177,6 +191,8 @@ func (s *Store) Sync(deviceID, name string, req SyncRequest, logsEnabled bool) (
 		switch {
 		case alert.CancelRequested && alert.Status == AlertPending:
 			state.Alerts[index].Status, state.Alerts[index].UpdatedAt = AlertCancelled, now
+		case alert.Status == AlertPending && !req.AlertsAllowed:
+			state.Alerts[index].Status, state.Alerts[index].Detail, state.Alerts[index].UpdatedAt = AlertFailed, AlertsOffDetail, now
 		case alert.CancelRequested && alert.Status == AlertScheduled:
 			response.CancelAlerts = append(response.CancelAlerts, alert.ID)
 		case alert.Status == AlertPending:
@@ -276,7 +292,7 @@ type LogQuery struct {
 
 // Logs returns the newest matching lines, oldest first, for one device.
 func (s *Store) Logs(query LogQuery) (Device, []LogEntry, error) {
-	device, err := s.resolveDevice(query.DeviceID)
+	device, err := s.resolveDevice(query.DeviceID, FeatureLogs)
 	if err != nil {
 		return Device{}, nil, err
 	}
@@ -339,7 +355,7 @@ func (s *Store) ScheduleAlert(deviceID, title, body string, fireAt time.Time) (D
 	if fireAt.IsZero() {
 		return Device{}, Alert{}, errors.New("fire time is required")
 	}
-	device, err := s.resolveDevice(deviceID)
+	device, err := s.resolveDevice(deviceID, FeatureAlerts)
 	if err != nil {
 		return Device{}, Alert{}, err
 	}
@@ -400,7 +416,7 @@ func (s *Store) CancelAlert(alertID string) (Alert, error) {
 
 // Alerts lists one device's alerts by fire time.
 func (s *Store) Alerts(deviceID string) (Device, []Alert, error) {
-	device, err := s.resolveDevice(deviceID)
+	device, err := s.resolveDevice(deviceID, FeatureAlerts)
 	if err != nil {
 		return Device{}, nil, err
 	}
@@ -437,18 +453,54 @@ func (s *Store) Devices() []Device {
 	return out
 }
 
-// resolveDevice picks deviceID, or the only phone when it is empty.
-func (s *Store) resolveDevice(deviceID string) (Device, error) {
-	devices := s.Devices()
+// Feature is a sync feature the user switches on in the app.
+type Feature int
+
+const (
+	FeatureLogs Feature = iota
+	FeatureAlerts
+)
+
+// Allowed reports whether the phone's user switched the feature on.
+func (d Device) Allowed(feature Feature) bool {
+	if feature == FeatureLogs {
+		return d.LogsAllowed
+	}
+	return d.AlertsAllowed
+}
+
+func (f Feature) setting() string {
+	if f == FeatureLogs {
+		return "Share diagnostic log"
+	}
+	return "Accept alerts"
+}
+
+// Available reports whether any synced phone allows the feature.
+func (s *Store) Available(feature Feature) bool {
+	return slices.ContainsFunc(s.Devices(), func(device Device) bool { return device.Allowed(feature) })
+}
+
+// resolveDevice picks deviceID, or the only phone allowing feature when it is
+// empty.
+func (s *Store) resolveDevice(deviceID string, feature Feature) (Device, error) {
+	synced := s.Devices()
+	if len(synced) == 0 {
+		return Device{}, errors.New("no phone has synced with Koder yet; open the Koder app on the phone")
+	}
+	devices := slices.DeleteFunc(slices.Clone(synced), func(device Device) bool { return !device.Allowed(feature) })
 	deviceID = strings.TrimSpace(deviceID)
-	for _, device := range devices {
+	for _, device := range synced {
 		if deviceID != "" && (device.ID == deviceID || strings.EqualFold(device.Name, deviceID)) {
+			if !device.Allowed(feature) {
+				return Device{}, fmt.Errorf("%s has %q turned off in the Koder app's settings", device.Name, feature.setting())
+			}
 			return device, nil
 		}
 	}
 	switch {
 	case len(devices) == 0:
-		return Device{}, errors.New("no phone has synced with Koder yet; open the Koder app on the phone")
+		return Device{}, fmt.Errorf("no phone has %q turned on in the Koder app's settings", feature.setting())
 	case deviceID != "":
 		return Device{}, fmt.Errorf("no synced phone %q; known phones: %s", deviceID, deviceNames(devices))
 	case len(devices) > 1:

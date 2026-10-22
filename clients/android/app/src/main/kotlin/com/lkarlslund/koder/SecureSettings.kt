@@ -32,6 +32,10 @@ class SecureSettings(context: Context) {
 		val responsePacing: VoiceResponsePacing = VoiceResponsePacing.NORMAL,
 		val inputCompression: AudioCompression = AudioCompression.PCM,
 		val outputCompression: AudioCompression = AudioCompression.OPUS_BALANCED,
+		/** The phone uploads its diagnostic log for Koder's phone_logs tool. */
+		val shareLogs: Boolean = false,
+		/** The phone schedules the alerts Koder's phone_alerts tool queues. */
+		val acceptAlerts: Boolean = false,
     )
 
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
@@ -79,6 +83,8 @@ class SecureSettings(context: Context) {
 			VoiceResponsePacing.fromStorage(preferences.getString(RESPONSE_PACING, null)),
 			AudioCompression.fromStorage(preferences.getString(INPUT_COMPRESSION, null), AudioCompression.PCM),
 			AudioCompression.fromStorage(preferences.getString(OUTPUT_COMPRESSION, null), AudioCompression.OPUS_BALANCED),
+			preferences.getBoolean(SHARE_LOGS, false),
+			preferences.getBoolean(ACCEPT_ALERTS, false),
 		)
     }
 
@@ -141,6 +147,14 @@ class SecureSettings(context: Context) {
 
 	fun saveOutputCompression(compression: AudioCompression) {
 		preferences.edit().putString(OUTPUT_COMPRESSION, compression.storageValue).apply()
+	}
+
+	fun saveShareLogs(enabled: Boolean) {
+		preferences.edit().putBoolean(SHARE_LOGS, enabled).apply()
+	}
+
+	fun saveAcceptAlerts(enabled: Boolean) {
+		preferences.edit().putBoolean(ACCEPT_ALERTS, enabled).apply()
 	}
 
 	fun readinessComplete(server: String): Boolean = preferences.getString(READINESS_SERVER, "") == server.trim()
@@ -291,6 +305,8 @@ class SecureSettings(context: Context) {
 		const val VOICE_READ_COUNTS = "voice_read_counts"
 		const val VOICE_READ_STATE_INITIALIZED = "voice_read_state_initialized"
 		const val READINESS_SERVER = "readiness_server"
+		const val SHARE_LOGS = "share_logs"
+		const val ACCEPT_ALERTS = "accept_alerts"
         const val DEFAULT_SERVER = ""
     }
 }

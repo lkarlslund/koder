@@ -346,9 +346,6 @@ func Default() Config {
 		toolDefaults[kind] = true
 	}
 	toolDefaults[domain.ToolKindBash] = false
-	// Phone logs and alerts reach a personal device; the user opts in.
-	toolDefaults[domain.ToolKindPhoneLogs] = false
-	toolDefaults[domain.ToolKindPhoneAlerts] = false
 	return Config{
 		MaxToolLoopSteps: defaultMaxToolLoopSteps,
 		MaxChildChats:    defaultMaxChildChats,

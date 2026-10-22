@@ -67,7 +67,7 @@ func TestPhoneSyncStoresLogsForBoundDeviceAndDeliversAlerts(t *testing.T) {
 	if response, _ := post("wrong", `{"protocol":"voice.v1"}`); response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated sync status = %d", response.StatusCode)
 	}
-	upload := `{"protocol":"voice.v1","log_epoch":"e1","logs":[{"seq":1,"time":"2026-10-21T10:00:00Z","level":"W","tag":"popup","message":"Audio playback failed (-6)"}]}`
+	upload := `{"protocol":"voice.v1","logs_allowed":true,"alerts_allowed":true,"log_epoch":"e1","logs":[{"seq":1,"time":"2026-10-21T10:00:00Z","level":"W","tag":"popup","message":"Audio playback failed (-6)"}]}`
 	response, decoded := post(binding.Token, upload)
 	if response.StatusCode != http.StatusOK || !decoded.LogsEnabled || decoded.LogCursor != 1 || decoded.Protocol != protocolVersion {
 		t.Fatalf("sync status=%d body=%+v", response.StatusCode, decoded)
@@ -81,7 +81,7 @@ func TestPhoneSyncStoresLogsForBoundDeviceAndDeliversAlerts(t *testing.T) {
 		t.Fatal(err)
 	}
 	sync.logsEnabled = false
-	response, decoded = post(binding.Token, `{"protocol":"voice.v1","log_epoch":"e1"}`)
+	response, decoded = post(binding.Token, `{"protocol":"voice.v1","logs_allowed":true,"alerts_allowed":true,"log_epoch":"e1"}`)
 	if response.StatusCode != http.StatusOK || decoded.LogsEnabled || len(decoded.Alerts) != 1 || decoded.Alerts[0].Title != "Stretch" {
 		t.Fatalf("sync status=%d body=%+v", response.StatusCode, decoded)
 	}
@@ -104,7 +104,7 @@ func TestPhoneSyncMatchesSharedFixtures(t *testing.T) {
 	if err := json.Unmarshal(read("device_sync_request.json"), &request); err != nil {
 		t.Fatal(err)
 	}
-	if request.LogEpoch != "epoch-fixture-1" || len(request.Logs) != 2 || request.Logs[1].Tag != "playback" ||
+	if request.LogEpoch != "epoch-fixture-1" || !request.LogsAllowed || !request.AlertsAllowed || len(request.Logs) != 2 || request.Logs[1].Tag != "playback" ||
 		request.Logs[0].Time.UnixMilli()%1000 != 250 || len(request.Alerts) != 1 || request.Alerts[0].Status != phonesync.AlertScheduled {
 		t.Fatalf("request fixture decoded as %+v", request)
 	}

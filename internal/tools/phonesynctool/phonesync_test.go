@@ -26,7 +26,7 @@ func TestLogsToolFormatsFilteredLines(t *testing.T) {
 		{Seq: 2, Time: now.Add(-time.Minute), Level: "I", Tag: "call", Message: "started"},
 		{Seq: 3, Time: now.Add(-30 * time.Second), Level: "W", Tag: "popup", Message: "Speech audio arrived out of order"},
 	}
-	if _, err := store.Sync("dev1", "Pixel", phonesync.SyncRequest{LogEpoch: "e", Logs: logs}, true); err != nil {
+	if _, err := store.Sync("dev1", "Pixel", phonesync.SyncRequest{LogsAllowed: true, AlertsAllowed: true, LogEpoch: "e", Logs: logs}, true); err != nil {
 		t.Fatal(err)
 	}
 	result, err := call(t, store, tools.PhoneLogs, map[string]string{"since": "1h", "level": "warn"})
@@ -45,7 +45,7 @@ func TestLogsToolFormatsFilteredLines(t *testing.T) {
 
 func TestAlertsToolSchedulesListsAndCancels(t *testing.T) {
 	store := phonesync.Open(t.TempDir())
-	if _, err := store.Sync("dev1", "Pixel", phonesync.SyncRequest{}, false); err != nil {
+	if _, err := store.Sync("dev1", "Pixel", phonesync.SyncRequest{LogsAllowed: true, AlertsAllowed: true}, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := call(t, store, tools.PhoneAlerts, map[string]string{"action": "schedule", "title": "Tea"}); err == nil {
@@ -69,7 +69,7 @@ func TestAlertsToolSchedulesListsAndCancels(t *testing.T) {
 	}
 }
 
-func TestToolsAppearOnlyAfterAPhoneSynced(t *testing.T) {
+func TestToolsAppearOnlyForPhonesThatAllowThem(t *testing.T) {
 	store := phonesync.Open(t.TempDir())
 	offered := func() map[string]bool {
 		names := map[string]bool{}
@@ -81,7 +81,13 @@ func TestToolsAppearOnlyAfterAPhoneSynced(t *testing.T) {
 	if names := offered(); names[tools.PhoneLogs.String()] || names[tools.PhoneAlerts.String()] {
 		t.Fatalf("phone tools offered before any sync: %v", names)
 	}
-	if _, err := store.Sync("dev1", "Pixel", phonesync.SyncRequest{}, false); err != nil {
+	if _, err := store.Sync("dev1", "Pixel", phonesync.SyncRequest{AlertsAllowed: true}, false); err != nil {
+		t.Fatal(err)
+	}
+	if names := offered(); names[tools.PhoneLogs.String()] || !names[tools.PhoneAlerts.String()] {
+		t.Fatalf("tools offered for a phone that accepts only alerts: %v", names)
+	}
+	if _, err := store.Sync("dev1", "Pixel", phonesync.SyncRequest{LogsAllowed: true, AlertsAllowed: true}, false); err != nil {
 		t.Fatal(err)
 	}
 	if names := offered(); !names[tools.PhoneLogs.String()] || !names[tools.PhoneAlerts.String()] {

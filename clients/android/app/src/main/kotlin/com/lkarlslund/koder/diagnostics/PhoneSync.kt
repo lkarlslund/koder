@@ -37,8 +37,10 @@ object PhoneSyncProtocol {
 
 	data class Response(val logsEnabled: Boolean, val logCursor: Long, val alerts: List<PhoneAlert>, val cancelAlerts: List<String>)
 
-	fun request(epoch: String, logs: List<AppLogEntry>, reports: List<PhoneAlert>): String = JSONObject()
+	fun request(epoch: String, logs: List<AppLogEntry>, reports: List<PhoneAlert>, logsAllowed: Boolean, alertsAllowed: Boolean): String = JSONObject()
 		.put("protocol", VOICE_PROTOCOL)
+		.put("logs_allowed", logsAllowed)
+		.put("alerts_allowed", alertsAllowed)
 		.put("log_epoch", epoch)
 		.put("logs", JSONArray().also { array -> logs.forEach { array.put(it.toJSON()) } })
 		.put("alerts", JSONArray().also { array ->
@@ -78,7 +80,8 @@ object PhoneSyncProtocol {
 
 /**
  * Keeps the server up to date with this phone: uploads [AppLog] while the user
- * has enabled the `phone_logs` tool, and arms the alerts Koder queued. Syncs
+ * shares logs in the app's settings and Koder has the `phone_logs` tool on, and
+ * arms the alerts Koder queued while the user accepts alerts. Syncs
  * shortly after a warning, every minute while the app is visible, and about
  * every 15 minutes in the background.
  */
@@ -135,17 +138,18 @@ class PhoneSync private constructor(context: Context) {
 		val settings = runCatching { SecureSettings(app).load() }.getOrNull() ?: return
 		if (settings.server.isBlank() || settings.token.isBlank()) return
 		captureLogcat()
+		if (!settings.acceptAlerts) PhoneAlerts.withdrawAll(app)
 		val identity = PhoneIdentity.from(app)
 		var more = true
 		var rounds = 0
 		while (more && rounds++ < MAX_ROUNDS) {
 			val epoch = AppLog.epoch
-			val logsEnabled = preferences.getBoolean(LOGS_ENABLED, false)
+			val logsEnabled = settings.shareLogs && preferences.getBoolean(LOGS_ENABLED, false)
 			val cursor = if (preferences.getString(CURSOR_EPOCH, "") == epoch) preferences.getLong(CURSOR, 0) else 0
 			val logs = if (logsEnabled) AppLog.entriesAfter(cursor, PhoneSyncProtocol.MAX_LOGS) else emptyList()
 			val reports = PhoneAlerts.unreported(app)
 			val response = try {
-				post(settings.server, settings.token, identity, PhoneSyncProtocol.request(epoch, logs, reports))
+				post(settings.server, settings.token, identity, PhoneSyncProtocol.request(epoch, logs, reports, settings.shareLogs, settings.acceptAlerts))
 			} catch (error: Exception) {
 				if (preferences.getBoolean(LAST_OK, true)) AppLog.w(TAG, "Sync with ${settings.server} failed", error)
 				preferences.edit().putBoolean(LAST_OK, false).apply()
@@ -244,6 +248,15 @@ object PhoneAlerts {
 			AppLog.i(TAG, "Alert $id cancelled by Koder")
 		}
 		fresh.isNotEmpty() || cancel.isNotEmpty()
+	}
+
+	/** Cancels every armed alert once the user stops accepting alerts. */
+	fun withdrawAll(context: Context) = edit(context) { book ->
+		book.armed().forEach { alert ->
+			context.getSystemService(AlarmManager::class.java).cancel(receiverIntent(context, PhoneSyncReceiver.ACTION_ALERT, alert.id))
+			book.mark(alert.id, PhoneAlert.CANCELLED, "alerts were turned off on the phone")
+			AppLog.i(TAG, "Alert ${alert.id} cancelled because alerts were turned off")
+		}
 	}
 
 	/** Re-arms alerts after a reboot or app update, which clear Android alarms. */

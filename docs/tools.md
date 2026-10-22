@@ -42,11 +42,12 @@ navigation, state changes, and user-facing actions.
 `phone_logs` and `phone_alerts` differ from the call-bound phone resources: the
 Android app syncs them with the server on its own (see "Phone sync" in
 `protocol/voice/v1/README.md`), so any chat can use them while the phone is away.
-Both are off until the user enables them in tool settings, and are offered only
-once a phone has synced. `phone_logs` reads the app's uploaded diagnostic log,
-and enabling it is also what allows the phone to upload. `phone_alerts`
-(`schedule`, `list`, `cancel`) queues notifications that the phone schedules
-locally at its next sync.
+The user switches each on in the app's settings under "Logs & alerts" ("Share
+diagnostic log" and "Accept alerts", both off by default), and Koder offers a
+tool only once a phone has synced with its switch on. `phone_logs` reads the
+app's uploaded diagnostic log. `phone_alerts` (`schedule`, `list`, `cancel`)
+queues notifications that the phone schedules locally at its next sync. Like any
+tool, either can also be turned off for the whole server in tool settings.
 
 Some operations intentionally remain first-class tools:
 

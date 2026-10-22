@@ -73,11 +73,11 @@ func store(runtime tools.Runtime) (*phonesync.Store, error) {
 	return value, nil
 }
 
-// syncedPhone offers the tools only once a phone has synced, so chats on a
-// server without the Android app never see them.
-func syncedPhone(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+// allowedOnPhone offers a tool only once a phone has synced with the feature
+// switched on in the app, so chats never see a tool no phone would serve.
+func allowedOnPhone(runtime tools.Runtime, spec tools.ToolSpec, feature phonesync.Feature) (tools.ToolSpec, bool) {
 	syncStore, err := store(runtime)
-	if err != nil || len(syncStore.Devices()) == 0 {
+	if err != nil || !syncStore.Available(feature) {
 		return tools.ToolSpec{}, false
 	}
 	return spec, true
@@ -86,7 +86,7 @@ func syncedPhone(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bo
 type logsTool struct{}
 
 func (logsTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	return syncedPhone(runtime, spec)
+	return allowedOnPhone(runtime, spec, phonesync.FeatureLogs)
 }
 
 func (logsTool) ID() tools.ID             { return tools.PhoneLogs }
@@ -147,7 +147,7 @@ func (logsTool) Call(_ context.Context, options tools.Options) (tools.Result, er
 	if len(entries) == 0 {
 		out.WriteString("No matching log lines.")
 		if device.LogCursor == 0 {
-			out.WriteString(" The phone has uploaded no logs yet; it starts once phone_logs is enabled and the app next syncs.")
+			out.WriteString(" The phone has uploaded no logs yet; it starts at the app's next sync.")
 		}
 	}
 	for _, entry := range entries {
@@ -162,7 +162,7 @@ func (logsTool) Call(_ context.Context, options tools.Options) (tools.Result, er
 type alertsTool struct{}
 
 func (alertsTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	return syncedPhone(runtime, spec)
+	return allowedOnPhone(runtime, spec, phonesync.FeatureAlerts)
 }
 
 func (alertsTool) ID() tools.ID             { return tools.PhoneAlerts }
