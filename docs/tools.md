@@ -35,19 +35,13 @@ runtime resource:
 Phone capabilities are grouped by domain rather than put into one argument bag:
 `phone_device`, `phone_location`, `phone_contacts`, `phone_calendar`,
 `phone_messages`, `phone_calls`, `phone_notifications`, `phone_clock`,
-`phone_clipboard`, `phone_apps`, `phone_media`, `phone_share`, `phone_open`, and
-`phone_photos`. This keeps read-only lookup separate from communication,
-navigation, state changes, and user-facing actions.
-
-`phone_logs` and `phone_alerts` differ from the call-bound phone resources: the
-Android app syncs them with the server on its own (see "Phone sync" in
-`protocol/voice/v1/README.md`), so any chat can use them while the phone is away.
-The user switches each on in the app's settings under "Logs & alerts" ("Share
-diagnostic log" and "Accept alerts", both off by default), and Koder offers a
-tool only once a phone has synced with its switch on. `phone_logs` reads the
-app's uploaded diagnostic log. `phone_alerts` (`schedule`, `list`, `cancel`)
-queues notifications that the phone schedules locally at its next sync. Like any
-tool, either can also be turned off for the whole server in tool settings.
+`phone_clipboard`, `phone_apps`, `phone_media`, `phone_share`, `phone_open`,
+`phone_photos`, `phone_logs` (the Koder app's own diagnostic log and logcat), and
+`phone_alerts` (`schedule`, `list`, `cancel` notifications the phone shows at a
+set time, armed with Android's alarm manager so they fire even when Koder is
+closed). This keeps read-only lookup separate from communication, navigation,
+state changes, and user-facing actions. Like every phone tool, each action is
+Off, Ask, or On in the app's phone tool settings.
 
 Some operations intentionally remain first-class tools:
 

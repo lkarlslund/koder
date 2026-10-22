@@ -54,7 +54,6 @@ import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import com.lkarlslund.koder.diagnostics.AppLog
-import com.lkarlslund.koder.diagnostics.PhoneSync
 import com.lkarlslund.koder.diagnostics.showPopup
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -289,7 +288,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
         secureSettings = SecureSettings(this)
 		phoneIdentity = PhoneIdentity.from(this)
 		AppLog.i("app", "Started ${phoneIdentity.appVersion} on ${phoneIdentity.name}, Android ${phoneIdentity.androidVersion}")
-		PhoneSync.get(this).armBackground()
 		bindingClient = PhoneBindingClient(phoneIdentity)
 		sessionClient = VoiceSessionClient(identity = phoneIdentity)
 		voiceHaptics = AndroidVoiceHaptics(this)
@@ -346,7 +344,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	override fun onStart() {
 		super.onStart()
 		appVisible = true
-		PhoneSync.get(this).setVisible(true)
 	}
 
 	override fun onResume() {
@@ -356,7 +353,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 
 	override fun onStop() {
 		appVisible = false
-		PhoneSync.get(this).setVisible(false)
 		super.onStop()
 	}
 
@@ -1147,25 +1143,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		content.addView(body("Choose a policy for every phone tool. Off hides it from Koder. Ask requests confirmation on this phone each time. On lets the active voice conversation use it without an extra Koder prompt; Android's own protected screens still apply."), spaced(top = 6, bottom = 14))
         PhoneCapabilities.all.forEach { capability -> content.addView(phoneCapabilityRow(capability), spaced(bottom = 10)) }
         content.addView(helper("SMS and call access is intended for this sideloaded personal build. Notification access exposes only notifications currently visible to Android; Koder cannot directly browse arbitrary email inboxes."), spaced(top = 5, bottom = 18))
-
-		content.addView(title("Logs & alerts").apply { textSize = 24f }, matchWrap())
-		content.addView(body("These work outside conversations: the app syncs with Koder every minute while it is open and about every 15 minutes in the background. Koder's matching tools appear once this phone has synced with them on."), spaced(top = 6, bottom = 14))
-		content.addView(phoneSyncRow(
-			"Share diagnostic log",
-			"Upload this app's log, including its Android system log lines, so Koder can investigate audio, connection, and crash problems.",
-			settings.shareLogs,
-		) { enabled ->
-			secureSettings.saveShareLogs(enabled)
-			settings = settings.copy(shareLogs = enabled)
-		}, spaced(bottom = 10))
-		content.addView(phoneSyncRow(
-			"Accept alerts",
-			"Let Koder schedule reminders that this phone shows as notifications at a set time, even offline. Turning this off cancels alerts already scheduled.",
-			settings.acceptAlerts,
-		) { enabled ->
-			secureSettings.saveAcceptAlerts(enabled)
-			settings = settings.copy(acceptAlerts = enabled)
-		}, spaced(bottom = 18))
 		showScrollable(content)
     }
 
@@ -1350,24 +1327,6 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			}, matchWrap())
 		}
     }
-
-	private fun phoneSyncRow(title: String, description: String, checked: Boolean, onChange: (Boolean) -> Unit) = LinearLayout(this).apply {
-		orientation = LinearLayout.VERTICAL
-		setPadding(dp(12), dp(10), dp(12), dp(13))
-		background = cardBackground()
-		addView(CheckBox(this@MainActivity).apply {
-			text = title
-			contentDescription = title
-			isChecked = checked
-			setTypeface(typeface, Typeface.BOLD)
-			setOnCheckedChangeListener { _, enabled ->
-				onChange(enabled)
-				// Tell Koder right away rather than at the next periodic sync.
-				PhoneSync.get(this@MainActivity).requestSoon(0)
-			}
-		}, matchWrap())
-		addView(helper(description), spaced(top = 2))
-	}
 
 	private fun requestPhoneActionPolicy(capability: PhoneCapability, action: String, policy: PhoneActionPolicy) {
 		if (policy == PhoneActionPolicy.OFF) {

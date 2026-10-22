@@ -34,12 +34,17 @@ import android.view.KeyEvent
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.lkarlslund.koder.SecureSettings
+import com.lkarlslund.koder.diagnostics.AppLog
+import com.lkarlslund.koder.diagnostics.AppLogFilter
+import com.lkarlslund.koder.diagnostics.PhoneAlert
+import com.lkarlslund.koder.diagnostics.PhoneAlerts
 import com.lkarlslund.koder.voice.AndroidVoiceHaptics
 import com.lkarlslund.koder.voice.VoiceHapticCue
 import com.lkarlslund.koder.voice.VoiceHaptics
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.time.temporal.ChronoUnit
 import java.util.Locale
 import java.util.TimeZone
@@ -154,8 +159,46 @@ class AndroidPhoneToolProvider(
 		"phone_photos_thumbs" -> queryPhotos(args, PhotoRendition.THUMBNAIL)
 		"phone_photo_view" -> queryPhotos(args, PhotoRendition.PREVIEW)
 		"phone_photo_transfer" -> queryPhotos(args, PhotoRendition.ORIGINAL)
+		"read_app_log" -> readAppLog(args)
+		"schedule_alert" -> scheduleAlert(args)
+		"list_alerts" -> listAlerts()
+		"cancel_alert" -> cancelAlert(args)
         else -> error("Unknown phone action: $action")
     }
+
+	private fun readAppLog(args: Map<String, String>): PhoneToolResult {
+		val filter = AppLogFilter(
+			sinceMillis = args["since"]?.takeIf(String::isNotBlank)?.let { OffsetDateTime.parse(it).toInstant().toEpochMilli() } ?: 0,
+			minLevel = when (args["level"]) { "info" -> "I"; "warn" -> "W"; "error" -> "E"; else -> "D" },
+			tag = args["tag"].orEmpty().trim(),
+			query = args["query"].orEmpty().trim(),
+		)
+		val limit = (args["limit"]?.toIntOrNull() ?: 300).coerceIn(1, 2000)
+		val entries = AppLog.query(filter, limit)
+		if (entries.isEmpty()) return PhoneToolResult("No matching log lines")
+		val text = entries.joinToString("\n") { "${it.time} ${it.level} ${it.tag}: ${it.message}" }
+		return PhoneToolResult("${entries.size} log lines, oldest first:\n$text")
+	}
+
+	private fun scheduleAlert(args: Map<String, String>): PhoneToolResult {
+		val fireAt = OffsetDateTime.parse(required(args, "at")).toInstant().toEpochMilli()
+		val alert = PhoneAlerts.schedule(activity, required(args, "title"), args["message"].orEmpty(), fireAt)
+		val text = if (alert.status == PhoneAlert.SCHEDULED) "Alert ${alert.id} scheduled for ${Instant.ofEpochMilli(alert.fireAtMillis)} (${alert.detail})"
+			else "Alert ${alert.id} ${alert.status}: ${alert.detail}"
+		return PhoneToolResult(text, alertJSON(alert))
+	}
+
+	private fun listAlerts(): PhoneToolResult {
+		val alerts = PhoneAlerts.list(activity)
+		return PhoneToolResult(if (alerts.isEmpty()) "No alerts" else "${alerts.size} alerts", JSONArray().also { array -> alerts.forEach { array.put(alertJSON(it)) } })
+	}
+
+	private fun alertJSON(alert: PhoneAlert): JSONObject = alert.toJSON().put("fire_at", Instant.ofEpochMilli(alert.fireAtMillis).toString())
+
+	private fun cancelAlert(args: Map<String, String>): PhoneToolResult {
+		val alert = PhoneAlerts.cancel(activity, required(args, "alert_id"))
+		return PhoneToolResult("Alert ${alert.id} cancelled")
+	}
 
 	private fun queryPhotos(args: Map<String, String>, rendition: PhotoRendition): PhoneToolResult {
 		val projection = arrayOf(

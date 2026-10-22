@@ -30,7 +30,6 @@ import (
 	"github.com/lkarlslund/koder/internal/modelruntime"
 	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/phonedevice"
-	"github.com/lkarlslund/koder/internal/phonesync"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
@@ -78,13 +77,6 @@ func (e *Engine) SetVoiceSessionControl(control sessiontool.Control) {
 func (e *Engine) SetPhoneDeviceControl(control phonedevice.Control) {
 	if e != nil && e.toolsRuntime != nil {
 		e.toolsRuntime.SetPhoneDeviceControl(control)
-	}
-}
-
-// SetPhoneSync connects logs and alerts of synced phones to every chat.
-func (e *Engine) SetPhoneSync(store *phonesync.Store) {
-	if e != nil && e.toolsRuntime != nil {
-		e.toolsRuntime.SetPhoneSync(store)
 	}
 }
 

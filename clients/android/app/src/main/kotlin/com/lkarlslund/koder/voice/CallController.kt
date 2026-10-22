@@ -6,7 +6,6 @@ import android.os.Handler
 import android.os.Looper
 import android.app.Activity
 import com.lkarlslund.koder.diagnostics.AppLog
-import com.lkarlslund.koder.diagnostics.PhoneSync
 import com.lkarlslund.koder.phone.AndroidPhoneToolProvider
 import com.lkarlslund.koder.phone.PhoneDeviceConnection
 import com.lkarlslund.koder.phone.PhoneIdentity
@@ -401,7 +400,6 @@ class CallController(
     fun end() {
         if (!running) return
 		AppLog.i(LOG_CALL, "Conversation ending at stage ${snapshot.stage}")
-		PhoneSync.get(appContext).requestSoon()
         running = false
         serverReady = false
 		stopMicrophone()

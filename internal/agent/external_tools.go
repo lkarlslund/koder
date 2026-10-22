@@ -27,7 +27,7 @@ var externalAgentTools = map[tools.ID]struct{}{
 	tools.Present:     {},
 	tools.Memory:      {},
 	tools.PhoneDevice: {}, tools.PhoneLocation: {}, tools.PhoneContacts: {}, tools.PhoneCalendar: {}, tools.PhoneMessages: {}, tools.PhoneCalls: {}, tools.PhoneNotifications: {},
-	tools.PhoneClock: {}, tools.PhoneClipboard: {}, tools.PhoneApps: {}, tools.PhoneMedia: {}, tools.PhoneShare: {}, tools.PhoneOpen: {}, tools.PhonePhotos: {},
+	tools.PhoneClock: {}, tools.PhoneClipboard: {}, tools.PhoneApps: {}, tools.PhoneMedia: {}, tools.PhoneShare: {}, tools.PhoneOpen: {}, tools.PhonePhotos: {}, tools.PhoneLogs: {}, tools.PhoneAlerts: {},
 }
 
 // ExternalAgentToolIDs returns the Koder tools that may complement an external

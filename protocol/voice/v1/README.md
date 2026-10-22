@@ -303,33 +303,6 @@ clients can ignore the added fields. A client must wait for a selected
 transport before replaying an in-flight turn when the initial snapshot contains
 `transport_encodings`.
 
-## Phone sync
-
-Outside calls, a bound phone posts to `POST /voice/v1/device/sync` with its
-device token. It uploads its diagnostic log and reports on alerts, and the
-answer says what to send and schedule next:
-
-```json
-{"protocol":"voice.v1","log_epoch":"e5c1…","logs_allowed":true,"alerts_allowed":true,"logs":[{"seq":41,"time":"2026-10-21T10:00:01.250Z","level":"W","tag":"popup","message":"Speech audio arrived out of order"}],"alerts":[{"id":"alert-…","status":"scheduled","detail":"exact"}]}
-{"protocol":"voice.v1","logs_enabled":true,"log_cursor":41,"alerts":[{"id":"alert-…","title":"Stretch","body":"","fire_at":"2026-10-21T15:00:00Z"}],"cancel_alerts":[]}
-```
-
-Log lines carry a sequence number that increases per installation.
-`log_epoch` changes when the phone restarts numbering, for example after its
-data was cleared. `logs_allowed` and `alerts_allowed` carry the user's
-switches in the app. Koder keeps lines after `log_cursor` only while the phone
-sends `logs_allowed: true` and the `phone_logs` tool is enabled on the server,
-and answers `logs_enabled: false` otherwise. The phone then sends no lines until
-a later answer says `true`, and sends at most 2000 lines per request. Levels are
-`D`, `I`, `W` and `E`.
-
-`alerts` lists alerts the phone should schedule; it keeps doing so until the
-phone reports `scheduled`, `fired`, `cancelled` or `failed` for them.
-`cancel_alerts` names scheduled alerts to withdraw. While a phone sends
-`alerts_allowed: false`, Koder sends it no alerts and fails pending ones, and
-the phone cancels and reports any it had scheduled. The phone schedules alerts
-with Android's alarm manager, so they fire without a connection.
-
 ## Binary audio envelope
 
 Header integers are big-endian. PCM samples are signed 16-bit little-endian;

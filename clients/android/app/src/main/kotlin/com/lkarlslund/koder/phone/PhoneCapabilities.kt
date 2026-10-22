@@ -81,6 +81,16 @@ object PhoneCapabilities {
             "Draft email, set alarms and timers, open safe links, control media, and share text.",
             setOf("compose_email", "set_alarm", "set_timer", "open_url", "media_control", "share_text"),
         ),
+		PhoneCapability(
+			"app_log", "Koder app log",
+			"Read this app's diagnostic log, including its Android system log lines, to investigate audio, connection, and crash problems.",
+			setOf("read_app_log"),
+		),
+		PhoneCapability(
+			"alerts", "Alerts",
+			"Schedule, list, and cancel reminders that this phone shows as notifications at a set time, even when Koder is closed.",
+			setOf("schedule_alert", "list_alerts", "cancel_alert"),
+		),
     )
 
     val byID = all.associateBy(PhoneCapability::id)

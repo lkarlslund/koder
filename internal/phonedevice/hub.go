@@ -43,6 +43,10 @@ const (
 	PhotosThumbs        Action = "phone_photos_thumbs"
 	PhotoView           Action = "phone_photo_view"
 	PhotoTransfer       Action = "phone_photo_transfer"
+	ReadAppLog          Action = "read_app_log"
+	ScheduleAlert       Action = "schedule_alert"
+	ListAlerts          Action = "list_alerts"
+	CancelAlert         Action = "cancel_alert"
 )
 
 const MaxArtifactBytes = 25 << 20
@@ -97,6 +101,10 @@ var catalog = []CatalogEntry{
 	{PhotosThumbs, "Copy a bounded batch of low-resolution photo thumbnails for visual triage", "optional start_time, end_time, query, limit", false, false},
 	{PhotoView, "Copy one selected photo at inspection resolution into temporary session storage", "photo_id", false, false},
 	{PhotoTransfer, "Copy one selected original photo so Koder can place it at a requested project path and edit it", "photo_id", false, false},
+	{ReadAppLog, "Read the Koder app's diagnostic log on the phone: its own events (tags such as popup, call, audio, playback, connection, telecom, crash) and the app process's Android logcat (tag logcat); the newest lines are kept when the limit is reached", "optional since (RFC 3339 time or duration back such as 30m), level (debug, info, warn, error), tag, query, limit (1-2000, default 300)", false, false},
+	{ScheduleAlert, "Schedule a notification that the phone shows at a set time, even if Koder is closed or offline by then", "title; at (RFC 3339 time with offset) or in (duration such as 45m); optional message", true, true},
+	{ListAlerts, "List the alerts Koder scheduled on the phone and their status", "none", false, false},
+	{CancelAlert, "Cancel an alert Koder scheduled on the phone", "alert_id", true, true},
 }
 
 var known = func() map[Action]CatalogEntry {
@@ -258,6 +266,10 @@ func explicitlyRequestedUserFacingActions(text string) map[Action]bool {
 		allowed[SendSMS] = true
 	}
 	allow(SetAlarm, "alarm", "vækkeur")
+	allow(ScheduleAlert, "alert", "remind", "reminder", "notify", "notification", "påmind", "husk mig", "notifikation", "advar")
+	if containsAny("alert", "reminder", "påmindelse") && containsAny("cancel", "remove", "delete", "aflys", "fjern", "slet") {
+		allowed[CancelAlert] = true
+	}
 	allow(SetTimer, "timer", "nedtælling")
 	if containsAny("clipboard", "udklipsholder", "copy ", "kopier ") && containsAny("write", "put", "save", "copy", "skriv", "sæt", "gem", "kopier") {
 		allowed[WriteClipboard] = true

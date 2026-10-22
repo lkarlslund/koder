@@ -22,7 +22,6 @@ import (
 	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/phonedevice"
-	"github.com/lkarlslund/koder/internal/phonesync"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
@@ -614,7 +613,6 @@ type Controller struct {
 	nextSeq uint64
 	subs    map[int]chan Event
 	phone   *phonedevice.Hub
-	sync    *phonesync.Store
 }
 
 // New constructs a browser app controller.
@@ -634,13 +632,9 @@ func New(cfg config.Config, engine *agent.Engine) *Controller {
 		phone:                       phone,
 		providerHealth:              health,
 	}
-	if stateDir := cfg.StateDir(); stateDir != "" {
-		controller.sync = phonesync.Open(stateDir)
-	}
 	if engine != nil {
 		engine.SetVoiceSessionControl(controller)
 		engine.SetPhoneDeviceControl(phone)
-		engine.SetPhoneSync(controller.sync)
 	}
 	return controller
 }
@@ -652,26 +646,6 @@ func (c *Controller) PhoneDeviceHub() *phonedevice.Hub {
 		return nil
 	}
 	return c.phone
-}
-
-// PhoneSyncStore returns the store for logs and alerts that bound phones
-// sync outside voice calls.
-func (c *Controller) PhoneSyncStore() *phonesync.Store {
-	if c == nil {
-		return nil
-	}
-	return c.sync
-}
-
-// PhoneLogsEnabled reports whether the user enabled the phone_logs tool, which
-// is also the phone's permission to upload its log.
-func (c *Controller) PhoneLogsEnabled() bool {
-	if c == nil {
-		return false
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.cfg.Tools.Enabled[domain.ToolKindPhoneLogs]
 }
 
 // ChatBackends reports runtime availability and models for chat creation.

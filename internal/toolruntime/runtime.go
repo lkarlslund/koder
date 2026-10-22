@@ -22,7 +22,6 @@ import (
 	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/phonedevice"
-	"github.com/lkarlslund/koder/internal/phonesync"
 	"github.com/lkarlslund/koder/internal/provider"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/settings"
@@ -30,7 +29,6 @@ import (
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
-	"github.com/lkarlslund/koder/internal/tools/phonesynctool"
 	"github.com/lkarlslund/koder/internal/tools/phonetool"
 	"github.com/lkarlslund/koder/internal/tools/sessiontool"
 )
@@ -51,7 +49,6 @@ type Runtime struct {
 	skillCatalogMax  int
 	voiceSessions    sessiontool.Control
 	phoneDevice      phonedevice.Control
-	phoneSync        *phonesync.Store
 }
 
 type Config struct {
@@ -105,13 +102,6 @@ func (r *Runtime) Memory() *memory.Store {
 func (r *Runtime) SetPhoneDeviceControl(control phonedevice.Control) {
 	if r != nil {
 		r.phoneDevice = control
-	}
-}
-
-// SetPhoneSync gives every chat the logs and alerts of synced phones.
-func (r *Runtime) SetPhoneSync(store *phonesync.Store) {
-	if r != nil {
-		r.phoneSync = store
 	}
 }
 
@@ -213,12 +203,6 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		runtime.Services = chattool.RuntimeService(owner.ChatToolControl(chat.ID))
 	}
 	for key, service := range sessiontool.RuntimeService(r.voiceSessions) {
-		if runtime.Services == nil {
-			runtime.Services = map[string]any{}
-		}
-		runtime.Services[key] = service
-	}
-	for key, service := range phonesynctool.RuntimeService(r.phoneSync) {
 		if runtime.Services == nil {
 			runtime.Services = map[string]any{}
 		}

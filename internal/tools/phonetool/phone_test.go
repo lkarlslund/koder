@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/id"
@@ -272,4 +273,60 @@ func catalogEntry(t *testing.T, action phonedevice.Action) phonedevice.CatalogEn
 	}
 	t.Fatalf("catalog action %q was not found", action)
 	return phonedevice.CatalogEntry{}
+}
+
+type recordingControl struct {
+	catalogControl
+	action phonedevice.Action
+	args   map[string]string
+}
+
+func (c *recordingControl) Execute(_ context.Context, action phonedevice.Action, args map[string]string) (phonedevice.Result, error) {
+	c.action, c.args = action, args
+	return phonedevice.Result{Text: "ok"}, nil
+}
+
+func TestPhoneLogsAndAlertsAreRegularPhoneTools(t *testing.T) {
+	control := &recordingControl{catalogControl: catalogControl{entries: []phonedevice.CatalogEntry{
+		catalogEntry(t, phonedevice.ReadAppLog), catalogEntry(t, phonedevice.ScheduleAlert), catalogEntry(t, phonedevice.ListAlerts),
+	}}}
+	runtime := tools.Runtime{ChatRole: chatrole.Voice, Services: RuntimeService(control)}
+	if definition, ok := tools.DefinitionFor(tools.PhoneLogs, runtime); !ok || !strings.Contains(string(definition.Function.Parameters), `"read"`) {
+		t.Fatalf("phone_logs definition = %#v, %v", definition, ok)
+	}
+	definition, ok := tools.DefinitionFor(tools.PhoneAlerts, runtime)
+	if params := string(definition.Function.Parameters); !ok || !strings.Contains(params, `"schedule"`) || strings.Contains(params, `"cancel"`) {
+		t.Fatalf("phone_alerts offers only what the phone advertised: %s", params)
+	}
+
+	before := time.Now()
+	call := func(kind tools.ID, args map[string]string) error {
+		_, err := tools.Call(context.Background(), tools.Options{Runtime: runtime, Request: tools.Request{Tool: kind, Args: args}})
+		return err
+	}
+	if err := call(tools.PhoneAlerts, map[string]string{"action": "schedule", "title": "Tea", "in": "45m"}); err != nil {
+		t.Fatal(err)
+	}
+	at, err := time.Parse(time.RFC3339, control.args["at"])
+	if err != nil || control.action != phonedevice.ScheduleAlert || control.args["in"] != "" || at.Sub(before) < 44*time.Minute || at.Sub(before) > 46*time.Minute {
+		t.Fatalf("schedule sent %q %v (%v)", control.action, control.args, err)
+	}
+	if err := call(tools.PhoneLogs, map[string]string{"action": "read", "since": "30m", "level": "warn"}); err != nil {
+		t.Fatal(err)
+	}
+	since, err := time.Parse(time.RFC3339, control.args["since"])
+	if err != nil || control.action != phonedevice.ReadAppLog || before.Sub(since) < 29*time.Minute || control.args["level"] != "warn" {
+		t.Fatalf("read sent %q %v (%v)", control.action, control.args, err)
+	}
+
+	for _, bad := range []map[string]string{
+		{"action": "schedule", "title": "Tea"},
+		{"action": "schedule", "title": "Tea", "in": "45m", "at": "2030-01-01T00:00:00Z"},
+		{"action": "schedule", "title": "Tea", "at": "2000-01-01T00:00:00Z"},
+		{"action": "schedule", "in": "45m"},
+	} {
+		if err := call(tools.PhoneAlerts, bad); err == nil {
+			t.Fatalf("schedule %v was accepted", bad)
+		}
+	}
 }

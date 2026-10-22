@@ -6,7 +6,6 @@ import android.widget.Toast
 import org.json.JSONObject
 import java.io.File
 import java.time.Instant
-import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -39,10 +38,8 @@ object AppLog {
 
 	@Volatile private var directory: File? = null
 	private var seq = 0L
-	@Volatile var epoch: String = ""
-		private set
 	private var bytes = 0L
-	private var listener: ((AppLogEntry) -> Unit)? = null
+	private var logcatAfterMillis = 0L
 	private val writer: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
 		Thread(runnable, "koder-app-log").apply { isDaemon = true }
 	}
@@ -51,25 +48,13 @@ object AppLog {
 	fun init(context: Context) {
 		if (directory != null) return
 		val dir = File(context.applicationContext.filesDir, "diagnostics").apply { mkdirs() }
-		val preferences = context.getSharedPreferences("koder_diagnostics", Context.MODE_PRIVATE)
-		val last = (readFile(File(dir, "log.current")).lastOrNull() ?: readFile(File(dir, "log.previous")).lastOrNull())
-		epoch = preferences.getString("log_epoch", "").orEmpty()
-		if (last == null || epoch.isBlank()) {
-			epoch = UUID.randomUUID().toString()
-			preferences.edit().putString("log_epoch", epoch).apply()
-			File(dir, "log.current").delete()
-			File(dir, "log.previous").delete()
-		}
+		val last = readFile(File(dir, "log.current")).lastOrNull() ?: readFile(File(dir, "log.previous")).lastOrNull()
 		seq = last?.seq ?: 0L
+		logcatAfterMillis = (readFile(File(dir, "log.previous")) + readFile(File(dir, "log.current")))
+			.lastOrNull { it.tag == LOGCAT_TAG }?.time?.toEpochMilli() ?: 0L
 		bytes = File(dir, "log.current").length()
 		directory = dir
 		installCrashHandler()
-	}
-
-	/** Called on the log thread after each entry, e.g. to sync soon after a warning. */
-	@Synchronized
-	fun setListener(value: ((AppLogEntry) -> Unit)?) {
-		listener = value
 	}
 
 	fun d(tag: String, message: String) = log("D", tag, message)
@@ -78,8 +63,7 @@ object AppLog {
 	fun e(tag: String, message: String, error: Throwable? = null) = log("E", tag, withError(message, error))
 
 	fun log(level: String, tag: String, message: String, time: Instant = Instant.now()) {
-		// Queue under the lock so the file stays in sequence order; a sync
-		// that saw a later line would otherwise skip an earlier one for good.
+		// Queue under the lock so the file stays in sequence order.
 		val entry = synchronized(this) {
 			next(level, tag, message, time)?.also { writer.execute { append(it) } }
 		} ?: return
@@ -87,15 +71,44 @@ object AppLog {
 		if (tag != LOGCAT_TAG) mirror(entry)
 	}
 
-	/** Entries after [afterSeq], oldest first, at most [limit]. Call off the main thread. */
-	fun entriesAfter(afterSeq: Long, limit: Int): List<AppLogEntry> {
+	/**
+	 * The newest [limit] entries matching [filter], oldest first, after copying
+	 * in the app process's newer logcat lines. Call off the main thread.
+	 */
+	fun query(filter: AppLogFilter, limit: Int): List<AppLogEntry> {
+		captureLogcat()
 		flush()
 		val dir = directory ?: return emptyList()
-		return synchronized(this) {
-			(readFile(File(dir, "log.previous")) + readFile(File(dir, "log.current")))
-				.filter { it.seq > afterSeq }
-				.take(limit)
+		val entries = synchronized(this) { readFile(File(dir, "log.previous")) + readFile(File(dir, "log.current")) }
+		return entries.filter(filter::matches).takeLast(limit)
+	}
+
+	/** Copies this process's newer logcat lines (Android's own audio and system messages) into the log. */
+	private fun captureLogcat() {
+		val lines = runCatching {
+			val process = ProcessBuilder(listOf("logcat", "-v", "epoch", "-t", LOGCAT_LINES.toString(), "--pid=${android.os.Process.myPid()}") + logcatFilter)
+				.redirectErrorStream(true).start()
+			val output = process.inputStream.bufferedReader().readLines()
+			process.waitFor(5, TimeUnit.SECONDS)
+			output
+		}.getOrDefault(emptyList())
+		synchronized(this) {
+			val fresh = parseLogcat(lines, logcatAfterMillis)
+			fresh.forEach { (time, level, message) -> log(level, LOGCAT_TAG, message, Instant.ofEpochMilli(time)) }
+			fresh.lastOrNull()?.let { logcatAfterMillis = it.first }
 		}
+	}
+
+	private val logcatLine = Regex("""^\s*(\d+)\.(\d{3})\s+\d+\s+\d+\s+([VDIWEF])\s+(.*?)\s*: (.*)$""")
+
+	/** Parses `logcat -v epoch` lines newer than [afterMillis] into time, level, and message. */
+	internal fun parseLogcat(lines: List<String>, afterMillis: Long): List<Triple<Long, String, String>> = lines.mapNotNull { line ->
+		val match = logcatLine.matchEntire(line) ?: return@mapNotNull null
+		val (seconds, millis, level, tag, message) = match.destructured
+		val time = seconds.toLong() * 1000 + millis.toLong()
+		if (time <= afterMillis) return@mapNotNull null
+		val appLevel = when (level) { "V", "D" -> "D"; "I" -> "I"; "W" -> "W"; else -> "E" }
+		Triple(time, appLevel, "$tag: $message")
 	}
 
 	/** Waits briefly for queued writes, so a read sees them. */
@@ -122,8 +135,6 @@ object AppLog {
 			}
 			runCatching { current.appendText(line) }.onSuccess { bytes += line.length }
 		}
-		val notify = synchronized(this) { listener }
-		runCatching { notify?.invoke(entry) }
 	}
 
 	private fun mirror(entry: AppLogEntry) {
@@ -160,6 +171,25 @@ object AppLog {
 	/** Logcat lines are captured under this tag; the app's own mirror is excluded. */
 	internal const val LOGCAT_TAG = "logcat"
 	internal val logcatFilter = arrayOf("*:I", "$ANDROID_TAG:S")
+	private const val LOGCAT_LINES = 2000
+}
+
+/** Selects log entries for the phone_logs tool. Levels are D, I, W and E. */
+data class AppLogFilter(
+	val sinceMillis: Long = 0,
+	val minLevel: String = "D",
+	val tag: String = "",
+	val query: String = "",
+) {
+	fun matches(entry: AppLogEntry): Boolean =
+		entry.time.toEpochMilli() >= sinceMillis &&
+			LEVELS.indexOf(entry.level).coerceAtLeast(0) >= LEVELS.indexOf(minLevel).coerceAtLeast(0) &&
+			(tag.isBlank() || entry.tag == tag) &&
+			(query.isBlank() || entry.tag.contains(query, ignoreCase = true) || entry.message.contains(query, ignoreCase = true))
+
+	companion object {
+		val LEVELS = listOf("D", "I", "W", "E")
+	}
 }
 
 /** Shows a popup and keeps it in [AppLog], since a toast disappears in seconds. */

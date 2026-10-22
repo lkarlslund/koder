@@ -83,7 +83,7 @@
             </intent-filter>
         </service>
         <receiver
-            android:name=".diagnostics.PhoneSyncReceiver"
+            android:name=".diagnostics.PhoneAlertReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

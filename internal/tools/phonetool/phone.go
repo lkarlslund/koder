@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"mime"
 	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/attachment"
@@ -108,6 +110,12 @@ func registerPhoneResources() {
 	registerPhoneResource(tools.PhoneOpen, "Open on phone", "Open a map or HTTPS URL only when the user explicitly asks to see it on the phone.",
 		phoneSchema(`"action":{"type":"string"},"query":{"type":"string"},"latitude":{"type":"number"},"longitude":{"type":"number"},"url":{"type":"string"}`),
 		[]resourceRoute{{Name: "map", Action: phonedevice.OpenMap}, {Name: "url", Action: phonedevice.OpenURL}})
+	registerPhoneResource(tools.PhoneLogs, "Phone app logs", "Read the Koder Android app's diagnostic log to investigate its problems: audio that stops, dropped connections, crashes, and the short error popups it showed.",
+		phoneSchema(`"action":{"type":"string"},"since":{"type":"string","description":"RFC 3339 time, or a duration back from now such as 30m"},"level":{"type":"string","enum":["debug","info","warn","error"]},"tag":{"type":"string","description":"Exact tag, such as popup, audio or logcat"},"query":{"type":"string","description":"Case-insensitive text in the tag or message"},"limit":{"type":"integer","minimum":1,"maximum":2000}`),
+		[]resourceRoute{{Name: "read", Action: phonedevice.ReadAppLog}})
+	registerPhoneResource(tools.PhoneAlerts, "Phone alerts", "Schedule, list, or cancel notifications that the phone shows at a set time.",
+		phoneSchema(`"action":{"type":"string"},"title":{"type":"string"},"message":{"type":"string"},"at":{"type":"string","description":"RFC 3339 time with offset"},"in":{"type":"string","description":"Delay from now such as 45m or 2h30m"},"alert_id":{"type":"string"}`),
+		[]resourceRoute{{Name: "schedule", Action: phonedevice.ScheduleAlert}, {Name: "list", Action: phonedevice.ListAlerts}, {Name: "cancel", Action: phonedevice.CancelAlert}})
 	tools.Register(tools.ActionTool{
 		Kind:   tools.PhonePhotos,
 		Routes: []tools.ActionRoute{{Action: "search", Tool: tools.PhonePhotosSearch}, {Action: "thumbnails", Tool: tools.PhonePhotosThumbs}, {Action: "view", Tool: tools.PhonePhotoView}, {Action: "transfer", Tool: tools.PhonePhotoTransfer}},
@@ -210,6 +218,11 @@ func (t resourceTool) Call(ctx context.Context, opts tools.Options) (tools.Resul
 			args[key] = value
 		}
 	}
+	// Relative times become absolute only now, after any approval wait.
+	args, err = resolveTimes(route.Action, args, time.Now())
+	if err != nil {
+		return tools.Result{}, err
+	}
 	result, err := control.Execute(ctx, route.Action, args)
 	if err != nil {
 		return tools.Result{}, err
@@ -223,6 +236,48 @@ func (t resourceTool) route(name string) (resourceRoute, bool) {
 		}
 	}
 	return resourceRoute{}, false
+}
+
+// resolveTimes turns read_app_log's since and schedule_alert's in into
+// absolute RFC 3339 times, which is all the phone accepts.
+func resolveTimes(action phonedevice.Action, args map[string]string, now time.Time) (map[string]string, error) {
+	out := maps.Clone(args)
+	switch action {
+	case phonedevice.ReadAppLog:
+		raw := out["since"]
+		if raw == "" {
+			return out, nil
+		}
+		if _, err := time.Parse(time.RFC3339, raw); err == nil {
+			return out, nil
+		}
+		ago, err := time.ParseDuration(raw)
+		if err != nil || ago < 0 {
+			return nil, errors.New("since must be an RFC 3339 time or a duration such as 2h")
+		}
+		out["since"] = now.Add(-ago).UTC().Format(time.RFC3339)
+	case phonedevice.ScheduleAlert:
+		var at time.Time
+		if raw := out["in"]; raw != "" {
+			delay, err := time.ParseDuration(raw)
+			if err != nil || delay <= 0 {
+				return nil, errors.New("in must be a positive duration such as 45m")
+			}
+			at = now.Add(delay)
+		} else {
+			parsed, err := time.Parse(time.RFC3339, out["at"])
+			if err != nil {
+				return nil, errors.New("at must be an RFC 3339 time with offset")
+			}
+			if !parsed.After(now) {
+				return nil, fmt.Errorf("at %s is not in the future", out["at"])
+			}
+			at = parsed
+		}
+		delete(out, "in")
+		out["at"] = at.Format(time.RFC3339)
+	}
+	return out, nil
 }
 
 func capabilityForAction(capabilities []phonedevice.CatalogEntry, action phonedevice.Action) (phonedevice.CatalogEntry, bool) {
@@ -303,6 +358,20 @@ func validateResourceArgs(action phonedevice.Action, args map[string]string) err
 		return require("latitude", "longitude")
 	case phonedevice.SetAlarm:
 		return require("hour", "minute")
+	case phonedevice.ReadAppLog:
+		_, err := resolveTimes(action, args, time.Now())
+		return err
+	case phonedevice.ScheduleAlert:
+		if err := require("title"); err != nil {
+			return err
+		}
+		if (args["at"] == "") == (args["in"] == "") {
+			return errors.New("pass exactly one of at or in for schedule_alert")
+		}
+		_, err := resolveTimes(action, args, time.Now())
+		return err
+	case phonedevice.CancelAlert:
+		return require("alert_id")
 	case phonedevice.SetTimer:
 		return require("duration_seconds")
 	case phonedevice.WriteClipboard:

@@ -10,11 +10,12 @@ data class PhoneAlert(
 	val fireAtMillis: Long,
 	val status: String = SCHEDULED,
 	val detail: String = "",
-	/** Whether the server has acknowledged [status]. */
-	val reported: Boolean = false,
 	val updatedAtMillis: Long = 0,
 ) {
 	val finished get() = status != SCHEDULED
+
+	fun toJSON(): JSONObject = JSONObject().put("id", id).put("title", title).put("body", body)
+		.put("fire_at", fireAtMillis).put("status", status).put("detail", detail).put("updated_at", updatedAtMillis)
 
 	companion object {
 		const val SCHEDULED = "scheduled"
@@ -24,10 +25,7 @@ data class PhoneAlert(
 	}
 }
 
-/**
- * The phone's record of alerts from Koder: which are armed, and which status
- * changes the server has not yet heard about. Pure logic, stored as JSON.
- */
+/** The alerts Koder scheduled on this phone, stored as JSON. Pure logic. */
 class AlertBook(json: String = "[]") {
 	private val alerts = linkedMapOf<String, PhoneAlert>()
 
@@ -38,45 +36,32 @@ class AlertBook(json: String = "[]") {
 				val alert = PhoneAlert(
 					id = item.optString("id"), title = item.optString("title"), body = item.optString("body"),
 					fireAtMillis = item.optLong("fire_at"), status = item.optString("status", PhoneAlert.SCHEDULED),
-					detail = item.optString("detail"), reported = item.optBoolean("reported"),
-					updatedAtMillis = item.optLong("updated_at"),
+					detail = item.optString("detail"), updatedAtMillis = item.optLong("updated_at"),
 				)
 				if (alert.id.isNotBlank()) alerts[alert.id] = alert
 			}
 		}
 	}
 
-	fun toJSON(): String = JSONArray().also { array ->
-		alerts.values.forEach { alert ->
-			array.put(JSONObject().put("id", alert.id).put("title", alert.title).put("body", alert.body)
-				.put("fire_at", alert.fireAtMillis).put("status", alert.status).put("detail", alert.detail)
-				.put("reported", alert.reported).put("updated_at", alert.updatedAtMillis))
-		}
-	}.toString()
+	fun toJSON(): String = JSONArray().also { array -> alerts.values.forEach { array.put(it.toJSON()) } }.toString()
 
 	operator fun get(id: String): PhoneAlert? = alerts[id]
 
-	/** Records alerts the server sent and returns those not seen before. */
-	fun accept(incoming: List<PhoneAlert>): List<PhoneAlert> = incoming.filter { alert ->
-		alert.id.isNotBlank() && alert.id !in alerts
-	}.onEach { alerts[it.id] = it.copy(status = PhoneAlert.SCHEDULED, reported = false) }
+	fun add(alert: PhoneAlert) {
+		alerts[alert.id] = alert
+	}
 
 	fun mark(id: String, status: String, detail: String = "", nowMillis: Long = System.currentTimeMillis()) {
 		val alert = alerts[id] ?: return
-		alerts[id] = alert.copy(status = status, detail = detail, reported = false, updatedAtMillis = nowMillis)
+		alerts[id] = alert.copy(status = status, detail = detail, updatedAtMillis = nowMillis)
 	}
 
 	fun armed(): List<PhoneAlert> = alerts.values.filter { it.status == PhoneAlert.SCHEDULED }
 
-	fun unreported(): List<PhoneAlert> = alerts.values.filter { !it.reported }
-
-	/** Marks reports as delivered unless the status changed since they were sent. */
-	fun reported(sent: List<PhoneAlert>, nowMillis: Long = System.currentTimeMillis()) {
-		sent.forEach { report ->
-			val current = alerts[report.id] ?: return@forEach
-			if (current.status == report.status && current.detail == report.detail) alerts[report.id] = current.copy(reported = true)
-		}
-		alerts.values.removeAll { it.finished && it.reported && nowMillis - it.updatedAtMillis > KEEP_FINISHED_MILLIS }
+	/** Every alert by fire time, after dropping those finished over a week ago. */
+	fun all(nowMillis: Long = System.currentTimeMillis()): List<PhoneAlert> {
+		alerts.values.removeAll { it.finished && nowMillis - it.updatedAtMillis > KEEP_FINISHED_MILLIS }
+		return alerts.values.sortedBy { it.fireAtMillis }
 	}
 
 	private companion object {
