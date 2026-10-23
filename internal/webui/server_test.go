@@ -2968,10 +2968,16 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `sessionBusyChatCount()`) ||
 		!strings.Contains(fullPage, `syncBrowserTabActivity()`) ||
-		!strings.Contains(fullPage, `renderTabActivityIcon(busy)`) ||
+		!strings.Contains(fullPage, `renderTabActivityIcon(mode)`) ||
 		!strings.Contains(fullPage, `koder-tab-activity-icon`) ||
 		!strings.Contains(fullPage, `canvas.toDataURL('image/png')`) {
 		t.Fatalf("expected browser tab title and favicon to reflect session-wide chat activity")
+	}
+	if !strings.Contains(fullPage, `document.hidden || !document.hasFocus()`) ||
+		!strings.Contains(fullPage, `this.tabAttention = 'waiting'`) ||
+		!strings.Contains(fullPage, `this.tabAttention = 'done'`) ||
+		!strings.Contains(fullPage, `this.clearTabAttention();`) {
+		t.Fatalf("expected a background tab to flag finished and waiting chats until it is focused")
 	}
 	if strings.Contains(fullPage, `setInterval(() => this.renderTabActivityIcon(true)`) {
 		t.Fatalf("expected the busy favicon to remain static because browsers do not reliably repaint animated favicons")
