@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -3353,6 +3354,30 @@ func TestRuntimeDebouncesStreamedToolCallDeltaStatus(t *testing.T) {
 		t.Fatalf("second status text = %q", second.StatusText)
 	}
 	close(events)
+}
+
+func TestRuntimeDebouncesWithheldToolCallProgressStatus(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	rt := newTestChat(t, st, session, chat, &runtimeFakeRunner{})
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	events := make(chan domain.Event, 200)
+	defer close(events)
+	rt.forwardTurnEvents(0, events)
+	for size := 1; size <= 200; size++ {
+		events <- domain.Event{Kind: domain.EventKindToolCallDelta, Meta: map[string]string{"argument_bytes": strconv.Itoa(size)}}
+	}
+
+	first := waitForToolCallDeltaUpdate(t, updates, 2*time.Second)
+	if first.StatusText != "Receiving tool call (1 B arguments)" {
+		t.Fatalf("first status text = %q", first.StatusText)
+	}
+	last := waitForToolCallDeltaUpdate(t, updates, 2*time.Second)
+	if last.StatusText != "Receiving tool call (200 B arguments)" {
+		t.Fatalf("debounced status text = %q, want the latest progress", last.StatusText)
+	}
 }
 
 func waitForToolCallDeltaUpdate(t *testing.T, updates <-chan Update, timeout time.Duration) Update {

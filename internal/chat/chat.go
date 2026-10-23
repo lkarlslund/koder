@@ -3743,8 +3743,13 @@ func (r *Chat) sendWorkerCommand(cmd any) bool {
 	}
 }
 
+// debounceStreamingToolCallDelta matches the per-chunk tool call progress a
+// provider streams, either as the growing arguments or, when the server
+// withholds them, as a byte count. Each one would otherwise broadcast a full
+// snapshot, and a flood of them fills subscriber buffers and drops the text
+// updates that came before the tool call.
 func debounceStreamingToolCallDelta(evt domain.Event) bool {
-	return evt.Kind == domain.EventKindToolCallDelta && evt.Item.ID == "" && evt.Meta["arguments"] != ""
+	return evt.Kind == domain.EventKindToolCallDelta && evt.Item.ID == "" && (evt.Meta["arguments"] != "" || evt.Meta["argument_bytes"] != "")
 }
 
 func (r *Chat) persistQueue() error {
