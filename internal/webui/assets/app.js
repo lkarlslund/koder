@@ -1096,7 +1096,7 @@
     function koderApp() {
       return {
         ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, lastWSMessageBytes: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
-        tabActivityIcon: null,
+        tabActivityIcon: null, tabActivityIconMode: null, tabAttention: '', tabWasWorking: false, tabAttentionTimer: null, tabAttentionBlink: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
 		showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'overview', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', settingsHealth: {issue_count: 0, needs_setup: false, issues: []}, showBrowserEditor: false, showCodexEditor: false, showClaudeEditor: false, showObservability: false,
 		showPhoneBinding: false, phoneBinding: null, phoneBindingLoading: false, phoneBindingError: '', voiceDevices: [], voiceDevicesLoading: false, voiceDevicesError: '',
@@ -1128,9 +1128,9 @@
 		  this.voicePresenceTimer = setInterval(() => this.refreshVoiceChatPresence(), 2000);
           window.addEventListener('resize', () => { this.resizeComposer(); if (!this.isMobileLayout()) this.mobileSidebarOpen = false; this.reportClientStateSoon(); });
           window.addEventListener('online', () => this.connectNow());
-          window.addEventListener('focus', () => { this.connectNow(); this.reportClientStateSoon(); });
+          window.addEventListener('focus', () => { this.connectNow(); this.reportClientStateSoon(); this.clearTabAttention(); });
           window.addEventListener('blur', () => this.reportClientStateSoon());
-          document.addEventListener('visibilitychange', () => { if (!document.hidden) this.connectNow(); this.reportClientStateSoon(); });
+          document.addEventListener('visibilitychange', () => { if (!document.hidden) this.connectNow(); this.reportClientStateSoon(); this.clearTabAttention(); });
           document.addEventListener('click', event => {
             if (!this.handleCopyOutputClick(event)) this.handleMediaPreviewClick(event);
           });
@@ -3597,22 +3597,60 @@
           const value = String(status.status || status.Status || 'idle');
           return ['running', 'waiting_llm', 'streaming_thoughts', 'streaming_response', 'running_tools', 'waiting_approval', 'waiting_input'].includes(value);
         },
-        sessionBusyChatCount() {
+        sessionChatStatuses() {
           const chatIDs = new Set((this.state.chats || this.state.Chats || []).map(chat => this.chatID(chat)).filter(Boolean));
           const statuses = this.state.chat_statuses || this.state.ChatStatuses || [];
-          return statuses.filter(status => {
-            const id = String(status.chat_id || status.ChatID || '').trim();
-            return chatIDs.has(id) && this.chatStatusBusy(status);
-          }).length;
+          return statuses.filter(status => chatIDs.has(String(status.chat_id || status.ChatID || '').trim()));
+        },
+        sessionBusyChatCount() {
+          return this.sessionChatStatuses().filter(status => this.chatStatusBusy(status)).length;
+        },
+        chatStatusWaiting(status) {
+          if (Number(status.pending_approvals ?? status.PendingApprovals ?? 0) > 0) return true;
+          if (Number(status.pending_user_input ?? status.PendingUserInput ?? 0) > 0) return true;
+          return ['waiting_approval', 'waiting_input'].includes(String(status.status || status.Status || ''));
+        },
+        // The tab is "away" when it is hidden behind another tab or its window
+        // is not focused, so a finished turn or a question can flag the tab.
+        tabAway() {
+          return document.hidden || !document.hasFocus();
         },
         syncBrowserTabActivity() {
           const sessionID = this.currentSessionID();
           const busy = !!sessionID && this.sessionBusyChatCount() > 0;
-          const sessionTitle = sessionID ? this.sessionTitle(this.currentSession()) : '';
-          document.title = sessionTitle ? (busy ? '● ' : '') + sessionTitle + ' · koder' : 'koder';
-          this.renderTabActivityIcon(busy);
+          const waiting = !!sessionID && this.sessionChatStatuses().some(status => this.chatStatusWaiting(status));
+          const working = busy && !waiting;
+          if (working) this.tabAttention = '';
+          else if (this.tabAway() && waiting) this.tabAttention = 'waiting';
+          else if (this.tabAway() && this.tabWasWorking) this.tabAttention = 'done';
+          this.tabWasWorking = working;
+          if (this.tabAttention && !this.tabAttentionTimer) {
+            this.tabAttentionTimer = setInterval(() => { this.tabAttentionBlink = !this.tabAttentionBlink; this.renderTabTitle(); }, 1200);
+          } else if (!this.tabAttention && this.tabAttentionTimer) {
+            clearInterval(this.tabAttentionTimer);
+            this.tabAttentionTimer = null;
+            this.tabAttentionBlink = false;
+          }
+          this.renderTabTitle(busy);
+          this.renderTabActivityIcon(this.tabAttention || (busy ? 'busy' : ''));
         },
-        renderTabActivityIcon(busy) {
+        clearTabAttention() {
+          if (!this.tabAttention || this.tabAway()) return;
+          this.tabAttention = '';
+          this.syncBrowserTabActivity();
+        },
+        renderTabTitle(busy = this.currentSessionID() && this.sessionBusyChatCount() > 0) {
+          const sessionTitle = this.currentSessionID() ? this.sessionTitle(this.currentSession()) : '';
+          if (!sessionTitle) {
+            document.title = 'koder';
+            return;
+          }
+          let prefix = busy ? '● ' : '';
+          if (this.tabAttention === 'waiting') prefix = this.tabAttentionBlink ? '✋ Needs you · ' : '✋ ';
+          if (this.tabAttention === 'done') prefix = this.tabAttentionBlink ? '✓ Done · ' : '✓ ';
+          document.title = prefix + sessionTitle + ' · koder';
+        },
+        renderTabActivityIcon(mode) {
           let icon = this.tabActivityIcon;
           if (!icon || !icon.isConnected) {
             icon = document.getElementById('koder-tab-activity-icon');
@@ -3623,8 +3661,11 @@
               document.head.appendChild(icon);
             }
             this.tabActivityIcon = icon;
+            this.tabActivityIconMode = null;
           }
-          if (!busy) {
+          if (mode === this.tabActivityIconMode) return;
+          this.tabActivityIconMode = mode;
+          if (!mode) {
             icon.type = 'image/svg+xml';
             icon.sizes = 'any';
             icon.href = '/assets/koder-logo.svg';
@@ -3636,19 +3677,42 @@
           const ctx = canvas.getContext('2d');
           if (!ctx) return;
           ctx.lineCap = 'round';
-          ctx.lineWidth = 4;
-          ctx.strokeStyle = 'rgba(108, 117, 125, .45)';
-          ctx.beginPath();
-          ctx.arc(16, 16, 11, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.strokeStyle = '#0d6efd';
-          ctx.beginPath();
-          ctx.arc(16, 16, 11, 0, Math.PI * 1.25);
-          ctx.stroke();
-          ctx.fillStyle = '#6ea8fe';
-          ctx.beginPath();
-          ctx.arc(16, 16, 3, 0, Math.PI * 2);
-          ctx.fill();
+          if (mode === 'busy') {
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = 'rgba(108, 117, 125, .45)';
+            ctx.beginPath();
+            ctx.arc(16, 16, 11, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.strokeStyle = '#0d6efd';
+            ctx.beginPath();
+            ctx.arc(16, 16, 11, 0, Math.PI * 1.25);
+            ctx.stroke();
+            ctx.fillStyle = '#6ea8fe';
+            ctx.beginPath();
+            ctx.arc(16, 16, 3, 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            // The koder logo with a badge: green when a turn finished, orange
+            // when a chat waits for an approval or an answer.
+            ctx.scale(32 / 24, 32 / 24);
+            ctx.fillStyle = '#0d6efd';
+            ctx.beginPath();
+            ctx.roundRect(0, 0, 24, 24, 4);
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2.4;
+            ctx.lineJoin = 'round';
+            ctx.stroke(new Path2D('M7 6v12M17 6l-6 6 6 6'));
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(24.5, 7.5, 7.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = mode === 'waiting' ? '#fd7e14' : '#198754';
+            ctx.beginPath();
+            ctx.arc(24.5, 7.5, 6, 0, Math.PI * 2);
+            ctx.fill();
+          }
           icon.type = 'image/png';
           icon.sizes = '32x32';
           icon.href = canvas.toDataURL('image/png');
