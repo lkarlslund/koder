@@ -971,10 +971,12 @@
       if (String((tool && tool.tool) || '') === 'bash' && (toolStatus(tool) === 'done' || toolStatus(tool) === 'errored')) return '';
       if (String((tool && tool.tool) || '') === 'chat_send') return chatSendMessage(args);
       if (String((tool && tool.tool) || '') === 'chats' && ['queue', 'steer', 'interrupt'].includes(toolAction(tool))) return chatSendMessage(args);
-      if (String((tool && tool.tool) || '') === 'exec_command' && args.comment) return '';
+      const execCommand = String((tool && tool.tool) || '') === 'exec_command';
+      if (execCommand && args.comment) return '';
       const values = [];
       if (args.command) values.push(compactCommandLabel(args.command));
-      if (args.cmd) values.push(compactCommandLabel(args.cmd));
+      // exec_command's title already shows cmd when there is no comment.
+      if (args.cmd && !execCommand) values.push(compactCommandLabel(args.cmd));
       if (args.process_id) values.push('process_id=' + args.process_id);
       const timeout = timeoutLabel(args.timeout_ms || args.yield_time_ms);
       if (timeout) values.push((args.yield_time_ms ? 'wait=' : 'timeout=') + timeout);

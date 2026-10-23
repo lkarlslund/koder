@@ -2380,12 +2380,12 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected colorful tool status badges with done wording")
 	}
 	if !strings.Contains(fullPage, `if (args.command) values.push(compactCommandLabel(args.command))`) ||
-		!strings.Contains(fullPage, `if (args.cmd) values.push(compactCommandLabel(args.cmd))`) ||
+		!strings.Contains(fullPage, `if (args.cmd && !execCommand) values.push(compactCommandLabel(args.cmd))`) ||
 		!strings.Contains(fullPage, `if (args.process_id) values.push('process_id=' + args.process_id)`) ||
 		!strings.Contains(fullPage, `(args.yield_time_ms ? 'wait=' : 'timeout=') + timeout`) ||
 		!strings.Contains(fullPage, `function compactCommandLabel(command)`) ||
 		!strings.Contains(fullPage, `const label = comment || compactCommandLabel(command)`) ||
-		!strings.Contains(fullPage, `if (String((tool && tool.tool) || '') === 'exec_command' && args.comment) return ''`) ||
+		!strings.Contains(fullPage, `if (execCommand && args.comment) return ''`) ||
 		!strings.Contains(fullPage, `if (command) lines.push('command: ' + command)`) ||
 		!strings.Contains(fullPage, `if (timeout) lines.push('timeout: ' + timeout)`) ||
 		!strings.Contains(fullPage, `function execResultLines(data, fallback)`) ||
