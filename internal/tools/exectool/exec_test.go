@@ -366,3 +366,22 @@ func TestStoredFromSnapshotMarksOutputMode(t *testing.T) {
 		t.Fatalf("expected tail output mode, got %q", tail.OutputMode)
 	}
 }
+
+func TestListShowsOnlyRunningSessionsWithShortCommands(t *testing.T) {
+	long := "python3 - <<'PY'\n" + strings.Repeat("print('x')\n", 50) + "PY"
+	control := &recordingExecControl{list: []execruntime.Snapshot{
+		{ProcessID: "exec_1", Command: "echo done", State: execruntime.StateCompleted},
+		{ProcessID: "exec_2", Command: long, State: execruntime.StateRunning},
+		{ProcessID: "exec_3", Command: strings.Repeat("a", 300), State: execruntime.StateRunning},
+	}}
+	result, err := (listTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{
+		SessionID: "session-1", ChatID: "chat-1", Exec: control,
+	}, Request: tools.Request{Tool: tools.ExecList, Args: map[string]string{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Listed running exec sessions\nexec_2 [running] python3 - <<'PY' …\nexec_3 [running] " + strings.Repeat("a", 120) + " …"
+	if result.Output != want {
+		t.Fatalf("output:\n%s\nwant:\n%s", result.Output, want)
+	}
+}

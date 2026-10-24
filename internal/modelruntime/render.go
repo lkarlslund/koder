@@ -440,6 +440,7 @@ func (r *Runtime) timelineToolResultMessage(chat domain.Chat, tool domain.ToolCa
 		}
 	}
 	body = modelToolResultBody(tool, status, body)
+	body = tools.CapModelResult(body, r.toolResultLimitBytes(chat))
 	return provider.Message{Role: provider.RoleTool, Content: body, ToolCallID: string(tool.ToolCallID)}, true
 }
 
@@ -447,6 +448,18 @@ func (r *Runtime) timelineToolResultMessage(chat domain.Chat, tool domain.ToolCa
 // arguments, then the error. Qwen-style templates render tool results inside a
 // user turn, so instructions here read as a new user message; how to react to
 // a failed call is part of the system prompt instead.
+// toolResultLimitBytes depends only on the chat's model, so a result renders
+// the same on every turn and the prompt cache keeps matching.
+func (r *Runtime) toolResultLimitBytes(chat domain.Chat) int {
+	contextWindow := 0
+	if r.settings != nil {
+		if model, err := r.settings.Model(chat); err == nil {
+			contextWindow = model.ContextWindow
+		}
+	}
+	return tools.ModelResultLimitBytes(contextWindow)
+}
+
 func modelToolResultBody(tool domain.ToolCall, status domain.ToolResultStatus, body string) string {
 	body = strings.TrimSpace(body)
 	var state string

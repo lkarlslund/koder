@@ -514,3 +514,14 @@ func TestNormalizeFailurePreservesRequestIdentity(t *testing.T) {
 		t.Errorf("expected ToolCallID to be %q, got %q", "call_abc123", got)
 	}
 }
+
+func TestCapModelResultCutsAtALineAndSaysSo(t *testing.T) {
+	text := strings.Repeat("0123456789\n", 100)
+	want := strings.Repeat("0123456789\n", 8) + "0123456789\n[tool result cut: showing the first 98 of 1100 bytes]"
+	if got := tools.CapModelResult(text, 105); got != want {
+		t.Fatalf("got %q", got)
+	}
+	if got := tools.CapModelResult("short", 105); got != "short" {
+		t.Fatalf("short text changed: %q", got)
+	}
+}

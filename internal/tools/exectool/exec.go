@@ -34,7 +34,7 @@ func init() {
 	}, tools.ToolSpec{
 		Title:       "Exec session",
 		Description: "Inspect and interact with persistent command sessions.",
-		Usage:       "Manage commands that exec_command returned as still running. A running session reports its exit to this chat as a notification, so a long wait is not needed: end the turn or keep working until the notification arrives. wait consumes newly available output without sending input and suits short waits; send_input writes chars and can close stdin; status returns a non-consuming snapshot; terminate stops one process; cleanup stops processes in the selected scope.",
+		Usage:       "Manage commands that exec_command returned as still running. A running session reports its exit to this chat as a notification, so a long wait is not needed: end the turn or keep working until the notification arrives. list shows the running sessions; wait consumes newly available output without sending input and suits short waits; send_input writes chars and can close stdin; status returns a non-consuming snapshot; terminate stops one process; cleanup stops processes in the selected scope.",
 		Parameters:  `{"type":"object","properties":{"action":{"type":"string","enum":["list","status","wait","send_input","resize","terminate","cleanup"]},"process_id":{"type":"string","description":"Process id returned by exec_command"},"scope":{"type":"string","enum":["chat","session"]},"chars":{"type":"string","description":"For send_input, exact characters to write"},"close_stdin":{"type":"boolean"},"yield_time_ms":{"type":"integer","minimum":1,"maximum":300000},"max_output_bytes":{"type":"integer"},"rows":{"type":"integer"},"cols":{"type":"integer"}},"required":["action"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
@@ -371,7 +371,19 @@ func (listTool) Call(ctx context.Context, opts tools.Options) (tools.Result, err
 	if err != nil {
 		return tools.Result{}, err
 	}
-	stored := storedListFromSnapshots(snaps, string(scope), "Listed exec sessions")
+	// Finished sessions are left out: a long chat can have hundreds, and
+	// status still answers for any of them by process id.
+	running := snaps[:0]
+	for _, snap := range snaps {
+		if snap.State == execruntime.StateRunning {
+			running = append(running, snap)
+		}
+	}
+	message := "Listed running exec sessions"
+	if len(running) == 0 {
+		message = "No exec sessions are running"
+	}
+	stored := storedListFromSnapshots(running, string(scope), message)
 	return tools.Result{
 		Output: tools.DisplayTextForStored(req.Tool, stored),
 		Stored: stored,
@@ -561,7 +573,6 @@ func storedListFromSnapshots(snaps []execruntime.Snapshot, scope, message string
 			State:     string(snap.State),
 			TTY:       snap.TTY,
 			ExitCode:  snap.ExitCode,
-			Output:    snap.Output,
 		})
 	}
 	return tools.ExecListStoredResult{

@@ -28,6 +28,7 @@ import (
 	"github.com/lkarlslund/koder/internal/offeredfile"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/skills"
+	"github.com/lkarlslund/koder/internal/textutil"
 )
 
 type chatIDContextKey struct{}
@@ -195,6 +196,28 @@ const (
 	// maxOutputBudgetBytes matches how much output exec keeps per process.
 	maxOutputBudgetBytes = 256 << 10
 )
+
+// ModelResultLimitBytes caps any tool result in the model's context, as a
+// backstop for tools that do not size their own output: a quarter of the
+// context window, at most maxOutputBudgetBytes.
+func ModelResultLimitBytes(contextWindow int) int {
+	if contextWindow <= 0 {
+		return maxOutputBudgetBytes
+	}
+	return OutputBudgetBytes(contextWindow, 0)
+}
+
+// CapModelResult cuts text over limit bytes at a line break and says so.
+func CapModelResult(text string, limit int) string {
+	if limit <= 0 || len(text) <= limit {
+		return text
+	}
+	kept := textutil.TruncateBytes(text, limit)
+	if cut := strings.LastIndexByte(kept, '\n'); cut > len(kept)/2 {
+		kept = kept[:cut]
+	}
+	return fmt.Sprintf("%s\n[tool result cut: showing the first %d of %d bytes]", kept, len(kept), len(text))
+}
 
 // OutputBudgetBytes sizes one tool output as a quarter of the context the
 // chat has left, at about four bytes per token. usedTokens <= 0 means the

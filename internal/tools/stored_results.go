@@ -1308,13 +1308,24 @@ func formatExecStoredResult(result ExecStoredResult) string {
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
+// execListCommand shows a command as one short line; status shows it whole.
+func execListCommand(command string) string {
+	const maxRunes = 120
+	line, rest, _ := strings.Cut(strings.TrimSpace(command), "\n")
+	line = strings.TrimSpace(line)
+	if cut := textutil.TruncateRunes(line, maxRunes); cut != line || strings.TrimSpace(rest) != "" {
+		return cut + " …"
+	}
+	return line
+}
+
 func formatExecListStoredResult(result ExecListStoredResult) string {
 	lines := make([]string, 0, len(result.Items)+1)
 	if msg := strings.TrimSpace(result.Message); msg != "" {
 		lines = append(lines, msg)
 	}
 	for _, item := range result.Items {
-		line := fmt.Sprintf("%s [%s] %s", strings.TrimSpace(item.ProcessID), strings.TrimSpace(item.State), strings.TrimSpace(item.Command))
+		line := fmt.Sprintf("%s [%s] %s", strings.TrimSpace(item.ProcessID), strings.TrimSpace(item.State), execListCommand(item.Command))
 		if item.ExitCode != nil {
 			line += fmt.Sprintf(" (exit %d)", *item.ExitCode)
 		}
