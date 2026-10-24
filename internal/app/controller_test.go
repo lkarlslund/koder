@@ -3137,7 +3137,7 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 		requestsMu.Unlock()
 		switch {
 		case strings.Contains(requestBody, "voice orchestrator") && strings.Contains(requestBody, `"role":"tool"`):
-			if !strings.Contains(requestBody, "Your message is being processed by the chat.") {
+			if !strings.Contains(requestBody, "delivery: the chat is processing the message") {
 				t.Errorf("voice continuation omitted chat delivery result: %s", requestBody)
 			}
 			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"I asked the laptop chat to check it."},"finish_reason":"stop"}],"usage":{"total_tokens":2}}`)

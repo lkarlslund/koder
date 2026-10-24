@@ -781,7 +781,7 @@ func TestSystemPromptHonorsExplicitToolRestrictionsWithoutPlaceholders(t *testin
 		t.Fatal(err)
 	}
 	prompt := string(data)
-	for _, want := range []string{"only use this tool/source", "hard constraint", "outside the allowed set", "Never make placeholder", "echo ok"} {
+	for _, want := range []string{"only use this tool/source", "do not repeat the identical call", "hard constraint", "outside the allowed set", "Never make placeholder", "echo ok"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("expected system prompt to mention %q", want)
 		}
@@ -6957,8 +6957,8 @@ func TestRunPromptDeniesRepeatedIdenticalToolCallsThenStops(t *testing.T) {
 				}
 				if tool.Status == domain.ToolStatusDenied {
 					deniedOutputs++
-					if tool.Result == nil || !strings.Contains(tool.Result.Text, "Read the previous tool result") || !strings.Contains(tool.Result.Text, "Repeated input:") {
-						t.Fatalf("expected denied loop tool to show repeated input and tell model to read prior results, got %#v", tool.Result)
+					if tool.Result == nil || !strings.Contains(tool.Result.Text, "identical call") || !strings.Contains(tool.Result.Text, "Repeated input:") || strings.Contains(tool.Result.Text, "Read the previous tool result") {
+						t.Fatalf("expected denied loop tool to state the repeated input as a fact, got %#v", tool.Result)
 					}
 				}
 			}

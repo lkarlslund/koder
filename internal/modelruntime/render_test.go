@@ -218,7 +218,7 @@ func TestBuildPromptEnvelopeRepeatedCompactionIgnoresPendingMarkerInRetainedTail
 	}
 }
 
-func TestConversationMessagesForToolErrorGivesRecoveryGuidance(t *testing.T) {
+func TestConversationMessagesForToolErrorStatesFacts(t *testing.T) {
 	t.Parallel()
 
 	runtime := New(Config{Config: config.Default().WithStateDir(t.TempDir())})
@@ -244,18 +244,13 @@ func TestConversationMessagesForToolErrorGivesRecoveryGuidance(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := providerMessagesText(messages)
-	for _, want := range []string{
-		"Tool call did not succeed.",
-		"Do not retry the same tool call with the same arguments.",
-		"different user-allowed tool",
-		"explicit user restriction on tools or sources",
-		"Failed tool: exec_write_stdin",
-		`"process_id":""`,
-		"Tool error:",
-		"Invalid tool call: process_id is empty",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("expected model guidance %q in prompt, got %s", want, joined)
+	want := "status: error\ntool: exec_write_stdin\narguments: {\"process_id\":\"\"}\nerror:\nInvalid tool call: process_id is empty"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("expected failed tool result as facts %q, got %s", want, joined)
+	}
+	for _, instruction := range []string{"Do not retry", "did not succeed", "Read the error"} {
+		if strings.Contains(joined, instruction) {
+			t.Fatalf("expected no instructions in failed tool result, found %q in %s", instruction, joined)
 		}
 	}
 }
@@ -270,7 +265,7 @@ func TestConversationMessagesForSuccessfulToolDoesNotAddErrorGuidance(t *testing
 		t.Fatal(err)
 	}
 	joined := providerMessagesText(messages)
-	if strings.Contains(joined, "Do not retry the same tool call") {
+	if strings.Contains(joined, "status: error") {
 		t.Fatalf("did not expect error guidance for successful tool result, got %s", joined)
 	}
 	if !strings.Contains(joined, "ok") {

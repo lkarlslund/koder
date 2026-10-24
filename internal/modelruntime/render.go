@@ -425,32 +425,38 @@ func (r *Runtime) timelineToolResultMessage(chat domain.Chat, tool domain.ToolCa
 	return provider.Message{Role: provider.RoleTool, Content: body, ToolCallID: string(tool.ToolCallID)}, true
 }
 
+// modelToolResultBody frames a failed tool result as facts: status, tool and
+// arguments, then the error. Qwen-style templates render tool results inside a
+// user turn, so instructions here read as a new user message; how to react to
+// a failed call is part of the system prompt instead.
 func modelToolResultBody(tool domain.ToolCall, status domain.ToolResultStatus, body string) string {
 	body = strings.TrimSpace(body)
-	failed := status == domain.ToolResultStatusError ||
-		status == domain.ToolResultStatusDenied ||
-		tool.Status == domain.ToolStatusCanceled
-	if !failed {
+	var state string
+	switch {
+	case tool.Status == domain.ToolStatusCanceled:
+		state = "canceled"
+	case status == domain.ToolResultStatusDenied:
+		state = "denied"
+	case status == domain.ToolResultStatusError:
+		state = "error"
+	default:
 		return body
 	}
-	var guidance strings.Builder
-	guidance.WriteString("Tool call did not succeed.\n")
-	guidance.WriteString("Do not retry the same tool call with the same arguments.\n")
-	guidance.WriteString("Read the error, identify what is wrong, and either fix the arguments, use a different user-allowed tool, ask the user for missing information, or provide a final answer using the information already available. Continue to honor any explicit user restriction on tools or sources.\n")
+	lines := []string{"status: " + state}
 	if tool.Tool != "" {
-		guidance.WriteString("Failed tool: ")
-		guidance.WriteString(tool.Tool.String())
-		guidance.WriteString("\n")
+		lines = append(lines, "tool: "+tool.Tool.String())
 	}
 	if args := strings.TrimSpace((tools.Request{Tool: tool.Tool, Args: tool.Args}).ArgumentsJSON()); args != "" && args != "{}" {
-		guidance.WriteString("Failed arguments: ")
-		guidance.WriteString(args)
-		guidance.WriteString("\n")
+		lines = append(lines, "arguments: "+args)
 	}
-	if body == "" {
-		return strings.TrimSpace(guidance.String())
+	if body != "" {
+		label := "error:"
+		if state != "error" {
+			label = "detail:"
+		}
+		lines = append(lines, label, body)
 	}
-	return strings.TrimSpace(guidance.String()) + "\n\nTool error:\n" + body
+	return strings.Join(lines, "\n")
 }
 
 func (r *Runtime) BaseInstructionsForChat(session domain.Session, chat domain.Chat) []provider.InstructionBlock {

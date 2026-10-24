@@ -271,7 +271,7 @@ func TestStartUsesControlAndReportsNoPollingContract(t *testing.T) {
 	if control.lastStart.Profile != chatrole.Execution || control.lastStart.Objective != "Implement alpha" || control.lastStart.MilestoneKey != "alpha" || control.lastStart.Title != "Worker" || control.lastStart.Backend != domain.ChatBackendCodex || control.lastStart.ModelID != "gpt-test" || control.lastStart.PermissionProfile != "readonly" || control.lastStart.ToolStates[domain.ToolKindSessionStart] || control.lastStart.ToolStates[domain.ToolKindChatStart] || control.lastSessionID != "session-10" || control.lastParentChatID != "chat-20" {
 		t.Fatalf("unexpected control call: %#v", control)
 	}
-	if !strings.Contains(result.Output, "Worker") || !strings.Contains(result.Output, "will report back automatically") || !strings.Contains(result.Output, "Do not poll") {
+	if !strings.Contains(result.Output, "Worker") || !strings.Contains(result.Output, "reporting: automatic when the child chat becomes idle") || strings.Contains(result.Output, "Do not poll") {
 		t.Fatalf("expected chat output with reporting guidance, got %q", result.Output)
 	}
 }

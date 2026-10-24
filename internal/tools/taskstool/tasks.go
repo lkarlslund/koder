@@ -326,7 +326,7 @@ func (fetchNextTool) Call(ctx context.Context, opts tools.Options) (tools.Result
 			return tools.TaskBucketResult(plan, ref, []planning.Task{item}, ""), nil
 		}
 	}
-	message := "All tasks for this milestone are done. If you have more planned tasks, move to the next milestone or break it down into tasks and start working on them."
+	message := "All tasks for this milestone are done."
 	return tools.TaskBucketResult(plan, ref, tasks, message), nil
 }
 
@@ -621,7 +621,7 @@ func (fetchNextTool) FinalizeResult(ctx context.Context, runtime tools.Runtime, 
 			return result, nil
 		}
 	}
-	message = "All tasks for this milestone are done. If you have more planned tasks, move to the next milestone or break it down into tasks and start working on them."
+	message = "All tasks for this milestone are done."
 	result.Stored = tools.BuildTaskListStoredResult(plan, ref, tasks, message)
 	return result, nil
 }
@@ -636,7 +636,7 @@ func ensureMilestoneAcceptsTasks(plan planning.Plan, ref string) error {
 		}
 		switch milestone.Status {
 		case planning.MilestoneStatusCompleted, planning.MilestoneStatusCancelled:
-			return fmt.Errorf("milestone %q is %s; cannot add tasks. To reopen it, first use milestones with action=update and status=ready, then add tasks", planning.MilestoneKey(milestone), milestone.Status.String())
+			return fmt.Errorf("milestone %q is %s, and tasks cannot be added to it; milestones action=update with status=ready reopens it", planning.MilestoneKey(milestone), milestone.Status.String())
 		}
 		return nil
 	}

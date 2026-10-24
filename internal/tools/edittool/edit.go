@@ -119,7 +119,7 @@ func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) 
 		return tools.Result{}, fmt.Errorf("post-write verification failed for %s: could not re-read file: %w", rel, err)
 	}
 	if string(verifyBytes) != after {
-		return tools.Result{}, fmt.Errorf("post-write verification failed for %s: on-disk content differs from intended write (wrote %d bytes, read back %d bytes). The edit did not persist as intended; re-read the file and try again", rel, len(after), len(verifyBytes))
+		return tools.Result{}, fmt.Errorf("post-write verification failed for %s: on-disk content differs from intended write (wrote %d bytes, read back %d bytes); the edit did not persist as intended", rel, len(after), len(verifyBytes))
 	}
 	dmp := diffmatchpatch.New()
 	diffs := dmp.DiffMain(before, after, false)
@@ -647,7 +647,7 @@ func detectEscapedQuoteDrift(oldString, newString string, matched []string) erro
 				return nil
 			}
 		}
-		return fmt.Errorf("target text only matched after unescaping %s; re-read the file and pass the actual unescaped text instead of escaped quotes", suspect)
+		return fmt.Errorf("target text only matched after unescaping %s; the file contains the unescaped text, not escaped quotes", suspect)
 	}
 	return nil
 }

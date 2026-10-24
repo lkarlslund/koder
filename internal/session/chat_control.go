@@ -262,24 +262,24 @@ func (c chatControl) UpdateChat(ctx context.Context, sessionID, ownerChatID, cha
 			case chattool.DeliveryQueue:
 				rt.Enqueue(item)
 				if before.Busy {
-					deliveryNotice = "Your message was queued for the chat."
+					deliveryNotice = "queued for the chat"
 				} else {
-					deliveryNotice = "Your message is being processed by the chat."
+					deliveryNotice = "the chat is processing the message"
 				}
 			case chattool.DeliverySteer:
 				item.Kind = chatpkg.QueueKindSteer
 				rt.Enqueue(item)
 				if before.Busy {
-					deliveryNotice = "Your message will be delivered at the chat's next turn boundary."
+					deliveryNotice = "at the chat's next turn boundary"
 				} else {
-					deliveryNotice = "Your message is being processed by the chat."
+					deliveryNotice = "the chat is processing the message"
 				}
 			case chattool.DeliveryInterrupt:
 				rt.InterruptAndEnqueue(item)
 				if before.Busy || before.State == chattool.RunStateWaitingApproval {
-					deliveryNotice = "The chat was interrupted to get your message."
+					deliveryNotice = "the chat was interrupted to take the message"
 				} else {
-					deliveryNotice = "Your message is being processed by the chat."
+					deliveryNotice = "the chat is processing the message"
 				}
 			default:
 				return chattool.Status{}, fmt.Errorf("unsupported chat message delivery %q", update.Delivery)
@@ -532,7 +532,7 @@ func (s *Session) ensureCanStartChild(ctx context.Context, parentChatID id.ID, c
 		}
 		parts = append(parts, fmt.Sprintf("%s (%s)", status.ID, ref))
 	}
-	return fmt.Errorf("cannot start child chat: %d non-idle child chat(s) already active, limit is %d; use chats with action=steer for existing child chat(s): %s", len(active), limit, strings.Join(parts, ", "))
+	return fmt.Errorf("cannot start child chat: %d non-idle child chat(s) already active, limit is %d; active child chat(s), which chats action=steer can reach: %s", len(active), limit, strings.Join(parts, ", "))
 }
 
 func (s *Session) maxChildChats() int {

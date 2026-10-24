@@ -767,7 +767,7 @@ func TestStartChatRespectsMaxNonIdleChildren(t *testing.T) {
 		Objective:    "Implement beta",
 		MilestoneKey: "M002",
 	})
-	if err == nil || !strings.Contains(err.Error(), "limit is 1") || !strings.Contains(err.Error(), "chats with action=steer") {
+	if err == nil || !strings.Contains(err.Error(), "limit is 1") || !strings.Contains(err.Error(), "chats action=steer can reach") {
 		t.Fatalf("expected max child chat error, got %v", err)
 	}
 }

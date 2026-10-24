@@ -254,10 +254,10 @@ func TestTaskAddRejectsClosedMilestones(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expected closed milestone error for %s", ref)
 		}
-		if !strings.Contains(err.Error(), "cannot add tasks") || !strings.Contains(err.Error(), "milestones with action=update") {
+		if !strings.Contains(err.Error(), "tasks cannot be added") || !strings.Contains(err.Error(), "milestones action=update with status=ready reopens it") {
 			t.Fatalf("expected reopen guidance for %s, got %v", ref, err)
 		}
-		if _, _, err := tools.FinalizeResult(ctx, runtime, req, tools.Result{}); err == nil || !strings.Contains(err.Error(), "cannot add tasks") {
+		if _, _, err := tools.FinalizeResult(ctx, runtime, req, tools.Result{}); err == nil || !strings.Contains(err.Error(), "tasks cannot be added") {
 			t.Fatalf("expected persist closed milestone error for %s, got %v", ref, err)
 		}
 	}

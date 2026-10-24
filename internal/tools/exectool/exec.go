@@ -601,7 +601,7 @@ func missingWriteStdinProcessIDError(ctx context.Context, control execruntime.Co
 		}
 	}
 	if len(running) == 0 {
-		return errors.New("process_id is empty; exec_session can only wait for or write to an existing persistent exec session, but there are no running exec sessions in this chat; do not call exec_session again; use the information already available, start a new command with exec_command if more work is needed, or answer the user")
+		return errors.New("process_id is empty, and no exec sessions are running in this chat")
 	}
 	ids := make([]string, 0, len(running))
 	for _, snap := range running {
@@ -611,7 +611,7 @@ func missingWriteStdinProcessIDError(ctx context.Context, control execruntime.Co
 		}
 		ids = append(ids, label)
 	}
-	return fmt.Errorf("process_id is empty. exec_session requires the process_id returned by exec_command. Running exec sessions in this chat: %s. Use exec_session action=list with scope \"chat\" to inspect sessions, then action=wait or action=send_input with one of those process_id values, or action=status for a non-consuming snapshot", strings.Join(ids, ", "))
+	return fmt.Errorf("process_id is empty; running exec sessions in this chat: %s", strings.Join(ids, ", "))
 }
 
 func normalizeScope(args map[string]string) string {

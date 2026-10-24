@@ -47,7 +47,7 @@ func TestExecuteRefusesExistingFileWithoutForceOverwrite(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected overwrite refusal")
 	}
-	for _, want := range []string{"force_overwrite=true", "Prefer file_edit"} {
+	for _, want := range []string{"already exists", "force_overwrite=true"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected error to contain %q, got %v", want, err)
 		}

@@ -58,7 +58,7 @@ func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) 
 	action := "created"
 	if readErr == nil {
 		if req.Args["force_overwrite"] != "true" {
-			return tools.Result{}, fmt.Errorf("file_write refuses to overwrite existing file %s. Prefer file_edit for targeted changes to existing files. For larger new work, create a small initial scaffold, then add behavior iteratively with focused file_edit calls. Use force_overwrite=true only when replacing the entire file is absolutely necessary", rel)
+			return tools.Result{}, fmt.Errorf("%s already exists; file_write overwrites an existing file only with force_overwrite=true", rel)
 		}
 		if info, statErr := os.Stat(abs); statErr == nil {
 			mode = info.Mode().Perm()

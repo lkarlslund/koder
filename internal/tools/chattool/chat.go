@@ -474,7 +474,7 @@ func disabledToolStates(value string) domain.ToolStates {
 }
 
 func childReportGuidance(output string) string {
-	return strings.TrimSpace(output + "\nThe child chat will report back automatically when it becomes idle, including task or milestone progress. Do not poll it.")
+	return strings.TrimSpace(output + "\nreporting: automatic when the child chat becomes idle, including task and milestone progress")
 }
 
 func (messageTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
@@ -614,7 +614,7 @@ func chatResult(tool tools.ID, status Status) (tools.Result, error) {
 	stored := storedResult([]Status{status})
 	output := tools.DisplayTextForStored(tool, stored)
 	if notice := strings.TrimSpace(status.DeliveryNotice); notice != "" {
-		output = strings.TrimSpace(notice + "\n" + output)
+		output = strings.TrimSpace(output + "\ndelivery: " + notice)
 	}
 	return tools.Result{
 		Output: output,

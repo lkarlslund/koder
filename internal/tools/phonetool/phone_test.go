@@ -72,7 +72,7 @@ func TestPhotoThumbnailIsMaterializedWithoutPersistingBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if control.action != phonedevice.PhotosThumbs || !strings.Contains(result.Output, "Phone artifact 42 copied to") {
+	if control.action != phonedevice.PhotosThumbs || !strings.Contains(result.Output, "phone artifact: 42 copied to") {
 		t.Fatalf("result=%#v action=%q", result, control.action)
 	}
 	if strings.Contains(result.Output, "jpeg-data") {

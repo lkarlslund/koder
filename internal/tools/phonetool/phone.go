@@ -611,7 +611,7 @@ func phoneResult(runtime tools.Runtime, result phonedevice.Result) (tools.Result
 		}
 		stored["artifacts"] = files
 		for _, file := range files {
-			output += fmt.Sprintf("\nPhone artifact %s copied to %s (%s). Use view_image to inspect images and present action=media to show a result to the user.", file.ID, file.Path, file.MIMEType)
+			output += fmt.Sprintf("\nphone artifact: %s copied to %s (%s)", file.ID, file.Path, file.MIMEType)
 		}
 	}
 	return tools.Result{Output: strings.TrimSpace(output), Stored: stored}, nil

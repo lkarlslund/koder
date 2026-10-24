@@ -169,7 +169,7 @@ func RepeatedToolDeniedMessage(pause ContinuationPause) string {
 	if args := strings.TrimSpace(pause.Args); args != "" {
 		msg += " Repeated input: " + args + "."
 	}
-	return msg + " Read the previous tool result, then choose a different tool or pass different arguments that include the field you intended to change."
+	return msg
 }
 
 func comparableToolLoopCall(req tools.Request) (toolLoopComparableCall, bool) {

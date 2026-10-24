@@ -212,7 +212,7 @@ func TestWriteStdinMissingProcessIDExplainsNoRunningProcesses(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing process id error")
 	}
-	for _, want := range []string{"process_id is empty", "there are no running exec sessions", "do not call exec_session again", "exec_command"} {
+	for _, want := range []string{"process_id is empty", "no exec sessions are running in this chat"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected error to contain %q, got %v", want, err)
 		}
@@ -239,7 +239,7 @@ func TestWriteStdinMissingProcessIDListsRunningProcesses(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing process id error")
 	}
-	for _, want := range []string{"process_id is empty", "Running exec sessions", "exec_7 (sleep 60)", "action=list", "action=status"} {
+	for _, want := range []string{"process_id is empty", "running exec sessions in this chat: exec_7 (sleep 60)"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected error to contain %q, got %v", want, err)
 		}

@@ -876,7 +876,7 @@ func noMilestoneChangeError(current planning.Milestone, req tools.Request) error
 			currentParent = "unset"
 		}
 		parts = append(parts, fmt.Sprintf("depends_on_key is %s", currentParent))
-		parts = append(parts, fmt.Sprintf("to change dependency, call milestone_depend with milestone_key=%s and depends_on_key=<parent milestone key>; do not retry milestone_update with only status", key))
+		parts = append(parts, fmt.Sprintf("milestone_update does not change dependencies; milestone_depend with milestone_key=%s does", key))
 	}
 	return errors.New(strings.Join(parts, "; "))
 }
