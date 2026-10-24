@@ -2123,7 +2123,9 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `Send as steer`) ||
 		!strings.Contains(fullPage, `send({steer: true})`) ||
 		!strings.Contains(fullPage, `ev.altKey`) ||
-		!strings.Contains(fullPage, `steer: !!options.steer`) {
+		!strings.Contains(fullPage, `Send to queue`) ||
+		!strings.Contains(fullPage, `this.send({steer: !this.composerDefaultSteer})`) ||
+		!strings.Contains(fullPage, `readPreference('composerDefaultSend', 'steer')`) {
 		t.Fatalf("expected composer to expose explicit steer submission")
 	}
 	if !strings.Contains(fullPage, `activeTokenUsageLabel()`) ||
@@ -2679,8 +2681,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `@paste.prevent="onComposerPaste($event)"`) ||
 		!strings.Contains(fullPage, `/api/attachments/clipboard-image`) ||
 		!strings.Contains(fullPage, `composerAttachments`) ||
-		!strings.Contains(fullPage, `this.rpc('send_prompt', {text, attachments, steer: !!options.steer})`) ||
-		!strings.Contains(fullPage, `this.send({steer: true})`) {
+		!strings.Contains(fullPage, `this.rpc('send_prompt', {text, attachments, steer: !!steer})`) {
 		t.Fatalf("expected composer to upload pasted images and send them as attachments")
 	}
 	if !strings.Contains(fullPage, `activeQueue().length > 0`) ||
