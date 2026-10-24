@@ -250,6 +250,7 @@ func TestWriteStdinMissingProcessIDListsRunningProcesses(t *testing.T) {
 }
 
 type recordingExecControl struct {
+	startState execruntime.State
 	start      execruntime.StartRequest
 	writeStdin execruntime.WriteStdinRequest
 	list       []execruntime.Snapshot
@@ -260,13 +261,17 @@ func (c *recordingExecControl) Start(_ context.Context, req execruntime.StartReq
 	if req.Workdir == "" {
 		return execruntime.Snapshot{}, errors.New("workdir is empty")
 	}
+	state := c.startState
+	if state == "" {
+		state = execruntime.StateCompleted
+	}
 	return execruntime.Snapshot{
 		ProcessID: "exec_1",
 		SessionID: req.SessionID,
 		ChatID:    req.ChatID,
 		Command:   req.Command,
 		Workdir:   req.Workdir,
-		State:     execruntime.StateCompleted,
+		State:     state,
 	}, nil
 }
 
@@ -301,14 +306,27 @@ func (c *recordingExecControl) Cleanup(context.Context, execruntime.CleanupReque
 	return nil, errors.New("not implemented")
 }
 
-func TestExecStartMessageDistinguishesRunningProcess(t *testing.T) {
-	running := execStartMessage(execruntime.Snapshot{State: execruntime.StateRunning})
-	if running == "" || !containsAll(running, "still running", "action=wait", "action=status", "action=send_input", "action=terminate") {
-		t.Fatalf("expected running guidance, got %q", running)
-	}
-	completed := execStartMessage(execruntime.Snapshot{State: execruntime.StateCompleted})
-	if completed == "" || !containsAll(completed, "completed", "grace period") {
-		t.Fatalf("expected completed grace-period message, got %q", completed)
+func TestCommandResultStatesFactsWithoutInstructions(t *testing.T) {
+	for _, tc := range []struct {
+		state execruntime.State
+		want  string
+	}{
+		{execruntime.StateRunning, "process_id: exec_1\nstate: running (startup wait ended; the command continues in the background)\noutput_mode: tail\noutput:\n(none yet)"},
+		{execruntime.StateCompleted, "process_id: exec_1\nstate: completed\noutput_mode: tail\noutput:\n(none)"},
+	} {
+		control := &recordingExecControl{startState: tc.state}
+		result, err := (commandTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{
+			Workdir:   t.TempDir(),
+			SessionID: "session-1",
+			ChatID:    "chat-1",
+			Exec:      control,
+		}, Request: tools.Request{Args: map[string]string{"cmd": "sleep 60"}}})
+		if err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		if result.Output != tc.want {
+			t.Fatalf("%s output = %q, want %q", tc.state, result.Output, tc.want)
+		}
 	}
 }
 
@@ -321,13 +339,4 @@ func TestStoredFromSnapshotMarksOutputMode(t *testing.T) {
 	if tail.OutputMode != "tail" {
 		t.Fatalf("expected tail output mode, got %q", tail.OutputMode)
 	}
-}
-
-func containsAll(text string, needles ...string) bool {
-	for _, needle := range needles {
-		if !strings.Contains(text, needle) {
-			return false
-		}
-	}
-	return true
 }

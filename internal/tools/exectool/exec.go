@@ -283,7 +283,10 @@ func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 	if err != nil {
 		return tools.Result{}, err
 	}
-	stored := storedFromSnapshot(snap, execStartMessage(snap))
+	stored := storedFromSnapshot(snap, "")
+	if snap.State == execruntime.StateRunning {
+		stored.StateNote = tools.ExecStartRunningNote
+	}
 	stored.Workdir = rel
 	stored.Comment = req.Args["comment"]
 	meta := map[string]string{
@@ -300,7 +303,7 @@ func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 		meta["comment"] = stored.Comment
 	}
 	return tools.Result{
-		Output: stored.Message,
+		Output: tools.DisplayTextForStored(tools.ExecCommand, stored),
 		Meta:   meta,
 		Stored: stored,
 	}, nil
@@ -510,13 +513,6 @@ func storedFromSnapshot(snap execruntime.Snapshot, message string) tools.ExecSto
 		StdinClosed:  snap.StdinClosed,
 		Message:      message,
 	}
-}
-
-func execStartMessage(snap execruntime.Snapshot) string {
-	if snap.State == execruntime.StateRunning {
-		return "Exec session is still running. Use exec_session action=wait for new output, action=send_input to interact with stdin, action=status for one-off inspection, or action=terminate to stop it."
-	}
-	return "Exec session completed during startup grace period."
 }
 
 // outputLimit is the requested max_output_bytes, or else the room the

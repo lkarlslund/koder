@@ -93,9 +93,12 @@ type ExecStoredResult struct {
 	OutputMode  string `json:"output_mode,omitempty"`
 	OutputBytes int    `json:"output_bytes,omitempty"`
 	// OmittedBytes counts output left out before Output by the size limit.
-	OmittedBytes int    `json:"omitted_bytes,omitempty"`
-	StdinClosed  bool   `json:"stdin_closed,omitempty"`
-	Message      string `json:"message,omitempty"`
+	OmittedBytes int  `json:"omitted_bytes,omitempty"`
+	StdinClosed  bool `json:"stdin_closed,omitempty"`
+	// StateNote explains State in the model-facing text, e.g. that a
+	// command outlived exec_command's startup wait.
+	StateNote string `json:"state_note,omitempty"`
+	Message   string `json:"message,omitempty"`
 }
 
 type ExecListStoredItem struct {
@@ -645,7 +648,8 @@ func compactBashStoredResult(result BashStoredResult, limits CompactFormatLimits
 
 func compactExecStoredResult(result ExecStoredResult, limits CompactFormatLimits) string {
 	lines := make([]string, 0, 8)
-	if msg := strings.TrimSpace(result.Message); msg != "" {
+	msg, state := execMessageAndState(result)
+	if msg != "" {
 		lines = append(lines, msg)
 	}
 	if id := strings.TrimSpace(result.ProcessID); id != "" {
@@ -657,7 +661,7 @@ func compactExecStoredResult(result ExecStoredResult, limits CompactFormatLimits
 	if workdir := strings.TrimSpace(result.Workdir); workdir != "" {
 		lines = append(lines, "workdir: "+workdir)
 	}
-	if state := strings.TrimSpace(result.State); state != "" {
+	if state != "" {
 		lines = append(lines, "state: "+state)
 	}
 	if result.ExitCode != nil {
@@ -1242,15 +1246,31 @@ func formatReadStoredResult(result ReadStoredResult) string {
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
+// ExecStartRunningNote is the state note for a command that is still running
+// when exec_command's startup wait ends. It states a fact rather than giving
+// instructions: Qwen-style templates render tool results inside a user turn,
+// where an instruction-like result reads as a new setup message.
+const ExecStartRunningNote = "startup wait ended; the command continues in the background"
+
+// execMessageAndState returns the leading message and the state line.
+func execMessageAndState(result ExecStoredResult) (string, string) {
+	state := strings.TrimSpace(result.State)
+	if note := strings.TrimSpace(result.StateNote); state != "" && note != "" {
+		state += " (" + note + ")"
+	}
+	return strings.TrimSpace(result.Message), state
+}
+
 func formatExecStoredResult(result ExecStoredResult) string {
-	lines := make([]string, 0, 4)
-	if msg := strings.TrimSpace(result.Message); msg != "" {
+	lines := make([]string, 0, 6)
+	msg, state := execMessageAndState(result)
+	if msg != "" {
 		lines = append(lines, msg)
 	}
 	if id := strings.TrimSpace(result.ProcessID); id != "" {
 		lines = append(lines, "process_id: "+id)
 	}
-	if state := strings.TrimSpace(result.State); state != "" {
+	if state != "" {
 		lines = append(lines, "state: "+state)
 	}
 	if result.ExitCode != nil {
@@ -1262,8 +1282,14 @@ func formatExecStoredResult(result ExecStoredResult) string {
 	if result.OmittedBytes > 0 {
 		lines = append(lines, fmt.Sprintf("output truncated: the first %d bytes were left out; showing the last %d. Pass a larger max_output_bytes or narrow the command to see more.", result.OmittedBytes, len(result.Output)))
 	}
-	if output := strings.TrimSpace(result.Output); output != "" {
+	lines = append(lines, "output:")
+	switch output := strings.TrimSpace(result.Output); {
+	case output != "":
 		lines = append(lines, output)
+	case result.State == "running":
+		lines = append(lines, "(none yet)")
+	default:
+		lines = append(lines, "(none)")
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
