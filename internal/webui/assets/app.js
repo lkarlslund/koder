@@ -1546,12 +1546,12 @@
         },
         connectionLabel() {
           if (this.connected) return 'Online';
-          if (this.connecting) return 'Connecting';
+          if (this.connecting) return 'Reconnecting';
           return 'Offline';
         },
         connectionBadgeClass() {
           if (this.connected) return 'text-bg-success';
-          if (this.connecting) return 'text-bg-secondary';
+          if (this.connecting) return 'text-bg-primary';
           return 'text-bg-danger';
         },
         restartNeeded() {
@@ -1559,8 +1559,12 @@
         },
         restartButtonClass() {
           if (this.restartHardRequested) return 'btn-danger';
-          if (this.restartAcknowledged) return 'btn-warning';
-          return 'btn-outline-warning';
+          return 'restart-pending';
+        },
+        restartButtonLabel() {
+          if (this.restartHardRequested) return 'Hard restart';
+          if (this.restartAcknowledged) return 'Restart requested';
+          return 'Restart pending';
         },
         restartButtonIcon() {
           if (this.restartRequestPending) return 'bi-hourglass-split';

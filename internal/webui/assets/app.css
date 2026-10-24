@@ -44,9 +44,10 @@
     .browser-tab-row:hover, .browser-tab-row:focus-visible { border-color: rgba(var(--bs-secondary-rgb), .75); background: var(--bs-secondary-bg); outline: none; }
     .browser-tab-title { min-width: 0; font-size: .86rem; }
     .browser-sidebar-footer { display: flex; align-items: center; justify-content: flex-end; gap: .25rem; margin-top: .35rem; }
-    .restart-needed { color: var(--bs-warning); font-size: 1.05rem; line-height: 1; animation: restart-needed-pulse 1s ease-in-out infinite; }
-    .restart-needed.btn-warning, .restart-needed.btn-danger { color: var(--bs-btn-color); }
-    @keyframes restart-needed-pulse { 0%, 100% { opacity: .55; transform: scale(.95); } 50% { opacity: 1; transform: scale(1.08); } }
+    .restart-needed { display: inline-flex; align-items: center; gap: .3rem; padding: .2rem .5rem; font-size: .75rem; font-weight: 600; line-height: 1; border: 0; border-radius: var(--bs-border-radius); }
+    .restart-needed.restart-pending { color: #fff; background: var(--bs-orange); }
+    .restart-needed.restart-pending:hover, .restart-needed.restart-pending:focus-visible { color: #fff; background: color-mix(in srgb, var(--bs-orange) 85%, black); }
+    .restart-needed.btn-danger { color: #fff; }
     .welcome-view { position: fixed; inset: 0; z-index: 1020; width: 100%; min-height: 100vh; min-height: 100dvh; overflow: hidden; background: var(--bs-body-bg); }
     .session-selector-home { padding: 0; }
     .session-selector-home .session-dialog { width: 100%; height: 100%; max-height: none; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }

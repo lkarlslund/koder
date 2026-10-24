@@ -39,7 +39,7 @@
       </div>
       <div class="topbar-actions d-flex align-items-center gap-2">
         <span class="text-secondary small font-monospace d-none d-sm-inline" x-show="currentBuildLabel()" :title="currentBuildTitle()" x-text="currentBuildLabel()"></span>
-        <button class="btn btn-sm restart-needed" :class="restartButtonClass()" x-show="restartNeeded()" :disabled="restartRequestPending" :title="restartButtonTitle()" @click="requestRestart()" style="display: none;"><i class="bi" :class="restartButtonIcon()"></i><span class="visually-hidden" x-text="restartButtonTitle()"></span></button>
+        <button class="btn btn-sm restart-needed" :class="restartButtonClass()" x-show="restartNeeded()" :disabled="restartRequestPending" :title="restartButtonTitle()" @click="requestRestart()" style="display: none;"><i class="bi" :class="restartButtonIcon()"></i><span x-text="restartButtonLabel()"></span></button>
         <span class="badge" :class="connectionBadgeClass()" x-text="connectionLabel()"></span>
         <button class="btn btn-sm btn-outline-success" type="button" title="New Quick Chat" :disabled="quickChatCreating" @click="newQuickChat($event)" @auxclick.stop.prevent="newQuickChat($event)"><i class="bi" :class="quickChatCreating ? 'bi-hourglass-split' : 'bi-lightning-charge'"></i><span class="visually-hidden">New Quick Chat</span></button>
         <button class="btn btn-sm btn-outline-secondary" type="button" x-show="quickChatMode()" :title="activeModelTooltip()" @click="openModelDialog()" style="display: none;"><i class="bi bi-cpu"></i><span class="visually-hidden">Choose model</span></button>

@@ -2539,8 +2539,8 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `rejectPending('connection closed')`) {
 		t.Fatalf("expected websocket close to reject pending RPCs")
 	}
-	if !strings.Contains(fullPage, `connectionLabel()`) || !strings.Contains(fullPage, `return 'Connecting'`) {
-		t.Fatalf("expected connection badge to show Connecting instead of Offline during reconnect")
+	if !strings.Contains(fullPage, `connectionLabel()`) || !strings.Contains(fullPage, `return 'Reconnecting'`) {
+		t.Fatalf("expected connection badge to show Reconnecting instead of Offline during reconnect")
 	}
 	if !strings.Contains(fullPage, `const version = String(build.version || build.Version || '').trim()`) ||
 		!strings.Contains(fullPage, `return version || built || this.shortBuildCommit(build)`) {
