@@ -73,6 +73,7 @@ type serveOptions struct {
 	webBind       string
 	webBindSet    bool
 	voiceToken    string
+	autoUpgrade   bool
 }
 
 func newServeCommand(root *rootOptions) *cobra.Command {
@@ -89,6 +90,7 @@ func newServeCommand(root *rootOptions) *cobra.Command {
 	flags.BoolVar(&opts.noOpenBrowser, "nobrowser", false, "Do not open a browser for the web UI")
 	flags.StringVar(&opts.webBind, "web-bind", defaultWebBind, "Web UI bind address")
 	flags.StringVar(&opts.voiceToken, "voice-token", opts.voiceToken, "Bearer token for Android voice connections (or KODER_VOICE_TOKEN)")
+	flags.BoolVar(&opts.autoUpgrade, "auto-upgrade", false, "Install a binary staged as <executable>.new when Koder is idle, then exit for a supervisor restart")
 	return cmd
 }
 
@@ -107,6 +109,7 @@ type serveConfig struct {
 	WebBind         string
 	WebBindExplicit bool
 	VoiceToken      string
+	AutoUpgrade     bool
 }
 
 func runKoder(ctx context.Context, mode app.StartupMode, serveOpts serveConfig) error {
@@ -195,6 +198,14 @@ func runWeb(ctx context.Context, cfg config.Config, engine *agent.Engine, mode a
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGUSR1)
 	defer signal.Stop(sig)
+	upgraded := make(chan struct{}, 1)
+	if serveOpts.AutoUpgrade {
+		upgrade, err := newStagedUpgrade(controller.BusyReason)
+		if err != nil {
+			return err
+		}
+		go upgrade.watch(ctx, upgraded)
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -203,6 +214,12 @@ func runWeb(ctx context.Context, cfg config.Config, engine *agent.Engine, mode a
 				return err
 			}
 			return ctx.Err()
+		case <-upgraded:
+			if err := controller.ShutdownWithCancelReason(context.Background(), chatpkg.CancelReasonRestartInterrupt); err != nil {
+				return err
+			}
+			slog.Info("koder exiting to run the upgraded binary", "exit_code", processRestartExitCode)
+			return errProcessRestart
 		case <-restartRequested:
 			slog.Info("koder restart request received by root loop", "exit_code", processRestartExitCode)
 			slog.Info("koder exiting for process restart", "exit_code", processRestartExitCode)
@@ -246,6 +263,7 @@ func serveConfigFromFlags(root *rootOptions, opts serveOptions) serveConfig {
 		WebBind:         opts.webBind,
 		WebBindExplicit: opts.webBindSet,
 		VoiceToken:      strings.TrimSpace(opts.voiceToken),
+		AutoUpgrade:     opts.autoUpgrade,
 	}
 }
 

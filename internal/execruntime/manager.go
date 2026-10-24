@@ -399,6 +399,21 @@ func (m *Manager) List(_ context.Context, req ListRequest) ([]Snapshot, error) {
 	return snaps, nil
 }
 
+// Running counts the processes still running in any session.
+func (m *Manager) Running() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	running := 0
+	for _, p := range m.processes {
+		p.mu.RLock()
+		if p.state == StateRunning {
+			running++
+		}
+		p.mu.RUnlock()
+	}
+	return running
+}
+
 func (m *Manager) WriteStdin(ctx context.Context, req WriteStdinRequest) (Snapshot, error) {
 	p, err := m.lookup(req.SessionID, req.ChatID, req.ProcessID)
 	if err != nil {

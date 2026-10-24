@@ -174,6 +174,7 @@ koder serve
 koder --data-dir /tmp/koder-test serve
 koder serve --web-bind 127.0.0.1:8080
 koder serve --nobrowser
+koder serve --auto-upgrade
 koder doctor
 koder doctor --provider local-llama --model qwen3-coder
 koder doctor --tts
@@ -182,6 +183,30 @@ koder debug tail --session <session-id> --url http://127.0.0.1:7979
 koder session --help
 koder skill --help
 koder version
+```
+
+## Auto-Upgrade
+
+With `koder serve --auto-upgrade`, Koder checks every 10 seconds for a new
+binary staged as `<executable>.new`, for example `~/.local/bin/koder.new`.
+
+- It waits until the file has stopped changing for 5 seconds.
+- It waits until no chat is running, queued or waiting for approval, and no
+  exec session is running.
+- It runs the new binary's `version` command to check it, then keeps the old
+  binary as `<executable>.prev` and moves the new one into place.
+- It then exits with code 75, so its supervisor starts the new binary. A
+  systemd unit with `Restart=on-failure` does this.
+
+If the staged binary does not run (for example, it was built for the wrong CPU),
+Koder renames it to `<executable>.new.rejected` and keeps running the current
+binary.
+
+To upgrade, copy the binary to a temporary name and rename it, so Koder never
+sees a half-written file:
+
+```bash
+scp koder host:.local/bin/koder.tmp && ssh host mv .local/bin/koder.tmp .local/bin/koder.new
 ```
 
 ## Debug API
