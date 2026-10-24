@@ -20,6 +20,13 @@ if [[ ! -f "$new" ]]; then
 	log "nothing staged at $new"
 	exit 0
 fi
+# The path unit can fire as soon as a copy starts, so wait until the file
+# stops changing.
+previous=""
+while current=$(stat -c '%s %Y' "$new") && [[ "$current" != "$previous" ]]; do
+	previous=$current
+	sleep 3
+done
 chmod 755 "$new"
 if ! version=$("$new" version 2>&1 | head -n 1); then
 	log "rejecting $new, it does not run: $version"
