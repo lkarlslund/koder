@@ -241,7 +241,9 @@ func (r *Runtime) conversationMessages(scope *renderScope, item domain.TimelineI
 			return nil, err
 		}
 		if ok {
-			if userMessageIsSteer(content) {
+			if domain.IsNotificationSource(content.Source) {
+				msg = wrapStructuredNotificationMessage(content.Source, msg)
+			} else if userMessageIsSteer(content) {
 				msg = wrapStructuredSteerMessage(msg)
 			}
 			return []provider.Message{msg}, nil
@@ -250,7 +252,9 @@ func (r *Runtime) conversationMessages(scope *renderScope, item domain.TimelineI
 			return nil, nil
 		}
 		text := content.Text
-		if userMessageIsSteer(content) {
+		if domain.IsNotificationSource(content.Source) {
+			text = domain.NotificationMessageText(content.Source, text)
+		} else if userMessageIsSteer(content) {
 			text = steerUserMessageText(text)
 		}
 		return []provider.Message{{Role: provider.RoleUser, Content: text}}, nil
@@ -360,6 +364,20 @@ func steerUserMessageText(text string) string {
 	return "User steering update:\n" +
 		"<user_input>\n" + text + "\n</user_input>\n\n" +
 		"Apply this update to the active turn before choosing the next action."
+}
+
+func wrapStructuredNotificationMessage(source string, msg provider.Message) provider.Message {
+	if strings.TrimSpace(msg.Content) != "" {
+		msg.Content = domain.NotificationMessageText(source, msg.Content)
+	}
+	if len(msg.ContentParts) > 0 {
+		wrapped := make([]provider.ContentPart, 0, len(msg.ContentParts)+2)
+		wrapped = append(wrapped, provider.TextPart(domain.NotificationOpening(source)))
+		wrapped = append(wrapped, msg.ContentParts...)
+		wrapped = append(wrapped, provider.TextPart("\n</notification>"))
+		msg.ContentParts = wrapped
+	}
+	return msg
 }
 
 func wrapStructuredSteerMessage(msg provider.Message) provider.Message {

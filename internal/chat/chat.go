@@ -684,7 +684,9 @@ func (r *Chat) UpsertTimelineItem(ctx context.Context, item domain.TimelineItem)
 	return item, nil
 }
 
-// ApplyNextSteer removes and records queued turn-boundary messages.
+// ApplyNextSteer removes and records queued turn-boundary messages that share
+// a sender: the user's steers merge into one message, and each kind of
+// notification gets its own, so its source stays visible to the model.
 func (r *Chat) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bool, error) {
 	if r == nil {
 		return domain.TimelineItem{}, false, fmt.Errorf("chat runtime is required")
@@ -692,9 +694,16 @@ func (r *Chat) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bool, e
 	now := time.Now().UTC()
 	r.mu.Lock()
 	var steers []domain.QueuedInput
+	group := ""
 	remaining := make([]domain.QueuedInput, 0, len(r.queue))
 	for _, item := range r.queue {
 		if item.Held || domain.DeliveryForQueuedInput(item) != domain.QueuedInputDeliveryTurnBoundary {
+			remaining = append(remaining, item)
+			continue
+		}
+		if len(steers) == 0 {
+			group = steerGroup(item)
+		} else if steerGroup(item) != group {
 			remaining = append(remaining, item)
 			continue
 		}
@@ -809,6 +818,15 @@ func assistantHasUnfinishedToolCall(assistant domain.AssistantMessage) bool {
 		}
 	}
 	return false
+}
+
+// steerGroup is the sender a queued steer merges under: a notification
+// source, or "" for the user.
+func steerGroup(item domain.QueuedInput) string {
+	if source := domain.UserMessageSourceForQueuedInput(item); domain.IsNotificationSource(source) {
+		return source
+	}
+	return ""
 }
 
 func userMessageForSteers(steers []domain.QueuedInput) domain.UserMessage {
@@ -3599,19 +3617,28 @@ func (r *Chat) continueTurnLoop(ctx context.Context, turnInstructions, ephemeral
 	loop := modelTurnLoop{model: r.deps.Model, session: r.Snapshot().Session, ephemeralInstructions: ephemeralInstructions}
 	for step := 0; step < loop.maxSteps(); step++ {
 		if step > 0 {
-			item, applied, err := r.ApplyNextSteer(ctx)
-			if err != nil {
-				r.handleTurnError(ctx, out, err)
-				return
-			}
-			if applied {
-				turnInstructions = nil
-				out <- domain.Event{
-					Kind: domain.EventKindStatus,
-					Text: "Applying queued steer...",
-					Item: item,
-					Meta: map[string]string{domain.EventMetaRefresh: domain.EventRefreshQueue},
+			// Apply every pending steer group before announcing any: the queue
+			// refresh reloads the stored queue, which would bring back a group
+			// applied after the refresh was sent.
+			var applied []domain.TimelineItem
+			for {
+				item, ok, err := r.ApplyNextSteer(ctx)
+				if err != nil {
+					r.handleTurnError(ctx, out, err)
+					return
 				}
+				if !ok {
+					break
+				}
+				applied = append(applied, item)
+			}
+			for idx, item := range applied {
+				turnInstructions = nil
+				evt := domain.Event{Kind: domain.EventKindStatus, Text: "Applying queued steer...", Item: item}
+				if idx == len(applied)-1 {
+					evt.Meta = map[string]string{domain.EventMetaRefresh: domain.EventRefreshQueue}
+				}
+				out <- evt
 			}
 		}
 		result, err := loop.step(ctx, r, step, turnInstructions, out)
@@ -4002,6 +4029,12 @@ func queuedInputFromItem(item QueueItem) domain.QueuedInput {
 		origin = domain.QueuedInputOriginAutoResume
 	case domain.UserMessageSourceRejectedSteer:
 		origin = domain.QueuedInputOriginRejectedSteer
+	case domain.UserMessageSourceExec:
+		origin = domain.QueuedInputOriginExec
+	case domain.UserMessageSourceMonitor:
+		origin = domain.QueuedInputOriginMonitor
+	case domain.UserMessageSourceChildReport:
+		origin = domain.QueuedInputOriginChildReport
 	case domain.UserMessageSourceUser, "":
 		if item.Kind == QueueKindSteer {
 			origin = domain.QueuedInputOriginUser

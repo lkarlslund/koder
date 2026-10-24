@@ -614,9 +614,16 @@
         case 'auto_generated': return 'auto-generated';
         case 'auto_resume': return 'auto-resume';
         case 'subchat': return 'subchat';
+        case 'exec': return 'exec';
+        case 'monitor': return 'monitor';
+        case 'child_report': return 'child report';
         case 'turn_instruction': return 'turn instruction';
         default: return 'user';
       }
+    }
+    // Notifications are messages Koder sends on its own, shown as plain output.
+    function userMessageIsNotificationSource(item) {
+      return ['exec', 'monitor', 'child_report'].includes(userMessageSourceValue(item));
     }
     function userMessageSourceQualifierText(item) {
       const label = userMessageSourceLabelText(item);
@@ -630,6 +637,9 @@
         case 'auto_generated': return 'bi-stars';
         case 'auto_resume': return 'bi-arrow-clockwise';
         case 'subchat': return 'bi-diagram-3';
+        case 'exec': return 'bi-terminal';
+        case 'monitor': return 'bi-activity';
+        case 'child_report': return 'bi-diagram-3';
         case 'turn_instruction': return 'bi-signpost-split';
         default: return 'bi-person-circle';
       }
@@ -3043,6 +3053,7 @@
         renderTimelineMarkdownElement(el, item, text, options = {}) { renderTimelineMarkdownIntoElement(el, item, text, options); },
         userMessageSourceQualifier(item) { return userMessageSourceQualifierText(item); },
         userMessageIcon(item) { return userMessageIconClass(item); },
+        userMessageIsNotification(item) { return userMessageIsNotificationSource(item); },
         statusText() { const snapshot = this.activeSnapshot(); return snapshot.StatusText || snapshot.status_text || snapshot.Status || 'idle'; },
         chatInterruptible() {
           const snapshot = this.activeSnapshot();
@@ -4246,7 +4257,7 @@
           return 'next_turn';
         },
         queueItemKind(item) {
-          const origin = this.queueItemOrigin(item).replace('_', ' ');
+          const origin = this.queueItemOrigin(item).replaceAll('_', ' ');
           const delivery = this.queueItemDelivery(item);
           if (delivery === 'turn_boundary') return origin === 'user' ? 'steer' : origin;
           if (delivery === 'continue') return 'continue';

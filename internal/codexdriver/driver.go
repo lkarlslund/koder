@@ -200,6 +200,9 @@ func (m *Manager) RunTurn(ctx context.Context, rt *chat.Chat, turn chat.DriverTu
 		return err
 	}
 	inputText := text
+	if source := domain.UserMessageSourceForQueuedInput(turn.Input); domain.IsNotificationSource(source) {
+		inputText = domain.NotificationMessageText(source, text)
+	}
 	for _, block := range turn.EphemeralInstructions {
 		if instruction := strings.TrimSpace(block.Text); instruction != "" {
 			inputText = instruction + "\n\n" + inputText

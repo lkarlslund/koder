@@ -405,7 +405,7 @@ func (s *Session) notifyParentChat(ctx context.Context, source domain.Chat, text
 	if err != nil {
 		return
 	}
-	parent.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Source: domain.UserMessageSourceSubchat, Text: strings.TrimSpace(text)})
+	parent.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Source: domain.UserMessageSourceChildReport, Text: strings.TrimSpace(text)})
 }
 
 func (s *Session) childIdleNotification(ctx context.Context, chatRecord domain.Chat, chatID id.ID, statusText string) string {

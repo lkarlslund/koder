@@ -105,7 +105,7 @@
               <div class="turn-header">
                 <div class="turn-header-title">
                   <i class="bi" :class="userMessageIcon(item)"></i>
-                  <span class="turn-source-label">user</span>
+                  <span class="turn-source-label" x-text="userMessageIsNotification(item) ? 'koder' : 'user'"></span>
                   <span class="turn-source-qualifier" x-show="userMessageSourceQualifier(item)" x-text="userMessageSourceQualifier(item)"></span>
                 </div>
                 <div class="turn-header-actions">
@@ -124,8 +124,9 @@
                   </template>
                 </div>
               </template>
-              <div class="markdown-body user-markdown-body">
-                <span class="user-message-text" x-html="timelineMarkdownHTML(item, item.content?.text || '')"></span>
+              <pre class="notification-message-text" x-show="userMessageIsNotification(item)" x-text="item.content?.text || ''"></pre>
+              <div class="markdown-body user-markdown-body" x-show="!userMessageIsNotification(item)">
+                <span class="user-message-text" x-html="userMessageIsNotification(item) ? '' : timelineMarkdownHTML(item, item.content?.text || '')"></span>
               </div>
             </div>
           </template>

@@ -101,6 +101,7 @@
     .chat-list-item .chat-backend-icon { color: var(--chat-backend-accent); }
     .chat-list-item.active.chat-backend-codex, .chat-list-item.active.chat-backend-claude { background-color: color-mix(in srgb, var(--chat-backend-accent) 78%, black); border-color: color-mix(in srgb, var(--chat-backend-accent) 78%, black); }
     .chat-list-item.active .chat-backend-icon { color: var(--bs-white); }
+    .notification-message-text { margin: 0; max-height: 18rem; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: .8rem; color: var(--bs-secondary-color); }
     .chat-title-edit { flex: 0 0 auto; color: inherit; opacity: .55; }
     .chat-title-edit:hover, .chat-title-edit:focus-visible { opacity: 1; }
     .chat-drag-handle { color: var(--bs-secondary-color); cursor: grab; }

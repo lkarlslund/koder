@@ -1821,6 +1821,66 @@ func TestRuntimeAppliesQueuedSteerBeforeAutoContinuingTurn(t *testing.T) {
 	}
 }
 
+func TestRuntimeAppliesNotificationSteersSeparatelyFromUserSteers(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	runner := &queuedSteerBoundaryRunner{
+		step0Started: make(chan struct{}),
+		continueStep: make(chan struct{}),
+		step1Done:    make(chan struct{}),
+	}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindUser, Text: "first prompt"})
+	select {
+	case <-runner.step0Started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first step")
+	}
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "use the staging config"})
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Source: domain.UserMessageSourceExec, Text: "event: exec session ended"})
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "and skip the slow tests"})
+	deadline := time.After(2 * time.Second)
+	for len(rt.Snapshot().QueuedInputs) != 3 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for queued steers: %#v", rt.Snapshot().QueuedInputs)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	close(runner.continueStep)
+	select {
+	case <-runner.step1Done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for second step")
+	}
+
+	runner.mu.Lock()
+	timeline := runner.step1Timeline
+	runner.mu.Unlock()
+	if len(timeline) < 3 {
+		t.Fatalf("step 1 timeline too short: %#v", timeline)
+	}
+	user, okUser := timeline[len(timeline)-2].Content.(domain.UserMessage)
+	notice, okNotice := timeline[len(timeline)-1].Content.(domain.UserMessage)
+	if !okUser || !okNotice {
+		t.Fatalf("timeline tail = %#v", timeline[len(timeline)-2:])
+	}
+	if user.Text != "use the staging config\n\nand skip the slow tests" || user.Source != domain.UserMessageSourceUser {
+		var dump []string
+		for _, item := range timeline {
+			if u, ok := item.Content.(domain.UserMessage); ok {
+				dump = append(dump, fmt.Sprintf("seq=%d src=%s text=%q", item.Seq, u.Source, u.Text))
+			}
+		}
+		t.Fatalf("user steer = %q from %q; timeline %v", user.Text, user.Source, dump)
+	}
+	if notice.Text != "event: exec session ended" || notice.Source != domain.UserMessageSourceExec {
+		t.Fatalf("notification = %q from %q", notice.Text, notice.Source)
+	}
+}
+
 func TestRuntimeQueuesSecondItemUntilFirstCompletes(t *testing.T) {
 	st := openTestStore(t)
 	session, chat, _ := createSessionWithPlan(t, st)
@@ -4551,5 +4611,21 @@ func TestPersistRemapsOptimisticIDsAndReloadsWithoutDuplicates(t *testing.T) {
 	}
 	if user, ok := snapshot.Timeline[0].Content.(domain.UserMessage); !ok || user.Text != "persist me" {
 		t.Fatalf("reloaded timeline item = %#v", snapshot.Timeline[0])
+	}
+}
+
+func TestQueuedNotificationsKeepTheirSource(t *testing.T) {
+	for source, origin := range map[string]domain.QueuedInputOrigin{
+		domain.UserMessageSourceExec:        domain.QueuedInputOriginExec,
+		domain.UserMessageSourceMonitor:     domain.QueuedInputOriginMonitor,
+		domain.UserMessageSourceChildReport: domain.QueuedInputOriginChildReport,
+	} {
+		queued := queuedInputFromItem(QueueItem{Kind: QueueKindSteer, Source: source, Text: "event"})
+		if queued.Origin != origin || queued.Delivery != domain.QueuedInputDeliveryTurnBoundary {
+			t.Fatalf("%s queued as origin %s delivery %s", source, queued.Origin, queued.Delivery)
+		}
+		if got := domain.UserMessageSourceForQueuedInput(queued); got != source {
+			t.Fatalf("%s comes back as source %q", source, got)
+		}
 	}
 }

@@ -547,3 +547,35 @@ func TestBaseInstructionsCarryAFrozenMemoryIndex(t *testing.T) {
 		t.Fatalf("a new chat does not see the new memory: %q", other)
 	}
 }
+
+func TestConversationMessagesFrameNotificationsAsNotUserInput(t *testing.T) {
+	t.Parallel()
+
+	runtime := New(Config{Config: config.Default().WithStateDir(t.TempDir())})
+	chat := domain.Chat{ID: "chat-1", SessionID: "session-1"}
+	for _, source := range []string{domain.UserMessageSourceExec, domain.UserMessageSourceMonitor, domain.UserMessageSourceChildReport} {
+		item := domain.TimelineItem{
+			ID:     "notice-" + source,
+			ChatID: chat.ID,
+			Seq:    1,
+			Content: domain.UserMessage{
+				Text:     "event: exec session ended\nprocess_id: exec_3",
+				Source:   source,
+				Delivery: domain.QueuedInputDeliveryTurnBoundary,
+			},
+			CreatedAt: time.Now().UTC(),
+		}
+		messages, err := runtime.ConversationMessagesForTimelineItem(domain.Session{ID: "session-1"}, chat, item, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		joined := providerMessagesText(messages)
+		want := "Koder notification, not written by the user (source: " + source + ").\n<notification source=\"" + source + "\">\nevent: exec session ended\nprocess_id: exec_3\n</notification>"
+		if joined != want {
+			t.Fatalf("%s rendered as %q, want %q", source, joined, want)
+		}
+		if strings.Contains(joined, "User steering update") || strings.Contains(joined, "<user_input>") {
+			t.Fatalf("%s notification framed as user input: %s", source, joined)
+		}
+	}
+}
