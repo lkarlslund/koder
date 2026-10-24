@@ -99,6 +99,13 @@ func TestExitIsReportedOnceAfterExecCommandReturnedRunning(t *testing.T) {
 	if got := len(rec.snapshot()); got != 1 {
 		t.Fatalf("notifications = %d, want 1", got)
 	}
+	late, err := mgr.WriteStdin(context.Background(), WriteStdinRequest{SessionID: "session-1", ChatID: "chat-1", ProcessID: snap.ProcessID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !late.ExitReported || late.Output != "" {
+		t.Fatalf("wait after the report: reported = %v, output = %q", late.ExitReported, late.Output)
+	}
 }
 
 func TestExitShownByToolResultIsNotReported(t *testing.T) {
@@ -213,5 +220,44 @@ func TestLineMonitorRateLimitsAndStopsAFlood(t *testing.T) {
 	l.feed(long)
 	if final := l.close(); final != long[:monitorLineBytes]+monitorTruncSuffix {
 		t.Fatalf("final line = %q", final)
+	}
+}
+
+func TestExitReportsPendingSaysWhetherAReportWasSent(t *testing.T) {
+	mgr := NewManager()
+	rec := newNotificationRecorder(mgr)
+	startTestProcess(t, mgr, StartRequest{Command: "echo done"})
+	if mgr.ExitReportsPending("session-1", "chat-1") != nil {
+		t.Fatal("pending reports after a command whose exit was shown")
+	}
+	startTestProcess(t, mgr, StartRequest{Command: "echo started; sleep 1"})
+	pending := mgr.ExitReportsPending("session-1", "chat-1")
+	if pending == nil {
+		t.Fatal("no pending report for a running command")
+	}
+	select {
+	case reported := <-pending:
+		if !reported || len(rec.snapshot()) != 1 {
+			t.Fatalf("reported = %v, notifications = %d", reported, len(rec.snapshot()))
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("pending reports did not settle")
+	}
+
+	stopped := startTestProcess(t, mgr, StartRequest{Command: "echo started; sleep 30"})
+	pending = mgr.ExitReportsPending("session-1", "chat-1")
+	if pending == nil {
+		t.Fatal("no pending report for a running command")
+	}
+	if _, err := mgr.Terminate(context.Background(), TerminateRequest{SessionID: "session-1", ChatID: "chat-1", ProcessID: stopped.ProcessID}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case reported := <-pending:
+		if reported {
+			t.Fatal("a stopped command counted as reported")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("pending reports did not settle")
 	}
 }

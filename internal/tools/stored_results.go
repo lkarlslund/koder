@@ -1256,6 +1256,9 @@ func formatReadStoredResult(result ReadStoredResult) string {
 const (
 	ExecReportingExit  = "automatic: the exit arrives in this chat as a notification"
 	ExecReportingLines = "automatic: each batch of new output lines, then the exit, arrives in this chat as a notification"
+	// ExecReportingDone is shown once the exit has been reported, so an empty
+	// output does not read as the command having printed nothing.
+	ExecReportingDone = "done: the exit and its output were already sent to this chat as a notification"
 )
 
 const ExecStartRunningNote = "startup wait ended; the command continues in the background"
@@ -1284,7 +1287,7 @@ func formatExecStoredResult(result ExecStoredResult) string {
 	if result.ExitCode != nil {
 		lines = append(lines, fmt.Sprintf("exit_code: %d", *result.ExitCode))
 	}
-	if reporting := strings.TrimSpace(result.Reporting); reporting != "" && result.State == "running" {
+	if reporting := strings.TrimSpace(result.Reporting); reporting != "" && (result.State == "running" || reporting == ExecReportingDone) {
 		lines = append(lines, "reporting: "+reporting)
 	}
 	if mode := strings.TrimSpace(result.OutputMode); mode != "" {

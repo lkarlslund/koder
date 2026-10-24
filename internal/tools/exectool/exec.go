@@ -514,7 +514,7 @@ func execResult(stored tools.ExecStoredResult) tools.Result {
 }
 
 func storedFromSnapshot(snap execruntime.Snapshot, message string) tools.ExecStoredResult {
-	return tools.ExecStoredResult{
+	stored := tools.ExecStoredResult{
 		ProcessID:    snap.ProcessID,
 		Command:      snap.Command,
 		Workdir:      snap.Workdir,
@@ -530,6 +530,10 @@ func storedFromSnapshot(snap execruntime.Snapshot, message string) tools.ExecSto
 		StdinClosed:  snap.StdinClosed,
 		Message:      message,
 	}
+	if snap.ExitReported {
+		stored.Reporting = tools.ExecReportingDone
+	}
+	return stored
 }
 
 // outputLimit is the requested max_output_bytes, or else the room the

@@ -137,7 +137,9 @@ its chat on its own. The model does not need to wait for it.
   with the process id, state (with the reason when Koder stopped it, such as a
   timeout), exit code, runtime and the output not yet shown. Koder skips it
   when a tool result has already shown the exit, when a tool call that may show
-  it is still in flight, or when the session was terminated on request.
+  it is still in flight, or when the session was terminated on request. A
+  later `wait` or `status` result says the exit was already reported, so its
+  empty output does not read as the command printing nothing.
 - **Lines (`notify=lines`):** each batch of new stdout lines is a notification
   too. Output printed before `exec_command` returns is in its result instead.
   - Lines arriving within 200 ms share one notification. Each line is cut at
@@ -157,4 +159,10 @@ otherwise. A child chat's report to its parent uses the same path with source
 `Koder notification, not written by the user (source: …)` around a
 `<notification>` block. At a turn boundary, each source becomes its own message,
 so a notification is never merged into the user's own steer.
+
+A child chat that goes idle while one of its exec sessions may still report an
+exit does not report idle to its parent yet. The exit report starts a new turn
+in the child, and the parent hears about the child when that turn ends. If the
+session ends without a report, for example because it was terminated, the idle
+report goes out then.
 

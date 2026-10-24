@@ -28,6 +28,12 @@ func (e *Engine) sessionRegistryConfig(defaults settings.NewSessionDefaults) ses
 		MaxChildChats:        defaults.MaxChildChats,
 	}
 	cfg.PrepareChatSpec = e.prepareChatCreateSpec
+	cfg.ExitReportsPending = func(sessionID, chatID id.ID) <-chan bool {
+		if manager := e.ExecManager(); manager != nil {
+			return manager.ExitReportsPending(sessionID, chatID)
+		}
+		return nil
+	}
 	if e != nil && e.browser != nil {
 		cfg.OnChatArchived = e.browser.CleanupChat
 	}

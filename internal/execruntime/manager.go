@@ -171,6 +171,9 @@ type Snapshot struct {
 	Drained     bool
 	StdinClosed bool
 	Lost        bool
+	// ExitReported is set once the exit has been sent to the chat as a
+	// notification, together with the output not shown before.
+	ExitReported bool
 }
 
 type Event struct {
@@ -227,6 +230,8 @@ type process struct {
 	stdin       io.WriteCloser
 	done        chan struct{}
 	once        sync.Once
+	// settled closes after the exit has been handled, including any report.
+	settled chan struct{}
 
 	label   string
 	notify  NotifyMode
@@ -322,6 +327,7 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 		state:      StateRunning,
 		proc:       cmd,
 		done:       make(chan struct{}),
+		settled:    make(chan struct{}),
 		label:      strings.TrimSpace(req.Label),
 		notify:     req.Notify,
 	}
@@ -623,6 +629,7 @@ func (m *Manager) waitForExit(p *process) {
 	p.mu.Unlock()
 	m.publish(Event{Kind: EventKindState, Snapshot: p.snapshot(defaultPreviewBytes)})
 	m.reportExitIfDue(p)
+	close(p.settled)
 }
 
 func (m *Manager) enforceTimeout(p *process, timeout time.Duration) {
@@ -735,25 +742,26 @@ func (p *process) snapshot(maxBytes int) Snapshot {
 	}
 	output = tailOnLineBoundary(output, maxBytes)
 	return Snapshot{
-		ProcessID:   p.processID,
-		SessionID:   p.sessionID,
-		ChatID:      p.chatID,
-		ToolCallID:  p.toolCallID,
-		Command:     p.command,
-		Workdir:     p.workdir,
-		Shell:       p.shell,
-		TTY:         p.tty,
-		State:       p.state,
-		ExitCode:    cloneIntPtr(p.exitCode),
-		StartedAt:   p.startedAt,
-		EndedAt:     p.endedAt,
-		TimeoutMS:   p.timeout.Milliseconds(),
-		Output:      output,
-		OutputBytes: p.outputBytes,
-		Omitted:     p.outputBytes - len(output),
-		Stream:      tailStream(p.stream, maxBytes),
-		StdinClosed: p.stdinClosed,
-		Lost:        p.lost,
+		ProcessID:    p.processID,
+		SessionID:    p.sessionID,
+		ChatID:       p.chatID,
+		ToolCallID:   p.toolCallID,
+		Command:      p.command,
+		Workdir:      p.workdir,
+		Shell:        p.shell,
+		TTY:          p.tty,
+		State:        p.state,
+		ExitCode:     cloneIntPtr(p.exitCode),
+		StartedAt:    p.startedAt,
+		EndedAt:      p.endedAt,
+		TimeoutMS:    p.timeout.Milliseconds(),
+		Output:       output,
+		OutputBytes:  p.outputBytes,
+		Omitted:      p.outputBytes - len(output),
+		Stream:       tailStream(p.stream, maxBytes),
+		StdinClosed:  p.stdinClosed,
+		Lost:         p.lost,
+		ExitReported: p.exitReported,
 	}
 }
 
@@ -768,26 +776,27 @@ func (p *process) drainSnapshot(maxBytes int) Snapshot {
 	}
 	output = tailOnLineBoundary(output, maxBytes)
 	return Snapshot{
-		ProcessID:   p.processID,
-		SessionID:   p.sessionID,
-		ChatID:      p.chatID,
-		ToolCallID:  p.toolCallID,
-		Command:     p.command,
-		Workdir:     p.workdir,
-		Shell:       p.shell,
-		TTY:         p.tty,
-		State:       p.state,
-		ExitCode:    cloneIntPtr(p.exitCode),
-		StartedAt:   p.startedAt,
-		EndedAt:     p.endedAt,
-		TimeoutMS:   p.timeout.Milliseconds(),
-		Output:      output,
-		OutputBytes: p.outputBytes,
-		Stream:      tailStream(p.stream, maxBytes),
-		Omitted:     produced - len(output),
-		Drained:     true,
-		StdinClosed: p.stdinClosed,
-		Lost:        p.lost,
+		ProcessID:    p.processID,
+		SessionID:    p.sessionID,
+		ChatID:       p.chatID,
+		ToolCallID:   p.toolCallID,
+		Command:      p.command,
+		Workdir:      p.workdir,
+		Shell:        p.shell,
+		TTY:          p.tty,
+		State:        p.state,
+		ExitCode:     cloneIntPtr(p.exitCode),
+		StartedAt:    p.startedAt,
+		EndedAt:      p.endedAt,
+		TimeoutMS:    p.timeout.Milliseconds(),
+		Output:       output,
+		OutputBytes:  p.outputBytes,
+		Stream:       tailStream(p.stream, maxBytes),
+		Omitted:      produced - len(output),
+		Drained:      true,
+		StdinClosed:  p.stdinClosed,
+		Lost:         p.lost,
+		ExitReported: p.exitReported,
 	}
 }
 

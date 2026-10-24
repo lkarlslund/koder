@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1008,5 +1009,141 @@ func TestForkChatAtCopiesTimelinePrefix(t *testing.T) {
 	sourceTimeline := sourcePage.Items
 	if len(sourceTimeline) != 3 {
 		t.Fatalf("expected source timeline to remain intact, got %#v", sourceTimeline)
+	}
+}
+
+func TestChildIdleReportWaitsForPendingExitReports(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentID, childID := id.New(), id.New()
+	child := domain.Chat{ID: childID, SessionID: sessionRecord.ID, ParentChatID: &parentID}
+
+	var pendingMu sync.Mutex
+	var pending chan bool
+	setPending := func(ch chan bool) {
+		pendingMu.Lock()
+		pending = ch
+		pendingMu.Unlock()
+	}
+	owner.mu.Lock()
+	owner.config.ExitReportsPending = func(_, _ id.ID) <-chan bool {
+		pendingMu.Lock()
+		defer pendingMu.Unlock()
+		if pending == nil {
+			return nil
+		}
+		return pending
+	}
+	owner.mu.Unlock()
+
+	reports := make(chan string, 4)
+	updates := make(chan chatpkg.Update)
+	done := make(chan struct{})
+	go func() {
+		owner.consumeChatUpdates(childID, updates, nil, func(_ context.Context, _ domain.Chat, text string) { reports <- text })
+		close(done)
+	}()
+	send := func(active bool) {
+		updates <- chatpkg.Update{Active: active, Status: chatpkg.StatusIdle, Snapshot: chatpkg.Snapshot{Chat: child}}
+	}
+	expectNone := func(step string) {
+		t.Helper()
+		select {
+		case text := <-reports:
+			t.Fatalf("%s: unexpected report %q", step, text)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	expectIdle := func(step string) {
+		t.Helper()
+		select {
+		case text := <-reports:
+			if !strings.Contains(text, "is now idle") {
+				t.Fatalf("%s: report = %q", step, text)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s: no idle report", step)
+		}
+	}
+
+	// The first exit is reported, so the idle report waits for the turn the
+	// report starts.
+	first := make(chan bool, 1)
+	setPending(first)
+	send(true)
+	send(false)
+	expectNone("idle with a pending exit report")
+	first <- true
+	expectNone("exit reported")
+	setPending(nil)
+	send(true)
+	send(false)
+	expectIdle("idle after the reported exit's turn")
+
+	close(updates)
+	<-done
+}
+
+func TestChildIdleReportFollowsExitsThatWereNotReported(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	sessionRecord, chatsSrc, planSrc, err := testCreateSessionRecord(ctx, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := testLoadSession(ctx, st, chatsSrc, planSrc, sessionRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentID, childID := id.New(), id.New()
+	child := domain.Chat{ID: childID, SessionID: sessionRecord.ID, ParentChatID: &parentID}
+	pending := make(chan bool, 1)
+	calls := 0
+	owner.mu.Lock()
+	owner.config.ExitReportsPending = func(_, _ id.ID) <-chan bool {
+		calls++
+		if calls == 1 {
+			return pending
+		}
+		return nil
+	}
+	owner.mu.Unlock()
+
+	reports := make(chan string, 4)
+	updates := make(chan chatpkg.Update)
+	go owner.consumeChatUpdates(childID, updates, nil, func(_ context.Context, _ domain.Chat, text string) { reports <- text })
+	t.Cleanup(func() { close(updates) })
+	updates <- chatpkg.Update{Active: true, Snapshot: chatpkg.Snapshot{Chat: child}}
+	updates <- chatpkg.Update{Status: chatpkg.StatusIdle, Snapshot: chatpkg.Snapshot{Chat: child}}
+	select {
+	case text := <-reports:
+		t.Fatalf("unexpected report %q", text)
+	case <-time.After(100 * time.Millisecond):
+	}
+	// The session was stopped, so no report starts a turn.
+	pending <- false
+	select {
+	case text := <-reports:
+		if !strings.Contains(text, "is now idle") {
+			t.Fatalf("report = %q", text)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no idle report")
 	}
 }

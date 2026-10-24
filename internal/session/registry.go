@@ -30,6 +30,10 @@ type RegistryConfig struct {
 	BackendAvailable     func(domain.ChatBackend) error
 	BeforeChatUpdate     func(context.Context, domain.Chat, chattool.UpdateRequest) error
 	BeforeChatDelete     func(context.Context, domain.Chat) error
+	// ExitReportsPending returns nil when no exec session in the chat may
+	// still report its exit; otherwise a channel that receives once they have
+	// all ended, true if any of them sent a report.
+	ExitReportsPending func(sessionID, chatID id.ID) <-chan bool
 }
 
 type Registry struct {

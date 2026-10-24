@@ -121,6 +121,42 @@ func (m *Manager) reportExitIfDue(p *process) {
 	})
 }
 
+// ExitReportsPending returns nil when no session in the chat may still report
+// its exit. Otherwise the channel receives once all of them have ended: true
+// when at least one sent a report, false when each ended without one, for
+// example because a tool result showed the exit or it was stopped on request.
+func (m *Manager) ExitReportsPending(sessionID, chatID id.ID) <-chan bool {
+	m.mu.RLock()
+	var pending []*process
+	for _, p := range m.processes {
+		if p.sessionID == sessionID && p.chatID == chatID && p.mayReportExit() {
+			pending = append(pending, p)
+		}
+	}
+	m.mu.RUnlock()
+	if len(pending) == 0 {
+		return nil
+	}
+	result := make(chan bool, 1)
+	go func() {
+		reported := false
+		for _, p := range pending {
+			<-p.settled
+			p.mu.RLock()
+			reported = reported || p.exitReported
+			p.mu.RUnlock()
+		}
+		result <- reported
+	}()
+	return result
+}
+
+func (p *process) mayReportExit() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.state == StateRunning && p.startReturned && !p.exitShown && !p.stopRequested && !p.lost
+}
+
 func exitReportText(p *process, snap Snapshot, finalLines string) string {
 	p.mu.RLock()
 	label, endReason, monitor := p.label, p.endReason, p.monitor
