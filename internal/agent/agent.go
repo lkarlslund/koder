@@ -163,6 +163,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 	chatSource := chatpkg.NewSource(e.ChatDeps)
 	planSource := planning.NewSource(st)
 	e.registry = sessionpkg.NewRegistry(st, chatSource, planSource, e.sessionRegistryConfig(settingsStore.NewSessionDefaults()))
+	execRuntime.SetNotifier(e.deliverExecNotification)
 	e.SetSessionSource(e)
 	e.toolsRuntime = toolruntime.New(toolruntime.Config{
 		Settings:         settingsStore,

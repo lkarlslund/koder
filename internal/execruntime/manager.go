@@ -97,6 +97,9 @@ type StartRequest struct {
 	YieldTime      time.Duration
 	PreviewBytes   int
 	AccessSettings accesssettings.Settings
+	// Label is the user-facing description shown in notifications.
+	Label  string
+	Notify NotifyMode
 }
 
 type StatusRequest struct {
@@ -191,6 +194,7 @@ type Manager struct {
 	nextID      uint64
 	processes   map[string]*process
 	subscribers map[id.ID]map[chan Event]struct{}
+	notifier    func(Notification)
 }
 
 type process struct {
@@ -223,6 +227,19 @@ type process struct {
 	stdin       io.WriteCloser
 	done        chan struct{}
 	once        sync.Once
+
+	label   string
+	notify  NotifyMode
+	monitor *lineMonitor
+	// endReason explains a stop Koder caused, such as a timeout.
+	endReason string
+	// startReturned is set once exec_command has returned its result.
+	startReturned bool
+	// modelWaits counts tool calls in flight that may show the exit.
+	modelWaits    int
+	exitShown     bool
+	exitReported  bool
+	stopRequested bool
 }
 
 func NewManager() *Manager {
@@ -305,6 +322,26 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 		state:      StateRunning,
 		proc:       cmd,
 		done:       make(chan struct{}),
+		label:      strings.TrimSpace(req.Label),
+		notify:     req.Notify,
+	}
+	if p.notify == "" {
+		p.notify = NotifyExit
+	}
+	if p.notify == NotifyLines {
+		if p.timeout <= 0 {
+			p.timeout = DefaultLinesTimeout
+		}
+		p.timeout = min(p.timeout, MaxLinesTimeout)
+		p.monitor = newLineMonitor(func(lines string, suppressedBefore int) {
+			m.notify(Notification{
+				SessionID: p.sessionID,
+				ChatID:    p.chatID,
+				ProcessID: p.processID,
+				Kind:      NotificationLines,
+				Text:      linesEventText(p, lines, suppressedBefore),
+			})
+		}, func() { m.stopForReason(p, "stopped: output rate stayed too high for "+monitorFloodLimit.String()) })
 	}
 	if req.TTY {
 		size := normalizeSize(TerminalSize{Rows: defaultRows, Cols: defaultCols})
@@ -343,8 +380,8 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 	m.processes[p.processID] = p
 	m.mu.Unlock()
 	go m.waitForExit(p)
-	if req.Timeout > 0 {
-		go m.enforceTimeout(p, req.Timeout)
+	if p.timeout > 0 {
+		go m.enforceTimeout(p, p.timeout)
 	}
 	if wait := normalizeWait(req.YieldTime); wait > 0 {
 		if err := p.waitForStartup(ctx, wait); err != nil {
@@ -352,7 +389,15 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 		}
 	}
 	snap := p.drainSnapshot(req.PreviewBytes)
+	p.mu.Lock()
+	p.startReturned = true
+	if snap.State != StateRunning {
+		p.exitShown = true
+	}
+	p.mu.Unlock()
 	m.publish(Event{Kind: EventKindState, Snapshot: snap})
+	// The process may have exited after the snapshot was taken.
+	m.reportExitIfDue(p)
 	return snap, nil
 }
 
@@ -373,7 +418,13 @@ func (m *Manager) Status(_ context.Context, req StatusRequest) (Snapshot, error)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return p.snapshot(req.MaxBytes), nil
+	snap := p.snapshot(req.MaxBytes)
+	if snap.State != StateRunning {
+		p.mu.Lock()
+		p.exitShown = true
+		p.mu.Unlock()
+	}
+	return snap, nil
 }
 
 func (m *Manager) List(_ context.Context, req ListRequest) ([]Snapshot, error) {
@@ -419,11 +470,18 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteStdinRequest) (Snapsh
 	if err != nil {
 		return Snapshot{}, err
 	}
+	p.beginModelWait()
+	snap := Snapshot{State: StateRunning}
+	defer func() {
+		p.endModelWait(snap)
+		m.reportExitIfDue(p)
+	}()
 	p.mu.Lock()
 	if p.state != StateRunning {
 		if req.Chars == "" && !req.CloseStdin {
 			p.mu.Unlock()
-			return p.drainSnapshot(req.MaxBytes), nil
+			snap = p.drainSnapshot(req.MaxBytes)
+			return snap, nil
 		}
 		p.mu.Unlock()
 		return Snapshot{}, errors.New("process is not running")
@@ -453,7 +511,8 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteStdinRequest) (Snapsh
 	if err := p.waitForOutput(ctx, normalizeStdinWait(req.YieldTime)); err != nil {
 		return Snapshot{}, err
 	}
-	return p.drainSnapshot(req.MaxBytes), nil
+	snap = p.drainSnapshot(req.MaxBytes)
+	return snap, nil
 }
 
 func (m *Manager) Resize(_ context.Context, req ResizeRequest) (Snapshot, error) {
@@ -480,6 +539,7 @@ func (m *Manager) Terminate(_ context.Context, req TerminateRequest) (Snapshot, 
 	if err != nil {
 		return Snapshot{}, err
 	}
+	p.requestStop()
 	if err := terminateProcess(p); err != nil {
 		return Snapshot{}, err
 	}
@@ -502,6 +562,7 @@ func (m *Manager) Cleanup(_ context.Context, req CleanupRequest) ([]Snapshot, er
 	var snaps []Snapshot
 	for _, p := range matches {
 		if p.snapshot(0).State == StateRunning {
+			p.requestStop()
 			_ = terminateProcess(p)
 		}
 		snaps = append(snaps, p.snapshot(req.MaxBytes))
@@ -518,6 +579,7 @@ func (m *Manager) readOutput(p *process, r io.Reader, source StreamSource) {
 		if n > 0 {
 			delta := string(buf[:n])
 			p.appendOutput(source, delta)
+			p.feedMonitor(source, delta)
 			m.publish(Event{Kind: EventKindOutput, Snapshot: p.snapshot(defaultPreviewBytes), Delta: delta})
 		}
 		if err != nil {
@@ -560,6 +622,7 @@ func (m *Manager) waitForExit(p *process) {
 	p.closeDone()
 	p.mu.Unlock()
 	m.publish(Event{Kind: EventKindState, Snapshot: p.snapshot(defaultPreviewBytes)})
+	m.reportExitIfDue(p)
 }
 
 func (m *Manager) enforceTimeout(p *process, timeout time.Duration) {
@@ -567,8 +630,44 @@ func (m *Manager) enforceTimeout(p *process, timeout time.Duration) {
 	defer timer.Stop()
 	select {
 	case <-timer.C:
-		_ = terminateProcess(p)
+		reason := "timed out after " + timeout.String()
+		if p.notify == NotifyLines {
+			reason = "watch expired after " + timeout.String()
+		}
+		m.stopForReason(p, reason)
 	case <-p.done:
+	}
+}
+
+// stopForReason terminates a process Koder decided to stop, keeping the
+// reason for its exit report.
+func (m *Manager) stopForReason(p *process, reason string) {
+	p.mu.Lock()
+	if p.state == StateRunning && p.endReason == "" {
+		p.endReason = reason
+	}
+	p.mu.Unlock()
+	_ = terminateProcess(p)
+}
+
+func (p *process) requestStop() {
+	p.mu.Lock()
+	p.stopRequested = true
+	p.mu.Unlock()
+}
+
+// feedMonitor passes output to a lines-mode monitor once exec_command has
+// returned; earlier output is already in the exec_command result. Stderr is
+// not an event source, so a watch command merges it with 2>&1 when needed.
+func (p *process) feedMonitor(source StreamSource, delta string) {
+	if p.monitor == nil || source == StreamSourceStderr {
+		return
+	}
+	p.mu.RLock()
+	started := p.startReturned
+	p.mu.RUnlock()
+	if started {
+		p.monitor.feed(delta)
 	}
 }
 

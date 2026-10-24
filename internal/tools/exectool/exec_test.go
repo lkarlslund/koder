@@ -311,7 +311,7 @@ func TestCommandResultStatesFactsWithoutInstructions(t *testing.T) {
 		state execruntime.State
 		want  string
 	}{
-		{execruntime.StateRunning, "process_id: exec_1\nstate: running (startup wait ended; the command continues in the background)\noutput_mode: tail\noutput:\n(none yet)"},
+		{execruntime.StateRunning, "process_id: exec_1\nstate: running (startup wait ended; the command continues in the background)\nreporting: automatic: the exit arrives in this chat as a notification\noutput_mode: tail\noutput:\n(none yet)"},
 		{execruntime.StateCompleted, "process_id: exec_1\nstate: completed\noutput_mode: tail\noutput:\n(none)"},
 	} {
 		control := &recordingExecControl{startState: tc.state}
@@ -327,6 +327,32 @@ func TestCommandResultStatesFactsWithoutInstructions(t *testing.T) {
 		if result.Output != tc.want {
 			t.Fatalf("%s output = %q, want %q", tc.state, result.Output, tc.want)
 		}
+	}
+}
+
+func TestCommandNotifyLinesReachesTheRuntime(t *testing.T) {
+	control := &recordingExecControl{startState: execruntime.StateRunning}
+	args, err := (commandTool{}).NormalizeArgs(map[string]string{"cmd": "tail -f app.log", "notify": "lines", "comment": "errors in app.log"})
+	if err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	result, err := (commandTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{
+		Workdir:   t.TempDir(),
+		SessionID: "session-1",
+		ChatID:    "chat-1",
+		Exec:      control,
+	}, Request: tools.Request{Args: args}})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if control.start.Notify != execruntime.NotifyLines || control.start.Label != "errors in app.log" {
+		t.Fatalf("start request notify=%q label=%q", control.start.Notify, control.start.Label)
+	}
+	if !strings.Contains(result.Output, "reporting: "+tools.ExecReportingLines) {
+		t.Fatalf("output = %q", result.Output)
+	}
+	if _, err := (commandTool{}).NormalizeArgs(map[string]string{"cmd": "true", "notify": "always"}); err == nil {
+		t.Fatal("expected an invalid notify value to be rejected")
 	}
 }
 

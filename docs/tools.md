@@ -127,3 +127,34 @@ Before adding a callable name:
 
 Do not remove a legacy handler until persisted transcripts no longer need it or a
 storage migration has converted every call and result safely.
+
+## Exec Notifications
+
+An exec session that is still running when `exec_command` returns reports to
+its chat on its own. The model does not need to wait for it.
+
+- **Exit:** when the session ends, Koder queues one notification in the chat
+  with the process id, state (with the reason when Koder stopped it, such as a
+  timeout), exit code, runtime and the output not yet shown. Koder skips it
+  when a tool result has already shown the exit, when a tool call that may show
+  it is still in flight, or when the session was terminated on request.
+- **Lines (`notify=lines`):** each batch of new stdout lines is a notification
+  too. Output printed before `exec_command` returns is in its result instead.
+  - Lines arriving within 200 ms share one notification. Each line is cut at
+    500 bytes and each batch at 3000.
+  - A token bucket allows a burst of 10 notifications, refilled one per 2 s.
+    Batches over the limit are dropped and counted, and the next notification
+    says how many.
+  - If output stays over the limit for 30 s, Koder stops the session.
+  - The session stops after `timeout_ms`, 5 minutes by default and 30 at most.
+    The exit notification then counts the events delivered.
+  - Stderr is not an event source; a watch command merges it with `2>&1`.
+
+Notifications are queued as steers with source `exec` or `monitor`: they start a
+turn when the chat is idle, and join the running turn at its next step
+otherwise. A child chat's report to its parent uses the same path with source
+`child_report`. These messages reach the model framed as
+`Koder notification, not written by the user (source: …)` around a
+`<notification>` block. At a turn boundary, each source becomes its own message,
+so a notification is never merged into the user's own steer.
+

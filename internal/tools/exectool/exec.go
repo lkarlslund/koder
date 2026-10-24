@@ -34,21 +34,21 @@ func init() {
 	}, tools.ToolSpec{
 		Title:       "Exec session",
 		Description: "Inspect and interact with persistent command sessions.",
-		Usage:       "Manage commands that exec_command returned as still running. wait consumes newly available output without sending input; send_input writes chars and can close stdin; status returns a non-consuming snapshot; terminate stops one process; cleanup stops processes in the selected scope. Prefer wait over repeated status polling.",
+		Usage:       "Manage commands that exec_command returned as still running. A running session reports its exit to this chat as a notification, so a long wait is not needed: end the turn or keep working until the notification arrives. wait consumes newly available output without sending input and suits short waits; send_input writes chars and can close stdin; status returns a non-consuming snapshot; terminate stops one process; cleanup stops processes in the selected scope.",
 		Parameters:  `{"type":"object","properties":{"action":{"type":"string","enum":["list","status","wait","send_input","resize","terminate","cleanup"]},"process_id":{"type":"string","description":"Process id returned by exec_command"},"scope":{"type":"string","enum":["chat","session"]},"chars":{"type":"string","description":"For send_input, exact characters to write"},"close_stdin":{"type":"boolean"},"yield_time_ms":{"type":"integer","minimum":1,"maximum":300000},"max_output_bytes":{"type":"integer"},"rows":{"type":"integer"},"cols":{"type":"integer"}},"required":["action"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(commandTool{}, tools.ToolSpec{
 		Title:       "Start exec session",
 		Description: "Start a persistent shell command session.",
-		Usage:       "Run a shell command in the workspace. Short commands return their output directly; commands still running after the startup wait or a brief output-settle period become persistent exec sessions managed with exec_session. Use this for both quick and long-running commands. Keep cmd executable-only: do not include reasoning, commentary, plans, status updates, or explanatory shell comments. Put explanations in normal assistant text. Prefer dedicated file and search tools where available.",
-		Parameters:  `{"type":"object","properties":{"cmd":{"type":"string","description":"Exact executable shell command. Keep it small; do not include reasoning, commentary, plans, status updates, or explanatory comments."},"comment":{"type":"string","description":"Optional short user-facing description of what this exec does. Use this for long or dense commands instead of relying on cmd as the visible label."},"workdir":{"type":"string","description":"Optional workspace-relative working directory; use this instead of cd."},"timeout_ms":{"type":"integer","minimum":0,"maximum":9223372036854,"description":"Optional timeout in milliseconds; omit for no timeout"},"tty":{"type":"boolean","description":"Enable tty mode for interactive commands"},"shell":{"type":"string","description":"Optional shell binary name or path"},"login":{"type":"boolean","description":"Use login shell semantics; defaults to true"},"yield_time_ms":{"type":"integer","minimum":1,"maximum":30000,"description":"Optional maximum startup wait in milliseconds. The call returns sooner when output settles. Defaults to 10000."}},"required":["cmd"],"additionalProperties":false}`,
+		Usage:       "Run a shell command in the workspace. Short commands return their output directly; commands still running after the startup wait or a brief output-settle period become persistent exec sessions managed with exec_session. A running session reports its exit to this chat as a notification, which starts a new turn when the chat is idle. With notify=lines, each batch of new stdout lines is also a notification, which suits watching a log or a build: filter the command to the lines that matter, including failures (for example `tail -f app.log | grep --line-buffered -E 'ERROR|Ready'`). Lines within 200 ms share one notification, each line is cut at 500 bytes, notifications over about one per 2 s are dropped and counted, and a session whose output stays over that rate for 30 s is stopped. A notify=lines session stops after timeout_ms, 5 minutes by default and 30 at most. Keep cmd executable-only: do not include reasoning, commentary, plans, status updates, or explanatory shell comments. Put explanations in normal assistant text. Prefer dedicated file and search tools where available.",
+		Parameters:  `{"type":"object","properties":{"cmd":{"type":"string","description":"Exact executable shell command. Keep it small; do not include reasoning, commentary, plans, status updates, or explanatory comments."},"comment":{"type":"string","description":"Optional short user-facing description of what this exec does. Use this for long or dense commands instead of relying on cmd as the visible label."},"workdir":{"type":"string","description":"Optional workspace-relative working directory; use this instead of cd."},"timeout_ms":{"type":"integer","minimum":0,"maximum":9223372036854,"description":"Optional timeout in milliseconds; omit for no timeout"},"tty":{"type":"boolean","description":"Enable tty mode for interactive commands"},"shell":{"type":"string","description":"Optional shell binary name or path"},"login":{"type":"boolean","description":"Use login shell semantics; defaults to true"},"yield_time_ms":{"type":"integer","minimum":1,"maximum":30000,"description":"Optional maximum startup wait in milliseconds. The call returns sooner when output settles. Defaults to 10000."},"notify":{"type":"string","enum":["exit","lines"],"description":"What a session still running after the startup wait reports to this chat: exit (default) reports the exit once; lines also reports each batch of new stdout lines."}},"required":["cmd"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(statusTool{}, tools.ToolSpec{
 		Title:       "Exec status",
 		Description: "Get state and recent output for a persistent exec session.",
-		Usage:       "Inspect the latest state and accumulated output tail for one persistent exec session. This is a non-consuming status snapshot; do not repeatedly poll it for long-running commands. Use exec_write_stdin with empty chars and yield_time_ms to wait for new output.",
+		Usage:       "Inspect the latest state and accumulated output tail for one persistent exec session. This is a non-consuming status snapshot. A running session reports its exit to this chat as a notification, so repeated polling is not needed.",
 		Parameters:  `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id"],"additionalProperties":false}`,
 		ExposeToLLM: true, Legacy: true,
 	})
@@ -62,7 +62,7 @@ func init() {
 	tools.Register(writeStdinTool{}, tools.ToolSpec{
 		Title:       "Write exec stdin",
 		Description: "Write stdin text to, or wait for output from, a running persistent exec session.",
-		Usage:       "Write stdin text to a persistent exec session. Pass empty chars to wait for new output or process completion without writing input. Prefer this over repeated exec_status polling for long-running commands; returned output is newly drained output since the previous consuming exec result.",
+		Usage:       "Write stdin text to a persistent exec session. Pass empty chars to wait briefly for new output or process completion without writing input; returned output is newly drained output since the previous consuming exec result. A running session reports its exit to this chat as a notification, so a long wait is not needed.",
 		Parameters:  `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"chars":{"type":"string","description":"Text to write to stdin. Use an empty string to wait/poll for new output without writing input."},"close_stdin":{"type":"boolean","description":"Close stdin after writing"},"yield_time_ms":{"type":"integer","minimum":1,"maximum":300000,"description":"Optional positive wait in milliseconds for new output before returning. Defaults to 10000 ms."},"max_output_bytes":{"type":"integer","description":"Optional output size to return"}},"required":["process_id"],"additionalProperties":false}`,
 		ExposeToLLM: true, Legacy: true,
 	})
@@ -155,6 +155,13 @@ func (commandTool) NormalizeArgs(args map[string]string) (map[string]string, err
 			return nil, errors.New("yield_time_ms must be a positive integer")
 		}
 		out["yield_time_ms"] = strconv.Itoa(ms)
+	}
+	if notify := strings.TrimSpace(args["notify"]); notify != "" {
+		mode, err := execruntime.ParseNotifyMode(notify)
+		if err != nil {
+			return nil, err
+		}
+		out["notify"] = string(mode)
 	}
 	return out, nil
 }
@@ -265,6 +272,10 @@ func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 	if err := tools.EnsureSessionTmpDir(settings); err != nil {
 		return tools.Result{}, err
 	}
+	notify, err := execruntime.ParseNotifyMode(req.Args["notify"])
+	if err != nil {
+		return tools.Result{}, err
+	}
 	snap, err := control.Start(ctx, execruntime.StartRequest{
 		SessionID:      runtime.SessionID,
 		ChatID:         runtime.ChatID,
@@ -279,6 +290,8 @@ func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 		YieldTime:      durationArg(req.Args, "yield_time_ms", defaultYieldTime),
 		PreviewBytes:   outputLimit(runtime, req),
 		AccessSettings: settings,
+		Label:          normalizeComment(req.Args["comment"]),
+		Notify:         notify,
 	})
 	if err != nil {
 		return tools.Result{}, err
@@ -286,6 +299,10 @@ func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 	stored := storedFromSnapshot(snap, "")
 	if snap.State == execruntime.StateRunning {
 		stored.StateNote = tools.ExecStartRunningNote
+		stored.Reporting = tools.ExecReportingExit
+		if notify == execruntime.NotifyLines {
+			stored.Reporting = tools.ExecReportingLines
+		}
 	}
 	stored.Workdir = rel
 	stored.Comment = req.Args["comment"]

@@ -98,6 +98,8 @@ type ExecStoredResult struct {
 	// StateNote explains State in the model-facing text, e.g. that a
 	// command outlived exec_command's startup wait.
 	StateNote string `json:"state_note,omitempty"`
+	// Reporting says what a running session sends to the chat on its own.
+	Reporting string `json:"reporting,omitempty"`
 	Message   string `json:"message,omitempty"`
 }
 
@@ -1250,6 +1252,12 @@ func formatReadStoredResult(result ReadStoredResult) string {
 // when exec_command's startup wait ends. It states a fact rather than giving
 // instructions: Qwen-style templates render tool results inside a user turn,
 // where an instruction-like result reads as a new setup message.
+// Reporting values for a running exec session, by notify mode.
+const (
+	ExecReportingExit  = "automatic: the exit arrives in this chat as a notification"
+	ExecReportingLines = "automatic: each batch of new output lines, then the exit, arrives in this chat as a notification"
+)
+
 const ExecStartRunningNote = "startup wait ended; the command continues in the background"
 
 // execMessageAndState returns the leading message and the state line.
@@ -1275,6 +1283,9 @@ func formatExecStoredResult(result ExecStoredResult) string {
 	}
 	if result.ExitCode != nil {
 		lines = append(lines, fmt.Sprintf("exit_code: %d", *result.ExitCode))
+	}
+	if reporting := strings.TrimSpace(result.Reporting); reporting != "" && result.State == "running" {
+		lines = append(lines, "reporting: "+reporting)
 	}
 	if mode := strings.TrimSpace(result.OutputMode); mode != "" {
 		lines = append(lines, "output_mode: "+mode)
