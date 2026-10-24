@@ -380,12 +380,13 @@
         </div>
         <div class="list-group list-group-flush sidebar-list">
           <template x-for="chat in visibleChats()" :key="chat.ID || chat.id">
-			<div class="list-group-item list-group-item-action chat-list-item" :draggable="workspaceSessionMode()" :class="{'active': chatID(chat) === state.active_chat_id, 'dragging': dragChatID === chatID(chat), 'opacity-75': chatArchived(chat), 'chat-switching': switchingChat.id === chatID(chat)}" @click="switchChat(chatID(chat), $event)" @auxclick.prevent="switchChat(chatID(chat), $event)" @dragstart="startChatDrag($event, chatID(chat))" @dragover.prevent="overChatDrag($event, chatID(chat))" @drop.stop.prevent="dropChat($event, chatID(chat))" @dragend="endChatDrag()">
+			<div class="list-group-item list-group-item-action chat-list-item" :draggable="workspaceSessionMode()" :class="{'active': chatID(chat) === state.active_chat_id, 'dragging': dragChatID === chatID(chat), 'opacity-75': chatArchived(chat), 'chat-switching': switchingChat.id === chatID(chat), ['chat-backend-' + chatBackend(chat)]: true}" @click="switchChat(chatID(chat), $event)" @auxclick.prevent="switchChat(chatID(chat), $event)" @dragstart="startChatDrag($event, chatID(chat))" @dragover.prevent="overChatDrag($event, chatID(chat))" @drop.stop.prevent="dropChat($event, chatID(chat))" @dragend="endChatDrag()">
               <div class="d-flex align-items-center gap-1">
                 <div class="d-flex align-items-center gap-1 flex-grow-1 text-start chat-list-main chat-list-content" role="button" tabindex="0" :class="{'text-white': chatID(chat) === state.active_chat_id}" @click.stop="switchChat(chatID(chat), $event)" @auxclick.stop.prevent="switchChat(chatID(chat), $event)" @keydown.enter.stop.prevent="switchChat(chatID(chat), $event)" @keydown.space.stop.prevent="switchChat(chatID(chat), $event)">
 				  <i class="bi bi-grip-vertical chat-drag-handle" title="Drag to reorder" x-show="workspaceSessionMode()"></i>
 				  <i class="bi bi-chat-left-text" x-show="chatTypeIcon(chat) === 'bi-chat-left-text'"></i>
-				  <i class="bi bi-terminal" x-show="chatTypeIcon(chat) === 'bi-terminal'"></i>
+				  <i class="bi bi-terminal chat-backend-icon" x-show="chatTypeIcon(chat) === 'bi-terminal'" title="Codex chat"></i>
+				  <i class="bi bi-asterisk chat-backend-icon" x-show="chatTypeIcon(chat) === 'bi-asterisk'" title="Claude Code chat"></i>
 				  <i class="bi bi-mic-fill" x-show="chatTypeIcon(chat) === 'bi-mic-fill'"></i>
 				  <i class="bi bi-archive" x-show="chatTypeIcon(chat) === 'bi-archive'"></i>
                   <span class="text-truncate chat-title" x-text="chatTitle(chat)"></span>
@@ -643,7 +644,7 @@
             <div class="settings-field-control">
               <div class="chat-backend-grid">
                 <template x-for="backend in chatCreator.backends" :key="backend.id">
-                  <button type="button" class="chat-backend-card" :class="{'selected': chatCreator.draft.backend === backend.id, 'unavailable': !backend.available}" :disabled="!backend.available" @click="selectChatBackend(backend.id)">
+                  <button type="button" class="chat-backend-card" :class="{['chat-backend-' + backend.id]: true, 'selected': chatCreator.draft.backend === backend.id, 'unavailable': !backend.available}" :disabled="!backend.available" @click="selectChatBackend(backend.id)">
                     <i class="bi" :class="chatBackendIcon(backend.id, 'bi-stars')"></i>
                     <span><strong x-text="backend.label"></strong><small x-text="backend.available ? (backend.id !== 'koder' ? ((backend.models || []).length + ' live models') : 'Native Koder tools') : (backend.detail || 'Unavailable')"></small></span>
                     <i class="bi ms-auto" :class="chatCreator.draft.backend === backend.id ? 'bi-check-circle-fill text-primary' : (backend.available ? 'bi-circle' : 'bi-exclamation-circle text-warning')"></i>

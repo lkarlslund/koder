@@ -4604,7 +4604,8 @@
 		  if (rect) this.newChatMenuPosition = {top: Math.round(rect.bottom + 6) + 'px', right: Math.max(8, Math.round(window.innerWidth - rect.right)) + 'px'};
 		  this.newChatMenuOpen = true;
 		},
-		chatTypeIcon(chat) { if (this.chatArchived(chat)) return 'bi-archive'; if ((chat.interaction_mode || chat.InteractionMode) === 'voice' || (chat.workflow_role || chat.WorkflowRole) === 'voice') return 'bi-mic-fill'; return this.chatBackendIcon(chat.backend || chat.Backend, 'bi-chat-left-text'); },
+		chatBackend(chat) { return String(chat.backend || chat.Backend || 'koder'); },
+		chatTypeIcon(chat) { if (this.chatArchived(chat)) return 'bi-archive'; if ((chat.interaction_mode || chat.InteractionMode) === 'voice' || (chat.workflow_role || chat.WorkflowRole) === 'voice') return 'bi-mic-fill'; return this.chatBackendIcon(this.chatBackend(chat), 'bi-chat-left-text'); },
         renameChat(chat) {
           const id = this.chatID(chat);
           if (!id) return;
