@@ -44,7 +44,9 @@
     .browser-tab-row:hover, .browser-tab-row:focus-visible { border-color: rgba(var(--bs-secondary-rgb), .75); background: var(--bs-secondary-bg); outline: none; }
     .browser-tab-title { min-width: 0; font-size: .86rem; }
     .browser-sidebar-footer { display: flex; align-items: center; justify-content: flex-end; gap: .25rem; margin-top: .35rem; }
-    .restart-needed { display: inline-flex; align-items: center; gap: .3rem; padding: .2rem .5rem; font-size: .75rem; font-weight: 600; line-height: 1; border: 0; border-radius: var(--bs-border-radius); }
+    /* Status labels in the top bar stretch to the height of the buttons beside them. */
+    .topbar-status { align-self: stretch; display: inline-flex; align-items: center; padding: 0 .5rem; font-size: .75rem; font-weight: 600; line-height: 1; border: 0; border-radius: var(--bs-border-radius-sm); }
+    .restart-needed { gap: .3rem; }
     .restart-needed.restart-pending { color: #fff; background: var(--bs-orange); }
     .restart-needed.restart-pending:hover, .restart-needed.restart-pending:focus-visible { color: #fff; background: color-mix(in srgb, var(--bs-orange) 85%, black); }
     .restart-needed.btn-danger { color: #fff; }
