@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Upgrade a Koder systemd user service once Koder is idle.
+#
+#   koder-upgrade NEW_BINARY [TARGET] [UNIT]
+#
+# TARGET defaults to ~/.local/bin/koder and UNIT to koder.service. The script
+# checks that NEW_BINARY runs, asks Koder to exit when idle (SIGUSR2), waits
+# for the service to stop, keeps the old binary as TARGET.prev, moves the new
+# one into place and starts the service again. NEW_BINARY is moved, not copied.
+set -euo pipefail
+
+new=${1:?usage: koder-upgrade NEW_BINARY [TARGET] [UNIT]}
+target=${2:-$HOME/.local/bin/koder}
+unit=${3:-koder.service}
+staged="$target.upgrading"
+
+log() { printf 'koder-upgrade: %s\n' "$*" >&2; }
+
+if [[ ! -f "$new" ]]; then
+	log "nothing staged at $new"
+	exit 0
+fi
+chmod 755 "$new"
+if ! version=$("$new" version 2>&1 | head -n 1); then
+	log "rejecting $new, it does not run: $version"
+	mv -f "$new" "$new.rejected"
+	exit 1
+fi
+# Stage on the target's filesystem so the final swap is a rename.
+mv -f "$new" "$staged"
+log "staged $version"
+
+signalled_pid=""
+while systemctl --user is-active --quiet "$unit"; do
+	pid=$(systemctl --user show -p MainPID --value "$unit")
+	# Signal again if systemd restarted Koder while we waited.
+	if [[ "$pid" != "0" && "$pid" != "$signalled_pid" ]]; then
+		log "asking $unit (pid $pid) to exit when idle"
+		systemctl --user kill --kill-whom=main -s SIGUSR2 "$unit"
+		signalled_pid=$pid
+	fi
+	sleep 2
+done
+
+if [[ -e "$target" ]]; then
+	mv -f "$target" "$target.prev"
+fi
+mv "$staged" "$target"
+systemctl --user start "$unit"
+log "started $unit with $version (previous binary: $target.prev)"

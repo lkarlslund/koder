@@ -1,0 +1,11 @@
+# Upgrades Koder when a new binary is dropped at ~/.local/bin/koder.new.
+# Install with koder-upgrade.service in ~/.config/systemd/user, then:
+#   systemctl --user enable --now koder-upgrade.path
+[Unit]
+Description=Upgrade koder when a new binary is staged
+
+[Path]
+PathChanged=%h/.local/bin/koder.new
+
+[Install]
+WantedBy=default.target

@@ -174,7 +174,6 @@ koder serve
 koder --data-dir /tmp/koder-test serve
 koder serve --web-bind 127.0.0.1:8080
 koder serve --nobrowser
-koder serve --auto-upgrade
 koder doctor
 koder doctor --provider local-llama --model qwen3-coder
 koder doctor --tts
@@ -185,29 +184,32 @@ koder skill --help
 koder version
 ```
 
-## Auto-Upgrade
+## Upgrading A Running Service
 
-With `koder serve --auto-upgrade`, Koder checks every 10 seconds for a new
-binary staged as `<executable>.new`, for example `~/.local/bin/koder.new`.
+Send Koder `SIGUSR2` to make it exit once it is idle. Koder waits until no
+chat is running, queued or waiting for approval and no exec session is running,
+then shuts down cleanly and exits 0. A systemd unit with `Restart=on-failure`
+then stays stopped.
 
-- It waits until the file has stopped changing for 5 seconds.
-- It waits until no chat is running, queued or waiting for approval, and no
-  exec session is running.
-- It runs the new binary's `version` command to check it, then keeps the old
-  binary as `<executable>.prev` and moves the new one into place.
-- It then exits with code 75, so its supervisor starts the new binary. A
-  systemd unit with `Restart=on-failure` does this.
+`scripts/koder-upgrade NEW_BINARY [TARGET] [UNIT]` upgrades a systemd user
+service using that signal:
 
-If the staged binary does not run (for example, it was built for the wrong CPU),
-Koder renames it to `<executable>.new.rejected` and keeps running the current
-binary.
+1. It checks that the new binary runs `version`.
+2. It sends `SIGUSR2` and waits for the service to stop.
+3. It keeps the old binary as `TARGET.prev`, moves the new one into place and
+   starts the service.
 
-To upgrade, copy the binary to a temporary name and rename it, so Koder never
-sees a half-written file:
+`TARGET` defaults to `~/.local/bin/koder` and `UNIT` to `koder.service`.
 
-```bash
-scp koder host:.local/bin/koder.tmp && ssh host mv .local/bin/koder.tmp .local/bin/koder.new
-```
+To upgrade by dropping a binary at `~/.local/bin/koder.new`:
+
+1. Copy `scripts/koder-upgrade` to `~/.local/bin`.
+2. Copy `scripts/systemd/koder-upgrade.path` and `koder-upgrade.service` to
+   `~/.config/systemd/user`.
+3. Run `systemctl --user enable --now koder-upgrade.path`.
+
+After that, `scp koder host:.local/bin/koder.new` is enough. A binary that does
+not run is renamed `koder.new.rejected`.
 
 ## Debug API
 

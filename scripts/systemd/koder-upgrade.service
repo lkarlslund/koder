@@ -1,0 +1,6 @@
+[Unit]
+Description=Upgrade koder once it is idle
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/koder-upgrade %h/.local/bin/koder.new
