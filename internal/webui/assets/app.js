@@ -1545,9 +1545,14 @@
             .finally(() => clearTimeout(timeout));
         },
         connectionLabel() {
-          if (this.connected) return 'connected';
-          if (this.connecting) return 'connecting';
-          return 'offline';
+          if (this.connected) return 'Online';
+          if (this.connecting) return 'Connecting';
+          return 'Offline';
+        },
+        connectionBadgeClass() {
+          if (this.connected) return 'text-bg-success';
+          if (this.connecting) return 'text-bg-secondary';
+          return 'text-bg-danger';
         },
         restartNeeded() {
           return !!(this.state.restart_needed || this.state.RestartNeeded);
