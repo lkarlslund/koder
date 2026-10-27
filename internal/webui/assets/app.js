@@ -1,4 +1,4 @@
-    const {escapeHTML, sanitizeHTML, sanitizeMermaidSVG, highlightMarkdownCode, renderMermaidPlaceholders, renderMermaidDiagrams} = window.KoderMarkdownRuntime;
+    const {escapeHTML, sanitizeHTML, sanitizeMermaidSVG, highlightMarkdownCode, renderMermaidPlaceholders, renderMermaidDiagrams, fillKnownMermaidDiagrams} = window.KoderMarkdownRuntime;
     function sanitizeDiagramSVG(html) {
       if (!window.DOMPurify) return html;
       return DOMPurify.sanitize(html, {
@@ -135,10 +135,10 @@
     function diagramPlaceholder(kind, source) {
       return '\n<div class="diagram-stream-placeholder">' + escapeHTML(kind) + ' received: ' + escapeHTML(formatByteCount(byteCount(source))) + '</div>\n';
     }
+    // deferStreamingDiagrams holds back SVG that is still streaming in. Mermaid
+    // blocks stay: they render as they arrive (renderMermaidPlaceholders).
     function deferStreamingDiagrams(source) {
       let text = String(source || '');
-      text = text.replace(/```mermaid[^\n]*\n[\s\S]*?```/gi, match => diagramPlaceholder('Mermaid diagram', match));
-      text = text.replace(/```mermaid[\s\S]*$/i, match => diagramPlaceholder('Mermaid diagram', match));
       text = text.replace(/<svg\b[\s\S]*?<\/svg>/gi, match => diagramPlaceholder('SVG', match));
       text = text.replace(/<svg\b[\s\S]*$/i, match => diagramPlaceholder('SVG', match));
       return text;
@@ -386,17 +386,22 @@
     function renderMarkdown(text, options = {}) {
       const source = options.deferDiagrams ? deferStreamingDiagrams(text) : String(text || '');
       if (!source.trim()) return '';
-      return cachedMarkdown(source, options, () => {
+      const build = () => {
         if (!window.marked) return '<pre>' + escapeHTML(source) + '</pre>';
         marked.setOptions({gfm: true, breaks: false});
         let html = marked.parse(source);
         html = sanitizeHTML(html);
-        if (!options.deferDiagrams) html = renderMermaidPlaceholders(html);
+        html = renderMermaidPlaceholders(html, {streaming: !!options.deferDiagrams, partialLast: endsInsideMermaidFence(source)});
         html = renderMathInHTML(html);
         html = highlightMarkdownCode(html);
         html = renderMarkdownDiffBlocks(html);
         return sanitizeHTML(html);
-      });
+      };
+      return cachedMarkdown(source, options, build);
+    }
+    function endsInsideMermaidFence(source) {
+      const fences = String(source || '').match(/^\s*```.*$/gm) || [];
+      return fences.length % 2 === 1 && /^\s*```\s*mermaid/i.test(fences[fences.length - 1]);
     }
     function stableMarkdownPrefixLength(source) {
       const text = String(source || '');
@@ -423,6 +428,7 @@
       if (!options.incremental || !source.trim()) {
         el.innerHTML = renderMarkdown(source, options);
         el._koderMarkdownStable = '';
+        fillKnownMermaidDiagrams(el);
         return;
       }
       let stableNode = el.querySelector(':scope > [data-markdown-stable]');
@@ -441,8 +447,10 @@
       if (el._koderMarkdownStable !== stableSource) {
         stableNode.innerHTML = renderMarkdown(stableSource, options);
         el._koderMarkdownStable = stableSource;
+        fillKnownMermaidDiagrams(stableNode);
       }
       tailNode.innerHTML = renderMarkdown(tailSource, options);
+      fillKnownMermaidDiagrams(tailNode);
     }
     function renderTimelineMarkdownIntoElement(el, item, text, options = {}) {
       if (!el) return;
@@ -457,6 +465,7 @@
       el._koderMarkdownOptions = key;
       el.innerHTML = renderTimelineMarkdown(item, source, options);
       el._koderMarkdownStable = '';
+      fillKnownMermaidDiagrams(el);
     }
     function firstValue(obj, names) {
       if (!obj) return '';
@@ -1128,7 +1137,7 @@
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
 		chatCreator: {open: false, loading: false, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}},
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptScrollOperation: 0, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptEnhancementObserver: null, transcriptEnhancementFrame: 0, transcriptDOMUpdateScheduled: false, transcriptDOMUpdateCallbacks: [], scrollRestoreSeq: 0, timelineLoading: {}, timelineRepairing: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, composerDefaultSteer: readPreference('composerDefaultSend', 'steer') === 'steer', reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptScrollOperation: 0, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptEnhancementObserver: null, transcriptEnhancementFrame: 0, transcriptEnhanceTimer: null, transcriptDOMUpdateScheduled: false, transcriptDOMUpdateCallbacks: [], scrollRestoreSeq: 0, timelineLoading: {}, timelineRepairing: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, composerDefaultSteer: readPreference('composerDefaultSend', 'steer') === 'steer', reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
           this.syncBrowserTabActivity();
@@ -2367,7 +2376,14 @@
         enhanceTranscript() {
           const root = this.transcriptElement();
           this.enhanceDisplayedMedia(root);
-          return renderMermaidDiagrams(root, {configure: configureMermaid}).then(() => this.enhanceDisplayedMedia(root));
+          return renderMermaidDiagrams(root, {configure: configureMermaid, onThrottled: delay => this.enhanceTranscriptLater(delay)}).then(() => this.enhanceDisplayedMedia(root));
+        },
+        enhanceTranscriptLater(delay) {
+          if (this.transcriptEnhanceTimer) return;
+          this.transcriptEnhanceTimer = setTimeout(() => {
+            this.transcriptEnhanceTimer = null;
+            this.scheduleTranscriptEnhancement();
+          }, delay);
         },
         enhanceDisplayedMedia(root) {
           if (!root) return;

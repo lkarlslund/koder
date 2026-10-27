@@ -2286,7 +2286,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `deferStreamingDiagrams`) || !strings.Contains(fullPage, `diagram-stream-placeholder`) || !strings.Contains(fullPage, `Mermaid diagram`) || !strings.Contains(fullPage, `SVG`) ||
 		!strings.Contains(fullPage, `stableMarkdownPrefixLength`) || !strings.Contains(fullPage, `data-markdown-tail`) || !strings.Contains(fullPage, `itemMarkdownOptions(item)`) ||
 		!strings.Contains(fullPage, `const streaming = !String(item?.sealed_at || item?.SealedAt || '').trim();`) {
-		t.Fatalf("expected unsealed timeline items to defer Mermaid and SVG rendering")
+		t.Fatalf("expected unsealed timeline items to defer SVG and stream Mermaid diagrams")
 	}
 	if !strings.Contains(fullPage, `.markdown-body svg { max-width: 100%; height: auto; }`) || !strings.Contains(fullPage, `foreignObject`) {
 		t.Fatalf("expected inline SVG output to be constrained and sanitized")
@@ -2616,7 +2616,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `scheduleTranscriptEnhancement`) ||
 		!strings.Contains(fullPage, `captureTranscriptScrollAnchor`) ||
 		!strings.Contains(fullPage, `transcriptScrollAnchorTop`) ||
-		!strings.Contains(fullPage, `return renderMermaidDiagrams(root, {configure: configureMermaid}).then`) {
+		!strings.Contains(fullPage, `return renderMermaidDiagrams(root, {configure: configureMermaid, onThrottled: delay => this.enhanceTranscriptLater(delay)}).then`) {
 		t.Fatalf("expected transcript updates to batch media enhancement independently from scroll restoration")
 	}
 	if !strings.Contains(fullPage, `applyState(s, {scrollToBottom: true})`) {
