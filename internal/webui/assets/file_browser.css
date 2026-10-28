@@ -244,3 +244,52 @@ html, body {
     border-bottom: 1px solid var(--bs-border-color);
   }
 }
+
+/* Obsidian notes: properties, wikilinks, tags, highlights and callouts. */
+.obsidian-properties {
+  width: auto;
+  margin: 0 0 1.25rem;
+  font-size: .86rem;
+  border-collapse: collapse;
+}
+.obsidian-properties th,
+.obsidian-properties td {
+  padding: .2rem .75rem .2rem 0;
+  border: 0;
+  vertical-align: top;
+}
+.obsidian-properties th {
+  color: var(--bs-secondary-color);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.obsidian-property-chip,
+.obsidian-tag {
+  display: inline-block;
+  padding: 0 .45rem;
+  border-radius: 999px;
+  color: var(--bs-primary-text-emphasis);
+  background: var(--bs-primary-bg-subtle);
+  font-size: .85em;
+}
+.obsidian-property-chip { margin: 0 .2rem .2rem 0; }
+.file-browser-markdown a.wikilink { text-decoration: none; border-bottom: 1px dashed currentColor; }
+.file-browser-markdown a.wikilink:hover { border-bottom-style: solid; }
+.file-browser-markdown a.wikilink-missing { color: var(--bs-secondary-color); cursor: default; }
+.file-browser-markdown mark { padding: 0 .15em; color: inherit; background: rgba(var(--bs-warning-rgb), .35); }
+.obsidian-callout {
+  --callout-rgb: var(--bs-info-rgb);
+  margin: 0 0 1rem;
+  padding: .6rem .85rem;
+  border-left: 4px solid rgb(var(--callout-rgb));
+  border-radius: .35rem;
+  background: rgba(var(--callout-rgb), .1);
+}
+.obsidian-callout-title { font-weight: 600; color: rgb(var(--callout-rgb)); }
+details.obsidian-callout > summary { cursor: pointer; }
+.obsidian-callout-content > :last-child { margin-bottom: 0; }
+.obsidian-callout-content > :first-child { margin-top: .35rem; }
+.obsidian-callout:is([data-callout="tip"], [data-callout="hint"], [data-callout="success"], [data-callout="check"], [data-callout="done"]) { --callout-rgb: var(--bs-success-rgb); }
+.obsidian-callout:is([data-callout="warning"], [data-callout="caution"], [data-callout="attention"], [data-callout="question"], [data-callout="help"], [data-callout="faq"]) { --callout-rgb: var(--bs-warning-rgb); }
+.obsidian-callout:is([data-callout="danger"], [data-callout="error"], [data-callout="bug"], [data-callout="failure"], [data-callout="fail"], [data-callout="missing"]) { --callout-rgb: var(--bs-danger-rgb); }
+.obsidian-callout:is([data-callout="quote"], [data-callout="cite"], [data-callout="example"]) { --callout-rgb: var(--bs-secondary-rgb); }

@@ -57,6 +57,8 @@ type fileContentResponse struct {
 	Image       bool   `json:"image,omitempty"`
 	TooLarge    bool   `json:"too_large,omitempty"`
 	Markdown    bool   `json:"markdown,omitempty"`
+	// Wikilinks maps each [[target]] in a Markdown file to the file it opens.
+	Wikilinks map[string]string `json:"wikilinks,omitempty"`
 }
 
 type fileSendRequest struct {
@@ -203,6 +205,9 @@ func (s *Server) handleSessionFileRead(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	resp.Content = string(data)
+	if resp.Markdown {
+		resp.Wikilinks = resolveWikilinks(root, rel, resp.Content)
+	}
 	writeFileBrowserJSON(w, r, resp)
 }
 

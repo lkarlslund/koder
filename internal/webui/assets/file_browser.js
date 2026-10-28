@@ -61,6 +61,135 @@
     return template.innerHTML;
   }
 
+  // Obsidian notes extend Markdown: YAML properties, [[wikilinks]] and
+  // ![[embeds]] resolved by name (the server sends the map), callouts,
+  // ==highlights==, %%comments%% and #tags. These render the note the way
+  // Obsidian shows it; plain Markdown passes through unchanged.
+  const obsidianImagePattern = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
+
+  function splitFrontmatter(text) {
+    const match = /^---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)\r?\n?/.exec(text);
+    if (!match) return {properties: null, body: text};
+    return {properties: parseFrontmatter(match[1]), body: text.slice(match[0].length)};
+  }
+
+  // parseFrontmatter reads the flat YAML Obsidian writes: key: value, inline
+  // [a, b] lists and "- item" lists. Anything deeper is shown as written.
+  function parseFrontmatter(yaml) {
+    const properties = [];
+    let current = null;
+    for (const line of String(yaml).split(/\r?\n/)) {
+      const item = /^\s+-\s+(.*)$/.exec(line) || (current && /^-\s+(.*)$/.exec(line));
+      if (item && current) {
+        if (!Array.isArray(current.value)) current.value = current.value ? [current.value] : [];
+        current.value.push(unquoteYAML(item[1]));
+        continue;
+      }
+      const pair = /^([^:#\s][^:]*):\s*(.*)$/.exec(line);
+      if (pair) {
+        let value = pair[2].trim();
+        const list = /^\[(.*)\]$/.exec(value);
+        current = {key: pair[1].trim(), value: list ? list[1].split(',').map(v => unquoteYAML(v)).filter(Boolean) : unquoteYAML(value)};
+        properties.push(current);
+      } else if (current && line.trim()) {
+        current.value = [].concat(current.value || [], line.trim()).join(' ');
+      }
+    }
+    return properties;
+  }
+
+  function unquoteYAML(value) {
+    const text = String(value || '').trim();
+    const quoted = /^(['"])(.*)\1$/.exec(text);
+    return quoted ? quoted[2] : text;
+  }
+
+  function propertiesHTML(properties) {
+    if (!properties || !properties.length) return '';
+    const rows = properties.map(({key, value}) => {
+      const values = Array.isArray(value) ? value : [value];
+      const cell = values.filter(v => v !== '').map(v => Array.isArray(value)
+        ? '<span class="obsidian-property-chip">' + escapeHTML(v) + '</span>'
+        : escapeHTML(v)).join(' ');
+      return '<tr><th>' + escapeHTML(key) + '</th><td>' + cell + '</td></tr>';
+    }).join('');
+    return '<table class="obsidian-properties"><tbody>' + rows + '</tbody></table>\n\n';
+  }
+
+  // withoutCode applies transform to the text outside fenced and inline code.
+  function withoutCode(text, transform) {
+    const kept = [];
+    const keep = match => '' + (kept.push(match) - 1) + '';
+    let masked = text.replace(/^(\s*)(```|~~~)[^\n]*\n[\s\S]*?(?:\n\s*\2[^\n]*|$)/gm, keep);
+    masked = masked.replace(/(`+)[^`\n][\s\S]*?\1/g, keep);
+    return transform(masked).replace(/(\d+)/g, (_, i) => kept[Number(i)]);
+  }
+
+  function wikilinkHTML(target, heading, label, resolved, embed) {
+    const text = label || (target ? target + (heading ? ' › ' + heading : '') : heading);
+    if (!target) {
+      return '<a href="#" class="wikilink" data-wikilink-heading="' + escapeHTML(heading) + '">' + escapeHTML(text) + '</a>';
+    }
+    if (!resolved) {
+      return '<a href="#" class="wikilink wikilink-missing" title="' + escapeHTML('No file named ' + target + ' in this vault') + '">' + escapeHTML(text) + '</a>';
+    }
+    if (embed && obsidianImagePattern.test(resolved)) {
+      const width = /^\d+(x\d+)?$/.test(label || '') ? ' width="' + escapeHTML(label.split('x')[0]) + '"' : '';
+      return '<img src="/' + escapeHTML(resolved) + '" alt="' + escapeHTML(target) + '"' + width + '>';
+    }
+    const icon = embed ? '<i class="bi bi-box-arrow-in-down-right"></i> ' : '';
+    return '<a href="#" class="wikilink' + (embed ? ' wikilink-embed' : '') + '" data-wikilink-path="' + escapeHTML(resolved) + '"' +
+      (heading ? ' data-wikilink-heading="' + escapeHTML(heading) + '"' : '') + ' title="' + escapeHTML(resolved) + '">' + icon + escapeHTML(text) + '</a>';
+  }
+
+  function obsidianMarkdown(text, wikilinks) {
+    const {properties, body} = splitFrontmatter(String(text || ''));
+    const links = wikilinks || {};
+    const converted = withoutCode(body, part => part
+      .replace(/%%[\s\S]*?%%/g, '')
+      .replace(/(!?)\[\[([^\]\n]*)\]\]/g, (_, bang, inner) => {
+        const [ref, ...labelParts] = inner.split('|');
+        const label = labelParts.join('|').trim();
+        const hashAt = ref.search(/[#^]/);
+        const target = (hashAt >= 0 ? ref.slice(0, hashAt) : ref).trim();
+        const heading = hashAt >= 0 ? ref.slice(hashAt + 1).replace(/^[#^]+/, '').trim() : '';
+        return wikilinkHTML(target, heading, label, links[target], bang === '!');
+      })
+      .replace(/==(?=\S)([^=\n]+?)==/g, '<mark>$1</mark>')
+      .replace(/(^|\s)#([\p{L}_][\p{L}\p{N}_/-]*)/gu, '$1<span class="obsidian-tag">#$2</span>'));
+    return propertiesHTML(properties) + converted;
+  }
+
+  // renderObsidianCallouts turns > [!type] Title blockquotes into callouts;
+  // [!type]- and [!type]+ fold, closed and open.
+  function renderObsidianCallouts(html) {
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    template.content.querySelectorAll('blockquote').forEach(quote => {
+      const first = quote.firstElementChild;
+      if (!first || first.tagName !== 'P') return;
+      const match = /^\s*\[!([\w-]+)\]([+-]?)[ \t]*([^\n]*)\n?/.exec(first.innerHTML);
+      if (!match) return;
+      const type = match[1].toLowerCase();
+      const title = match[3].trim() || type.charAt(0).toUpperCase() + type.slice(1);
+      first.innerHTML = first.innerHTML.slice(match[0].length);
+      if (!first.innerHTML.trim()) first.remove();
+      const callout = document.createElement(match[2] ? 'details' : 'div');
+      callout.className = 'obsidian-callout';
+      callout.dataset.callout = type;
+      if (match[2] === '+') callout.open = true;
+      const head = document.createElement(match[2] ? 'summary' : 'div');
+      head.className = 'obsidian-callout-title';
+      head.innerHTML = title;
+      const content = document.createElement('div');
+      content.className = 'obsidian-callout-content';
+      content.append(...quote.childNodes);
+      callout.append(head, content);
+      quote.replaceWith(callout);
+    });
+    return template.innerHTML;
+  }
+
   function configureMermaid() {
     if (!window.mermaid || window.koderFilesMermaidConfigured) return;
     mermaid.initialize({
@@ -133,7 +262,7 @@
             this.fileLoading = false;
           }
         });
-        document.addEventListener('click', event => this.handleMediaPreviewClick(event));
+        document.addEventListener('click', event => this.handleMarkdownLinkClick(event) || this.handleMediaPreviewClick(event));
         // Dropping a local file outside a target must not navigate away.
         window.addEventListener('dragover', event => {
           if (Array.from(event.dataTransfer?.types || []).includes('Files')) event.preventDefault();
@@ -543,12 +672,52 @@
         if (!text.trim()) return '';
         if (!window.marked) return '<pre>' + escapeHTML(text) + '</pre>';
         marked.setOptions({gfm: true, breaks: false});
-        let html = marked.parse(text);
+        let html = marked.parse(obsidianMarkdown(text, this.file?.wikilinks));
+        html = renderObsidianCallouts(html);
         html = rewriteMarkdownImageSources(html, filePath || this.file?.path || '', path => this.rawFileURL(path));
         html = sanitizeHTML(html);
         html = renderMermaidPlaceholders(html);
         html = highlightMarkdownCode(html);
         return sanitizeHTML(html);
+      },
+
+      // handleMarkdownLinkClick opens wikilinks and relative links of a
+      // previewed note in the file browser, and scrolls to linked headings.
+      handleMarkdownLinkClick(event) {
+        const link = event.target?.closest?.('.file-browser-markdown a');
+        if (!link || event.defaultPrevented || event.button > 0 || event.metaKey || event.ctrlKey) return false;
+        let path = '';
+        let heading = '';
+        if (link.classList.contains('wikilink')) {
+          path = link.dataset.wikilinkPath || '';
+          heading = link.dataset.wikilinkHeading || '';
+          if (!path && !heading) {
+            event.preventDefault();
+            return true;
+          }
+        } else {
+          const href = link.getAttribute('href') || '';
+          if (href.startsWith('#')) {
+            heading = decodeURIComponent(href.slice(1));
+          } else {
+            path = resolveMarkdownAssetPath(href, this.file?.path || '');
+            if (!path) return false;
+            const hashAt = href.indexOf('#');
+            if (hashAt >= 0) heading = decodeURIComponent(href.slice(hashAt + 1));
+          }
+        }
+        event.preventDefault();
+        const open = path && path !== this.file?.path ? this.loadFile(path) : Promise.resolve();
+        open.then(() => heading && this.$nextTick(() => requestAnimationFrame(() => this.scrollToMarkdownHeading(heading))));
+        return true;
+      },
+
+      scrollToMarkdownHeading(heading) {
+        const slug = value => String(value || '').trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
+        const want = slug(heading);
+        const found = Array.from(document.querySelectorAll('.file-browser-markdown :is(h1, h2, h3, h4, h5, h6)'))
+          .find(el => slug(el.textContent) === want);
+        found?.scrollIntoView({block: 'start', behavior: 'smooth'});
       },
 
       handleMediaPreviewClick(event) {
