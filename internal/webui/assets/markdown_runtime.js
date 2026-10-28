@@ -166,7 +166,8 @@
   function repairMermaidSource(source) {
     const text = String(source || '');
     if (!/^\s*(?:flowchart|graph)\b/im.test(text)) return text;
-    return text.replace(/\b([A-Za-z_][A-Za-z0-9_-]*)\[([^\]\n]+)\]/g, (match, id, label) => {
+    return text.replace(/^(\s*subgraph\s+)([^"\n\[]*[^\w\s"\n\[][^"\n\[]*)$/gm, (match, head, title) =>
+      head + '"' + title.trim() + '"').replace(/\b([A-Za-z_][A-Za-z0-9_-]*)\[([^\]\n]+)\]/g, (match, id, label) => {
       const trimmed = label.trim();
       if (!/[()]/.test(trimmed) || /^['"]/.test(trimmed) || (/^\(/.test(trimmed) && /\)$/.test(trimmed))) return match;
       return id + '["' + trimmed.replaceAll('"', '&quot;') + '"]';
