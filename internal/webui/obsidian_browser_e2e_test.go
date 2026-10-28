@@ -20,7 +20,7 @@ func TestFileBrowserPreviewsObsidianNotes(t *testing.T) {
 		"vault/hub.md": "---\ntype: view\nconfidence: high\nparts: [2, 3, 4]\n---\n# Hub\n\n" +
 			"Bus: [[CAN-ECAN|the E-CAN]], wiring in [[CAN-ECAN#Pinout]], gone: [[Nowhere]].\n\n" +
 			"> [!warning] Mind the gap\n> Body text\n\n" +
-			"This is ==important== and tagged #can/ecan.\n\n%%hidden note%%\n\n" +
+			"This is ==important== and tagged #can/ecan.\nSecond line.\n\n%%hidden note%%\n\n" +
 			"```\nfirst line\n[[not-a-link]] #not-a-tag\n```\n",
 		"vault/buses/CAN-ECAN.md": "# CAN-ECAN\n\nIntro.\n\n## Pinout\n\nPins.\n",
 	}
@@ -58,6 +58,7 @@ func TestFileBrowserPreviewsObsidianNotes(t *testing.T) {
 		Tag         string   `json:"tag"`
 		Comment     bool     `json:"comment"`
 		Code        string   `json:"code"`
+		LineBreak   bool     `json:"lineBreak"`
 	}
 	var opened string
 	if err := chromedp.Run(ctx,
@@ -78,6 +79,7 @@ func TestFileBrowserPreviewsObsidianNotes(t *testing.T) {
 				tag: md.querySelector('.obsidian-tag')?.textContent || '',
 				comment: md.textContent.includes('hidden note'),
 				code: md.querySelector('pre')?.textContent || '',
+				lineBreak: !!md.querySelector('mark')?.parentElement.querySelector('br'),
 			};
 		})()`, &preview),
 		chromedp.Click(`.file-browser-markdown a.wikilink`, chromedp.ByQuery),
@@ -94,6 +96,9 @@ func TestFileBrowserPreviewsObsidianNotes(t *testing.T) {
 	}
 	if preview.Callout != "Mind the gap" || preview.CalloutType != "warning" || preview.Mark != "important" || preview.Tag != "#can/ecan" || preview.Comment {
 		t.Fatalf("obsidian syntax = %+v", preview)
+	}
+	if !preview.LineBreak {
+		t.Fatalf("single line break was joined; Obsidian keeps it")
 	}
 	if preview.Code != "first line\n[[not-a-link]] #not-a-tag\n" {
 		t.Fatalf("code block changed: %q", preview.Code)

@@ -59,6 +59,8 @@ type fileContentResponse struct {
 	Markdown    bool   `json:"markdown,omitempty"`
 	// Wikilinks maps each [[target]] in a Markdown file to the file it opens.
 	Wikilinks map[string]string `json:"wikilinks,omitempty"`
+	// Obsidian is set for a note in an Obsidian vault, with its settings.
+	Obsidian *obsidianNote `json:"obsidian,omitempty"`
 }
 
 type fileSendRequest struct {
@@ -207,6 +209,7 @@ func (s *Server) handleSessionFileRead(w http.ResponseWriter, r *http.Request, s
 	resp.Content = string(data)
 	if resp.Markdown {
 		resp.Wikilinks = resolveWikilinks(root, rel, resp.Content)
+		resp.Obsidian = detectObsidianNote(root, rel, resp.Content)
 	}
 	writeFileBrowserJSON(w, r, resp)
 }

@@ -1,7 +1,10 @@
 package webui
 
 import (
+	"bytes"
 	"cmp"
+	"encoding/json"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -72,17 +75,106 @@ func resolveWikilinks(projectRoot, rel, content string) map[string]string {
 // wikilinkVaultRoot is the nearest folder holding .obsidian above the note,
 // or the project root when there is none. It is relative to projectRoot.
 func wikilinkVaultRoot(projectRoot, rel string) string {
+	dir, _ := obsidianConfigDir(projectRoot, rel)
+	return dir
+}
+
+// obsidianConfigDir finds the nearest folder holding .obsidian above the
+// note; found is false, with dir "", when there is none.
+func obsidianConfigDir(projectRoot, rel string) (dir string, found bool) {
 	for dir := path.Dir(rel); ; dir = path.Dir(dir) {
 		if dir == "." {
 			dir = ""
 		}
 		if info, err := os.Stat(filepath.Join(projectRoot, filepath.FromSlash(dir), ".obsidian")); err == nil && info.IsDir() {
-			return dir
+			return dir, true
 		}
 		if dir == "" {
-			return ""
+			return "", false
 		}
 	}
+}
+
+// obsidianNote says how a Markdown note renders in Obsidian.
+type obsidianNote struct {
+	// StrictLineBreaks joins single line breaks into one paragraph, as
+	// standard Markdown does. Obsidian keeps them by default.
+	StrictLineBreaks bool `json:"strict_line_breaks"`
+}
+
+// detectObsidianNote returns nil for plain Markdown. A note is an Obsidian
+// note when a .obsidian folder sits above it, whose app.json then gives its
+// settings, or, for a vault without one, when the note or another note in
+// its folder or a parent folder below the project root uses [[wikilinks]].
+func detectObsidianNote(projectRoot, rel, content string) *obsidianNote {
+	if vault, found := obsidianConfigDir(projectRoot, rel); found {
+		note := &obsidianNote{}
+		if data, err := os.ReadFile(filepath.Join(projectRoot, filepath.FromSlash(vault), ".obsidian", "app.json")); err == nil {
+			var settings struct {
+				StrictLineBreaks bool `json:"strictLineBreaks"`
+			}
+			if json.Unmarshal(data, &settings) == nil {
+				note.StrictLineBreaks = settings.StrictLineBreaks
+			}
+		}
+		return note
+	}
+	if strings.Contains(content, "[[") {
+		return &obsidianNote{}
+	}
+	for dir := path.Dir(rel); dir != "." && dir != ""; dir = path.Dir(dir) {
+		if folderHasWikilinkNotes(filepath.Join(projectRoot, filepath.FromSlash(dir))) {
+			return &obsidianNote{}
+		}
+	}
+	return nil
+}
+
+const (
+	wikilinkScanFiles = 200
+	wikilinkScanBytes = 64 << 10
+)
+
+var wikilinkFolders = struct {
+	sync.Mutex
+	byDir map[string]wikilinkFolder
+}{byDir: map[string]wikilinkFolder{}}
+
+type wikilinkFolder struct {
+	checked time.Time
+	links   bool
+}
+
+// folderHasWikilinkNotes reports whether a Markdown file directly in dir
+// holds a [[wikilink]], reading at most the first 64 KB of 200 files.
+func folderHasWikilinkNotes(dir string) bool {
+	wikilinkFolders.Lock()
+	defer wikilinkFolders.Unlock()
+	if known, ok := wikilinkFolders.byDir[dir]; ok && time.Since(known.checked) < wikilinkIndexTTL {
+		return known.links
+	}
+	links := false
+	entries, _ := os.ReadDir(dir)
+	scanned := 0
+	for _, entry := range entries {
+		if links || scanned >= wikilinkScanFiles {
+			break
+		}
+		if entry.IsDir() || !isMarkdownFile(entry.Name()) {
+			continue
+		}
+		scanned++
+		file, err := os.Open(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		head := make([]byte, wikilinkScanBytes)
+		n, _ := io.ReadFull(file, head)
+		_ = file.Close()
+		links = bytes.Contains(head[:n], []byte("[["))
+	}
+	wikilinkFolders.byDir[dir] = wikilinkFolder{checked: time.Now(), links: links}
+	return links
 }
 
 func loadWikilinkIndex(root string) *wikilinkIndex {

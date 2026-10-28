@@ -143,8 +143,12 @@
       (heading ? ' data-wikilink-heading="' + escapeHTML(heading) + '"' : '') + ' title="' + escapeHTML(resolved) + '">' + icon + escapeHTML(text) + '</a>';
   }
 
-  function obsidianMarkdown(text, wikilinks) {
+  // obsidianMarkdown prepares a note for marked. Frontmatter shows as
+  // properties for any Markdown; the rest of Obsidian's syntax applies only
+  // to notes the server found in a vault (obsidian set).
+  function obsidianMarkdown(text, wikilinks, obsidian) {
     const {properties, body} = splitFrontmatter(String(text || ''));
+    if (!obsidian) return propertiesHTML(properties) + body;
     const links = wikilinks || {};
     const converted = withoutCode(body, part => part
       .replace(/%%[\s\S]*?%%/g, '')
@@ -169,7 +173,8 @@
     template.content.querySelectorAll('blockquote').forEach(quote => {
       const first = quote.firstElementChild;
       if (!first || first.tagName !== 'P') return;
-      const match = /^\s*\[!([\w-]+)\]([+-]?)[ \t]*([^\n]*)\n?/.exec(first.innerHTML);
+      // The title line ends in a newline, or in <br> when line breaks are kept.
+      const match = /^\s*\[!([\w-]+)\]([+-]?)[ \t]*([^\n]*?)(?:\s*<br\s*\/?>\n?|\n|$)/.exec(first.innerHTML);
       if (!match) return;
       const type = match[1].toLowerCase();
       const title = match[3].trim() || type.charAt(0).toUpperCase() + type.slice(1);
@@ -672,8 +677,11 @@
         const text = String(source || '');
         if (!text.trim()) return '';
         if (!window.marked) return '<pre>' + escapeHTML(text) + '</pre>';
-        marked.setOptions({gfm: true, breaks: false});
-        let html = marked.parse(obsidianMarkdown(text, this.file?.wikilinks));
+        // Obsidian keeps single line breaks unless the vault turns on
+        // strict line breaks.
+        const obsidian = this.file?.obsidian || null;
+        marked.setOptions({gfm: true, breaks: !!obsidian && !obsidian.strict_line_breaks});
+        let html = marked.parse(obsidianMarkdown(text, this.file?.wikilinks, obsidian));
         html = renderObsidianCallouts(html);
         html = rewriteMarkdownImageSources(html, filePath || this.file?.path || '', path => this.rawFileURL(path));
         html = sanitizeHTML(html);
