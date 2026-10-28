@@ -120,7 +120,8 @@
   function withoutCode(text, transform) {
     const kept = [];
     const keep = match => '' + (kept.push(match) - 1) + '';
-    let masked = text.replace(/^(\s*)(```|~~~)[^\n]*\n[\s\S]*?(?:\n\s*\2[^\n]*|$)/gm, keep);
+    // A fence runs to its closing fence, or to the end of the note.
+    let masked = text.replace(/^([ \t]*)(```|~~~)[^\n]*\n[\s\S]*?(?:\n[ \t]*\2[^\n]*|(?![\s\S]))/gm, keep);
     masked = masked.replace(/(`+)[^`\n][\s\S]*?\1/g, keep);
     return transform(masked).replace(/(\d+)/g, (_, i) => kept[Number(i)]);
   }

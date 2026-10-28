@@ -21,7 +21,7 @@ func TestFileBrowserPreviewsObsidianNotes(t *testing.T) {
 			"Bus: [[CAN-ECAN|the E-CAN]], wiring in [[CAN-ECAN#Pinout]], gone: [[Nowhere]].\n\n" +
 			"> [!warning] Mind the gap\n> Body text\n\n" +
 			"This is ==important== and tagged #can/ecan.\n\n%%hidden note%%\n\n" +
-			"```\n[[not-a-link]] #not-a-tag\n```\n",
+			"```\nfirst line\n[[not-a-link]] #not-a-tag\n```\n",
 		"vault/buses/CAN-ECAN.md": "# CAN-ECAN\n\nIntro.\n\n## Pinout\n\nPins.\n",
 	}
 	for name, content := range files {
@@ -95,7 +95,7 @@ func TestFileBrowserPreviewsObsidianNotes(t *testing.T) {
 	if preview.Callout != "Mind the gap" || preview.CalloutType != "warning" || preview.Mark != "important" || preview.Tag != "#can/ecan" || preview.Comment {
 		t.Fatalf("obsidian syntax = %+v", preview)
 	}
-	if preview.Code != "[[not-a-link]] #not-a-tag\n" {
+	if preview.Code != "first line\n[[not-a-link]] #not-a-tag\n" {
 		t.Fatalf("code block changed: %q", preview.Code)
 	}
 	if opened != "vault/buses/CAN-ECAN.md" {
