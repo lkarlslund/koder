@@ -256,6 +256,7 @@ html, body {
 .obsidian-properties td {
   padding: .2rem .75rem .2rem 0;
   border: 0;
+  background: transparent;
   vertical-align: top;
 }
 .obsidian-properties th {
