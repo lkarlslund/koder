@@ -92,7 +92,7 @@ const (
 	ToolKindChatArchive         ToolKind = "chat_archive"
 	ToolKindChatRename          ToolKind = "chat_rename"
 	ToolKindChatCleanup         ToolKind = "chat_cleanup"
-	ToolKindChatStatus          ToolKind = "chat_status"
+	ToolKindChatStatus          ToolKind = "chat_status" // no longer offered; old transcripts still name it
 	ToolKindSessions            ToolKind = "sessions"
 	ToolKindSessionList         ToolKind = "session_list"
 	ToolKindSessionDelegate     ToolKind = "session_delegate"

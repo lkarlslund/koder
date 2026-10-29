@@ -417,6 +417,21 @@ func (s *ChatState) SnapshotTimeline() []domain.TimelineItem {
 	return out
 }
 
+// SnapshotTimelineTail copies the last n timeline items.
+func (s *ChatState) SnapshotTimelineTail(n int) []domain.TimelineItem {
+	if s == nil {
+		return nil
+	}
+	start := max(0, len(s.timeline)-n)
+	out := make([]domain.TimelineItem, 0, len(s.timeline)-start)
+	for _, record := range s.timeline[start:] {
+		if record != nil {
+			out = append(out, snapshotTimelineItem(record.Item))
+		}
+	}
+	return out
+}
+
 func snapshotTimelineItem(item domain.TimelineItem) domain.TimelineItem {
 	switch content := item.Content.(type) {
 	case domain.UserMessage:

@@ -48,7 +48,7 @@ type MetadataUpdate struct {
 	GeneratedTitle bool
 }
 
-// SetChatActivity persists model-authored descriptive work status.
+// SetChatActivity persists a short description of what the chat is doing.
 func (r *Chat) SetChatActivity(ctx context.Context, activity domain.ChatActivity) (domain.Chat, error) {
 	if r == nil {
 		return domain.Chat{}, fmt.Errorf("chat runtime is required")
@@ -481,6 +481,7 @@ func newChat(session domain.Session, chatRecord domain.Chat, timeline []domain.T
 		subs:              map[int]chan Update{},
 	}
 	go c.loop()
+	go c.activitySummaryLoop()
 	resuming := false
 	if c.timelineLoaded && c.state.HasPendingExecutableToolCalls() {
 		c.inbox <- resumePendingToolsCmd{}

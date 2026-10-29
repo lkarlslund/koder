@@ -149,9 +149,9 @@ Examples:
 selected session, `chats` lists its chats, and `chat_id` identifies the selected
 voice chat. Chat summaries explicitly include `backend`, `workflow_role`, and
 `interaction_mode`, plus activity, runtime state, model, permission profile,
-and the model-authored `status_text` published through the global
-`chat_status` tool. The deprecated `role` field mirrors `workflow_role`; old
-servers and clients may still use `role: voice` during rolling upgrades.
+and `status_text`, which names the running tool or the runtime state. The
+deprecated `role` field mirrors `workflow_role`; old servers and clients may
+still use `role: voice` during rolling upgrades.
 `call_state.voice_sessions` lists selectable durable voice chats and omits
 archived and deleted ones for compatibility with older clients. Deleted
 sessions are also omitted from REST lists and server statistics; deletion is

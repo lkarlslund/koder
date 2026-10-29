@@ -160,7 +160,6 @@ func (r *Runtime) ToolRuntime(ctx context.Context, rt *chatpkg.Chat) (tools.Runt
 		rt.SetSession(session)
 	}
 	runtime := r.Runtime(session, chat)
-	runtime.ChatStatusControl = rt
 	return runtime, nil
 }
 

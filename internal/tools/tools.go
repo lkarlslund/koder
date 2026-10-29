@@ -171,7 +171,6 @@ type Runtime struct {
 	AssignedTaskRef       string
 	SessionControl        SessionControl
 	TaskControl           TaskControl
-	ChatStatusControl     ChatStatusControl
 	Services              map[string]any
 	AllowedTools          map[ID]bool
 	ManagedSkillsDir      string

@@ -55,7 +55,6 @@ const (
 	ChatArchive         ID = domain.ToolKindChatArchive
 	ChatRename          ID = domain.ToolKindChatRename
 	ChatCleanup         ID = domain.ToolKindChatCleanup
-	ChatStatus          ID = domain.ToolKindChatStatus
 	Sessions            ID = domain.ToolKindSessions
 	SessionList         ID = domain.ToolKindSessionList
 	SessionDelegate     ID = domain.ToolKindSessionDelegate

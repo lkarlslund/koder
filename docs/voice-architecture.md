@@ -133,10 +133,10 @@ mechanics; the role prompt only defines the generic conversational behavior.
   runtime, and artifacts to those interfaces.
 - `internal/provider` exposes OpenAI-compatible transcription and streaming
   speech APIs.
-- `internal/chatstatus` and the global `chat_status` tool let every normal chat
-  profile publish a model-authored descriptive status. It is not voice-specific
-  and does not replace runtime states such as reasoning, streaming, waiting,
-  error, or idle.
+- While a chat is busy, its runtime asks the chat's model every 30 seconds for
+  a 3-5 word label of what it is doing, from notes on its recent steps, and
+  stores it as the chat's activity. It is not voice-specific and does not
+  replace runtime states such as reasoning, streaming, waiting, error, or idle.
 - `internal/phonedevice` owns the call-scoped phone capability catalog and RPC
   hub. It routes each running voice chat to the Android call that submitted the
   turn, so parallel phones cannot see or invoke one another's capabilities.

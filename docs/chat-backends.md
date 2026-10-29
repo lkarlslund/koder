@@ -59,8 +59,8 @@ per hydrated Claude chat. Adding another backend requires a driver and backend d
 it does not require a new session type, transcript format, or client protocol.
 
 The driver emits the same domain events used by native turns. Consequently
-both backends share queueing, busy/idle state, cancellation, `chat_status`,
-voice busy cues, browser updates, and Android presentation adapters.
+both backends share queueing, busy/idle state, cancellation, voice busy cues,
+browser updates, and Android presentation adapters.
 
 ## Codex equivalence
 

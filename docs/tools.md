@@ -55,8 +55,6 @@ Some operations intentionally remain first-class tools:
 - `view_image` puts an image into model context, `view_pdf` renders one requested
   PDF page into bounded image context, while `present` is explicitly
   user-facing.
-- `chat_status` describes the current chat and is independent of chat lifecycle
-  state.
 - `browser_task` owns a complete bounded workflow and a verified file result;
   it is not an action on a page resource. Koder selects its browser backend.
 

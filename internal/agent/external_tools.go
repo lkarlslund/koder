@@ -22,7 +22,7 @@ import (
 // backend such as Codex or Claude Code.
 var externalAgentTools = map[tools.ID]struct{}{
 	tools.Milestones: {}, tools.Tasks: {},
-	tools.Chats: {}, tools.ChatStatus: {},
+	tools.Chats:       {},
 	tools.Sessions:    {},
 	tools.Present:     {},
 	tools.Memory:      {},

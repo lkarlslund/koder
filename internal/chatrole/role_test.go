@@ -56,7 +56,6 @@ func TestRoleAllowsTool(t *testing.T) {
 		{"standalone rejects chat start", Standalone, testTool("chat_start"), false},
 		{"standalone allows edit", Standalone, testTool("file_edit"), true},
 		{"compaction rejects read", Compaction, testTool("file_read"), false},
-		{"voice allows chat status", Voice, testTool("chat_status"), true},
 		{"voice rejects obsolete session delegation", Voice, testTool("session_delegate"), false},
 		{"voice allows presentation", Voice, testTool("present"), true},
 		{"voice allows file read", Voice, testTool("file_read"), true},
@@ -93,14 +92,6 @@ func TestExecutionPromptMatchesAssignment(t *testing.T) {
 				t.Fatalf("prompt = %q, want %q and no %q", prompt, tt.want, tt.without)
 			}
 		})
-	}
-}
-
-func TestChatStatusIsAvailableToEveryUserFacingRole(t *testing.T) {
-	for _, role := range []Role{General, Orchestrator, Planning, Execution, Standalone, Voice} {
-		if !AllowsTool(role, testTool("chat_status")) {
-			t.Errorf("chat_status is not available to %q", role)
-		}
 	}
 }
 
