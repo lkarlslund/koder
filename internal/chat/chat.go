@@ -3173,7 +3173,7 @@ func (r *Chat) handleStreamEventForTurn(turn uint64, evt domain.Event) {
 			r.running[evt.ToolCallID] = struct{}{}
 		}
 		r.status = StatusRunningTools
-		r.statusText = runningToolStatusText(evt.Tool)
+		r.statusText = runningToolStatusText(evt.Tool, evt.Text)
 	case domain.EventKindToolCallDelta:
 		r.status = StatusWaitingLLM
 		r.statusText = toolCallDeltaStatusText(evt)
@@ -3800,10 +3800,16 @@ func (r *Chat) markPersistError(err error) error {
 	return err
 }
 
-func runningToolStatusText(tool domain.ToolKind) string {
+// runningToolStatusText names the tool and, when it has one, the first line
+// of its preview, such as "Running ExecCommand: go test ./...".
+func runningToolStatusText(tool domain.ToolKind, preview string) string {
 	toolName := strings.TrimSpace(tool.DisplayName())
 	if toolName == "" {
-		return "Running tool"
+		toolName = "tool"
+	}
+	preview, _, _ = strings.Cut(strings.TrimSpace(preview), "\n")
+	if preview = textutil.Ellipsize(preview, 120); preview != "" {
+		return "Running " + toolName + ": " + preview
 	}
 	return "Running " + toolName
 }

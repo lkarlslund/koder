@@ -2943,7 +2943,7 @@ func TestLoadMetadataKeepsContextCacheLazy(t *testing.T) {
 	}
 }
 
-func TestRuntimeToolStartStatusUsesToolNameNotPreviewArgs(t *testing.T) {
+func TestRuntimeToolStartStatusNamesToolAndPreviewLine(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
 	events := make(chan domain.Event)
@@ -2957,7 +2957,7 @@ func TestRuntimeToolStartStatusUsesToolNameNotPreviewArgs(t *testing.T) {
 		Kind:       domain.EventKindToolStart,
 		Tool:       domain.ToolKindExecCommand,
 		ToolCallID: "call_exec",
-		Text:       "go test ./...",
+		Text:       "go test ./...\necho done",
 	}
 	close(events)
 
@@ -2970,11 +2970,8 @@ func TestRuntimeToolStartStatusUsesToolNameNotPreviewArgs(t *testing.T) {
 			if update.Status != StatusRunningTools {
 				t.Fatalf("expected running tools status, got %s", update.Status)
 			}
-			if update.StatusText != "Running ExecCommand" {
-				t.Fatalf("expected tool-name status text, got %q", update.StatusText)
-			}
-			if strings.Contains(update.StatusText, "go test") {
-				t.Fatalf("status text leaked preview args: %q", update.StatusText)
+			if update.StatusText != "Running ExecCommand: go test ./..." {
+				t.Fatalf("expected tool name and first preview line, got %q", update.StatusText)
 			}
 			return
 		case <-time.After(2 * time.Second):
