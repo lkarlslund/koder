@@ -128,6 +128,8 @@ type Manager struct {
 	refreshDirty map[refreshRequest]bool
 	config       map[string]config.MCPServer
 	state        map[string]*serverState
+	// statelessRefresh overrides mcpStatelessRefreshInterval when set.
+	statelessRefresh time.Duration
 }
 
 type serverState struct {
@@ -149,6 +151,9 @@ const (
 	mcpKeepAliveInterval = 15 * time.Second
 	mcpReconnectInitial  = 250 * time.Millisecond
 	mcpReconnectMaximum  = 30 * time.Second
+	// A stateless server has no session to lose and cannot notify about list
+	// changes, so a restart with new tools is invisible; poll its lists instead.
+	mcpStatelessRefreshInterval = time.Minute
 )
 
 func NewManager(cfgs map[string]config.MCPServer) (*Manager, error) {
@@ -312,7 +317,31 @@ func (m *Manager) connectServer(ctx context.Context, id string, preserveWatch bo
 	watchStop := current.watchStop
 	m.mu.Unlock()
 	go m.watchSession(id, session, watchStop)
+	if session.ID() == "" {
+		interval := mcpStatelessRefreshInterval
+		if m.statelessRefresh > 0 {
+			interval = m.statelessRefresh
+		}
+		go m.pollStatelessServer(id, watchStop, interval)
+	}
 	return nil
+}
+
+// pollStatelessServer refreshes a stateless server's tools, resources and
+// prompts until its connection is replaced or closed.
+func (m *Manager) pollStatelessServer(id string, stop <-chan struct{}, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			m.refreshServerAsync(id, refreshTools)
+			m.refreshServerAsync(id, refreshResources)
+			m.refreshServerAsync(id, refreshPrompts)
+		}
+	}
 }
 
 func (m *Manager) DisconnectServer(id string) error {
@@ -538,6 +567,13 @@ func (m *Manager) ExecuteTool(ctx context.Context, serverID, toolName string, ar
 		if !readOnly {
 			return tools.Result{}, fmt.Errorf("%w; mcp server %q reconnected, but tool %q was not retried because it is not declared read-only", err, serverID, toolName)
 		}
+		// The reconnect rediscovered the tools, and a restarted server may
+		// declare a different output schema than the one read before the call.
+		m.mu.RLock()
+		if state := m.state[serverID]; state != nil && state.session == recovered {
+			outputSchema = toolOutputSchema(state.tools, toolName)
+		}
+		m.mu.RUnlock()
 		res, err = callToolWithTimeout(ctx, cfg, recovered, toolName, args)
 		if err != nil {
 			return tools.Result{}, fmt.Errorf("mcp tool %s/%s failed after reconnect: %w", serverID, toolName, err)

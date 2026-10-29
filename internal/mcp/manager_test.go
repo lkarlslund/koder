@@ -316,6 +316,111 @@ func TestManagerReconnectsClosedSessionAndRetriesReadOnlyTool(t *testing.T) {
 	}
 }
 
+func TestManagerRetryAfterServerRestartUsesRediscoveredOutputSchema(t *testing.T) {
+	ctx := context.Background()
+	noteSchema := func(withID bool) map[string]any {
+		props := map[string]any{"text": map[string]any{"type": "string"}}
+		if withID {
+			props["id"] = map[string]any{"type": "string"}
+		}
+		return map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"notes": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": props, "additionalProperties": false}},
+			},
+		}
+	}
+	newHandler := func(withID bool) http.Handler {
+		server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "tracker", Version: "v1.0.0"}, nil)
+		server.AddTool(&sdkmcp.Tool{
+			Name:         "show",
+			InputSchema:  map[string]any{"type": "object"},
+			OutputSchema: noteSchema(withID),
+			Annotations:  &sdkmcp.ToolAnnotations{ReadOnlyHint: true},
+		}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+			note := map[string]any{"text": "checked"}
+			if withID {
+				note["id"] = "1"
+			}
+			return &sdkmcp.CallToolResult{
+				Content:           []sdkmcp.Content{&sdkmcp.TextContent{Text: "shown"}},
+				StructuredContent: map[string]any{"notes": []any{note}},
+			}, nil
+		})
+		return sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, &sdkmcp.StreamableHTTPOptions{JSONResponse: true})
+	}
+	var current atomic.Pointer[http.Handler]
+	first := newHandler(false)
+	current.Store(&first)
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		(*current.Load()).ServeHTTP(w, r)
+	}))
+	defer httpServer.Close()
+
+	manager, err := NewManager(map[string]config.MCPServer{"tracker": {URL: httpServer.URL, DisableStandaloneSSE: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = manager.DisconnectServer("tracker") }()
+	if err := manager.ConnectAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// The restarted server has forgotten the session and now returns note ids.
+	restarted := newHandler(true)
+	current.Store(&restarted)
+
+	result, err := manager.ExecuteTool(ctx, "tracker", "show", nil)
+	if err != nil {
+		t.Fatalf("ExecuteTool() after server restart: %v", err)
+	}
+	if strings.Contains(result.Output, "failed its declared schema") {
+		t.Fatalf("validated against the pre-restart schema: %s", result.Output)
+	}
+}
+
+func TestManagerPollsStatelessServerForChangedTools(t *testing.T) {
+	ctx := context.Background()
+	newHandler := func(names ...string) http.Handler {
+		server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "stateless", Version: "v1.0.0"}, nil)
+		for _, name := range names {
+			server.AddTool(&sdkmcp.Tool{Name: name, InputSchema: map[string]any{"type": "object"}}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+				return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "ok"}}}, nil
+			})
+		}
+		return sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, &sdkmcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+	}
+	var current atomic.Pointer[http.Handler]
+	first := newHandler("list")
+	current.Store(&first)
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		(*current.Load()).ServeHTTP(w, r)
+	}))
+	defer httpServer.Close()
+
+	manager, err := NewManager(map[string]config.MCPServer{"tracker": {URL: httpServer.URL}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.statelessRefresh = 20 * time.Millisecond
+	defer func() { _ = manager.DisconnectServer("tracker") }()
+	if err := manager.ConnectAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// A restarted stateless server gives no sign of the restart.
+	restarted := newHandler("list", "edit_note")
+	current.Store(&restarted)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for manager.ListServers()[0].ToolCount != 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("tool list was not refreshed: %#v", manager.ListServers()[0].Tools)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestManagerReconnectsBeforeCallingMutatingToolOnObservedClosure(t *testing.T) {
 	ctx := context.Background()
 	var calls atomic.Int32
