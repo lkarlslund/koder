@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -128,8 +129,6 @@ type Manager struct {
 	refreshDirty map[refreshRequest]bool
 	config       map[string]config.MCPServer
 	state        map[string]*serverState
-	// statelessRefresh overrides mcpStatelessRefreshInterval when set.
-	statelessRefresh time.Duration
 }
 
 type serverState struct {
@@ -151,9 +150,6 @@ const (
 	mcpKeepAliveInterval = 15 * time.Second
 	mcpReconnectInitial  = 250 * time.Millisecond
 	mcpReconnectMaximum  = 30 * time.Second
-	// A stateless server has no session to lose and cannot notify about list
-	// changes, so a restart with new tools is invisible; poll its lists instead.
-	mcpStatelessRefreshInterval = time.Minute
 )
 
 func NewManager(cfgs map[string]config.MCPServer) (*Manager, error) {
@@ -317,31 +313,7 @@ func (m *Manager) connectServer(ctx context.Context, id string, preserveWatch bo
 	watchStop := current.watchStop
 	m.mu.Unlock()
 	go m.watchSession(id, session, watchStop)
-	if session.ID() == "" {
-		interval := mcpStatelessRefreshInterval
-		if m.statelessRefresh > 0 {
-			interval = m.statelessRefresh
-		}
-		go m.pollStatelessServer(id, watchStop, interval)
-	}
 	return nil
-}
-
-// pollStatelessServer refreshes a stateless server's tools, resources and
-// prompts until its connection is replaced or closed.
-func (m *Manager) pollStatelessServer(id string, stop <-chan struct{}, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-stop:
-			return
-		case <-ticker.C:
-			m.refreshServerAsync(id, refreshTools)
-			m.refreshServerAsync(id, refreshResources)
-			m.refreshServerAsync(id, refreshPrompts)
-		}
-	}
 }
 
 func (m *Manager) DisconnectServer(id string) error {
@@ -557,6 +529,11 @@ func (m *Manager) ExecuteTool(ctx context.Context, serverID, toolName string, ar
 	}
 	res, err := callToolWithTimeout(ctx, cfg, session, toolName, args)
 	if err != nil && !isRecoverableSessionError(err) {
+		// The tool may have been renamed or changed its input since the list
+		// was read; refresh it so the next request offers the current tools.
+		if ctx.Err() == nil {
+			m.refreshToolsAfterFailure(serverID, session)
+		}
 		return tools.Result{}, err
 	}
 	if err != nil {
@@ -579,7 +556,24 @@ func (m *Manager) ExecuteTool(ctx context.Context, serverID, toolName string, ar
 			return tools.Result{}, fmt.Errorf("mcp tool %s/%s failed after reconnect: %w", serverID, toolName, err)
 		}
 	}
-	return convertCallToolResult(serverID, serverName, toolName, outputSchema, res)
+	result, err := convertCallToolResult(serverID, serverName, toolName, outputSchema, res)
+	if err != nil || result.Status != domain.ToolResultStatusError || res.NeedsInput() {
+		return result, err
+	}
+	// A failed call or a result that fails its schema can mean the server was
+	// updated. Servers do not always announce that (a stateless server cannot),
+	// so refresh the tools and judge the result by the current schema.
+	m.refreshToolsAfterFailure(serverID, session)
+	m.mu.RLock()
+	current := outputSchema
+	if state := m.state[serverID]; state != nil {
+		current = toolOutputSchema(state.tools, toolName)
+	}
+	m.mu.RUnlock()
+	if reflect.DeepEqual(current, outputSchema) {
+		return result, nil
+	}
+	return convertCallToolResult(serverID, serverName, toolName, current, res)
 }
 
 func (m *Manager) ReadResource(ctx context.Context, serverID, uri string) (ResourceReadResult, error) {
@@ -1120,7 +1114,7 @@ func (m *Manager) refreshServerAsync(id string, kind refreshKind) {
 	m.refreshMu.Unlock()
 	go func() {
 		for {
-			m.refreshServer(id, kind)
+			_ = m.refreshServer(id, kind)
 			m.refreshMu.Lock()
 			if m.refreshDirty[request] {
 				m.refreshDirty[request] = false
@@ -1135,10 +1129,20 @@ func (m *Manager) refreshServerAsync(id string, kind refreshKind) {
 	}()
 }
 
-func (m *Manager) refreshServer(id string, kind refreshKind) {
+// refreshToolsAfterFailure reads the tool list again after a failed call.
+// The SDK closes an HTTP connection on a protocol error such as an unknown
+// tool, so when listing fails, reconnect, which reads every list afresh.
+func (m *Manager) refreshToolsAfterFailure(id string, session *sdkmcp.ClientSession) {
+	if m.refreshServer(id, refreshTools) == nil {
+		return
+	}
+	_, _ = m.recoverSession(context.Background(), id, session)
+}
+
+func (m *Manager) refreshServer(id string, kind refreshKind) error {
 	session, cfg, err := m.sessionAndConfigForServer(id)
 	if err != nil {
-		return
+		return err
 	}
 	ctx, cancel := requestContext(context.Background(), cfg)
 	defer cancel()
@@ -1161,11 +1165,11 @@ func (m *Manager) refreshServer(id string, kind refreshKind) {
 	defer m.mu.Unlock()
 	state := m.state[id]
 	if state == nil || state.session != session {
-		return
+		return err
 	}
 	if err != nil {
 		state.lastErr = fmt.Sprintf("refresh MCP metadata: %v", err)
-		return
+		return err
 	}
 	switch kind {
 	case refreshTools:
@@ -1177,6 +1181,7 @@ func (m *Manager) refreshServer(id string, kind refreshKind) {
 		state.prompts = prompts
 	}
 	state.lastErr = ""
+	return nil
 }
 
 func (m *Manager) sessionForServer(serverID string) (*sdkmcp.ClientSession, error) {

@@ -379,45 +379,110 @@ func TestManagerRetryAfterServerRestartUsesRediscoveredOutputSchema(t *testing.T
 	}
 }
 
-func TestManagerPollsStatelessServerForChangedTools(t *testing.T) {
-	ctx := context.Background()
-	newHandler := func(names ...string) http.Handler {
+// restartableStatelessServer serves the tools from serve until restart swaps
+// in a new set, which a stateless server gives clients no sign of.
+func restartableStatelessServer(t *testing.T, serve func(*sdkmcp.Server)) (url string, restart func(func(*sdkmcp.Server))) {
+	t.Helper()
+	newHandler := func(serve func(*sdkmcp.Server)) http.Handler {
 		server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "stateless", Version: "v1.0.0"}, nil)
-		for _, name := range names {
-			server.AddTool(&sdkmcp.Tool{Name: name, InputSchema: map[string]any{"type": "object"}}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
-				return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "ok"}}}, nil
-			})
-		}
+		serve(server)
 		return sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, &sdkmcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
 	}
 	var current atomic.Pointer[http.Handler]
-	first := newHandler("list")
+	first := newHandler(serve)
 	current.Store(&first)
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		(*current.Load()).ServeHTTP(w, r)
 	}))
-	defer httpServer.Close()
+	t.Cleanup(func() {
+		// The SDK can leave a response stream open after a protocol error
+		// closes its connection, which would block Close.
+		httpServer.CloseClientConnections()
+		httpServer.Close()
+	})
+	return httpServer.URL, func(serve func(*sdkmcp.Server)) {
+		next := newHandler(serve)
+		current.Store(&next)
+	}
+}
 
-	manager, err := NewManager(map[string]config.MCPServer{"tracker": {URL: httpServer.URL}})
+func connectedTestManager(t *testing.T, serverID, url string) *Manager {
+	t.Helper()
+	manager, err := NewManager(map[string]config.MCPServer{serverID: {URL: url}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager.statelessRefresh = 20 * time.Millisecond
-	defer func() { _ = manager.DisconnectServer("tracker") }()
-	if err := manager.ConnectAll(ctx); err != nil {
+	t.Cleanup(func() { _ = manager.DisconnectServer(serverID) })
+	if err := manager.ConnectAll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	return manager
+}
 
-	// A restarted stateless server gives no sign of the restart.
-	restarted := newHandler("list", "edit_note")
-	current.Store(&restarted)
-
-	deadline := time.Now().Add(5 * time.Second)
-	for manager.ListServers()[0].ToolCount != 2 {
-		if time.Now().After(deadline) {
-			t.Fatalf("tool list was not refreshed: %#v", manager.ListServers()[0].Tools)
+func TestManagerRefreshesToolsWhenStructuredOutputFailsStaleSchema(t *testing.T) {
+	noteTool := func(withID bool) func(*sdkmcp.Server) {
+		return func(server *sdkmcp.Server) {
+			props := map[string]any{"text": map[string]any{"type": "string"}}
+			note := map[string]any{"text": "checked"}
+			if withID {
+				props["id"] = map[string]any{"type": "string"}
+				note["id"] = "1"
+			}
+			server.AddTool(&sdkmcp.Tool{
+				Name:        "show",
+				InputSchema: map[string]any{"type": "object"},
+				OutputSchema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"notes": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": props, "additionalProperties": false}},
+					},
+				},
+			}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+				return &sdkmcp.CallToolResult{
+					Content:           []sdkmcp.Content{&sdkmcp.TextContent{Text: "shown"}},
+					StructuredContent: map[string]any{"notes": []any{note}},
+				}, nil
+			})
 		}
-		time.Sleep(10 * time.Millisecond)
+	}
+	url, restart := restartableStatelessServer(t, noteTool(false))
+	manager := connectedTestManager(t, "tracker", url)
+
+	restart(noteTool(true))
+	result, err := manager.ExecuteTool(context.Background(), "tracker", "show", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != domain.ToolResultStatusOK {
+		t.Fatalf("result was judged by the stale schema: %#v", result)
+	}
+}
+
+func TestManagerRefreshesToolsAfterFailedCall(t *testing.T) {
+	addTools := func(names ...string) func(*sdkmcp.Server) {
+		return func(server *sdkmcp.Server) {
+			for _, name := range names {
+				server.AddTool(&sdkmcp.Tool{Name: name, InputSchema: map[string]any{"type": "object"}}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+					return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "ok"}}}, nil
+				})
+			}
+		}
+	}
+	url, restart := restartableStatelessServer(t, addTools("add_note"))
+	manager := connectedTestManager(t, "tracker", url)
+
+	restart(addTools("create_note", "edit_note"))
+	result, err := manager.ExecuteTool(context.Background(), "tracker", "add_note", nil)
+	if err == nil && result.Status != domain.ToolResultStatusError {
+		t.Fatalf("call to removed tool succeeded: %#v", result)
+	}
+	var names []string
+	for _, tool := range manager.ListServers()[0].Tools {
+		names = append(names, tool.Name)
+	}
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"create_note", "edit_note"}) {
+		t.Fatalf("tools after failed call = %v", names)
 	}
 }
 
