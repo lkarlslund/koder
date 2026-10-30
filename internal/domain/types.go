@@ -124,6 +124,7 @@ const (
 	ToolKindWebFetch            ToolKind = "web_fetch"
 	ToolKindWebSearch           ToolKind = "web_search"
 	ToolKindMemory              ToolKind = "memory"
+	ToolKindCron                ToolKind = "cron"
 	ToolKindMCP                 ToolKind = "mcp"
 	ToolKindBrowserStatus       ToolKind = "browser_status"
 	ToolKindBrowserTask         ToolKind = "browser_task"
@@ -252,6 +253,7 @@ var builtinToolKinds = []ToolKind{
 	ToolKindWebFetch,
 	ToolKindWebSearch,
 	ToolKindMemory,
+	ToolKindCron,
 	ToolKindMCP,
 	ToolKindBrowserStatus, ToolKindBrowserTask, ToolKindBrowserTabs, ToolKindBrowserNavigation, ToolKindBrowserPage,
 	ToolKindBrowserInteract, ToolKindBrowserCapture, ToolKindBrowserNetwork,
@@ -740,6 +742,7 @@ const (
 	QueuedInputOriginExec
 	QueuedInputOriginMonitor
 	QueuedInputOriginChildReport
+	QueuedInputOriginCron
 )
 
 const (
@@ -751,10 +754,12 @@ const (
 	UserMessageSourceAutoResume    = "auto_resume"
 	UserMessageSourceSubchat       = "subchat"
 	// Notifications: exec session exits, exec session output in lines mode,
-	// and a child chat reporting to its parent. They are not user input.
+	// a child chat reporting to its parent, and a scheduled cron job coming
+	// due. They are not user input.
 	UserMessageSourceExec            = "exec"
 	UserMessageSourceMonitor         = "monitor"
 	UserMessageSourceChildReport     = "child_report"
+	UserMessageSourceCron            = "cron"
 	UserMessageSourceTurnInstruction = "turn_instruction"
 	UserMessageSourceVoice           = "voice"
 )
@@ -776,7 +781,7 @@ type QueuedInput struct {
 // itself rather than from the user.
 func IsNotificationSource(source string) bool {
 	switch strings.TrimSpace(source) {
-	case UserMessageSourceExec, UserMessageSourceMonitor, UserMessageSourceChildReport:
+	case UserMessageSourceExec, UserMessageSourceMonitor, UserMessageSourceChildReport, UserMessageSourceCron:
 		return true
 	default:
 		return false
@@ -820,6 +825,8 @@ func UserMessageSourceForQueuedInput(item QueuedInput) string {
 		return UserMessageSourceMonitor
 	case QueuedInputOriginChildReport:
 		return UserMessageSourceChildReport
+	case QueuedInputOriginCron:
+		return UserMessageSourceCron
 	}
 	if source := strings.TrimSpace(item.Source); source != "" {
 		switch source {

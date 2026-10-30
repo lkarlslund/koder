@@ -4042,6 +4042,8 @@ func queuedInputFromItem(item QueueItem) domain.QueuedInput {
 		origin = domain.QueuedInputOriginMonitor
 	case domain.UserMessageSourceChildReport:
 		origin = domain.QueuedInputOriginChildReport
+	case domain.UserMessageSourceCron:
+		origin = domain.QueuedInputOriginCron
 	case domain.UserMessageSourceUser, "":
 		if item.Kind == QueueKindSteer {
 			origin = domain.QueuedInputOriginUser

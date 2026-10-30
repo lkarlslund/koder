@@ -86,6 +86,7 @@ const (
 	WebFetch            ID = domain.ToolKindWebFetch
 	WebSearch           ID = domain.ToolKindWebSearch
 	Memory              ID = domain.ToolKindMemory
+	Cron                ID = domain.ToolKindCron
 	MCP                 ID = domain.ToolKindMCP
 	BrowserStatus       ID = domain.ToolKindBrowserStatus
 	BrowserTask         ID = domain.ToolKindBrowserTask

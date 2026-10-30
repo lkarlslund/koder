@@ -26,6 +26,7 @@ var externalAgentTools = map[tools.ID]struct{}{
 	tools.Sessions:    {},
 	tools.Present:     {},
 	tools.Memory:      {},
+	tools.Cron:        {},
 	tools.PhoneDevice: {}, tools.PhoneLocation: {}, tools.PhoneContacts: {}, tools.PhoneCalendar: {}, tools.PhoneMessages: {}, tools.PhoneCalls: {}, tools.PhoneNotifications: {},
 	tools.PhoneClock: {}, tools.PhoneClipboard: {}, tools.PhoneApps: {}, tools.PhoneMedia: {}, tools.PhoneShare: {}, tools.PhoneOpen: {}, tools.PhonePhotos: {}, tools.PhoneLogs: {}, tools.PhoneAlerts: {},
 }

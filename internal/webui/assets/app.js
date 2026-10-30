@@ -626,13 +626,14 @@
         case 'exec': return 'exec';
         case 'monitor': return 'monitor';
         case 'child_report': return 'child report';
+        case 'cron': return 'cron';
         case 'turn_instruction': return 'turn instruction';
         default: return 'user';
       }
     }
     // Notifications are messages Koder sends on its own, shown as plain output.
     function userMessageIsNotificationSource(item) {
-      return ['exec', 'monitor', 'child_report'].includes(userMessageSourceValue(item));
+      return ['exec', 'monitor', 'child_report', 'cron'].includes(userMessageSourceValue(item));
     }
     function userMessageSourceQualifierText(item) {
       const label = userMessageSourceLabelText(item);
@@ -649,6 +650,7 @@
         case 'exec': return 'bi-terminal';
         case 'monitor': return 'bi-activity';
         case 'child_report': return 'bi-diagram-3';
+        case 'cron': return 'bi-alarm';
         case 'turn_instruction': return 'bi-signpost-split';
         default: return 'bi-person-circle';
       }

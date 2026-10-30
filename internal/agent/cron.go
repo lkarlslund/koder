@@ -1,0 +1,69 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	chatpkg "github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/cron"
+	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/store"
+)
+
+// StartCron delivers scheduled cron jobs until Shutdown. Only the server
+// calls it, so one-off commands that build an engine never run jobs.
+func (e *Engine) StartCron() {
+	if e == nil || e.cron == nil || e.stopCron != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	e.stopCron = cancel
+	go e.cron.Run(ctx)
+}
+
+// deliverCronJob queues a due job's prompt in its chat, to run once any
+// turn in progress has finished, or tells the chat a one-shot job was
+// missed.
+func (e *Engine) deliverCronJob(ctx context.Context, job cron.Job, delivery cron.Delivery) error {
+	if e == nil || e.registry == nil {
+		return fmt.Errorf("session registry is required")
+	}
+	owner, err := e.registry.Load(ctx, job.SessionID)
+	if store.IsNotFound(err) {
+		return cron.ErrChatGone
+	}
+	if err != nil {
+		return err
+	}
+	if !chatIsOpen(owner.Snapshot().Chats, job) {
+		return cron.ErrChatGone
+	}
+	rt, err := owner.Chat(ctx, job.ChatID)
+	if err != nil {
+		return err
+	}
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindQueued, Source: domain.UserMessageSourceCron, Text: cronJobText(job, delivery)})
+	return nil
+}
+
+func chatIsOpen(chats []domain.Chat, job cron.Job) bool {
+	for _, chatRecord := range chats {
+		if chatRecord.ID == job.ChatID {
+			return !chatRecord.Archived
+		}
+	}
+	return false
+}
+
+func cronJobText(job cron.Job, delivery cron.Delivery) string {
+	if delivery == cron.Missed {
+		return fmt.Sprintf("One-shot cron job %s (%s) was due at %s while Koder was not running. It has been deleted without running. Do not carry it out unless the user asks. Its prompt was:\n\n%s",
+			job.ID, job.Cron, job.NextRunAt.Local().Format("Mon 2006-01-02 15:04 MST"), job.Prompt)
+	}
+	kind := "One-shot"
+	if job.Recurring {
+		kind = "Recurring"
+	}
+	return fmt.Sprintf("%s cron job %s (%s), which this chat scheduled with the cron tool, is due. Carry out its prompt:\n\n%s", kind, job.ID, job.Cron, strings.TrimSpace(job.Prompt))
+}

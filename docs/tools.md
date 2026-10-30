@@ -5,8 +5,8 @@ operations use a stable resource name plus an `action` argument. Operations with
 materially different domains remain separate resources even when one client
 implements all of them.
 
-The normal Koder chat surface is 30 built-in names when the browser is available.
-The stock ceiling is 45 when every browser and connected-phone resource is
+The normal Koder chat surface is 31 built-in names when the browser is available.
+The stock ceiling is 46 when every browser and connected-phone resource is
 counted. A particular request receives only the subset allowed by its workflow
 role, interaction mode, session settings, and live runtime capabilities.
 
@@ -30,6 +30,7 @@ runtime resource:
 | `browser_network` | `list`, `get_request`, `get_response_body` |
 | `browser_downloads` | `list`, `get` |
 | `present` | `content`, `media`, `file` |
+| `cron` | `create`, `list`, `delete` |
 | `phone_photos` | `search`, `thumbnails`, `view`, `transfer` |
 
 Phone capabilities are grouped by domain rather than put into one argument bag:
@@ -42,6 +43,19 @@ set time, armed with Android's alarm manager so they fire even when Koder is
 closed). This keeps read-only lookup separate from communication, navigation,
 state changes, and user-facing actions. Like every phone tool, each action is
 Off, Ask, or On in the app's phone tool settings.
+
+`cron` schedules a prompt in the calling chat, once or on a recurring 5-field
+cron schedule in the server's local time (intervals such as `5m` also work).
+Jobs live in the store, so they survive restarts. When one comes due the server
+queues its prompt in the chat as a `cron` notification, and it runs once any
+turn in progress has finished. Each job runs at a fixed offset derived from its
+ID, so jobs set for the same minute do not reach the provider together: a
+recurring job up to 10% of its period late (at most 15 minutes), a one-shot job
+on :00 or :30 up to 90 seconds early. Recurring jobs expire after 7 days, with
+a final run. A one-shot job that came due while Koder was not running is not
+run; the chat is told it was missed. A recurring job skips the runs it missed.
+Jobs of a deleted or archived chat are dropped when they come due. A chat sees
+and deletes only its own jobs, at most 20 of them.
 
 Some operations intentionally remain first-class tools:
 

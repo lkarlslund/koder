@@ -883,6 +883,7 @@ func (c *Controller) Start(ctx context.Context, mode StartupMode, projectRoot st
 	if err := c.resumeRestartInterruptedChats(ctx); err != nil {
 		slog.Warn("resume restart-interrupted chats failed", "error", err)
 	}
+	c.agent.StartCron()
 	return nil
 }
 

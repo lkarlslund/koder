@@ -20,6 +20,7 @@ import (
 	"github.com/lkarlslund/koder/internal/codexapp"
 	"github.com/lkarlslund/koder/internal/codexdriver"
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/cron"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
@@ -61,6 +62,8 @@ type Engine struct {
 	codex        *codexdriver.Manager
 	claude       *claudedriver.Manager
 	registry     *sessionpkg.Registry
+	cron         *cron.Scheduler
+	stopCron     context.CancelFunc
 	retryPause   func(context.Context, time.Duration, func(time.Duration)) error
 }
 
@@ -179,6 +182,8 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		SkillCatalogMax:  cfg.Skills.CatalogMaxChars,
 		Memory:           memory.NewStore(memoryConfigDir(cfg), cfg.StateDir()),
 	})
+	e.cron = cron.NewScheduler(st, e.deliverCronJob)
+	e.toolsRuntime.SetCronControl(e.cron)
 	e.SetToolsRuntime(e.toolsRuntime)
 	if e.codex != nil {
 		e.codex.SetToolBridge(codexToolBridge{engine: e})

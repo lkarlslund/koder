@@ -29,6 +29,7 @@ import (
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/chattool"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
+	"github.com/lkarlslund/koder/internal/tools/crontool"
 	"github.com/lkarlslund/koder/internal/tools/phonetool"
 	"github.com/lkarlslund/koder/internal/tools/sessiontool"
 )
@@ -49,6 +50,7 @@ type Runtime struct {
 	skillCatalogMax  int
 	voiceSessions    sessiontool.Control
 	phoneDevice      phonedevice.Control
+	cron             crontool.Control
 }
 
 type Config struct {
@@ -102,6 +104,13 @@ func (r *Runtime) Memory() *memory.Store {
 func (r *Runtime) SetPhoneDeviceControl(control phonedevice.Control) {
 	if r != nil {
 		r.phoneDevice = control
+	}
+}
+
+// SetCronControl gives chats the cron tool's scheduler.
+func (r *Runtime) SetCronControl(control crontool.Control) {
+	if r != nil {
+		r.cron = control
 	}
 }
 
@@ -202,6 +211,12 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		runtime.Services = chattool.RuntimeService(owner.ChatToolControl(chat.ID))
 	}
 	for key, service := range sessiontool.RuntimeService(r.voiceSessions) {
+		if runtime.Services == nil {
+			runtime.Services = map[string]any{}
+		}
+		runtime.Services[key] = service
+	}
+	for key, service := range crontool.RuntimeService(r.cron) {
 		if runtime.Services == nil {
 			runtime.Services = map[string]any{}
 		}
