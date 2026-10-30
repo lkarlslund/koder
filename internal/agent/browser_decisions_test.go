@@ -226,6 +226,34 @@ func TestBrowserExtractorUsesTheChatModelAndReadsNone(t *testing.T) {
 	}
 }
 
+// A custom server on the plain OpenAI transport has no overlay binding for
+// thinking, yet Qwen thinks there by default; it must still be asked not to,
+// or it spends the extraction's token budget thinking and returns no text.
+func TestBrowserExtractorTurnsThinkingOffOnACustomServer(t *testing.T) {
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		message := map[string]any{"content": "", "reasoning_content": "Thinking about the page..."}
+		if kwargs, _ := body["chat_template_kwargs"].(map[string]any); kwargs["enable_thinking"] == false {
+			message = map[string]any{"content": "- Lisbon: €6,124/m²"}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": message}}})
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers["custom"] = config.Provider{Kind: "openai-compatible", BaseURL: server.URL + "/v1", Transport: "openai", Features: &config.ProviderFeatures{Chat: true}}
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "custom", ModelID: "Qwen/Qwen3.8-Flash-Next", ContextWindow: 32768})
+	extractor, _, err := New(cfg, nil, nil, nil).resolveBrowserExtractor(context.Background(), browserapi.Chat{ProviderID: "custom", ModelID: "Qwen/Qwen3.8-Flash-Next"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := extractor.Extract(context.Background(), browser.ExtractRequest{Goal: "house prices", PageURL: "https://example.com/prices", Text: "Lisbon asking prices reached €6,124/m²."})
+	if err != nil || got.Facts != "- Lisbon: €6,124/m²" {
+		t.Fatalf("extraction = %#v, %v (request %v)", got, err, body)
+	}
+}
+
 func TestParseExtraction(t *testing.T) {
 	for reply, want := range map[string]browser.Extraction{
 		"- a fact\nFOLLOW: 2":                {Facts: "- a fact", Follow: []int{2}},

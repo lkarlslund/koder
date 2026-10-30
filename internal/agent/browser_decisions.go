@@ -43,14 +43,16 @@ func (e *Engine) resolveBrowserDecider(ctx context.Context) (browser.Decider, st
 	if servesDecisions(ctx, client, model.Provider, model.SourceModelID) {
 		return decisionModelDecider{client: client, model: model.SourceModelID}, name, nil
 	}
-	return chatModelDecider{client: client, model: model.SourceModelID, extraBody: e.quickChatBody(model)}, name + " (chat model)", nil
+	return chatModelDecider{client: client, model: model.SourceModelID, extraBody: e.quickChatBody(client, model)}, name + " (chat model)", nil
 }
 
 // quickChatBody is the extra request body for a quick answer from a chat
 // model: thinking off, which the overlay maps onto whatever field the
 // server uses for it, and no progress events. The model's thinking settings
-// go, since servers reject a reasoning effort with thinking off.
-func (e *Engine) quickChatBody(model settings.ModelSettings) map[string]any {
+// go, since servers reject a reasoning effort with thinking off. The client
+// adds the switch a custom server needs when no overlay maps one for it, or
+// the model would think through its small token budget and answer nothing.
+func (e *Engine) quickChatBody(client *provider.Client, model settings.ModelSettings) map[string]any {
 	modelCfg := model.Model
 	modelCfg.Options = maps.Clone(modelCfg.Options)
 	if modelCfg.Options == nil {
@@ -63,7 +65,8 @@ func (e *Engine) quickChatBody(model settings.ModelSettings) map[string]any {
 	modelCfg.Options["thinking_mode"] = "disabled"
 	extra := provider.RequestExtraBody(model.Provider, modelCfg, e.modelOverlays)
 	delete(extra, "return_progress")
-	return extra
+	req, _ := client.WithoutThinking(provider.ChatRequest{ExtraBody: extra})
+	return req.ExtraBody
 }
 
 // resolveBrowserExtractor returns the chat's own model for pulling facts
@@ -77,7 +80,7 @@ func (e *Engine) resolveBrowserExtractor(_ context.Context, chat browserapi.Chat
 	if err != nil {
 		return nil, "", err
 	}
-	return chatModelExtractor{client: client, model: model.SourceModelID, extraBody: e.quickChatBody(model)}, model.SourceProviderID + "/" + model.SourceModelID, nil
+	return chatModelExtractor{client: client, model: model.SourceModelID, extraBody: e.quickChatBody(client, model)}, model.SourceProviderID + "/" + model.SourceModelID, nil
 }
 
 // servesDecisions reports whether a model answers decision requests rather
