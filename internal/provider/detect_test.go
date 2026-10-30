@@ -71,6 +71,11 @@ func TestDetectChatServers(t *testing.T) {
 			transport: config.TransportNinfer,
 		},
 		{
+			name:      "quench6k",
+			gets:      map[string]string{"/v1/models": `{"data":[{"id":"Qwen/Qwen3.8-Flash-Next","owned_by":"quench6k"}]}`},
+			transport: config.TransportLlama,
+		},
+		{
 			name: "llama.cpp",
 			gets: map[string]string{
 				"/v1/models": `{"data":[{"id":"local","owned_by":"llamacpp"}]}`,
