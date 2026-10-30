@@ -34,8 +34,8 @@ and chat endpoints:
   `chat_backends` (including Codex and Claude Code models and availability), and an optional
   signed Android update;
 - `GET /voice/v1/sessions/<session-id>/chats` lists every chat in a session.
-  Clients show ordinary chats as context but only select chats whose
-  `interaction_mode` is `voice`;
+  Any open chat can be selected and joined, typed or by voice;
+  `interaction_mode` only records whether a chat was created for voice;
 - `POST /voice/v1/sessions/<session-id>/chats` accepts the shared chat creation
   fields `title`, `backend`, `workflow_role`, `model_id`,
   `permission_profile`, optional milestone/task scope, and `tool_states`.
@@ -76,16 +76,20 @@ use the audio envelope described below.
 
 - `hello`: request a fresh `ready` snapshot, offer `audio_encodings` in
   preference order, and optionally set
-  `response_pacing` to `concise`, `normal`, or `detailed` for subsequent turns
-  on this connection. The pacing instruction is never added to chat history.
+  `response_pacing` to `concise`, `normal`, or `detailed` and `reply_mode` to
+  `speech` (default) or `text` for subsequent turns on this connection. In
+  `text` mode replies are written for the phone's screen: the `message` frame
+  carries the reply as a `text/markdown` part and no speech is synthesized.
+  Neither setting is added to chat history; each turn carries its own
+  instructions, so the same chat behaves normally in the Web UI.
 - `ping`: request `pong`.
 - `select_voice_session` with `voice_session_id`: switch the durable voice-chat
   transcript owned by a legacy client.
 - `create_voice_session` with an optional `title`: create and select a durable
   voice chat. Native clients own creation; the browser only lists voice chats.
 - `select_session` with `session_id`: open a normal session.
-- `select_voice_chat` with `session_id` and `chat_id`: select a voice chat in
-  that session. Selecting an ordinary chat is rejected.
+- `select_voice_chat` with `session_id` and `chat_id`: select any open chat in
+  that session.
 - `create_voice_chat` with `session_id` and optional `title`: create and select
   a voice chat in an existing regular session.
 - `create_temporary_voice_chat` with optional `title`: create and select a
@@ -116,7 +120,7 @@ which has one `language` field rather than a native allow-list.
 Examples:
 
 ```json
-{"type":"hello","protocol":"voice.v1","response_pacing":"normal","audio_encodings":["opus","pcm_s16le"]}
+{"type":"hello","protocol":"voice.v1","response_pacing":"normal","reply_mode":"speech","audio_encodings":["opus","pcm_s16le"]}
 {"type":"select_voice_session","protocol":"voice.v1","voice_session_id":"voice-id"}
 {"type":"create_voice_session","protocol":"voice.v1","title":"Phone work"}
 {"type":"utterance","protocol":"voice.v1","utterance_id":"uuid","text":"Check my email"}

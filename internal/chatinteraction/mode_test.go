@@ -1,22 +1,36 @@
 package chatinteraction
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/domain"
 )
 
-func TestVoiceInteractionPromptAndPolicy(t *testing.T) {
-	if SystemPrompt(Voice) == "" {
-		t.Fatal("voice prompt is empty")
+func TestTurnInstructionsFollowTheSurface(t *testing.T) {
+	if TurnInstruction(SurfaceWeb) != "" {
+		t.Fatal("web turns got instructions")
 	}
-	if AllowsTool(Voice, domain.ToolKindRequestUserInput) {
-		t.Fatal("voice interaction allows request_user_input")
+	voice, text := TurnInstruction(SurfacePhoneVoice), TurnInstruction(SurfacePhoneText)
+	if !strings.Contains(voice, "spoken aloud") || !strings.Contains(text, "short and to the point") {
+		t.Fatalf("voice = %q\ntext = %q", voice, text)
 	}
-	if !AllowsTool(Voice, domain.ToolKindChatStart) {
-		t.Fatal("voice interaction denies chat_start")
+	// The voice style no longer claims the chat's role; any chat can be spoken to.
+	if strings.Contains(voice, "orchestrator") {
+		t.Fatalf("voice instructions describe a role: %q", voice)
 	}
-	if !AllowsTool(Text, domain.ToolKindRequestUserInput) {
-		t.Fatal("text interaction unexpectedly denies request_user_input")
+}
+
+func TestPhoneTurnsCannotAskForWebInput(t *testing.T) {
+	for _, source := range []string{domain.UserMessageSourceVoice, domain.UserMessageSourcePhone} {
+		if AllowsTool(ModeForSource(source), domain.ToolKindRequestUserInput) {
+			t.Fatalf("%s turn allows request_user_input", source)
+		}
+		if !AllowsTool(ModeForSource(source), domain.ToolKindChatStart) {
+			t.Fatalf("%s turn denies chat_start", source)
+		}
+	}
+	if !AllowsTool(ModeForSource(domain.UserMessageSourceUser), domain.ToolKindRequestUserInput) {
+		t.Fatal("web turn denies request_user_input")
 	}
 }

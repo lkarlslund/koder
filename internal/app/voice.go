@@ -11,6 +11,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/chatinteraction"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/phonedevice"
@@ -202,8 +203,9 @@ func (c *Controller) ListSessionChats(ctx context.Context, sessionID string) ([]
 	return out, nil
 }
 
-// EnsureVoiceChat verifies that chatID is a selectable voice chat inside
-// sessionID. When chatID is omitted, it selects the newest voice chat.
+// EnsureVoiceChat verifies that chatID is an open chat inside sessionID; a
+// phone can join any of them. When chatID is omitted, it selects the newest
+// chat created for voice.
 func (c *Controller) EnsureVoiceChat(ctx context.Context, sessionID, chatID string) (voice.Chat, error) {
 	chats, err := c.ListSessionChats(ctx, sessionID)
 	if err != nil {
@@ -211,10 +213,10 @@ func (c *Controller) EnsureVoiceChat(ctx context.Context, sessionID, chatID stri
 	}
 	chatID = strings.TrimSpace(chatID)
 	for _, item := range chats {
-		if item.Archived || item.InteractionMode != string(domain.InteractionModeVoice) {
+		if item.Archived {
 			continue
 		}
-		if chatID == "" || item.ID == chatID {
+		if item.ID == chatID || (chatID == "" && item.InteractionMode == string(domain.InteractionModeVoice)) {
 			return item, nil
 		}
 	}
@@ -661,12 +663,9 @@ func (c *Controller) VoiceChatHistory(ctx context.Context, sessionID, chatID, be
 }
 
 func (c *Controller) voiceChatHistory(ctx context.Context, sessionID, chatID, beforeID string, limit int) (voice.TranscriptPage, error) {
-	owner, session, chatRecord, err := c.resolveSelectedChatWithTouch(ctx, Selection{SessionID: id.ID(sessionID), ChatID: id.ID(chatID)}, true, false)
+	owner, _, chatRecord, err := c.resolveSelectedChatWithTouch(ctx, Selection{SessionID: id.ID(sessionID), ChatID: id.ID(chatID)}, true, false)
 	if err != nil {
 		return voice.TranscriptPage{}, err
-	}
-	if !isVoiceInteraction(chatRecord) {
-		return voice.TranscriptPage{}, fmt.Errorf("chat %s in session %s is not a voice chat", chatRecord.ID, session.ID)
 	}
 	if limit <= 0 || limit > 20 {
 		limit = 5
@@ -710,12 +709,9 @@ func (c *Controller) searchVoiceChatHistory(ctx context.Context, sessionID, chat
 	if limit <= 0 || limit > 20 {
 		limit = 20
 	}
-	_, session, chatRecord, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(sessionID), ChatID: id.ID(chatID)}, true)
+	_, _, _, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(sessionID), ChatID: id.ID(chatID)}, true)
 	if err != nil {
 		return nil, err
-	}
-	if !isVoiceInteraction(chatRecord) {
-		return nil, fmt.Errorf("chat %s in session %s is not a voice chat", chatRecord.ID, session.ID)
 	}
 	timeline, err := runtime.FullTimeline(ctx)
 	if err != nil {
@@ -824,12 +820,9 @@ func (c *Controller) runVoiceChatTurn(ctx context.Context, sessionID, chatID, te
 	if err != nil {
 		return voice.Message{}, err
 	}
-	owner, session, chatRecord, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(sessionID), ChatID: id.ID(chatID)}, true)
+	owner, _, chatRecord, runtime, err := c.resolveSelectedRuntimeWithoutTouch(ctx, Selection{SessionID: id.ID(sessionID), ChatID: id.ID(chatID)}, true)
 	if err != nil {
 		return voice.Message{}, err
-	}
-	if !isVoiceInteraction(chatRecord) {
-		return voice.Message{}, fmt.Errorf("chat %s in session %s is not a voice chat", chatRecord.ID, session.ID)
 	}
 	if err := c.validateChatModelAvailable(ctx, chatRecord); err != nil {
 		return voice.Message{}, err
@@ -846,16 +839,7 @@ func (c *Controller) runVoiceChatTurn(ctx context.Context, sessionID, chatID, te
 	initialSeq := latestTimelineSequence(initial.Timeline)
 	updates, unsubscribe := runtime.Subscribe()
 	defer unsubscribe()
-	runtime.Enqueue(chat.QueueItem{
-		Kind:        chat.QueueKindUser,
-		Source:      domain.UserMessageSourceVoice,
-		Text:        text,
-		Attachments: validated,
-		EphemeralInstructions: []provider.InstructionBlock{{
-			Kind: provider.InstructionKindRuntime,
-			Text: pacing.Instruction(),
-		}},
-	})
+	runtime.Enqueue(phoneQueueItem(text, validated, options.ReplyMode, pacing))
 	started := false
 	workingSent := false
 	workingTargetID := ""
@@ -904,6 +888,9 @@ func (c *Controller) runVoiceChatTurn(ctx context.Context, sessionID, chatID, te
 			}
 			timeline := runtime.SnapshotTimeline()
 			if responseItem, response := latestAssistantItemAfter(timeline, initialSeq); response != "" {
+				if options.ReplyMode == voice.ReplyModeText {
+					return c.phoneTextReply(ctx, owner, responseItem.ID, response, voiceRenderParts(timeline, initialSeq))
+				}
 				spoken := pacedSpokenResponse(response, pacing)
 				parts := []voice.Part{{MIMEType: "text/plain", Data: spoken}}
 				parts = append(parts, voiceRenderParts(timeline, initialSeq)...)
@@ -923,6 +910,35 @@ func (c *Controller) runVoiceChatTurn(ctx context.Context, sessionID, chatID, te
 			}
 		}
 	}
+}
+
+// phoneQueueItem is a turn from a phone: spoken, or typed in the app's text
+// mode. How the reply is shown comes with the turn as instructions that never
+// enter the transcript, so the same chat also works from the Web UI.
+func phoneQueueItem(text string, attachments []attachment.Draft, reply voice.ReplyMode, pacing voice.ResponsePacing) chat.QueueItem {
+	surface, source := chatinteraction.SurfacePhoneVoice, domain.UserMessageSourceVoice
+	if reply == voice.ReplyModeText {
+		surface, source = chatinteraction.SurfacePhoneText, domain.UserMessageSourcePhone
+	}
+	instructions := []provider.InstructionBlock{{Kind: provider.InstructionKindRuntime, Text: chatinteraction.TurnInstruction(surface)}}
+	if reply != voice.ReplyModeText {
+		instructions = append(instructions, provider.InstructionBlock{Kind: provider.InstructionKindRuntime, Text: pacing.Instruction()})
+	}
+	return chat.QueueItem{Kind: chat.QueueKindUser, Source: source, Text: text, Attachments: attachments, EphemeralInstructions: instructions}
+}
+
+// phoneTextReply returns a reply for the phone's text mode: the response as
+// written, to read rather than hear.
+func (c *Controller) phoneTextReply(ctx context.Context, owner *sessionpkg.Session, responseID id.ID, response string, rendered []voice.Part) (voice.Message, error) {
+	response = strings.TrimSpace(response)
+	parts := append([]voice.Part{{MIMEType: "text/markdown", Data: response}}, rendered...)
+	if _, err := owner.UpdateSession(ctx, func(session *domain.Session) {
+		session.LastMessage = truncateVoiceText(response, 240)
+		session.VoiceResultCount++
+	}); err != nil {
+		return voice.Message{}, fmt.Errorf("store phone conversation preview: %w", err)
+	}
+	return voice.Message{TranscriptID: string(responseID), Parts: parts}, nil
 }
 
 func pacedSpokenResponse(text string, pacing voice.ResponsePacing) string {

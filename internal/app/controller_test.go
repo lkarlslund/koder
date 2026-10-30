@@ -3136,12 +3136,12 @@ func TestRunVoiceTurnUsesNormalVoiceChatAndSessionTools(t *testing.T) {
 		requests = append(requests, requestBody)
 		requestsMu.Unlock()
 		switch {
-		case strings.Contains(requestBody, "voice orchestrator") && strings.Contains(requestBody, `"role":"tool"`):
+		case strings.Contains(requestBody, "spoken aloud") && strings.Contains(requestBody, `"role":"tool"`):
 			if !strings.Contains(requestBody, "delivery: the chat is processing the message") {
 				t.Errorf("voice continuation omitted chat delivery result: %s", requestBody)
 			}
 			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"I asked the laptop chat to check it."},"finish_reason":"stop"}],"usage":{"total_tokens":2}}`)
-		case strings.Contains(requestBody, "voice orchestrator"):
+		case strings.Contains(requestBody, "spoken aloud"):
 			arguments := fmt.Sprintf(`{"action":"queue","chat_id":%q,"message":"Check whether the laptop fix still works"}`, targetChatID)
 			_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"tool_calls":[{"id":"send-1","type":"function","function":{"name":"chats","arguments":%q}}]},"finish_reason":"tool_calls"}],"usage":{"total_tokens":2}}`, arguments)
 		default:
@@ -3398,7 +3398,7 @@ func TestRunVoiceTurnResearchesCurrentLocationWithoutOpeningMap(t *testing.T) {
 		requestsMu.Lock()
 		requests = append(requests, requestBody)
 		requestsMu.Unlock()
-		if !strings.Contains(requestBody, "voice orchestrator") {
+		if !strings.Contains(requestBody, "spoken aloud") {
 			_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"Aarhus has DHL Stafetten today."},"finish_reason":"stop"}],"usage":{"total_tokens":2}}`)
 			return
 		}

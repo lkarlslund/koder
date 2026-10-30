@@ -213,10 +213,33 @@ func ParseResponsePacing(value string) (ResponsePacing, error) {
 	}
 }
 
+// ReplyMode is how a client takes replies: spoken, or read as text on the
+// phone's screen.
+type ReplyMode string
+
+const (
+	ReplyModeSpeech ReplyMode = "speech"
+	ReplyModeText   ReplyMode = "text"
+)
+
+// ParseReplyMode validates a wire value, defaulting an omitted value to speech.
+func ParseReplyMode(value string) (ReplyMode, error) {
+	switch mode := ReplyMode(strings.ToLower(strings.TrimSpace(value))); mode {
+	case "":
+		return ReplyModeSpeech, nil
+	case ReplyModeSpeech, ReplyModeText:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("unsupported reply mode %q", value)
+	}
+}
+
 // TurnOptions contains per-connection behavior that must not pollute durable history.
 type TurnOptions struct {
 	ResponsePacing ResponsePacing
-	OnRender       func(RenderEvent) error
+	// ReplyMode is speech unless the client reads replies as text.
+	ReplyMode ReplyMode
+	OnRender  func(RenderEvent) error
 }
 
 // RenderEvent is non-spoken content that a client may display while the model

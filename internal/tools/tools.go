@@ -247,11 +247,10 @@ func (r Runtime) SkillOptions() skills.DiscoverOptions {
 	}
 }
 
-// VoiceInteraction reports whether tools are being offered to a voice
-// conversation. The legacy role fallback keeps stored/test callers compatible
-// while voice migrates to an orthogonal interaction mode.
+// VoiceInteraction reports whether tools are being offered to a turn that
+// came from a phone, typed or spoken.
 func (r Runtime) VoiceInteraction() bool {
-	return r.InteractionMode == chatinteraction.Voice || (r.InteractionMode == "" && r.ChatRole == chatrole.Voice)
+	return r.InteractionMode == chatinteraction.Voice
 }
 
 type Options struct {

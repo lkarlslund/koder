@@ -14,7 +14,6 @@ import (
 	"github.com/lkarlslund/koder/internal/assets"
 	"github.com/lkarlslund/koder/internal/attachment"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
-	"github.com/lkarlslund/koder/internal/chatinteraction"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -502,12 +501,6 @@ func (r *Runtime) BaseInstructionsForChat(session domain.Session, chat domain.Ch
 		instructions = append(instructions, provider.InstructionBlock{
 			Kind: provider.InstructionKindProjectInstructions,
 			Text: roleText,
-		})
-	}
-	if interactionText := strings.TrimSpace(chatinteraction.SystemPrompt(chat.EffectiveInteractionMode())); interactionText != "" {
-		instructions = append(instructions, provider.InstructionBlock{
-			Kind: provider.InstructionKindProjectInstructions,
-			Text: interactionText,
 		})
 	}
 	if agentsText := strings.TrimSpace(session.AgentsResolved); agentsText != "" {

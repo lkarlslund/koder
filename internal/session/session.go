@@ -467,6 +467,12 @@ func (s *Session) Chat(ctx context.Context, chatID id.ID) (*chatpkg.Chat, error)
 	return rt, nil
 }
 
+// ActiveTurnSource is the user-message source of the turn running in chatID,
+// or "" when the chat is idle or not loaded.
+func (s *Session) ActiveTurnSource(chatID id.ID) string {
+	return s.runtime(chatID).ActiveTurnSource()
+}
+
 func (s *Session) runtime(chatID id.ID) *chatpkg.Chat {
 	if s == nil || chatID == "" {
 		return nil

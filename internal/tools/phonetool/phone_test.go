@@ -110,20 +110,20 @@ func (f *fakeControl) Execute(_ context.Context, action phonedevice.Action, args
 	return phonedevice.Result{Text: "Steen: +45 1234", Data: map[string]any{"count": 1}}, nil
 }
 
-func TestPhoneDefinitionIsDynamicAndVoiceOnly(t *testing.T) {
+// The phone tool follows the phone, not the chat: any chat whose turn came
+// from a connected phone, typed or spoken, gets the actions that phone allows.
+func TestPhoneDefinitionFollowsTheConnectedPhone(t *testing.T) {
 	control := &fakeControl{}
-	runtime := tools.Runtime{ChatRole: chatrole.Voice, Services: RuntimeService(control)}
-	definition, enabled := tools.DefinitionFor(tools.PhoneContacts, runtime)
-	if !enabled || !strings.Contains(string(definition.Function.Parameters), `"search"`) {
-		t.Fatalf("definition=%#v enabled=%v", definition, enabled)
-	}
-	if _, enabled := tools.DefinitionFor(tools.PhoneContacts, tools.Runtime{ChatRole: chatrole.Execution, Services: RuntimeService(control)}); enabled {
-		t.Fatal("phone tool offered outside the voice profile")
+	for _, role := range []chatrole.Role{chatrole.Voice, chatrole.Execution} {
+		definition, enabled := tools.DefinitionFor(tools.PhoneContacts, tools.Runtime{ChatRole: role, Services: RuntimeService(control)})
+		if !enabled || !strings.Contains(string(definition.Function.Parameters), `"search"`) {
+			t.Fatalf("%s: definition=%#v enabled=%v", role, definition, enabled)
+		}
 	}
 	if _, enabled := tools.DefinitionFor(tools.PhoneContacts, tools.Runtime{ChatRole: chatrole.Voice}); enabled {
 		t.Fatal("phone tool offered without a connected provider")
 	}
-	if _, enabled := tools.DefinitionFor(tools.Phone, runtime); enabled {
+	if _, enabled := tools.DefinitionFor(tools.Phone, tools.Runtime{Services: RuntimeService(control)}); enabled {
 		t.Fatal("legacy generic phone dispatcher remained model-visible")
 	}
 }

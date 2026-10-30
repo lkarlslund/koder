@@ -173,7 +173,10 @@ type Chat struct {
 	drainReason       CancelReason
 	closed            bool
 	timelineLoaded    bool
-	timelineHasOlder  bool
+	// turnSource is the user-message source of the turn running now, so its
+	// tools follow where it came from (Web UI or phone).
+	turnSource       string
+	timelineHasOlder bool
 
 	inbox   chan any
 	done    chan struct{}
@@ -1524,6 +1527,20 @@ func (r *Chat) PendingApprovals(ctx context.Context) ([]Approval, error) {
 		return nil, nil
 	}
 	return r.state.Approvals(), nil
+}
+
+// ActiveTurnSource is the user-message source of the running turn, or ""
+// when the chat is idle.
+func (r *Chat) ActiveTurnSource() string {
+	if r == nil {
+		return ""
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if !r.active {
+		return ""
+	}
+	return r.turnSource
 }
 
 // EnsureTimeline loads persisted transcript items into memory once.
@@ -3570,6 +3587,7 @@ func (r *Chat) maybeDispatchNext() {
 
 func (r *Chat) runItem(ctx context.Context, turn uint64, item domain.QueuedInput) {
 	r.mu.Lock()
+	r.turnSource = strings.TrimSpace(item.Source)
 	note := r.queueNotes[item.ID]
 	ephemeralInstructions := r.queueInstructions[item.ID]
 	delete(r.queueNotes, item.ID)

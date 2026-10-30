@@ -17,19 +17,28 @@ There are three distinct objects:
 
 - A **session** is the same project or quick session shown by Koder's Web UI.
   Android lists these first, including their ordinary and voice-chat counts.
-- A **voice chat** is a normal top-level chat whose interaction mode is
-  `voice`. Its workflow role and turn backend remain independent. A regular
-  session may contain several voice chats and several text chats. Android shows
-  all of them, but only voice chats can be opened as a conversation. A new
-  temporary conversation creates a quick session with one voice chat and a
-  Koder-managed scratch folder.
+- Any **chat** can be joined from a phone, typed or by voice, and from the
+  Web UI. How a turn arrived decides how it is answered, not the chat: each
+  turn carries instructions for its surface (none for the Web UI, short and to
+  the point for the phone's text mode, spoken sentences for voice) as
+  ephemeral instructions that never enter the transcript. A chat created for
+  voice records `interaction_mode` `voice` only to list and label it; it is an
+  orchestrator by workflow role. A new temporary conversation creates a quick
+  session with one such chat and a Koder-managed scratch folder.
 - A **voice call** is one ephemeral authenticated WebSocket connection. Koder
   permits multiple phones to use different voice chats concurrently, while
   enforcing exactly one live voice chat per Android installation.
 
-The voice chat is that session's conversational orchestrator, not a privileged
-agent. It uses the session's workspace and standard tool configuration and can
-coordinate sibling chats, but cannot bypass their permission or approval state.
+A chat created for voice is that session's conversational orchestrator, not a
+privileged agent. It uses the session's workspace and standard tool
+configuration and can coordinate sibling chats, but cannot bypass their
+permission or approval state. Joining any other chat from the phone keeps that
+chat's own role, tools and permissions.
+
+Tools follow the turn too. A turn from a phone, typed or spoken, gets that
+phone's tools (the actions enabled in its settings) and cannot ask for Web UI
+input; a turn typed in the Web UI never gets phone tools, even while a phone
+is connected to the same chat.
 
 ## Request flow
 

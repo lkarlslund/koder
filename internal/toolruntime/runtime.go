@@ -12,6 +12,7 @@ import (
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/browserapi"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/chatinteraction"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -187,7 +188,7 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		ChatProviderID:        chat.ProviderID,
 		ChatModelID:           chat.ModelID,
 		ChatRole:              chat.EffectiveWorkflowRole(),
-		InteractionMode:       chat.EffectiveInteractionMode(),
+		InteractionMode:       chatinteraction.Text,
 		ActiveMilestoneKey:    chat.ActiveMilestoneKey,
 		AssignedTaskBucketKey: chat.AssignedTaskBucketKey,
 		AssignedTaskRef:       chat.AssignedTaskRef,
@@ -210,6 +211,8 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 	}
 	runtime.AccessSettings = withSkillMounts(runtime.AccessSettings, projectRoot, skills.InspectWithOptions(projectRoot, runtime.SkillOptions()))
 	if owner := r.loadedSession(session.ID); owner != nil {
+		// Tools follow where the running turn came from, Web UI or phone.
+		runtime.InteractionMode = chatinteraction.ModeForSource(owner.ActiveTurnSource(chat.ID))
 		runtime.SessionControl = owner.PlanningForChat(chat)
 		runtime.TaskControl = owner
 		runtime.Services = chattool.RuntimeService(owner.ChatToolControl(chat.ID))

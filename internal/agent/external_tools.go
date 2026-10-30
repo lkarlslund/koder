@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
-	"github.com/lkarlslund/koder/internal/chatinteraction"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/claudedriver"
 	"github.com/lkarlslund/koder/internal/codexdriver"
@@ -93,13 +92,10 @@ func (e *Engine) externalToolCall(ctx context.Context, rt *chatpkg.Chat, name, c
 }
 
 // externalAgentInstructions are the Koder instructions an external agent
-// receives on top of its own: the chat's workflow role and interaction mode.
+// receives on top of its own: the chat's workflow role. How a turn arrived
+// (phone text or voice) travels with that turn as ephemeral instructions.
 func externalAgentInstructions(_ domain.Session, chatRecord domain.Chat) string {
-	parts := []string{
-		strings.TrimSpace(chatrole.SystemPromptForChat(chatRecord)),
-		strings.TrimSpace(chatinteraction.SystemPrompt(chatRecord.EffectiveInteractionMode())),
-	}
-	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+	return strings.TrimSpace(chatrole.SystemPromptForChat(chatRecord))
 }
 
 type codexToolBridge struct{ engine *Engine }

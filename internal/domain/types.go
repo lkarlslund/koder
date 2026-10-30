@@ -762,6 +762,8 @@ const (
 	UserMessageSourceCron            = "cron"
 	UserMessageSourceTurnInstruction = "turn_instruction"
 	UserMessageSourceVoice           = "voice"
+	// UserMessageSourcePhone is a message typed in the phone app's text mode.
+	UserMessageSourcePhone = "phone"
 )
 
 type QueuedInput struct {
@@ -805,8 +807,9 @@ func NotificationMessageText(source, text string) string {
 
 // UserMessageSourceForQueuedInput returns the transcript source label for a queued input.
 func UserMessageSourceForQueuedInput(item QueuedInput) string {
-	if strings.TrimSpace(item.Source) == UserMessageSourceVoice {
-		return UserMessageSourceVoice
+	switch source := strings.TrimSpace(item.Source); source {
+	case UserMessageSourceVoice, UserMessageSourcePhone:
+		return source
 	}
 	switch item.Origin {
 	case QueuedInputOriginUser:

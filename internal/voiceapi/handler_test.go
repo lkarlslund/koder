@@ -52,6 +52,7 @@ type fakeBackend struct {
 	voiceChats     []voice.Session
 	history        []voice.TranscriptEntry
 	pacing         voice.ResponsePacing
+	replyMode      voice.ReplyMode
 	searchQuery    string
 	genericWorking bool
 }
@@ -341,7 +342,7 @@ func (f *fakeBackend) EnsureVoiceSession(_ context.Context, requestedID string) 
 }
 
 func (f *fakeBackend) RunVoiceTurn(ctx context.Context, _ string, text string, options voice.TurnOptions, onWorking func(voice.Session) error) (voice.Message, error) {
-	f.pacing = options.ResponsePacing
+	f.pacing, f.replyMode = options.ResponsePacing, options.ReplyMode
 	target := voice.Session{ID: "session-1", Title: "Laptop repair"}
 	if f.genericWorking {
 		target = voice.Session{}
@@ -359,6 +360,9 @@ func (f *fakeBackend) RunVoiceTurn(ctx context.Context, _ string, text string, o
 	if !strings.HasSuffix(spoken, ".") {
 		spoken += "."
 	}
+	if options.ReplyMode == voice.ReplyModeText {
+		return voice.Message{Parts: []voice.Part{{MIMEType: "text/markdown", Data: result.Text}}, Delegation: &result}, nil
+	}
 	return voice.Message{SpokenText: spoken, Parts: []voice.Part{{MIMEType: "text/plain", Data: spoken}}, Delegation: &result}, nil
 }
 
@@ -366,7 +370,7 @@ func TestRunVoiceTurnKeepsGenericToolWorkTargetless(t *testing.T) {
 	backend := &fakeBackend{genericWorking: true}
 	handler := NewHandler(backend, "")
 	turn := newCachedTurn("call-1", "utterance-1", textTurnFingerprint("check it"), "voice-1")
-	handler.runVoiceTurn(t.Context(), turn, "check it", nil, voice.ResponsePacingNormal, backend.VoiceAudioConfig().Output)
+	handler.runVoiceTurn(t.Context(), turn, "check it", nil, voice.TurnOptions{ResponsePacing: voice.ResponsePacingNormal}, backend.VoiceAudioConfig().Output)
 
 	var working *serverFrame
 	for _, event := range turn.snapshot().events {
@@ -548,6 +552,54 @@ func TestHandlerAuthenticatesAndDelegates(t *testing.T) {
 	}
 	readType(t, ctx, conn, "tts_end")
 	readType(t, ctx, conn, "ready")
+}
+
+// A phone in text mode says so once in hello; its turns are answered in
+// writing and nothing is synthesized. An unknown mode is refused.
+func TestHandlerTextReplyModeSkipsSpeech(t *testing.T) {
+	backend := &fakeBackend{}
+	server := httptest.NewServer(NewHandler(backend, "secret"))
+	defer server.Close()
+	ctx := context.Background()
+	conn, _, err := websocket.Dial(ctx, "ws"+server.URL[len("http"):]+"/voice/v1", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{"Bearer secret"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+	readType(t, ctx, conn, "ready")
+	if err := writeClientFrame(ctx, conn, clientFrame{Type: "hello", Protocol: protocolVersion, ReplyMode: "whisper"}); err != nil {
+		t.Fatal(err)
+	}
+	if refused := readType(t, ctx, conn, "error"); !strings.Contains(refused.Error, "reply mode") {
+		t.Fatalf("unknown reply mode = %#v", refused)
+	}
+	if err := writeClientFrame(ctx, conn, clientFrame{Type: "hello", Protocol: protocolVersion, ReplyMode: "text"}); err != nil {
+		t.Fatal(err)
+	}
+	readType(t, ctx, conn, "ready")
+	if err := writeClientFrame(ctx, conn, clientFrame{Type: "utterance", Protocol: protocolVersion, UtteranceID: "utt-1", Text: "check it", SessionID: "session-1"}); err != nil {
+		t.Fatal(err)
+	}
+	readType(t, ctx, conn, "state")
+	readType(t, ctx, conn, "state")
+	message := readType(t, ctx, conn, "message")
+	if backend.replyMode != voice.ReplyModeText || message.Message == nil || message.Message.SpokenText != "" || message.Message.Parts[0].MIMEType != "text/markdown" {
+		t.Fatalf("message = %#v reply mode = %q", message.Message, backend.replyMode)
+	}
+	// The turn ends without any speech frames.
+	for {
+		messageType, payload, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var frame serverFrame
+		if messageType == websocket.MessageBinary || json.Unmarshal(payload, &frame) != nil || frame.Type == "tts_start" {
+			t.Fatal("text mode synthesized speech")
+		}
+		if frame.Type == "ready" {
+			break
+		}
+	}
 }
 
 func TestHandlerAcceptsSingleUseBrowserTicket(t *testing.T) {

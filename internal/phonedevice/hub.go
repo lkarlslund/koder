@@ -500,7 +500,10 @@ func (h *Hub) connectionForChatLocked(chatID string) (*connection, *voiceTurnPol
 	if turn := h.turns[strings.TrimSpace(chatID)]; turn != nil {
 		return h.connections[turn.callID], turn
 	}
-	if len(h.connections) == 1 {
+	// Only callers without a chat fall back to the one connected phone; a
+	// chat reaches a phone only while a turn from that phone is running, so a
+	// turn typed in the Web UI never gets phone tools.
+	if chatID == "legacy" && len(h.connections) == 1 {
 		for _, active := range h.connections {
 			return active, h.turns["legacy"]
 		}

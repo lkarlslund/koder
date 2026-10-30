@@ -144,9 +144,6 @@ func (t resourceTool) Preview(req tools.Request) string {
 	return strings.ReplaceAll(t.kind.String()+" "+req.Args["action"], "_", " ")
 }
 func (t resourceTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	if !runtime.VoiceInteraction() {
-		return tools.ToolSpec{}, false
-	}
 	control, err := service(runtime)
 	if err != nil {
 		return tools.ToolSpec{}, false
@@ -406,9 +403,6 @@ func (tool) Preview(req tools.Request) string {
 }
 
 func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	if !runtime.VoiceInteraction() {
-		return tools.ToolSpec{}, false
-	}
 	control, err := service(runtime)
 	if err != nil {
 		return tools.ToolSpec{}, false
@@ -496,9 +490,6 @@ func (t photoTool) Preview(req tools.Request) string {
 	return strings.ReplaceAll(t.kind.String(), "_", " ")
 }
 func (t photoTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	if !runtime.VoiceInteraction() {
-		return tools.ToolSpec{}, false
-	}
 	control, err := service(runtime)
 	if err != nil || !hasCapability(control.Capabilities(), t.action) {
 		return tools.ToolSpec{}, false

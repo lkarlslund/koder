@@ -206,13 +206,13 @@ func (r *turnRegistry) start(callID, utteranceID, fingerprint, voiceSessionID, s
 	return turn, true, nil
 }
 
-func (h *Handler) runTextTurn(turn *cachedTurn, text string, attachments []attachment.Draft, pacing voice.ResponsePacing, outputTransport voice.AudioFormat) {
+func (h *Handler) runTextTurn(turn *cachedTurn, text string, attachments []attachment.Draft, options voice.TurnOptions, outputTransport voice.AudioFormat) {
 	ctx, cancel := context.WithTimeout(context.Background(), delegationTimeout)
 	defer cancel()
-	h.runVoiceTurn(ctx, turn, text, attachments, pacing, outputTransport)
+	h.runVoiceTurn(ctx, turn, text, attachments, options, outputTransport)
 }
 
-func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text string, attachments []attachment.Draft, pacing voice.ResponsePacing, outputTransport voice.AudioFormat) {
+func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text string, attachments []attachment.Draft, options voice.TurnOptions, outputTransport voice.AudioFormat) {
 	ctx = phonedevice.WithCallID(ctx, turn.callID)
 	turn.appendState("processing", nil)
 	onWorking := func(session voice.Session) error {
@@ -228,6 +228,7 @@ func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text strin
 		turn.appendRender(event.Parts)
 		return nil
 	}
+	options.OnRender = onRender
 	var message voice.Message
 	var err error
 	if turn.sessionID != "" && turn.chatID != "" {
@@ -237,18 +238,18 @@ func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text strin
 			return
 		}
 		if len(attachments) == 0 {
-			message, err = backend.RunVoiceChatTurn(ctx, turn.sessionID, turn.chatID, text, voice.TurnOptions{ResponsePacing: pacing, OnRender: onRender}, onWorking)
+			message, err = backend.RunVoiceChatTurn(ctx, turn.sessionID, turn.chatID, text, options, onWorking)
 		} else if attachmentBackend, supported := h.Backend.(attachmentTurnBackend); supported {
-			message, err = attachmentBackend.RunVoiceChatTurnWithAttachments(ctx, turn.sessionID, turn.chatID, text, attachments, voice.TurnOptions{ResponsePacing: pacing, OnRender: onRender}, onWorking)
+			message, err = attachmentBackend.RunVoiceChatTurnWithAttachments(ctx, turn.sessionID, turn.chatID, text, attachments, options, onWorking)
 		} else {
 			turn.finish(errors.New("voice attachments are unavailable"))
 			return
 		}
 	} else {
 		if len(attachments) == 0 {
-			message, err = h.Backend.RunVoiceTurn(ctx, turn.voiceSessionID, text, voice.TurnOptions{ResponsePacing: pacing, OnRender: onRender}, onWorking)
+			message, err = h.Backend.RunVoiceTurn(ctx, turn.voiceSessionID, text, options, onWorking)
 		} else if attachmentBackend, supported := h.Backend.(attachmentTurnBackend); supported {
-			message, err = attachmentBackend.RunVoiceTurnWithAttachments(ctx, turn.voiceSessionID, text, attachments, voice.TurnOptions{ResponsePacing: pacing, OnRender: onRender}, onWorking)
+			message, err = attachmentBackend.RunVoiceTurnWithAttachments(ctx, turn.voiceSessionID, text, attachments, options, onWorking)
 		} else {
 			turn.finish(errors.New("voice attachments are unavailable"))
 			return
@@ -276,7 +277,7 @@ func (h *Handler) runVoiceTurn(ctx context.Context, turn *cachedTurn, text strin
 	turn.finish(nil)
 }
 
-func (h *Handler) runAudioTurn(turn *cachedTurn, audio *incomingAudio, attachments []attachment.Draft, pacing voice.ResponsePacing, outputTransport voice.AudioFormat) {
+func (h *Handler) runAudioTurn(turn *cachedTurn, audio *incomingAudio, attachments []attachment.Draft, options voice.TurnOptions, outputTransport voice.AudioFormat) {
 	ctx, cancel := context.WithTimeout(context.Background(), delegationTimeout)
 	defer cancel()
 	turn.appendState("transcribing", nil)
@@ -286,7 +287,7 @@ func (h *Handler) runAudioTurn(turn *cachedTurn, audio *incomingAudio, attachmen
 		return
 	}
 	turn.setTranscript(transcript)
-	h.runVoiceTurn(ctx, turn, transcript, attachments, pacing, outputTransport)
+	h.runVoiceTurn(ctx, turn, transcript, attachments, options, outputTransport)
 }
 
 func (h *Handler) cacheSpeech(ctx context.Context, turn *cachedTurn, text string, outputTransport voice.AudioFormat) error {

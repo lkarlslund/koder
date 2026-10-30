@@ -134,6 +134,7 @@ type clientFrame struct {
 	Limit             int                             `json:"limit,omitempty"`
 	Query             string                          `json:"query,omitempty"`
 	ResponsePacing    string                          `json:"response_pacing,omitempty"`
+	ReplyMode         string                          `json:"reply_mode,omitempty"`
 	AudioEncodings    []string                        `json:"audio_encodings,omitempty"`
 	InputTransport    *voice.AudioTransportPreference `json:"input_transport_preference,omitempty"`
 	OutputTransport   *voice.AudioTransportPreference `json:"output_transport_preference,omitempty"`
@@ -443,6 +444,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var audio *incomingAudio
 	responsePacing := voice.ResponsePacingNormal
+	replyMode := voice.ReplyModeSpeech
 	baseAudioConfig := h.Backend.VoiceAudioConfig()
 	connectionAudioConfig := negotiatedAudioConfig(baseAudioConfig, nil, nil, nil)
 	var writeMu sync.Mutex
@@ -498,7 +500,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			responsePacing = parsedPacing
+			parsedReply, parseErr := voice.ParseReplyMode(frame.ReplyMode)
+			if parseErr != nil {
+				if err := writeFrame(ctx, conn, &writeMu, serverFrame{Type: "error", Error: parseErr.Error()}); err != nil {
+					return
+				}
+				continue
+			}
+			responsePacing, replyMode = parsedPacing, parsedReply
 			connectionAudioConfig = negotiatedAudioConfig(baseAudioConfig, frame.AudioEncodings, frame.InputTransport, frame.OutputTransport)
 			if err := writeReady(ctx, conn, &writeMu, call, connectionAudioConfig, h.Updates); err != nil {
 				return
@@ -666,7 +675,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			turn, _, startErr := h.startTurn(callID, completed.utteranceID, audioTurnFingerprint(completed, frame.Attachments...), state, func(turn *cachedTurn) {
-				h.runAudioTurn(turn, completed, frame.Attachments, responsePacing, selectedOutputFormat(connectionAudioConfig))
+				h.runAudioTurn(turn, completed, frame.Attachments, voice.TurnOptions{ResponsePacing: responsePacing, ReplyMode: replyMode}, selectedOutputFormat(connectionAudioConfig))
 			})
 			if startErr != nil {
 				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, connectionAudioConfig, h.Updates, completed.utteranceID, "", voice.Message{}, startErr); err != nil {
@@ -696,7 +705,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			turn, _, startErr := h.startTurn(callID, utteranceID, textTurnFingerprint(frame.Text, frame.Attachments...), state, func(turn *cachedTurn) {
-				h.runTextTurn(turn, frame.Text, frame.Attachments, responsePacing, selectedOutputFormat(connectionAudioConfig))
+				h.runTextTurn(turn, frame.Text, frame.Attachments, voice.TurnOptions{ResponsePacing: responsePacing, ReplyMode: replyMode}, selectedOutputFormat(connectionAudioConfig))
 			})
 			if startErr != nil {
 				if err := writeResult(ctx, conn, &writeMu, call, h.Backend, connectionAudioConfig, h.Updates, utteranceID, frame.Text, voice.Message{}, startErr); err != nil {
