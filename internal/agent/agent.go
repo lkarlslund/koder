@@ -942,7 +942,7 @@ func (e *Engine) summarizeInTemporaryChat(ctx context.Context, session domain.Se
 			// the history. Fail instead, which keeps the history intact.
 			summary := strings.TrimSpace(resp.Text)
 			if summary == "" && strings.TrimSpace(resp.RawReasoning) != "" {
-				if next, ok := provider.WithoutThinking(req); ok && !thinkingRetried {
+				if next, ok := client.WithoutThinking(req); ok && !thinkingRetried {
 					thinkingRetried, req = true, next
 					emit(out, domain.Event{Kind: domain.EventKindStatus, Text: "Compaction model only thought; retrying without thinking", Meta: map[string]string{"compaction": "progress"}})
 					continue

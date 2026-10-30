@@ -26,3 +26,19 @@ func TestWithoutThinking(t *testing.T) {
 		t.Fatal("a request without thinking controls was changed")
 	}
 }
+
+func TestClientWithoutThinkingAsksCustomServers(t *testing.T) {
+	req := ChatRequest{ExtraBody: map[string]any{"return_progress": true}}
+	custom := &Client{kind: ProviderKindCompatible}
+	next, ok := custom.WithoutThinking(req)
+	want := map[string]any{"return_progress": true, "chat_template_kwargs": map[string]any{"enable_thinking": false}}
+	if !ok || !reflect.DeepEqual(next.ExtraBody, want) {
+		t.Fatalf("custom server body = %#v, %v", next.ExtraBody, ok)
+	}
+	if _, ok := req.ExtraBody["chat_template_kwargs"]; ok {
+		t.Fatal("original request changed")
+	}
+	if _, ok := (&Client{kind: "openai"}).WithoutThinking(req); ok {
+		t.Fatal("a hosted API was sent an unrequested thinking control")
+	}
+}

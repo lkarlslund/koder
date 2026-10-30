@@ -444,6 +444,7 @@ type Client struct {
 	apiKey   string
 	headers  map[string]string
 	provider string
+	kind     string
 	recorder *debugsrv.Recorder
 	health   *HealthTracker
 	features *config.ProviderFeatures
@@ -496,6 +497,7 @@ func New(id string, cfg config.Provider, recorder *debugsrv.Recorder, healthTrac
 		apiKey:   cfg.APIKey,
 		headers:  cfg.Headers,
 		provider: id,
+		kind:     cfg.Kind,
 		features: cfg.Features,
 		recorder: recorder,
 		health:   health,

@@ -7728,3 +7728,61 @@ func TestCompactionRunsAsTemporaryChatLikeANormalTurn(t *testing.T) {
 		t.Fatalf("last item = %#v", items[len(items)-1].Content)
 	}
 }
+
+func TestCompactSessionRetriesACustomServerWithThinkingOff(t *testing.T) {
+	t.Parallel()
+
+	var requestBodies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		requestBodies = append(requestBodies, string(body))
+		// Like Qwen on a llama.cpp server: it writes the summary inside its
+		// thinking unless the template is told not to think.
+		if strings.Contains(string(body), `"enable_thinking":false`) {
+			_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"## Goal\nsummary"}}]}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"reasoning_content":"## Goal\nsummary written as thinking"}}]}`)
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {Kind: provider.ProviderKindCompatible, BaseURL: server.URL + "/v1", Timeout: time.Second},
+	}
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 200000})
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	engine := New(cfg, st, nil)
+	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	for idx := range 120 {
+		appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: fmt.Sprintf("history %02d %s", idx, strings.Repeat("b", 700))})
+	}
+	appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Tools: []domain.ToolCall{completedFileReadToolCall("call_tail", "tail tool output")}})
+	appendUserTimelineItem(t, st, chat.ID, "tail")
+
+	client, err := provider.New("test", cfg.Providers["test"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := compactTestChat(t, engine, session, chat, client, "manual", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(requestBodies) != 2 || strings.Contains(requestBodies[0], "enable_thinking") {
+		t.Fatalf("expected a thinking request, then one with thinking off; got %d requests", len(requestBodies))
+	}
+}

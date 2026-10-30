@@ -36,3 +36,24 @@ func WithoutThinking(req ChatRequest) (ChatRequest, bool) {
 	req.ExtraBody = body
 	return req, true
 }
+
+// WithoutThinking turns thinking off for a request to this provider. Beyond
+// the controls req already sends, a custom OpenAI-compatible server is sent
+// the chat template's enable_thinking=false, which llama.cpp, vLLM and SGLang
+// servers pass to the model's template; thinking models such as Qwen think by
+// default without being asked.
+func (c *Client) WithoutThinking(req ChatRequest) (ChatRequest, bool) {
+	if next, ok := WithoutThinking(req); ok {
+		return next, true
+	}
+	if c == nil || c.kind != ProviderKindCompatible {
+		return req, false
+	}
+	body := maps.Clone(req.ExtraBody)
+	if body == nil {
+		body = map[string]any{}
+	}
+	body["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
+	req.ExtraBody = body
+	return req, true
+}
