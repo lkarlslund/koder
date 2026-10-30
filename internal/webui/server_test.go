@@ -25,6 +25,7 @@ import (
 	"github.com/lkarlslund/koder/internal/app"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/cron"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
@@ -4755,4 +4756,15 @@ func readRPCStateSession(t *testing.T, ctx context.Context, conn *websocket.Conn
 		return resp.Result.State.Session.ID
 	}
 	return resp.Result.Session.ID
+}
+
+func TestChatDeltaSendsAnEmptyCronJobList(t *testing.T) {
+	delta := chatDeltaFromUpdate(chat.Update{Snapshot: chat.Snapshot{CronJobs: []cron.Job{}}})
+	data, err := json.Marshal(delta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(data, []byte(`"cron_jobs":[]`)) {
+		t.Fatalf("delta = %s", data)
+	}
 }

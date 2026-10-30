@@ -1868,6 +1868,7 @@
             next.queue = queue;
           }
           if (delta.exec_processes !== undefined) next.ExecProcesses = delta.exec_processes;
+          if (delta.cron_jobs !== undefined) next.CronJobs = delta.cron_jobs;
           if (delta.context !== undefined) next.Context = delta.context;
           if (delta.token_usage !== undefined) next.TokenUsage = delta.token_usage;
           if (delta.status !== undefined) next.Status = delta.status;
@@ -2869,6 +2870,26 @@
           return processes.filter(process => this.execProcessState(process) === 'running');
         },
         execProcessCount() { return this.allExecProcesses().length; },
+        cronJobs() {
+          const jobs = this.activeSnapshot().CronJobs;
+          return Array.isArray(jobs) ? jobs : [];
+        },
+        cronJobNextRun(job) {
+          const next = new Date(job?.next_run_at || '');
+          if (isNaN(next.getTime())) return '';
+          const sameDay = next.toDateString() === new Date().toDateString();
+          const time = next.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+          return sameDay ? time : next.toLocaleDateString([], {weekday: 'short', month: 'short', day: 'numeric'}) + ' ' + time;
+        },
+        cronJobTooltip(job) {
+          const kind = job?.recurring ? 'Recurring' : 'One-shot';
+          return kind + ' job ' + (job?.id || '') + ' (' + (job?.cron || '') + '), next run ' + this.cronJobNextRun(job) + '\n\n' + (job?.prompt || '');
+        },
+        deleteCronJob(job) {
+          const jobID = String(job?.id || '').trim();
+          if (!jobID) return;
+          this.rpc('delete_cron_job', {chat_id: this.activeChatID(), job_id: jobID}).catch(err => this.showToast(err.message || 'delete cron job failed'));
+        },
         runningExecProcessCount() { return this.allExecProcesses().filter(process => this.execProcessState(process) === 'running').length; },
         execProcessCountLabel() {
           const running = this.runningExecProcessCount();

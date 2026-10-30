@@ -3678,3 +3678,19 @@ func TestCustomModelIsListedUnderItsBaseModelsProvider(t *testing.T) {
 		t.Fatalf("custom model = %s/%s based on %s/%s; want it under the base model's provider", model.ProviderID, model.ModelID, model.SourceProviderID, model.SourceModelID)
 	}
 }
+
+func TestControllerStateListsCronJobsEvenWhenThereAreNone(t *testing.T) {
+	ctrl, _, _ := newTestControllerWithExec(t)
+	selection := controllerSelection(ctrl)
+	state, err := ctrl.StateForSelection(context.Background(), selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A looked-up empty list clears the sidebar; nil would leave stale jobs.
+	if jobs := state.Snapshots[selection.ChatID].CronJobs; jobs == nil || len(jobs) != 0 {
+		t.Fatalf("cron jobs = %#v", jobs)
+	}
+	if err := ctrl.DeleteCronJobForSelection(context.Background(), selection, "deadbeef"); err == nil {
+		t.Fatal("deleted a job that does not exist")
+	}
+}

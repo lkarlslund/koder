@@ -8,6 +8,7 @@ import (
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/cron"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/store"
 )
 
@@ -20,6 +21,23 @@ func (e *Engine) StartCron() {
 	ctx, cancel := context.WithCancel(context.Background())
 	e.stopCron = cancel
 	go e.cron.Run(ctx)
+}
+
+// CronJobs returns a chat's cron jobs, next run first.
+func (e *Engine) CronJobs(ctx context.Context, chatID id.ID) ([]cron.Job, error) {
+	if e == nil || e.cron == nil {
+		return nil, fmt.Errorf("cron is unavailable")
+	}
+	return e.cron.List(ctx, chatID)
+}
+
+// DeleteCronJob deletes one of a chat's cron jobs.
+func (e *Engine) DeleteCronJob(ctx context.Context, chatID id.ID, jobID string) error {
+	if e == nil || e.cron == nil {
+		return fmt.Errorf("cron is unavailable")
+	}
+	_, err := e.cron.Delete(ctx, chatID, jobID)
+	return err
 }
 
 // deliverCronJob queues a due job's prompt in its chat, to run once any

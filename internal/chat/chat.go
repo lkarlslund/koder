@@ -13,6 +13,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/attachment"
+	"github.com/lkarlslund/koder/internal/cron"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/provider"
@@ -118,12 +119,15 @@ type Snapshot struct {
 	PendingInputCalls []domain.ToolCall
 	QueuedInputs      []domain.QueuedInput
 	ExecProcesses     []tools.ExecProcess
-	Turn              Turn
-	Status            Status
-	StatusText        string
-	Context           domain.ContextUsage
-	TokenUsage        domain.Usage
-	Active            bool
+	// CronJobs are the chat's scheduled cron jobs, next run first. It is
+	// nil when they were not looked up.
+	CronJobs   []cron.Job
+	Turn       Turn
+	Status     Status
+	StatusText string
+	Context    domain.ContextUsage
+	TokenUsage domain.Usage
+	Active     bool
 }
 
 type Update struct {

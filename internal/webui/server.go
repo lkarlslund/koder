@@ -1344,6 +1344,22 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return map[string]bool{"reordered": true}, nil
+	case "delete_cron_job":
+		var in struct {
+			ChatID id.ID  `json:"chat_id"`
+			JobID  string `json:"job_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		selection := s.appSelection(clientID)
+		if in.ChatID != "" {
+			selection.ChatID = in.ChatID
+		}
+		if err := s.controller.DeleteCronJobForSelection(ctx, selection, in.JobID); err != nil {
+			return nil, err
+		}
+		return map[string]bool{"deleted": true}, nil
 	case "terminate_exec_process":
 		var in struct {
 			ChatID    id.ID  `json:"chat_id"`
@@ -2063,6 +2079,7 @@ type chatDelta struct {
 	PendingInputCalls []domain.ToolCall     `json:"pending_input_calls"`
 	Queue             any                   `json:"queue,omitempty"`
 	ExecProcesses     any                   `json:"exec_processes,omitempty"`
+	CronJobs          any                   `json:"cron_jobs,omitempty"`
 	Context           any                   `json:"context,omitempty"`
 	TokenUsage        any                   `json:"token_usage,omitempty"`
 	Status            string                `json:"status,omitempty"`
@@ -2232,6 +2249,10 @@ func chatDeltaFromUpdate(update chat.Update) chatDelta {
 	}
 	if snapshot.ExecProcesses != nil {
 		delta.ExecProcesses = snapshot.ExecProcesses
+	}
+	// An empty list is sent too, so the sidebar drops the last deleted job.
+	if snapshot.CronJobs != nil {
+		delta.CronJobs = snapshot.CronJobs
 	}
 	if update.ReplaceTimeline {
 		delta.Timeline = snapshot.Timeline

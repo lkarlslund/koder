@@ -330,6 +330,21 @@
           </template>
         </div>
       </div>
+      <div class="sidebar-section" x-show="cronJobs().length > 0" style="display: none;">
+        <div class="sidebar-heading-row">
+          <span class="sidebar-heading">Scheduled</span>
+        </div>
+        <div class="exec-process-list">
+          <template x-for="job in cronJobs()" :key="job.id">
+            <div class="exec-process-row" style="cursor: default;" :title="cronJobTooltip(job)">
+              <i class="bi" :class="job.recurring ? 'bi-arrow-repeat' : 'bi-alarm'"></i>
+              <span class="exec-process-command text-truncate" x-text="job.prompt"></span>
+              <span class="badge exec-process-state text-bg-secondary" x-text="cronJobNextRun(job)"></span>
+              <button type="button" class="exec-process-action" title="Delete scheduled job" @click.stop="deleteCronJob(job)"><i class="bi bi-trash"></i></button>
+            </div>
+          </template>
+        </div>
+      </div>
       <div class="sidebar-section browser-sidebar-section" x-show="browserStatus?.state === 'running'" style="display: none;">
         <div class="sidebar-heading-row">
           <span class="sidebar-heading">Browser</span>

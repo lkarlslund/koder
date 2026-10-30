@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/cron"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -32,7 +33,30 @@ func (c *Controller) snapshotWithExecProcessesLocked(snapshot chat.Snapshot) cha
 		return snapshot
 	}
 	snapshot.ExecProcesses = execProcessesFromSnapshots(processes)
+	if jobs, err := c.agent.CronJobs(context.Background(), snapshot.Chat.ID); err == nil {
+		snapshot.CronJobs = append([]cron.Job{}, jobs...)
+	}
 	return snapshot
+}
+
+// DeleteCronJobForSelection deletes one of the selected chat's cron jobs.
+func (c *Controller) DeleteCronJobForSelection(ctx context.Context, selection Selection, jobID string) error {
+	if c == nil || c.agent == nil {
+		return fmt.Errorf("controller is nil")
+	}
+	if selection.SessionID == "" || selection.ChatID == "" {
+		return fmt.Errorf("session and chat ids are required")
+	}
+	if err := c.agent.DeleteCronJob(ctx, selection.ChatID, jobID); err != nil {
+		return err
+	}
+	owner, err := c.agent.LoadSession(ctx, selection.SessionID)
+	if err == nil {
+		if event, ok := c.eventForSelectedExec(ctx, owner, selection); ok {
+			c.broadcast(event.Type, event.Payload)
+		}
+	}
+	return nil
 }
 
 func execProcessesFromSnapshots(snapshots []execruntime.Snapshot) []tools.ExecProcess {
