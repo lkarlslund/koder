@@ -1171,7 +1171,10 @@ func (c *Controller) VoiceOfferedArtifact(ctx context.Context, token string) (vo
 func voicePresentationParts(timeline []domain.TimelineItem, sequence int64) []voice.Part {
 	parts := make([]voice.Part, 0)
 	seen := map[string]struct{}{}
-	addAttachment := func(sessionID string, metadata *attachment.Metadata, title string) {
+	// Everything present produces (cards, Markdown, media, files) is a
+	// presentation the phone shows on its presentation surface; a browser
+	// capture is incidental tool output and only joins the transcript.
+	addAttachment := func(sessionID string, metadata *attachment.Metadata, title string, presentation bool) {
 		if metadata == nil || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(metadata.ID) == "" {
 			return
 		}
@@ -1185,6 +1188,9 @@ func voicePresentationParts(timeline []domain.TimelineItem, sequence int64) []vo
 			partMetadata["title"] = strings.TrimSpace(title)
 		}
 		partMetadata["render_key"] = metadata.ID
+		if presentation {
+			partMetadata["presentation"] = "true"
+		}
 		parts = append(parts, voice.Part{ID: metadata.ID, MIMEType: metadata.MIME, URI: uri, Metadata: partMetadata})
 	}
 	for _, item := range timeline {
@@ -1211,29 +1217,29 @@ func voicePresentationParts(timeline []domain.TimelineItem, sequence int64) []vo
 					}})
 				}
 			case tools.ShowMediaStoredResult:
-				addAttachment(result.SessionID, result.Attachment, result.Title)
+				addAttachment(result.SessionID, result.Attachment, result.Title, true)
 				for _, media := range result.Items {
-					addAttachment(media.SessionID, media.Attachment, media.Title)
+					addAttachment(media.SessionID, media.Attachment, media.Title, true)
 				}
 			case *tools.ShowMediaStoredResult:
 				if result != nil {
-					addAttachment(result.SessionID, result.Attachment, result.Title)
+					addAttachment(result.SessionID, result.Attachment, result.Title, true)
 					for _, media := range result.Items {
-						addAttachment(media.SessionID, media.Attachment, media.Title)
+						addAttachment(media.SessionID, media.Attachment, media.Title, true)
 					}
 				}
 			case tools.BrowserStoredResult:
-				addAttachment(result.SessionID, result.Attachment, result.Summary)
+				addAttachment(result.SessionID, result.Attachment, result.Summary, false)
 			case *tools.BrowserStoredResult:
 				if result != nil {
-					addAttachment(result.SessionID, result.Attachment, result.Summary)
+					addAttachment(result.SessionID, result.Attachment, result.Summary, false)
 				}
 			case tools.OfferFileStoredResult:
 				uri := "/voice/v1/artifacts/offered/" + url.PathEscape(result.Token)
 				if result.Token != "" {
 					if _, ok := seen[uri]; !ok {
 						seen[uri] = struct{}{}
-						parts = append(parts, voice.Part{MIMEType: result.MIMEType, URI: uri, Metadata: map[string]string{"name": result.Name, "title": result.Title}})
+						parts = append(parts, voice.Part{MIMEType: result.MIMEType, URI: uri, Metadata: map[string]string{"name": result.Name, "title": result.Title, "presentation": "true", "render_key": "offer:" + result.Token}})
 					}
 				}
 			}

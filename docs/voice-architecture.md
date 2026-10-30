@@ -288,7 +288,10 @@ with the bearer credential; generic files are copied into a cache-only
 `FileProvider` URI before another Android app is allowed to read them. Unknown
 MIME types remain usable instead of invalidating the message.
 
-An inline part created by `present` carries `metadata.presentation = "true"`.
+`present` is the one tool for showing the user something: a card or Markdown
+(`content`), media (`media`) or a download (`file`). Every part it produces
+carries `metadata.presentation = "true"`, so clients show all three the same
+way; incidental tool output such as a browser capture does not.
 While voice is active, Android switches from the quiet voice surface to a
 separate presentation surface automatically. The spoken response remains in
 the hidden conversation history; showing a table, image, or attachment does

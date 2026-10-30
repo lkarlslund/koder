@@ -237,6 +237,21 @@ func TestVoicePresentationPartsExtractsGenericArtifacts(t *testing.T) {
 	if parts[3].MIMEType != "text/markdown" || parts[3].Data != "| Time | Person |" || parts[3].Metadata["presentation"] != "true" {
 		t.Fatalf("inline presentation part = %#v", parts[3])
 	}
+	// Media and files from present are presentations too, like cards, so the
+	// phone shows them the same way.
+	for _, part := range parts {
+		if part.Metadata["presentation"] != "true" {
+			t.Fatalf("present part is not a presentation: %#v", part)
+		}
+	}
+	browser := voicePresentationParts([]domain.TimelineItem{{Seq: 1, Content: domain.AssistantMessage{Tools: []domain.ToolCall{{
+		Tool: domain.ToolKindBrowserCapture,
+		Result: &domain.ToolResult{Data: tools.BrowserStoredResult{SessionID: "session-1", Summary: "Captured page",
+			Attachment: &attachment.Metadata{ID: "234567890123456789012345", Name: "page.png", MIME: "image/png"}}},
+	}}}}}, 0)
+	if len(browser) != 1 || browser[0].Metadata["presentation"] != "" {
+		t.Fatalf("browser capture part = %#v", browser)
+	}
 }
 
 func TestVoiceRenderPartsAddsTranscriptOnlyToolActivity(t *testing.T) {
