@@ -1151,58 +1151,54 @@
       <template x-if="!sessionLoading && visibleSessionCount() === 0">
         <div class="list-group-item text-secondary" x-text="sessionSearchQuery.trim() ? 'No matching sessions or chats' : 'No sessions match these filters'"></div>
       </template>
-      <div class="session-list list-group list-group-flush" x-show="sessionRows().length > 0">
-        <template x-for="session in sessionRows()" :key="sessionID(session)">
+      <div class="session-list list-group list-group-flush" x-show="sessionPickerRows().length > 0">
+        <template x-for="session in sessionPickerRows()" :key="sessionID(session)">
           <div class="session-selector-row list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" x-transition.opacity.duration.200ms :class="{'active': sessionID(session) === activeSessionID()}">
             <button type="button" class="btn btn-link text-start p-0 flex-grow-1 text-decoration-none" :class="sessionID(session) === activeSessionID() ? 'text-white' : 'text-body'" @click="switchSession(sessionID(session), $event)" @auxclick.stop.prevent="switchSession(sessionID(session), $event)">
-              <span>
-				<span class="fw-semibold"><i class="bi me-1" :class="isVoiceSession(session) ? 'bi-telephone-fill' : 'bi-folder'"></i><span x-text="sessionTitle(session)"></span></span>
-				<span class="d-block small opacity-75 text-truncate" x-text="isVoiceSession(session) ? 'Voice coordination chat' : sessionProjectRoot(session)"></span>
-                <span class="d-block small opacity-75">
-                  <template x-if="session.LastMessage || session.last_message"><span x-text="session.LastMessage || session.last_message"></span></template>
+              <template x-if="isQuickSession(session)">
+                <span>
+                  <span class="fw-semibold"><i class="bi bi-lightning-charge me-1"></i><span x-text="sessionTitle(session)"></span></span>
+                  <span class="d-block small opacity-75" x-text="session.LastMessage || session.last_message || 'Standalone Quick Chat'"></span>
                 </span>
-              </span>
+              </template>
+              <template x-if="isVoiceSession(session)">
+                <span>
+                  <span class="fw-semibold"><i class="bi bi-telephone-fill me-1"></i><span x-text="sessionTitle(session)"></span></span>
+                  <span class="d-block small opacity-75" x-text="session.LastMessage || session.last_message || 'Voice coordination chat'"></span>
+                </span>
+              </template>
+              <template x-if="!isQuickSession(session) && !isVoiceSession(session)">
+                <span>
+  				<span class="fw-semibold"><i class="bi me-1" :class="isVoiceSession(session) ? 'bi-telephone-fill' : 'bi-folder'"></i><span x-text="sessionTitle(session)"></span></span>
+  				<span class="d-block small opacity-75 text-truncate" x-text="isVoiceSession(session) ? 'Voice coordination chat' : sessionProjectRoot(session)"></span>
+                  <span class="d-block small opacity-75">
+                    <template x-if="session.LastMessage || session.last_message"><span x-text="session.LastMessage || session.last_message"></span></template>
+                  </span>
+                </span>
+              </template>
             </button>
-            <div class="btn-group btn-group-sm">
-              <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-warning'" :title="sessionFavorite(session) ? 'Remove star' : 'Add star'" @click.stop="toggleSessionFavorite(session)"><i class="bi" :class="sessionFavorite(session) ? 'bi-star-fill' : 'bi-star'"></i></button>
-              <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-secondary'" title="Edit session" @click.stop="beginEditSession(session)"><i class="bi bi-pencil"></i></button>
-              <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-secondary'" :title="sessionArchived(session) ? 'Restore session' : 'Archive session'" @click.stop="sessionArchived(session) ? restoreSession(session) : archiveSession(session)"><i class="bi" :class="sessionArchived(session) ? 'bi-arrow-counterclockwise' : 'bi-archive'"></i></button>
-              <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-danger'" title="Delete session" @click.stop="deleteSession(sessionID(session))"><i class="bi bi-trash"></i></button>
-            </div>
-          </div>
-        </template>
-      </div>
-      <div class="session-list list-group list-group-flush" x-show="quickChatRows().length > 0">
-        <template x-for="session in quickChatRows()" :key="sessionID(session)">
-          <div class="session-selector-row list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" x-transition.opacity.duration.200ms :class="{'active': sessionID(session) === activeSessionID()}">
-            <button type="button" class="btn btn-link text-start p-0 flex-grow-1 text-decoration-none" :class="sessionID(session) === activeSessionID() ? 'text-white' : 'text-body'" @click="switchSession(sessionID(session), $event)" @auxclick.stop.prevent="switchSession(sessionID(session), $event)">
-              <span>
-                <span class="fw-semibold"><i class="bi bi-lightning-charge me-1"></i><span x-text="sessionTitle(session)"></span></span>
-                <span class="d-block small opacity-75" x-text="session.LastMessage || session.last_message || 'Standalone Quick Chat'"></span>
-              </span>
-            </button>
-            <div class="btn-group btn-group-sm">
-              <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-secondary'" title="Keep as Session" @click.stop="beginPromoteQuickChat(session)"><i class="bi bi-bookmark-check"></i></button>
-              <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-danger'" title="Close Quick Chat" @click.stop="closeQuickChat(sessionID(session))"><i class="bi bi-x-lg"></i></button>
-            </div>
-          </div>
-        </template>
-      </div>
-      <div class="session-list list-group list-group-flush" x-show="voiceSessionRows().length > 0">
-        <template x-for="session in voiceSessionRows()" :key="sessionID(session)">
-          <div class="session-selector-row list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" x-transition.opacity.duration.200ms :class="{'active': sessionID(session) === activeSessionID()}">
-            <button type="button" class="btn btn-link text-start p-0 flex-grow-1 text-decoration-none" :class="sessionID(session) === activeSessionID() ? 'text-white' : 'text-body'" @click="switchSession(sessionID(session), $event)" @auxclick.stop.prevent="switchSession(sessionID(session), $event)">
-              <span>
-                <span class="fw-semibold"><i class="bi bi-telephone-fill me-1"></i><span x-text="sessionTitle(session)"></span></span>
-                <span class="d-block small opacity-75" x-text="session.LastMessage || session.last_message || 'Voice coordination chat'"></span>
-              </span>
-            </button>
-            <div class="btn-group btn-group-sm">
-              <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-warning'" :title="sessionFavorite(session) ? 'Remove star' : 'Add star'" @click.stop="toggleSessionFavorite(session)"><i class="bi" :class="sessionFavorite(session) ? 'bi-star-fill' : 'bi-star'"></i></button>
-              <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-secondary'" title="Edit voice chat" @click.stop="beginEditSession(session)"><i class="bi bi-pencil"></i></button>
-              <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-secondary'" :title="sessionArchived(session) ? 'Restore session' : 'Archive session'" @click.stop="sessionArchived(session) ? restoreSession(session) : archiveSession(session)"><i class="bi" :class="sessionArchived(session) ? 'bi-arrow-counterclockwise' : 'bi-archive'"></i></button>
-              <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-danger'" title="Delete voice chat" @click.stop="deleteSession(sessionID(session))"><i class="bi bi-trash"></i></button>
-            </div>
+            <template x-if="isQuickSession(session)">
+              <div class="btn-group btn-group-sm">
+                <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-secondary'" title="Keep as Session" @click.stop="beginPromoteQuickChat(session)"><i class="bi bi-bookmark-check"></i></button>
+                <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-danger'" title="Close Quick Chat" @click.stop="closeQuickChat(sessionID(session))"><i class="bi bi-x-lg"></i></button>
+              </div>
+            </template>
+            <template x-if="isVoiceSession(session)">
+              <div class="btn-group btn-group-sm">
+                <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-warning'" :title="sessionFavorite(session) ? 'Remove star' : 'Add star'" @click.stop="toggleSessionFavorite(session)"><i class="bi" :class="sessionFavorite(session) ? 'bi-star-fill' : 'bi-star'"></i></button>
+                <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-secondary'" title="Edit voice chat" @click.stop="beginEditSession(session)"><i class="bi bi-pencil"></i></button>
+                <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-secondary'" :title="sessionArchived(session) ? 'Restore session' : 'Archive session'" @click.stop="sessionArchived(session) ? restoreSession(session) : archiveSession(session)"><i class="bi" :class="sessionArchived(session) ? 'bi-arrow-counterclockwise' : 'bi-archive'"></i></button>
+                <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-danger'" title="Delete voice chat" @click.stop="deleteSession(sessionID(session))"><i class="bi bi-trash"></i></button>
+              </div>
+            </template>
+            <template x-if="!isQuickSession(session) && !isVoiceSession(session)">
+              <div class="btn-group btn-group-sm">
+                <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-warning'" :title="sessionFavorite(session) ? 'Remove star' : 'Add star'" @click.stop="toggleSessionFavorite(session)"><i class="bi" :class="sessionFavorite(session) ? 'bi-star-fill' : 'bi-star'"></i></button>
+                <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-secondary'" title="Edit session" @click.stop="beginEditSession(session)"><i class="bi bi-pencil"></i></button>
+                <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-secondary'" :title="sessionArchived(session) ? 'Restore session' : 'Archive session'" @click.stop="sessionArchived(session) ? restoreSession(session) : archiveSession(session)"><i class="bi" :class="sessionArchived(session) ? 'bi-arrow-counterclockwise' : 'bi-archive'"></i></button>
+                <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-danger'" title="Delete session" @click.stop="deleteSession(sessionID(session))"><i class="bi bi-trash"></i></button>
+              </div>
+            </template>
           </div>
         </template>
       </div>
@@ -1757,16 +1753,13 @@
                 <div class="settings-list-header">
                   <div>
                     <div class="fw-semibold">Web search providers</div>
-                    <div class="small text-secondary">web_search asks the first enabled provider and falls back to the next when one fails.</div>
+                    <div class="small text-secondary">web_search asks the first enabled provider and falls back to the next when one fails. Drag to reorder.</div>
                   </div>
                 </div>
                 <div class="settings-item-list">
                   <template x-for="(item, index) in searchProviders()" :key="item.id">
-                    <div class="settings-item-row settings-search-row" :class="{'is-off': !item.enabled}" :data-search-provider="item.id">
-                      <div class="btn-group-vertical btn-group-sm settings-search-order" role="group" :aria-label="'Order of ' + item.title">
-                        <button type="button" class="btn btn-outline-secondary" title="Try this provider earlier" :disabled="index === 0" @click="moveSearchProvider(index, -1)"><i class="bi bi-chevron-up"></i></button>
-                        <button type="button" class="btn btn-outline-secondary" title="Try this provider later" :disabled="index === searchProviders().length - 1" @click="moveSearchProvider(index, 1)"><i class="bi bi-chevron-down"></i></button>
-                      </div>
+                    <div class="settings-item-row settings-search-row" :class="{'is-off': !item.enabled, 'dragging': searchDragID === item.id}" :data-search-provider="item.id">
+                      <span class="settings-search-grip" role="button" tabindex="0" :title="'Drag to change when ' + item.title + ' is tried; arrow keys work too'" :aria-label="'Reorder ' + item.title" @pointerdown="startSearchDrag($event, item.id)" @keydown.arrow-up.prevent="moveSearchProvider(index, -1)" @keydown.arrow-down.prevent="moveSearchProvider(index, 1)"><i class="bi bi-grip-vertical"></i></span>
                       <div class="settings-item-main">
                         <span class="settings-item-title"><span x-text="item.title"></span> <a class="small ms-1" :href="item.signup_url" target="_blank" rel="noopener" x-show="item.signup_url" :title="'Get access to ' + item.title"><i class="bi bi-box-arrow-up-right"></i></a></span>
                         <span class="settings-item-subtitle" x-text="item.description"></span>

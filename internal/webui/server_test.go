@@ -2093,9 +2093,8 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `voiceChatMode()`) ||
 		!strings.Contains(fullPage, `Voice coordination chat`) ||
-		!strings.Contains(fullPage, `sessionRows().length`) ||
-		!strings.Contains(fullPage, `quickChatRows().length`) ||
-		!strings.Contains(fullPage, `voiceSessionRows().length`) ||
+		!strings.Contains(fullPage, `x-for="session in sessionPickerRows()"`) ||
+		!strings.Contains(fullPage, `x-if="isVoiceSession(session)"`) ||
 		!strings.Contains(fullPage, `sessionTypeFilters.voice`) ||
 		strings.Contains(fullPage, `newVoiceChat()`) ||
 		strings.Contains(fullPage, `new_voice_chat`) {

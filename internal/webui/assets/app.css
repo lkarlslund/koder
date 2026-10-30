@@ -495,7 +495,10 @@
 	.settings-search-row { grid-template-columns: auto minmax(0, 1fr) auto; }
 	.settings-search-row .settings-item-subtitle { white-space: normal; }
 	.settings-search-row.is-off .settings-item-main { opacity: .62; }
-	.settings-search-order .btn { padding: .05rem .4rem; line-height: 1.1; }
+	.settings-search-grip { align-self: stretch; display: flex; align-items: center; padding: 0 .15rem; color: var(--bs-secondary-color); cursor: grab; touch-action: none; border-radius: .25rem; }
+	.settings-search-grip:hover, .settings-search-grip:focus-visible { color: var(--bs-body-color); background: var(--bs-secondary-bg); }
+	.settings-search-row.dragging { border-color: var(--bs-primary); box-shadow: 0 .25rem .9rem rgba(0, 0, 0, .35); }
+	.settings-search-row.dragging .settings-search-grip { cursor: grabbing; }
 	.settings-search-pricing { display: inline-flex; align-items: baseline; gap: .35rem; color: var(--bs-secondary-color); font-size: .8rem; opacity: .85; }
 	.settings-search-config { grid-column: 2 / -1; padding-top: .35rem; border-top: 1px dashed var(--bs-border-color); }
 	.settings-model-tree { display: grid; gap: .85rem; }

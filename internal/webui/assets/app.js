@@ -1121,7 +1121,7 @@
         ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, lastWSMessageBytes: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
         tabActivityIcon: null, tabActivityIconMode: null, tabAttention: '', tabWasWorking: false, tabAttentionTimer: null, tabAttentionBlink: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
-		showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'overview', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', settingsHealth: {issue_count: 0, needs_setup: false, issues: []}, showBrowserEditor: false, searchExpanded: '', searchTests: {}, showCodexEditor: false, showClaudeEditor: false, showObservability: false,
+		showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'overview', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', settingsHealth: {issue_count: 0, needs_setup: false, issues: []}, showBrowserEditor: false, searchExpanded: '', searchTests: {}, searchDragID: '', showCodexEditor: false, showClaudeEditor: false, showObservability: false,
 		showPhoneBinding: false, phoneBinding: null, phoneBindingLoading: false, phoneBindingError: '', voiceDevices: [], voiceDevicesLoading: false, voiceDevicesError: '',
         showSessions: false, sessionTypeFilters: {sessions: true, chats: true, voice: true}, sessionStatusFilters: {active: true, starred: false, archived: false}, sessionSearchQuery: '', sessionSearchIDs: null, sessionSearchTimer: null, sessionSearchSeq: 0, sessionSearching: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, folderPicker: {open: false, target: '', path: '', parent: '', folders: [], loading: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         confirmationDialog: {open: false, title: '', message: '', confirmLabel: 'Confirm', danger: false}, confirmationResolver: null,
@@ -5434,9 +5434,14 @@
           if (!this.sessionTypeFilters.voice) return [];
           return this.filterManagedSessions(this.allSessionRows().filter(session => this.isVoiceSession(session)));
         },
-        visibleSessionCount() {
-          return this.sessionRows().length + this.quickChatRows().length + this.voiceSessionRows().length;
+        // sessionPickerRows lists every visible session, quick chat and voice
+        // chat together, most recently used first.
+        sessionPickerRows() {
+          return [...this.sessionRows(), ...this.quickChatRows(), ...this.voiceSessionRows()]
+            .sort((a, b) => this.sessionLastUsed(b) - this.sessionLastUsed(a));
         },
+        sessionLastUsed(session) { return Date.parse(session?.UpdatedAt || session?.updated_at || '') || 0; },
+        visibleSessionCount() { return this.sessionPickerRows().length; },
         filterManagedSessions(rows) {
           return rows.filter(session => this.sessionMatchesStatus(session) && this.sessionMatchesSearch(session));
         },
@@ -6007,6 +6012,41 @@
 		  if (target < 0 || target >= list.length) return;
 		  const [item] = list.splice(index, 1);
 		  list.splice(target, 0, item);
+		},
+		// startSearchDrag follows the pointer on window: moving the row in
+		// the DOM would drop a pointer capture on the grip.
+		startSearchDrag(ev, id) {
+		  if (ev.button > 0) return;
+		  ev.preventDefault();
+		  this.searchDragID = id;
+		  const move = e => this.moveSearchDrag(e);
+		  const end = () => {
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', end);
+			window.removeEventListener('pointercancel', end);
+			this.searchDragID = '';
+		  };
+		  window.addEventListener('pointermove', move);
+		  window.addEventListener('pointerup', end);
+		  window.addEventListener('pointercancel', end);
+		},
+		// moveSearchDrag moves the dragged provider to the row under the
+		// pointer, scrolling the settings pane near its edges.
+		moveSearchDrag(ev) {
+		  if (!this.searchDragID) return;
+		  const pane = document.querySelector('.settings-form');
+		  if (pane) {
+			const box = pane.getBoundingClientRect();
+			if (ev.clientY < box.top + 40) pane.scrollBy(0, -12);
+			else if (ev.clientY > box.bottom - 40) pane.scrollBy(0, 12);
+		  }
+		  const target = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-search-provider]')?.dataset.searchProvider;
+		  if (!target || target === this.searchDragID) return;
+		  const list = this.searchProviders();
+		  const from = list.findIndex(p => p.id === this.searchDragID);
+		  const to = list.findIndex(p => p.id === target);
+		  if (from < 0 || to < 0) return;
+		  list.splice(to, 0, list.splice(from, 1)[0]);
 		},
 		searchProviderMissing(item) {
 		  if (item.needs_key && !item.api_key_set && !String(item.api_key || '').trim() && !String(item.api_key_env || '').trim()) return 'Needs an API key';

@@ -2,11 +2,13 @@ package webui
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/chromedp"
 )
 
@@ -100,6 +102,40 @@ func TestSettingsBrowserNavigationGroupsConfigurationByDomain(t *testing.T) {
 	}
 	if testDisabled["searxng"] || !testDisabled["exa"] {
 		t.Fatalf("search Test buttons disabled = %v, want searxng enabled and exa disabled", testDisabled)
+	}
+	// Dragging a provider's grip onto another row moves it there.
+	var points []float64
+	if err := chromedp.Run(browserCtx, chromedp.Evaluate(`(() => {
+		const grip = document.querySelector('[data-search-provider="exa"] .settings-search-grip').getBoundingClientRect();
+		const target = document.querySelector('[data-search-provider="tavily"]').getBoundingClientRect();
+		return [grip.x + grip.width / 2, grip.y + grip.height / 2, target.x + 40, target.bottom - 4];
+	})()`, &points)); err != nil || len(points) != 4 {
+		t.Fatalf("locate search rows: %v %v", points, err)
+	}
+	var order []string
+	if err := chromedp.Run(browserCtx,
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			steps := []*input.DispatchMouseEventParams{{Type: input.MousePressed, X: points[0], Y: points[1], Button: input.Left, ClickCount: 1}}
+			for i := 1; i <= 8; i++ {
+				f := float64(i) / 8
+				steps = append(steps, &input.DispatchMouseEventParams{Type: input.MouseMoved, X: points[0] + (points[2]-points[0])*f, Y: points[1] + (points[3]-points[1])*f, Button: input.Left})
+			}
+			steps = append(steps, &input.DispatchMouseEventParams{Type: input.MouseReleased, X: points[2], Y: points[3], Button: input.Left, ClickCount: 1})
+			for _, step := range steps {
+				if err := step.Do(ctx); err != nil {
+					return err
+				}
+				// Chrome merges pointer moves within a frame.
+				time.Sleep(50 * time.Millisecond)
+			}
+			return nil
+		}),
+		chromedp.Evaluate(`document.documentElement._x_dataStack[0].searchProviders().map(p => p.id)`, &order),
+	); err != nil {
+		t.Fatalf("drag search provider: %v", err)
+	}
+	if exa, tavily := slices.Index(order, "exa"), slices.Index(order, "tavily"); exa != tavily+1 {
+		t.Fatalf("order after dragging exa onto tavily = %v", order)
 	}
 	assertSettingsPageContains(t, browserCtx, "skills", "Agent Skills")
 	assertSettingsPageContains(t, browserCtx, "memory", "Global memory", "No memories yet")
