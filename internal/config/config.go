@@ -215,11 +215,49 @@ type Config struct {
 	Browser          Browser                 `toml:"browser"`
 	Codex            Codex                   `toml:"codex"`
 	Claude           Claude                  `toml:"claude"`
+	Search           Search                  `toml:"search"`
 	path             string
 	configDir        string
 	stateDir         string
 	cacheDir         string
 	managedAssetsDir string
+}
+
+// Search configures the web_search tool's providers.
+type Search struct {
+	// Order lists provider IDs, most preferred first. Providers it leaves
+	// out follow in their default order.
+	Order     []string                  `toml:"order,omitempty"`
+	Providers map[string]SearchProvider `toml:"providers,omitempty"`
+}
+
+// SearchProvider configures one web search provider.
+type SearchProvider struct {
+	// Enabled overrides the provider's default; providers that work with no
+	// settings are on by default.
+	Enabled   *bool  `toml:"enabled,omitempty"`
+	APIKey    string `toml:"api_key,omitempty"`
+	APIKeyEnv string `toml:"api_key_env,omitempty"`
+	BaseURL   string `toml:"base_url,omitempty"`
+}
+
+// EnabledOr reports whether the provider is on, given its default.
+func (p SearchProvider) EnabledOr(def bool) bool {
+	if p.Enabled == nil {
+		return def
+	}
+	return *p.Enabled
+}
+
+// ResolvedAPIKey is the API key, read from APIKeyEnv when no key is set.
+func (p SearchProvider) ResolvedAPIKey() string {
+	if key := strings.TrimSpace(p.APIKey); key != "" {
+		return key
+	}
+	if env := strings.TrimSpace(p.APIKeyEnv); env != "" {
+		return strings.TrimSpace(os.Getenv(env))
+	}
+	return ""
 }
 
 type LoadOptions struct {

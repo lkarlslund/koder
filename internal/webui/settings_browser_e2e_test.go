@@ -39,7 +39,7 @@ func TestSettingsBrowserNavigationGroupsConfigurationByDomain(t *testing.T) {
 		chromedp.WaitVisible(`[data-settings-open]`, chromedp.ByQuery),
 		chromedp.Click(`[data-settings-open]`, chromedp.ByQuery),
 		chromedp.WaitVisible(`.settings-dialog`, chromedp.ByQuery),
-		chromedp.Poll(`document.querySelectorAll('[data-settings-tab]').length === 11`, nil),
+		chromedp.Poll(`document.querySelectorAll('[data-settings-tab]').length === 12`, nil),
 		chromedp.Poll(`document.querySelector('.settings-form').textContent.includes('Theme')`, nil),
 		chromedp.Poll(`Number(document.querySelector('[data-settings-open] .badge').textContent) > 0`, nil),
 		chromedp.Poll(`getComputedStyle(document.querySelector('.settings-setup-label')).display === 'none'`, nil),
@@ -51,7 +51,7 @@ func TestSettingsBrowserNavigationGroupsConfigurationByDomain(t *testing.T) {
 	if err := chromedp.Run(browserCtx, chromedp.Evaluate(`Array.from(document.querySelectorAll('[data-settings-tab]')).map(node => node.textContent.trim().replace(/\s+/g, ' '))`, &labels)); err != nil {
 		t.Fatalf("read settings navigation: %v", err)
 	}
-	wantLabels := []string{"Overview", "Models", "Integrations", "Backends", "Tools", "Skills", "Memory", "Voice & devices", "Conversation", "Access", "Prompts"}
+	wantLabels := []string{"Overview", "Models", "Integrations", "Backends", "Tools", "Search", "Skills", "Memory", "Voice & devices", "Conversation", "Access", "Prompts"}
 	if len(labels) != len(wantLabels) {
 		t.Fatalf("settings tabs = %#v, want %#v", labels, wantLabels)
 	}
@@ -65,6 +65,34 @@ func TestSettingsBrowserNavigationGroupsConfigurationByDomain(t *testing.T) {
 	assertSettingsPageContains(t, browserCtx, "integrations", "Model providers", "MCP tool sources")
 	assertSettingsPageContains(t, browserCtx, "backends", "Koder", "Codex", "Configure")
 	assertSettingsPageContains(t, browserCtx, "tools", "Browser", "Configure", "Native tools")
+	assertSettingsPageContains(t, browserCtx, "search", "Web search providers", "Exa", "Tavily", "SearXNG", "DuckDuckGo")
+	// A search provider's settings survive a save from the browser.
+	if err := chromedp.Run(browserCtx,
+		chromedp.Click(`[data-settings-tab="search"]`, chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const app = document.documentElement._x_dataStack[0];
+			const item = app.searchProviders().find(p => p.id === 'searxng');
+			item.base_url = 'https://searx.example.invalid/';
+			item.enabled = true;
+			app.saveSettings();
+		})()`, nil),
+		chromedp.Poll(`(() => {
+			const app = document.documentElement._x_dataStack[0];
+			const item = app.searchProviders().find(p => p.id === 'searxng');
+			return !app.settingsSaving && !app.settingsDirty() && item.enabled && item.base_url === 'https://searx.example.invalid';
+		})()`, nil),
+	); err != nil {
+		t.Fatalf("save search settings: %v", err)
+	}
+	saved, err := ctrl.Preferences(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, got := range saved.Search.Providers {
+		if got.ID == "searxng" && (got.BaseURL != "https://searx.example.invalid" || !got.Enabled) {
+			t.Fatalf("saved searxng settings = %+v", got)
+		}
+	}
 	assertSettingsPageContains(t, browserCtx, "skills", "Agent Skills")
 	assertSettingsPageContains(t, browserCtx, "memory", "Global memory", "No memories yet")
 	assertSettingsPageContains(t, browserCtx, "voice", "Android devices", "Speech output")

@@ -1121,7 +1121,7 @@
         ws: null, reconnectTimer: null, connectWatchdog: null, websocketHealthTimer: null, lastWSMessageAt: 0, lastWSMessageBytes: 0, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showAccess: false, accessDraft: {},
         tabActivityIcon: null, tabActivityIconMode: null, tabAttention: '', tabWasWorking: false, tabAttentionTimer: null, tabAttentionBlink: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [], modelPickerTarget: null, modelSettingsDraft: null, modelSettingsSaving: false, modelSettingsStatus: '', modelSettingsStatusKind: 'secondary',
-		showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'overview', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', settingsHealth: {issue_count: 0, needs_setup: false, issues: []}, showBrowserEditor: false, showCodexEditor: false, showClaudeEditor: false, showObservability: false,
+		showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'overview', settings: null, settingsBaselineJSON: '', settingsStatus: '', settingsStatusKind: 'secondary', settingsHealth: {issue_count: 0, needs_setup: false, issues: []}, showBrowserEditor: false, searchExpanded: '', searchTests: {}, showCodexEditor: false, showClaudeEditor: false, showObservability: false,
 		showPhoneBinding: false, phoneBinding: null, phoneBindingLoading: false, phoneBindingError: '', voiceDevices: [], voiceDevicesLoading: false, voiceDevicesError: '',
         showSessions: false, sessionTypeFilters: {sessions: true, chats: true, voice: true}, sessionStatusFilters: {active: true, starred: false, archived: false}, sessionSearchQuery: '', sessionSearchIDs: null, sessionSearchTimer: null, sessionSearchSeq: 0, sessionSearching: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, folderPicker: {open: false, target: '', path: '', parent: '', folders: [], loading: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         confirmationDialog: {open: false, title: '', message: '', confirmLabel: 'Confirm', danger: false}, confirmationResolver: null,
@@ -5999,7 +5999,38 @@
 		normalizeSettingsTab(tab) {
 		  return {general: 'overview', providers: 'integrations', codex: 'backends', claude: 'backends', browser: 'tools', mcp: 'integrations', security: 'voice', tts: 'voice', compaction: 'conversation', thinking: 'conversation'}[tab] || tab || 'overview';
 		},
-		settingsTabs() { return ['overview', 'models', 'integrations', 'backends', 'tools', 'skills', 'memory', 'voice', 'conversation', 'access', 'prompts']; },
+		settingsTabs() { return ['overview', 'models', 'integrations', 'backends', 'tools', 'search', 'skills', 'memory', 'voice', 'conversation', 'access', 'prompts']; },
+		searchProviders() { return this.settings?.search?.providers || []; },
+		moveSearchProvider(index, delta) {
+		  const list = this.searchProviders();
+		  const target = index + delta;
+		  if (target < 0 || target >= list.length) return;
+		  const [item] = list.splice(index, 1);
+		  list.splice(target, 0, item);
+		},
+		searchProviderMissing(item) {
+		  if (item.needs_key && !item.api_key_set && !String(item.api_key || '').trim() && !String(item.api_key_env || '').trim()) return 'Needs an API key';
+		  if (item.needs_key && item.clear_api_key && !String(item.api_key || '').trim() && !String(item.api_key_env || '').trim()) return 'Needs an API key';
+		  if (item.needs_base_url && !String(item.base_url || '').trim()) return 'Needs a base URL';
+		  return '';
+		},
+		searchProviderStatus(item) {
+		  const test = this.searchTests[item.id];
+		  if (test?.busy) return {cls: 'text-secondary', icon: 'bi-hourglass-split', text: 'Testing…'};
+		  if (test?.error) return {cls: 'text-danger', icon: 'bi-exclamation-triangle-fill', text: test.error};
+		  if (test?.result) return {cls: 'text-success', icon: 'bi-check-circle-fill', text: test.result.results + ' results in ' + test.result.elapsed_ms + ' ms'};
+		  const missing = this.searchProviderMissing(item);
+		  if (missing) return {cls: item.enabled ? 'text-danger' : 'text-secondary', icon: item.enabled ? 'bi-exclamation-triangle-fill' : 'bi-key', text: missing};
+		  return item.enabled ? {cls: 'text-success', icon: 'bi-check-circle-fill', text: 'Enabled'} : {cls: 'text-secondary', icon: 'bi-pause-circle', text: 'Disabled'};
+		},
+		testSearchProvider(item) {
+		  this.searchTests = Object.assign({}, this.searchTests, {[item.id]: {busy: true}});
+		  this.rpc('test_search_provider', item).then(result => {
+			this.searchTests = Object.assign({}, this.searchTests, {[item.id]: {result}});
+		  }).catch(err => {
+			this.searchTests = Object.assign({}, this.searchTests, {[item.id]: {error: err.message || 'test failed'}});
+		  });
+		},
         selectSettingsTab(tab) {
 		  tab = this.normalizeSettingsTab(tab);
           this.settingsTab = tab;
@@ -6038,10 +6069,10 @@
 		  }).catch(err => { this.memoryStatus = err.message; });
 		},
         settingsTabLabel(tab) {
-		  return {overview: 'Overview', models: 'Models', integrations: 'Integrations', backends: 'Backends', tools: 'Tools', skills: 'Skills', memory: 'Memory', voice: 'Voice & devices', conversation: 'Conversation', access: 'Access', prompts: 'Prompts'}[tab] || tab;
+		  return {overview: 'Overview', models: 'Models', integrations: 'Integrations', backends: 'Backends', tools: 'Tools', search: 'Search', skills: 'Skills', memory: 'Memory', voice: 'Voice & devices', conversation: 'Conversation', access: 'Access', prompts: 'Prompts'}[tab] || tab;
         },
 		settingsTabIcon(tab) {
-		  return {overview: 'bi-grid', models: 'bi-cpu', integrations: 'bi-plug', backends: 'bi-terminal', tools: 'bi-tools', skills: 'bi-stars', memory: 'bi-journal-text', voice: 'bi-mic', conversation: 'bi-chat-square-text', access: 'bi-shield-lock', prompts: 'bi-braces-asterisk'}[tab] || 'bi-gear';
+		  return {overview: 'bi-grid', models: 'bi-cpu', integrations: 'bi-plug', backends: 'bi-terminal', tools: 'bi-tools', search: 'bi-search', skills: 'bi-stars', memory: 'bi-journal-text', voice: 'bi-mic', conversation: 'bi-chat-square-text', access: 'bi-shield-lock', prompts: 'bi-braces-asterisk'}[tab] || 'bi-gear';
 		},
         settingsTabDescription(tab) {
           return {
@@ -6050,6 +6081,7 @@
 			integrations: 'External model providers and MCP servers',
 			backends: 'Engines that execute chat turns',
 			tools: 'Built-in tools and the managed browser',
+			search: 'Providers for the web_search tool, tried in this order',
 			skills: 'Portable project, shared, and built-in workflows',
 			memory: 'Notes the model keeps across chats',
 			voice: 'Speech output and registered Android devices',
@@ -7050,6 +7082,7 @@
               browser: source.browser,
 			  codex: source.codex,
 			  claude: source.claude,
+			  search: source.search,
               compaction: source.compaction,
               thinking: source.thinking,
               prompts: source.prompts,

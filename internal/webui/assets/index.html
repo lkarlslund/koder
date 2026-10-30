@@ -1753,6 +1753,53 @@
                 </div>
               </div>
 
+              <div class="settings-page-block" x-show="settingsTab === 'search'">
+                <div class="settings-list-header">
+                  <div>
+                    <div class="fw-semibold">Web search providers</div>
+                    <div class="small text-secondary">web_search asks the first enabled provider and falls back to the next when one fails.</div>
+                  </div>
+                </div>
+                <div class="settings-item-list">
+                  <template x-for="(item, index) in searchProviders()" :key="item.id">
+                    <div class="settings-item-row flex-wrap">
+                      <div class="settings-item-main">
+                        <span class="settings-item-title"><span x-text="item.title"></span> <a class="small ms-1" :href="item.signup_url" target="_blank" rel="noopener" x-show="item.signup_url" :title="'Get access to ' + item.title"><i class="bi bi-box-arrow-up-right"></i></a></span>
+                        <span class="settings-item-subtitle" x-text="item.description"></span>
+                        <span class="settings-item-subtitle" x-text="item.pricing"></span>
+                        <span class="settings-provider-health" :class="searchProviderStatus(item).cls"><i class="bi" :class="searchProviderStatus(item).icon"></i><span x-text="searchProviderStatus(item).text"></span></span>
+                      </div>
+                      <div class="settings-item-actions" role="group" :aria-label="'Actions for ' + item.title">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" title="Prefer this provider" :disabled="index === 0" @click="moveSearchProvider(index, -1)"><i class="bi bi-arrow-up"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" title="Prefer this provider less" :disabled="index === searchProviders().length - 1" @click="moveSearchProvider(index, 1)"><i class="bi bi-arrow-down"></i></button>
+                        <label class="toggle-switch settings-item-toggle"><input class="toggle-switch-input" type="checkbox" x-model="item.enabled"><span class="toggle-switch-track" aria-hidden="true"></span><span class="toggle-switch-label">Enabled</span></label>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @click="searchExpanded = searchExpanded === item.id ? '' : item.id"><i class="bi bi-sliders me-1"></i>Configure</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" title="Run a trial search with these settings" :disabled="!!searchProviderMissing(item) || searchTests[item.id]?.busy" @click="testSearchProvider(item)"><i class="bi bi-play me-1"></i>Test</button>
+                      </div>
+                      <div class="w-100 pt-2" x-show="searchExpanded === item.id" style="display: none;">
+                        <div class="row g-2">
+                          <div class="col-md-6" x-show="item.needs_key || item.id === 'searxng'">
+                            <label class="form-label small mb-1">API key</label>
+                            <div class="input-group input-group-sm">
+                              <input type="password" class="form-control" autocomplete="off" x-model="item.api_key" :placeholder="item.api_key_set && !item.clear_api_key ? 'Stored; type to replace' : (item.needs_key ? 'Paste API key' : 'Optional bearer token')">
+                              <button type="button" class="btn btn-outline-danger" x-show="item.api_key_set && !item.clear_api_key" title="Remove the stored key" @click="item.clear_api_key = true; item.api_key = ''"><i class="bi bi-trash"></i></button>
+                            </div>
+                          </div>
+                          <div class="col-md-6" x-show="item.needs_key">
+                            <label class="form-label small mb-1">Or read the key from environment variable</label>
+                            <input type="text" class="form-control form-control-sm" x-model="item.api_key_env" placeholder="e.g. EXA_API_KEY">
+                          </div>
+                          <div class="col-12">
+                            <label class="form-label small mb-1" x-text="item.needs_base_url ? 'Base URL' : 'Base URL (optional override)'"></label>
+                            <input type="url" class="form-control form-control-sm" x-model="item.base_url" :placeholder="item.needs_base_url ? 'https://searxng.example.net' : 'Default endpoint'">
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
               <div x-show="settingsTab === 'access'">
                 <div class="settings-list-header">
                   <div>

@@ -1542,6 +1542,12 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		}
 		preferences.Skills, err = s.controller.SkillsForSelection(ctx, s.appSelection(clientID))
 		return preferences, err
+	case "test_search_provider":
+		var in app.SearchProviderPreference
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.TestSearchProvider(ctx, in)
 	case "test_mcp_server":
 		var in app.MCPServerDraft
 		if err := decodeParams(params, &in); err != nil {

@@ -57,6 +57,17 @@ run; the chat is told it was missed. A recurring job skips the runs it missed.
 Jobs of a deleted or archived chat are dropped when they come due. A chat sees
 and deletes only its own jobs, at most 20 of them.
 
+`web_search` runs through the providers in `internal/websearch`: Exa, Brave,
+Tavily, Parallel, Perplexity, Serper, You.com, Firecrawl, Linkup, Mojeek, Jina,
+Ollama, SearXNG and DuckDuckGo. Each adapter maps the same query (text, limit,
+allowed and blocked domains, recency) onto its provider's own parameters, and
+the results are then filtered by domain and date, deduplicated and cut to the
+limit, so every provider answers in one shape. Settings > Search orders the
+providers and holds their API keys (stored in `config.toml` under `[search]`,
+never sent back to the browser) or base URLs. The tool asks the first enabled
+provider and falls back to the next when one fails. DuckDuckGo needs no setup
+and is on by default; SearXNG needs only a base URL; the rest need an API key.
+
 Some operations intentionally remain first-class tools:
 
 - `exec_command` starts a command; `exec_session` manages one after it outlives

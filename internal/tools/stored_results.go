@@ -309,15 +309,17 @@ type WebFetchStoredResult struct {
 }
 
 type WebSearchStoredItem struct {
-	Title   string `json:"title"`
-	URL     string `json:"url"`
-	Snippet string `json:"snippet,omitempty"`
+	Title     string `json:"title"`
+	URL       string `json:"url"`
+	Snippet   string `json:"snippet,omitempty"`
+	Published string `json:"published,omitempty"`
 }
 
 type WebSearchStoredResult struct {
 	Query          string                `json:"query"`
 	AllowedDomains string                `json:"allowed_domains,omitempty"`
 	BlockedDomains string                `json:"blocked_domains,omitempty"`
+	Provider       string                `json:"provider,omitempty"`
 	Items          []WebSearchStoredItem `json:"items,omitempty"`
 }
 

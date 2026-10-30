@@ -32,6 +32,7 @@ import (
 	"github.com/lkarlslund/koder/internal/tools/crontool"
 	"github.com/lkarlslund/koder/internal/tools/phonetool"
 	"github.com/lkarlslund/koder/internal/tools/sessiontool"
+	"github.com/lkarlslund/koder/internal/websearch"
 )
 
 type Runtime struct {
@@ -203,6 +204,9 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		AccessSettings:        r.accessSettings(session),
 		OutputBudgetBytes:     r.outputBudgetBytes(chat),
 		Memory:                r.memory,
+	}
+	if r.settings != nil {
+		runtime.WebSearch = websearch.Backends(r.settings.Snapshot().Search)
 	}
 	runtime.AccessSettings = withSkillMounts(runtime.AccessSettings, projectRoot, skills.InspectWithOptions(projectRoot, runtime.SkillOptions()))
 	if owner := r.loadedSession(session.ID); owner != nil {

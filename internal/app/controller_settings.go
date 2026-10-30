@@ -396,6 +396,10 @@ func (c *Controller) SavePreferences(ctx context.Context, prefs PreferencesState
 		c.mu.Unlock()
 		return PreferencesState{}, err
 	}
+	if err := applySearchPreferences(&next, prefs.Search); err != nil {
+		c.mu.Unlock()
+		return PreferencesState{}, err
+	}
 	if err := applyCompactionPreferences(&next, prefs.Compaction); err != nil {
 		c.mu.Unlock()
 		return PreferencesState{}, err
@@ -1346,6 +1350,7 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 		BrowserRuntime: nativeBrowserRuntimeState(c.agent),
 		Codex:          codexPreferencesFromConfig(c.cfg.Codex),
 		Claude:         claudePreferencesFromConfig(c.cfg.Claude),
+		Search:         searchPreferencesFromConfig(c.cfg.Search),
 		Health:         c.settingsHealthLocked(),
 	}
 	for idx := range state.ModelConfigs {
@@ -2371,6 +2376,8 @@ func (c *Controller) settingsHealthLocked() SettingsHealth {
 			add("skills", "skills", skill.CanonicalPath, "error", "Skill "+skill.Name+": "+skill.Error)
 		}
 	}
+
+	searchHealthIssues(c.cfg.Search, add)
 
 	slices.SortFunc(issues, func(a, b SettingsIssue) int {
 		if cmp := strings.Compare(a.Area, b.Area); cmp != 0 {

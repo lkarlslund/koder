@@ -2206,7 +2206,7 @@ func TestIndexServesHTML(t *testing.T) {
 		strings.Contains(document, `Server disabled`) {
 		t.Fatalf("expected providers and MCP servers to share immediate enable, configure, and delete controls, and phones to be deleted")
 	}
-	if !strings.Contains(appJS, `settingsTabs() { return ['overview', 'models', 'integrations', 'backends', 'tools', 'skills'`) ||
+	if !strings.Contains(appJS, `settingsTabs() { return ['overview', 'models', 'integrations', 'backends', 'tools', 'search', 'skills'`) ||
 		!strings.Contains(document, `x-show="settingsTab === 'integrations'"`) ||
 		!strings.Contains(document, `x-show="settingsTab === 'skills'"`) ||
 		!strings.Contains(document, `@click="openBrowserEditor()"`) ||
@@ -3143,7 +3143,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(document, `toggle-switch-track`) {
 		t.Fatalf("expected tools settings and boolean preferences to use shared toggle sliders")
 	}
-	if !strings.Contains(fullPage, `settingsTabs() { return ['overview', 'models', 'integrations', 'backends', 'tools', 'skills', 'memory', 'voice', 'conversation', 'access', 'prompts']; }`) ||
+	if !strings.Contains(fullPage, `settingsTabs() { return ['overview', 'models', 'integrations', 'backends', 'tools', 'search', 'skills', 'memory', 'voice', 'conversation', 'access', 'prompts']; }`) ||
 		!strings.Contains(document, `data-settings-open`) ||
 		!strings.Contains(document, `settingsTabIssueCount(tab)`) ||
 		!strings.Contains(fullPage, `settings_health`) ||

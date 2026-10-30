@@ -326,6 +326,7 @@ type PreferencesState struct {
 	BrowserRuntime browserapi.Status        `json:"browser_runtime"`
 	Codex          CodexPreferences         `json:"codex"`
 	Claude         ClaudePreferences        `json:"claude"`
+	Search         SearchPreferences        `json:"search"`
 	Health         SettingsHealth           `json:"health"`
 	RestartKeys    []string                 `json:"restart_keys,omitempty"`
 }

@@ -4,11 +4,13 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/websearch"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -67,5 +69,38 @@ func TestWebSearchDomainFilteringAndURLNormalization(t *testing.T) {
 func TestNormalizeDomainList(t *testing.T) {
 	if got := normalizeDomainList(" https://www.Example.com/,docs.example.com,example.com "); got != "docs.example.com,example.com" {
 		t.Fatalf("unexpected normalized domains: %q", got)
+	}
+}
+
+func TestWebSearchFallsBackToTheNextProvider(t *testing.T) {
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer failing.Close()
+	working := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"results":[{"title":"Go docs","url":"https://go.dev/doc","content":"Go is a language","published_date":"2026-10-01"}]}`)
+	}))
+	defer working.Close()
+	exa, _ := websearch.Lookup("exa")
+	tavily, _ := websearch.Lookup("tavily")
+	runtime := tools.Runtime{Workdir: t.TempDir(), WebSearch: []websearch.Backend{
+		{Provider: exa, Settings: websearch.Settings{APIKey: "k", BaseURL: failing.URL}},
+		{Provider: tavily, Settings: websearch.Settings{APIKey: "k", BaseURL: working.URL}},
+	}}
+	req, err := tools.Normalize(tools.Request{Tool: domain.ToolKindWebSearch, Args: map[string]string{"query": "go docs"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: runtime, Request: req})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Meta["provider"] != "tavily" || !strings.HasPrefix(result.Output, "Results from Tavily (Exa: rate limited") || !strings.Contains(result.Output, "Published 2026-10-01") {
+		t.Fatalf("result = %#v", result)
+	}
+
+	runtime.WebSearch = []websearch.Backend{}
+	if _, err := (tool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: req}); err == nil || !strings.Contains(err.Error(), "Settings > Search") {
+		t.Fatalf("no providers: %v", err)
 	}
 }

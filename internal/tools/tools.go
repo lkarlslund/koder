@@ -29,6 +29,7 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/textutil"
+	"github.com/lkarlslund/koder/internal/websearch"
 )
 
 type chatIDContextKey struct{}
@@ -185,6 +186,9 @@ type Runtime struct {
 	AccessSettings        accesssettings.Settings
 	// Memory holds the notes the model keeps across chats.
 	Memory *memory.Store
+	// WebSearch lists the enabled web search providers, most preferred
+	// first. Nil means the defaults.
+	WebSearch []websearch.Backend
 	// OutputBudgetBytes bounds one tool's output by the room left in the
 	// model's context; zero means unknown and tools use their own default.
 	OutputBudgetBytes int

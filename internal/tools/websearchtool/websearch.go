@@ -1,36 +1,27 @@
 package websearchtool
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"html"
-	"io"
-	"net/http"
-	"net/url"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/websearch"
 )
 
 type tool struct{}
-
-type resultItem struct {
-	Title   string
-	URL     string
-	Snippet string
-}
 
 func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Search web",
 		Description: "Search the public web for current or external information.",
-		Usage:       "Search the public web for current or external information beyond the local workspace. Use this to discover relevant pages, news, docs, or references when you do not already know the URL. Use webfetch once you know the page you want to read. Prefer specific queries, and include the current year when looking for recent information. Do not use this for local repository search; use file_grep or file_glob instead. allowed_domains and blocked_domains are optional comma-separated domain lists.",
-		Parameters:  `{"type":"object","properties":{"query":{"type":"string","description":"Search query"},"limit":{"type":"integer","description":"Optional maximum result count"},"allowed_domains":{"type":"string","description":"Optional comma-separated domains to include, such as example.com,docs.example.com"},"blocked_domains":{"type":"string","description":"Optional comma-separated domains to exclude"}},"required":["query"],"additionalProperties":false}`,
+		Usage:       "Search the public web for current or external information beyond the local workspace. Use this to discover relevant pages, news, docs, or references when you do not already know the URL. Use webfetch once you know the page you want to read. Prefer specific queries, and include the current year when looking for recent information. Do not use this for local repository search; use file_grep or file_glob instead. allowed_domains and blocked_domains are optional comma-separated domain lists. recency (day, week, month or year) limits results to recently published pages.",
+		Parameters:  `{"type":"object","properties":{"query":{"type":"string","description":"Search query"},"limit":{"type":"integer","description":"Optional maximum result count"},"allowed_domains":{"type":"string","description":"Optional comma-separated domains to include, such as example.com,docs.example.com"},"blocked_domains":{"type":"string","description":"Optional comma-separated domains to exclude"},"recency":{"type":"string","enum":["day","week","month","year"],"description":"Optional: only pages published within this period"}},"required":["query"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 }
@@ -56,131 +47,93 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	if domains := normalizeDomainList(args["blocked_domains"]); domains != "" {
 		out["blocked_domains"] = domains
 	}
+	if raw := strings.TrimSpace(args["recency"]); raw != "" {
+		recency, err := websearch.ParseRecency(raw)
+		if err != nil {
+			return nil, err
+		}
+		out["recency"] = string(recency)
+	}
 	return out, nil
 }
 func (tool) Preview(req tools.Request) string { return req.Args["query"] }
 func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
-	client := runtime.HTTPClient
-	if client == nil {
-		client = &http.Client{}
+	query := websearch.Query{
+		Text:           req.Args["query"],
+		Limit:          5,
+		AllowedDomains: splitDomainList(req.Args["allowed_domains"]),
+		BlockedDomains: splitDomainList(req.Args["blocked_domains"]),
 	}
-	limit := 5
 	if raw := strings.TrimSpace(req.Args["limit"]); raw != "" {
 		value, err := strconv.Atoi(raw)
 		if err != nil || value <= 0 {
 			return tools.Result{}, errors.New("limit must be a positive integer")
 		}
-		limit = value
+		query.Limit = min(value, websearch.MaxLimit)
 	}
-	allowedDomains := splitDomainList(req.Args["allowed_domains"])
-	blockedDomains := splitDomainList(req.Args["blocked_domains"])
-	endpoint := "https://html.duckduckgo.com/html/?q=" + url.QueryEscape(req.Args["query"])
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	recency, err := websearch.ParseRecency(req.Args["recency"])
 	if err != nil {
 		return tools.Result{}, err
 	}
-	request.Header.Set("User-Agent", "koder/1.0")
-	resp, err := client.Do(request)
-	if err != nil {
-		return tools.Result{}, err
+	query.Recency = recency
+	backends := runtime.WebSearch
+	if backends == nil {
+		// A runtime without search settings uses the default providers.
+		backends = websearch.Backends(config.Search{})
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		return tools.Result{}, fmt.Errorf("search status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	if len(backends) == 0 {
+		return tools.Result{}, errors.New("no web search provider is enabled; enable one under Settings > Search")
 	}
-	var buf bytes.Buffer
-	if _, err := io.CopyN(&buf, resp.Body, int64(tools.DefaultToolOutputLimit)); err != nil && !errors.Is(err, io.EOF) {
-		return tools.Result{}, err
+	// Providers are tried in order of preference until one answers.
+	var failures []string
+	for _, backend := range backends {
+		results, err := backend.Provider.Search(ctx, runtime.HTTPClient, backend.Settings, query)
+		if err != nil {
+			failures = append(failures, err.Error())
+			continue
+		}
+		return searchResult(req, backend.Provider, results, failures), nil
 	}
-	results := parseResults(buf.String(), limit*4)
-	results = filterResults(results, allowedDomains, blockedDomains)
-	if len(results) > limit {
-		results = results[:limit]
+	return tools.Result{}, fmt.Errorf("every web search provider failed:\n%s", strings.Join(failures, "\n"))
+}
+
+func searchResult(req tools.Request, provider websearch.Provider, results []websearch.Result, failures []string) tools.Result {
+	meta := map[string]string{
+		"query":           req.Args["query"],
+		"allowed_domains": req.Args["allowed_domains"],
+		"blocked_domains": req.Args["blocked_domains"],
+		"recency":         req.Args["recency"],
+		"provider":        provider.ID,
+		"results":         strconv.Itoa(len(results)),
+	}
+	stored := tools.WebSearchStoredResult{
+		Query:          req.Args["query"],
+		AllowedDomains: req.Args["allowed_domains"],
+		BlockedDomains: req.Args["blocked_domains"],
+		Provider:       provider.Title,
+	}
+	lines := []string{"Results from " + provider.Title + ":"}
+	if len(failures) > 0 {
+		lines[0] = "Results from " + provider.Title + " (" + strings.Join(failures, "; ") + "):"
 	}
 	if len(results) == 0 {
-		return tools.Result{
-			Output: "No results found",
-			Meta: map[string]string{
-				"query":           req.Args["query"],
-				"allowed_domains": req.Args["allowed_domains"],
-				"blocked_domains": req.Args["blocked_domains"],
-				"results":         "0",
-			},
-			Stored: tools.WebSearchStoredResult{
-				Query:          req.Args["query"],
-				AllowedDomains: req.Args["allowed_domains"],
-				BlockedDomains: req.Args["blocked_domains"],
-			},
-		}, nil
+		lines = append(lines, "No results found")
 	}
-	lines := make([]string, 0, len(results)*3)
 	for idx, item := range results {
-		lines = append(lines, fmt.Sprintf("%d. %s", idx+1, item.Title))
-		lines = append(lines, item.URL)
+		lines = append(lines, fmt.Sprintf("%d. %s", idx+1, item.Title), item.URL)
+		published := ""
+		if !item.Published.IsZero() {
+			published = item.Published.Format(time.DateOnly)
+			lines = append(lines, "Published "+published)
+		}
 		if item.Snippet != "" {
 			lines = append(lines, item.Snippet)
 		}
 		lines = append(lines, "")
+		stored.Items = append(stored.Items, tools.WebSearchStoredItem{Title: item.Title, URL: item.URL, Snippet: item.Snippet, Published: published})
 	}
-	storedItems := make([]tools.WebSearchStoredItem, 0, len(results))
-	for _, item := range results {
-		storedItems = append(storedItems, tools.WebSearchStoredItem{
-			Title:   item.Title,
-			URL:     item.URL,
-			Snippet: item.Snippet,
-		})
-	}
-	return tools.Result{
-		Output: strings.TrimSpace(strings.Join(lines, "\n")),
-		Meta: map[string]string{
-			"query":           req.Args["query"],
-			"allowed_domains": req.Args["allowed_domains"],
-			"blocked_domains": req.Args["blocked_domains"],
-			"results":         strconv.Itoa(len(results)),
-		},
-		Stored: tools.WebSearchStoredResult{
-			Query:          req.Args["query"],
-			AllowedDomains: req.Args["allowed_domains"],
-			BlockedDomains: req.Args["blocked_domains"],
-			Items:          storedItems,
-		},
-	}, nil
-}
-
-var (
-	resultPattern  = regexp.MustCompile(`(?is)<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>`)
-	snippetPattern = regexp.MustCompile(`(?is)<a[^>]*class="[^"]*result__a[^"]*"[^>]*>.*?</a>(.*?)</div>`)
-	tagPattern     = regexp.MustCompile(`(?s)<[^>]+>`)
-)
-
-func parseResults(body string, limit int) []resultItem {
-	matches := resultPattern.FindAllStringSubmatchIndex(body, limit)
-	results := make([]resultItem, 0, len(matches))
-	for _, match := range matches {
-		if len(match) < 6 {
-			continue
-		}
-		href := normalizeResultURL(html.UnescapeString(body[match[2]:match[3]]))
-		title := cleanHTML(body[match[4]:match[5]])
-		tail := body[match[1]:]
-		snippet := ""
-		if snippetMatch := snippetPattern.FindStringSubmatch(tail); len(snippetMatch) > 1 {
-			snippet = cleanHTML(snippetMatch[1])
-		}
-		results = append(results, resultItem{
-			Title:   title,
-			URL:     href,
-			Snippet: snippet,
-		})
-	}
-	return results
-}
-
-func cleanHTML(value string) string {
-	value = tagPattern.ReplaceAllString(value, " ")
-	return strings.TrimSpace(strings.Join(strings.Fields(html.UnescapeString(value)), " "))
+	return tools.Result{Output: strings.TrimSpace(strings.Join(lines, "\n")), Meta: meta, Stored: stored}
 }
 
 func normalizeDomainList(raw string) string {
@@ -212,66 +165,4 @@ func splitDomainList(raw string) []string {
 		out = append(out, part)
 	}
 	return out
-}
-
-func filterResults(results []resultItem, allowedDomains []string, blockedDomains []string) []resultItem {
-	if len(allowedDomains) == 0 && len(blockedDomains) == 0 {
-		return results
-	}
-	filtered := make([]resultItem, 0, len(results))
-	for _, item := range results {
-		if !domainAllowed(item.URL, allowedDomains, blockedDomains) {
-			continue
-		}
-		filtered = append(filtered, item)
-	}
-	return filtered
-}
-
-func domainAllowed(rawURL string, allowedDomains []string, blockedDomains []string) bool {
-	host := normalizedHost(rawURL)
-	if host == "" {
-		return len(allowedDomains) == 0
-	}
-	for _, domain := range blockedDomains {
-		if hostMatchesDomain(host, domain) {
-			return false
-		}
-	}
-	if len(allowedDomains) == 0 {
-		return true
-	}
-	for _, domain := range allowedDomains {
-		if hostMatchesDomain(host, domain) {
-			return true
-		}
-	}
-	return false
-}
-
-func normalizedHost(rawURL string) string {
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil {
-		return ""
-	}
-	host := strings.ToLower(parsed.Hostname())
-	host = strings.TrimPrefix(host, "www.")
-	return host
-}
-
-func hostMatchesDomain(host string, domain string) bool {
-	return host == domain || strings.HasSuffix(host, "."+domain)
-}
-
-func normalizeResultURL(rawURL string) string {
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil {
-		return strings.TrimSpace(rawURL)
-	}
-	if parsed.Host == "duckduckgo.com" && parsed.Path == "/l/" {
-		if target := parsed.Query().Get("uddg"); strings.TrimSpace(target) != "" {
-			return target
-		}
-	}
-	return parsed.String()
 }
