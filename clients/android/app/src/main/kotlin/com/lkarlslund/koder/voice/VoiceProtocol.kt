@@ -394,10 +394,12 @@ object VoiceProtocol {
 		responsePacing: VoiceResponsePacing = VoiceResponsePacing.NORMAL,
 		inputCompression: AudioCompression = AudioCompression.PCM,
 		outputCompression: AudioCompression = AudioCompression.OPUS_BALANCED,
+		replyMode: VoiceReplyMode = VoiceReplyMode.SPEECH,
 	): String = JSONObject()
         .put("type", "hello")
         .put("protocol", VOICE_PROTOCOL)
 		.put("response_pacing", responsePacing.wireValue)
+		.put("reply_mode", replyMode.wireValue)
 		.put("audio_encodings", JSONArray(if (inputCompression == AudioCompression.PCM) listOf(PCM16_ENCODING, OPUS_ENCODING) else listOf(OPUS_ENCODING, PCM16_ENCODING)))
 		.put("input_transport_preference", inputCompression.preference().toJSON())
 		.put("output_transport_preference", outputCompression.preference().toJSON())

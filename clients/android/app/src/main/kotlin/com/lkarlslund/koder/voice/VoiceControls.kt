@@ -20,6 +20,12 @@ enum class VoiceResponsePacing(val wireValue: String, val title: String, val des
 	}
 }
 
+/** How Koder replies on this connection: spoken in a call, or written for the screen. */
+enum class VoiceReplyMode(val wireValue: String) {
+	SPEECH("speech"),
+	TEXT("text"),
+}
+
 enum class ConversationAvailability { CONNECTING, RETRYING, ONLINE, PAUSED, OFFLINE }
 
 fun conversationAvailability(stage: CallController.Stage?, detail: String = ""): ConversationAvailability = when {

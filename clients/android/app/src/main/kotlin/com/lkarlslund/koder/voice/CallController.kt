@@ -48,6 +48,8 @@ class CallController(
 		val phoneToolsConnected: Boolean = false,
 		val turnErrorId: String = "",
 		val pendingAttachmentName: String = "",
+		/** A typed conversation: no call, microphone or speech; replies are written. */
+		val textMode: Boolean = false,
     )
 
     interface Listener {
@@ -167,6 +169,7 @@ class CallController(
 
 	@Volatile private var snapshot = Snapshot()
     @Volatile private var running = false
+	@Volatile private var textMode = false
 	@Volatile private var serverReady = false
     private var telecomReady = false
     private var audioEndpoint = "phone audio"
@@ -204,10 +207,12 @@ class CallController(
 		responsePacing: VoiceResponsePacing = VoiceResponsePacing.NORMAL,
 		inputCompression: AudioCompression = AudioCompression.PCM,
 		outputCompression: AudioCompression = AudioCompression.OPUS_BALANCED,
+		textMode: Boolean = false,
 	) {
         if (running) end()
-		AppLog.i(LOG_CALL, "Conversation starting: chat=$chatId route=$builtInAudioRoute input=$inputCompression output=$outputCompression")
+		AppLog.i(LOG_CALL, "Conversation starting: chat=$chatId text=$textMode route=$builtInAudioRoute input=$inputCompression output=$outputCompression")
         running = true
+		this.textMode = textMode
 		diagnostics.reset()
         serverReady = false
         telecomReady = false
@@ -238,12 +243,21 @@ class CallController(
 		endpoint.configure(listeningEndpointConfig)
 		telecom.setBuiltInAudioRoute(builtInAudioRoute)
 		VoiceCallControlRegistry.attach(this)
-		snapshot = Snapshot(stage = Stage.CONNECTING, detail = "Connecting…", activeSessionId = sessionId, voiceSessionId = chatId)
+		snapshot = Snapshot(stage = Stage.CONNECTING, detail = "Connecting…", activeSessionId = sessionId, voiceSessionId = chatId, textMode = textMode)
         publish()
-        appContext.startForegroundService(Intent(appContext, VoiceCallService::class.java))
-        telecom.start()
+		if (textMode) {
+			// A typed conversation holds no call: it never takes audio focus,
+			// the microphone or a call notification.
+			telecomReady = true
+		} else {
+			appContext.startForegroundService(Intent(appContext, VoiceCallService::class.java))
+			telecom.start()
+		}
         try {
-			connection.connect(server, token, sessionId, chatId, responsePacing, inputCompression, outputCompression)
+			connection.connect(
+				server, token, sessionId, chatId, responsePacing, inputCompression, outputCompression,
+				if (textMode) VoiceReplyMode.TEXT else VoiceReplyMode.SPEECH,
+			)
         } catch (error: Exception) {
             update(Stage.ERROR, error.message ?: "Connection failed")
         }
@@ -414,9 +428,11 @@ class CallController(
         endpoint.reset()
         connection.close()
 		phoneDevice.close()
-        telecom.disconnect()
+		if (!textMode) {
+			telecom.disconnect()
+			appContext.stopService(Intent(appContext, VoiceCallService::class.java))
+		}
 		VoiceCallControlRegistry.detach(this)
-        appContext.stopService(Intent(appContext, VoiceCallService::class.java))
 		snapshot = Snapshot(stage = Stage.DISCONNECTED, detail = "Conversation paused", phoneToolsConnected = false)
         publish()
     }
@@ -617,6 +633,10 @@ class CallController(
 
 	    private fun maybeListen(force: Boolean = false) {
 	        if (!running || !serverReady || !telecomReady || audioConfig == null) return
+			if (textMode) {
+				update(Stage.LISTENING, "Connected · type a message")
+				return
+			}
 			if (pausedByUser || telecomHeld) {
 				update(Stage.HELD, "Conversation paused")
 				return

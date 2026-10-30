@@ -43,6 +43,14 @@ class VoiceProtocolTest {
 	}
 
 	@Test
+	fun helloAsksForSpokenRepliesUnlessTheConversationIsTyped() {
+		assertEquals("speech", JSONObject(VoiceProtocol.hello()).getString("reply_mode"))
+		val typed = JSONObject(VoiceProtocol.hello(replyMode = VoiceReplyMode.TEXT))
+		assertEquals("text", typed.getString("reply_mode"))
+		assertFalse(typed.has("text"))
+	}
+
+	@Test
 	fun defaultHelloUsesLosslessMicrophoneAndBalancedPlayback() {
 		val hello = JSONObject(VoiceProtocol.hello())
 		assertEquals(listOf("pcm_s16le", "opus"), List(hello.getJSONArray("audio_encodings").length()) { hello.getJSONArray("audio_encodings").getString(it) })

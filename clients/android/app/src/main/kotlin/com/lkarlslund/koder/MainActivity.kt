@@ -215,6 +215,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 	private var muteButton: ImageButton? = null
 	private var latestCallSnapshot = CallController.Snapshot()
 	private var conversationListeningActive = false
+	/** The open conversation is typed: no call, written replies. */
+	private var conversationTextMode = false
 	private var transcriptShown = false
 	private var transcriptOpened = false
 	private var followConversationBottom = true
@@ -1721,7 +1723,7 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		gravity = Gravity.CENTER_VERTICAL
 		setPadding(dp(14), dp(11), dp(14), dp(11))
 		background = cardBackground()
-		val selectable = chat.isVoiceChat && !chat.archived && !session.archived
+		val selectable = !chat.archived && !session.archived
 		alpha = if (selectable) 1f else 0.72f
 		val titleText = chat.title.ifBlank { "Untitled chat" }
 		val detail = listOf(chat.role.ifBlank { "chat" }.replaceFirstChar { it.titlecase() }, chat.statusText.ifBlank { chat.status }, chat.updatedAt?.let { compactLastUsedText(it.toEpochMilli()) }.orEmpty())
@@ -1744,8 +1746,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		})
 		isClickable = true
 		isFocusable = true
-		contentDescription = if (selectable) "Open voice conversation ${chat.title}" else "${chat.title}, ${chat.role} chat, visible but not selectable"
-		setOnClickListener { view -> if (selectable) openChat(chat) else showKoderChatMenu(view, chat) }
+		contentDescription = when {
+			!selectable -> "${chat.title}, ${chat.role} chat, archived"
+			chat.isVoiceChat -> "Open voice conversation ${chat.title}"
+			else -> "Open ${chat.title}"
+		}
+		// A chat created for voice opens as a call; any other chat opens typed,
+		// and Talk turns it into a call.
+		setOnClickListener { view -> if (selectable) openChat(chat, textMode = !chat.isVoiceChat) else showKoderChatMenu(view, chat) }
 	}
 
 	private fun showKoderChatMenu(anchor: View, chat: VoiceSession) {
@@ -2423,13 +2431,14 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		render(composerPhotoPreview, includeCamera = false)
 	}
 
-    private fun openChat(session: VoiceSession, startConnection: Boolean = true, initialDetail: String = "Connecting…") {
+    private fun openChat(session: VoiceSession, startConnection: Boolean = true, initialDetail: String = "Connecting…", textMode: Boolean = false) {
         screen = Screen.CHAT
         clearCallViews()
+		conversationTextMode = textMode
 		clearPendingPhonePhoto()
         pendingSession = session
 		secureSettings.markVoiceSessionRead(session.id, session.resultCount)
-		transcriptShown = false
+		transcriptShown = textMode
 		transcriptOpened = false
 		followConversationBottom = true
 		unreadConversationMessages = 0
@@ -2458,7 +2467,13 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                     marginStart = dp(10)
                 },
             )
-			muteButton = iconActionButton(R.drawable.ic_voice_mic, "Mute microphone", ACTION_BLUE).apply {
+			if (textMode) {
+				addView(iconActionButton(R.drawable.ic_voice_mic, "Talk", ACTION_GREEN).apply {
+					contentDescription = "Talk to this chat"
+					ViewCompat.setTooltipText(this, contentDescription)
+					setOnClickListener { switchConversationMode(textMode = false) }
+				}, actionLayout(start = 6))
+			} else muteButton = iconActionButton(R.drawable.ic_voice_mic, "Mute microphone", ACTION_BLUE).apply {
 					contentDescription = "Mute microphone"
 					setOnClickListener { controller.setMicrophoneMuted(!latestCallSnapshot.microphoneMuted) }
 				}.also { addView(it, actionLayout(start = 6)) }
@@ -2661,7 +2676,9 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			val catalog = readinessHome?.chatBackends.orEmpty().firstOrNull { it.id == "koder" }?.models.orEmpty()
 			val available = session.backend != "koder" || catalog.isEmpty() ||
 				catalog.any { it.providerId == session.providerId && it.id == session.modelId }
-			if (available) requestCallStart() else {
+			if (available) {
+				if (textMode) startCall() else requestCallStart()
+			} else {
 				startAfterModelRecovery = true
 				updateConversationStatus(CallController.Stage.ERROR, "This conversation's model is no longer available")
 				root.post { showChatModelDialog(session) }
@@ -2721,7 +2738,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			scrollToBottom(force = true)
 		}
 		transcriptButton?.apply {
-			visibility = View.VISIBLE
+			// A typed conversation is its transcript; there is nothing to toggle.
+			visibility = if (conversationTextMode) View.GONE else View.VISIBLE
 			contentDescription = if (transcriptShown) "Hide transcript" else "Show transcript"
 			setActionAppearance(this, ACTION_BLUE, transcriptShown)
 			ViewCompat.setTooltipText(this, contentDescription)
@@ -2750,7 +2768,12 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		}
 	}
 
-	private fun isConversationListening(stage: CallController.Stage?): Boolean = when (stage) {
+	private fun isConversationListening(stage: CallController.Stage?): Boolean = when {
+		conversationTextMode -> false
+		else -> isCallListening(stage)
+	}
+
+	private fun isCallListening(stage: CallController.Stage?): Boolean = when (stage) {
 		null -> conversationListeningActive
 		CallController.Stage.DISCONNECTED, CallController.Stage.HELD, CallController.Stage.ERROR -> false
 		else -> true
@@ -2766,6 +2789,20 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		val endpoints = latestCallSnapshot.audioEndpoints
 		val currentRoute = latestCallSnapshot.audioEndpointName.ifBlank { "Connecting…" }
 		PopupMenu(this, anchor).apply {
+			if (conversationTextMode) {
+				menu.add(0, MENU_TALK, 0, "Talk to this chat")
+				menu.add(0, MENU_SAVED_RESPONSES, 1, "Saved responses")
+				setOnMenuItemClickListener { item ->
+					when (item.itemId) {
+						MENU_TALK -> switchConversationMode(textMode = false)
+						MENU_SAVED_RESPONSES -> showSavedResponses()
+					}
+					true
+				}
+				show()
+				return
+			}
+			menu.add(0, MENU_TYPE, 0, "Switch to typing")
 			menu.add(0, MENU_AUDIO_HEADER, 0, "Audio source · $currentRoute").isEnabled = false
 			endpoints.forEachIndexed { index, endpoint ->
 				menu.add(MENU_AUDIO_GROUP, MENU_AUDIO_ENDPOINT_START + index, index + 1, (if (endpoint.current) "✓  " else "") + endpoint.name)
@@ -2779,6 +2816,10 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 				}
 				if (item.itemId == MENU_SAVED_RESPONSES) {
 					showSavedResponses()
+					return@setOnMenuItemClickListener true
+				}
+				if (item.itemId == MENU_TYPE) {
+					switchConversationMode(textMode = true)
 					return@setOnMenuItemClickListener true
 				}
 				val endpoint = endpoints.getOrNull(item.itemId - MENU_AUDIO_ENDPOINT_START) ?: return@setOnMenuItemClickListener false
@@ -2971,8 +3012,16 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 			settings.responsePacing,
 			settings.inputCompression,
 			settings.outputCompression,
+			conversationTextMode,
 		)
     }
+
+	/** Reopens the current chat typed or as a call, keeping the same chat. */
+	private fun switchConversationMode(textMode: Boolean) {
+		val session = pendingSession ?: return
+		controller.end()
+		openChat(session, textMode = textMode)
+	}
 
 	private fun addPart(part: VoicePart, transcriptId: String = "") {
         when {
@@ -3437,7 +3486,15 @@ class MainActivity : ComponentActivity(), CallController.Listener {
                 alpha = 1f
                 setTypeface(typeface, Typeface.BOLD)
             }, matchWrap())
-			addView(body(text).apply { maxWidth = dp(310) }, spaced(top = 4))
+			addView(body(text).apply {
+				maxWidth = dp(310)
+				// Koder's replies may be Markdown, especially from chats used
+				// in the Web UI or in the phone's typed mode.
+				if (!fromUser) {
+					this.text = Html.fromHtml(markdownToHtml(text), Html.FROM_HTML_MODE_LEGACY).trim()
+					movementMethod = LinkMovementMethod.getInstance()
+				}
+			}, spaced(top = 4))
 			addView(helper(savedResponseLabels(entryId)).apply {
 				tag = "saved:$entryId"
 				visibility = if (text.isBlank()) View.GONE else View.VISIBLE
@@ -3833,6 +3890,8 @@ class MainActivity : ComponentActivity(), CallController.Listener {
 		private const val MENU_AUDIO_GROUP = 1
 		private const val MENU_AUDIO_DIAGNOSTICS = 1_200
 		private const val MENU_SAVED_RESPONSES = 1_201
+		private const val MENU_TALK = 1_202
+		private const val MENU_TYPE = 1_203
 		private const val ACTION_BLUE = 0xff3867d6.toInt()
 		private const val ACTION_GREEN = 0xff16856b.toInt()
 		private const val ACTION_ORANGE = 0xffd97706.toInt()

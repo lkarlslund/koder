@@ -552,7 +552,7 @@ class MainActivityInstrumentedTest {
 	}
 
 	@Test
-	fun sessionBrowserHidesArchivedChatsUntilRequestedAndOnlyVoiceChatsAreSelectable() {
+	fun sessionBrowserHidesArchivedChatsUntilRequestedAndEveryOpenChatIsSelectable() {
 		val server = MockWebServer()
 		server.dispatcher = object : Dispatcher() {
 			override fun dispatch(request: RecordedRequest): MockResponse = when (request.target) {
@@ -587,7 +587,8 @@ class MainActivityInstrumentedTest {
 				onView(withContentDescription("Hide archived (1)")).check(matches(isDisplayed()))
 				assertTrue(labels.contains("BIOS investigation"))
 				assertTrue(labels.any { it.contains("Checking firmware") })
-				onView(withContentDescription("BIOS investigation, execution chat, visible but not selectable")).check(matches(isDisplayed()))
+				// Any open chat can be joined; one created for voice opens as a call.
+				onView(withContentDescription("Open BIOS investigation")).check(matches(isDisplayed()))
 				onView(withContentDescription("Open voice conversation Laptop conversation")).check(matches(isDisplayed()))
 				onView(withContentDescription("Chat options for BIOS investigation")).perform(click())
 				onView(withText("Archive")).perform(click())
@@ -743,6 +744,68 @@ class MainActivityInstrumentedTest {
 				onView(withContentDescription("Update available: foreground-dev")).check(matches(isDisplayed()))
 			}
 		} finally {
+			server.close()
+		}
+	}
+
+	@Test
+	fun ordinaryChatOpensTypedWithoutACallAndReadsMarkdownReplies() {
+		val server = MockWebServer()
+		val clientFrames = java.util.concurrent.LinkedBlockingQueue<String>()
+		var voiceSocket: WebSocket? = null
+		server.enqueue(MockResponse.Builder().body(
+			"""{"protocol":"voice.v1","sessions":[{"id":"session-code","title":"Koder work","kind":"regular","chat_count":1,"voice_chat_count":0}],"voice_sessions":[]}""",
+		).build())
+		server.enqueue(MockResponse.Builder().body(
+			"""{"protocol":"voice.v1","chats":[{"id":"chat-code","session_id":"session-code","title":"Code review","role":"execution","interaction_mode":"text"}],"voice_sessions":[]}""",
+		).build())
+		val ready = """{"type":"ready","protocol":"voice.v1","audio_config":{"input":{"encoding":"pcm_s16le","sample_rate":16000,"channels":1},"output":{"encoding":"pcm_s16le","sample_rate":24000,"channels":1},"max_utterance_seconds":120},"call_state":{"session_id":"session-code","chat_id":"chat-code","sessions":[{"id":"session-code","title":"Koder work"}],"chats":[{"id":"chat-code","session_id":"session-code","title":"Code review","role":"execution"}],"history":[]}}"""
+		server.enqueue(MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
+			override fun onOpen(webSocket: WebSocket, response: Response) {
+				voiceSocket = webSocket
+				webSocket.send(ready)
+			}
+
+			override fun onMessage(webSocket: WebSocket, text: String) {
+				clientFrames.add(text)
+				val frame = org.json.JSONObject(text)
+				if (frame.optString("type") == "utterance") {
+					val id = frame.getString("utterance_id")
+					webSocket.send("""{"type":"message","protocol":"voice.v1","utterance_id":"$id","message":{"transcript_id":"reply-1","parts":[{"mime_type":"text/markdown","data":"**Done.** All tests pass."}]}}""")
+					webSocket.send(ready)
+				}
+			}
+		}).build())
+		server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+		try {
+			SecureSettings(context).save(server.url("/").toString(), "")
+			ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+				waitForText(scenario, "Koder work")
+				onView(withContentDescription("Open Koder work. 1 chat · 0 voice")).perform(click())
+				waitForText(scenario, "Code review")
+				onView(withContentDescription("Open Code review")).perform(click())
+				// Typed: a Talk button instead of microphone controls, and the composer.
+				waitForDisplayedDescription("Talk to this chat")
+				onView(withContentDescription("Text message to Koder")).check(matches(isDisplayed()))
+				scenario.onActivity { activity ->
+					val descriptions = activity.findViewById<View>(android.R.id.content).allViews().mapNotNull { it.contentDescription?.toString() }.toList()
+					assertFalse("A typed chat has no microphone control", "Mute microphone" in descriptions)
+				}
+				var hello: org.json.JSONObject? = null
+				repeat(50) {
+					if (hello == null) clientFrames.poll(100, java.util.concurrent.TimeUnit.MILLISECONDS)?.let { org.json.JSONObject(it) }?.takeIf { it.optString("type") == "hello" }?.let { hello = it }
+				}
+				assertEquals("text", hello?.optString("reply_mode"))
+				onView(withContentDescription("Text message to Koder")).perform(replaceText("Did the tests pass?"))
+				onView(withContentDescription("Send message")).perform(click())
+				// The Markdown reply is rendered, not shown with its asterisks.
+				val labels = waitForText(scenario, "Done. All tests pass.")
+				assertTrue(labels.none { it.contains("**") })
+				onView(withContentDescription("Conversation options")).perform(click())
+				onView(withText("Talk to this chat")).check(matches(isDisplayed()))
+			}
+		} finally {
+			voiceSocket?.close(1000, "test complete")
 			server.close()
 		}
 	}
