@@ -1146,7 +1146,7 @@ function timeoutLabel(value) {
         toolCommandModal: {open: false, command: '', subtitle: '', meta: [], output: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-		browserStatus: {state: 'unknown', owned_tabs: 0}, browserStatusTimer: null, browserTabs: [], browserTabsLoading: false, activityNow: Date.now(), activityTimer: null, workspacePollTimer: null, scheduledJobs: {sessions: {}, chats: {}}, filterMenuOpen: '', cronJobModal: {open: false, jobID: ''},
+		browserStatus: {state: 'unknown', owned_tabs: 0}, browserStatusTimer: null, browserTabs: [], browserTabsLoading: false, activityNow: Date.now(), activityTimer: null, talkChatID: '', workspacePollTimer: null, scheduledJobs: {sessions: {}, chats: {}}, filterMenuOpen: '', cronJobModal: {open: false, jobID: ''},
 		browserPreview: {open: false, tab: null, rate: Number(readPreference('browserPreviewRate', '2')), src: '', loading: false, error: '', lastUpdated: '', timer: null, generation: 0},
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
@@ -2538,7 +2538,13 @@ function timeoutLabel(value) {
         sessionLoadedMode() { return !this.welcomeMode() && !this.hydratingSessionMode(); },
         quickChatMode() { return this.isQuickSession(this.currentSession()); },
         legacyVoiceSessionMode() { return this.isVoiceSession(this.currentSession()); },
-        voiceChatMode() { return this.legacyVoiceSessionMode() || this.activeChatRole() === 'voice'; },
+        // chatCreatedForVoice marks a chat made as a voice conversation; any
+        // chat can be talked to, which voiceChatMode covers while it is.
+        chatCreatedForVoice() {
+          const chat = this.activeChat();
+          return this.legacyVoiceSessionMode() || this.activeChatRole() === 'voice' || String(chat.interaction_mode || chat.InteractionMode || '') === 'voice';
+        },
+        voiceChatMode() { return this.chatCreatedForVoice() || (!!this.talkChatID && this.talkChatID === String(this.activeChatID() || '')); },
         singleChatMode() { return this.quickChatMode() || this.legacyVoiceSessionMode(); },
         workspaceSessionMode() { return !this.singleChatMode(); },
         switchingChatMode() { return !!this.switchingChat.active; },
@@ -4941,10 +4947,12 @@ function timeoutLabel(value) {
           if (resolve) resolve(!!confirmed);
         },
         async openBrowserVoice() {
-          if (!this.voiceChatMode()) {
-            this.showToast('Select a voice chat first');
+          const chatID = String(this.activeChatID() || '').trim();
+          if (!chatID) {
+            this.showToast('Select a chat first');
             return;
           }
+          this.talkChatID = chatID;
           this.browserVoice = {...this.browserVoice, open: true};
 		  if (this.browserVoice.mode === 'vad' && !this.browserVoice.active) await this.startBrowserVoice();
         },
