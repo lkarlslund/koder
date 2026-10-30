@@ -93,6 +93,14 @@ func TestSettingsBrowserNavigationGroupsConfigurationByDomain(t *testing.T) {
 			t.Fatalf("saved searxng settings = %+v", got)
 		}
 	}
+	// Test is usable for a configured provider and not for one that lacks a key.
+	var testDisabled map[string]bool
+	if err := chromedp.Run(browserCtx, chromedp.Evaluate(`Object.fromEntries(Array.from(document.querySelectorAll('[data-search-provider]')).map(row => [row.dataset.searchProvider, row.querySelector('[data-search-test]').disabled]))`, &testDisabled)); err != nil {
+		t.Fatalf("read search test buttons: %v", err)
+	}
+	if testDisabled["searxng"] || !testDisabled["exa"] {
+		t.Fatalf("search Test buttons disabled = %v, want searxng enabled and exa disabled", testDisabled)
+	}
 	assertSettingsPageContains(t, browserCtx, "skills", "Agent Skills")
 	assertSettingsPageContains(t, browserCtx, "memory", "Global memory", "No memories yet")
 	assertSettingsPageContains(t, browserCtx, "voice", "Android devices", "Speech output")
