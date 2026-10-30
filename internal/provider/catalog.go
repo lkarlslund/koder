@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -13,32 +14,13 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 )
 
-type AuthMethodKind string
-
-const (
-	ProviderKindCompatible string = "openai-compatible"
-)
-
-type Descriptor struct {
-	ID             string
-	Title          string
-	Description    string
-	DefaultBaseURL string
-	Headers        map[string]string
-	ModelHint      string
-	Local          bool
-	// RequiresAPIKey marks hosted services that reject requests without a key.
-	RequiresAPIKey bool
-	SupportsImages bool
-	SupportsPDFs   bool
-}
+// ProviderKindCompatible is the only kind of provider: a server reached by
+// URL, whose endpoints and request options are probed rather than chosen.
+const ProviderKindCompatible string = "openai-compatible"
 
 type ConnectDraft struct {
 	OriginalProviderID      string
 	ProviderID              string
-	TemplateID              string
-	Kind                    string
-	AuthMethod              string
 	Name                    string
 	BaseURL                 string
 	Transport               string
@@ -69,82 +51,26 @@ type ProbeResult struct {
 	PromptProgressTarget    string
 }
 
-var catalog = []Descriptor{
-	{ID: "openai", Title: "OpenAI", Description: "Direct OpenAI API access", DefaultBaseURL: "https://api.openai.com/v1", ModelHint: "gpt-5.4", RequiresAPIKey: true, SupportsImages: true},
-	{ID: "openrouter", Title: "OpenRouter", Description: "Unified OpenAI-compatible gateway", DefaultBaseURL: "https://openrouter.ai/api/v1", ModelHint: "openai/gpt-5.4", RequiresAPIKey: true, SupportsImages: true},
-	{ID: "groq", Title: "Groq", Description: "Low-latency OpenAI-compatible API", DefaultBaseURL: "https://api.groq.com/openai/v1", ModelHint: "llama-3.3-70b-versatile", RequiresAPIKey: true, SupportsImages: true},
-	{ID: "xai", Title: "xAI", Description: "OpenAI-compatible xAI endpoint", DefaultBaseURL: "https://api.x.ai/v1", ModelHint: "grok-3-mini", RequiresAPIKey: true, SupportsImages: true},
-	{ID: "deepseek", Title: "DeepSeek", Description: "DeepSeek OpenAI-compatible API", DefaultBaseURL: "https://api.deepseek.com/v1", ModelHint: "deepseek-chat", RequiresAPIKey: true, SupportsImages: true},
-	{ID: "together", Title: "Together", Description: "Together AI OpenAI-compatible API", DefaultBaseURL: "https://api.together.xyz/v1", ModelHint: "meta-llama/Llama-3.3-70B-Instruct-Turbo", RequiresAPIKey: true, SupportsImages: true},
-	{ID: "perplexity", Title: "Perplexity", Description: "Perplexity chat completions API", DefaultBaseURL: "https://api.perplexity.ai", ModelHint: "sonar", RequiresAPIKey: true},
-	{ID: "mistral", Title: "Mistral", Description: "Mistral OpenAI-compatible API", DefaultBaseURL: "https://api.mistral.ai/v1", ModelHint: "mistral-large-latest", RequiresAPIKey: true, SupportsImages: true},
-	{ID: "cerebras", Title: "Cerebras", Description: "Cerebras OpenAI-compatible API", DefaultBaseURL: "https://api.cerebras.ai/v1", ModelHint: "llama-4-scout-17b-16e-instruct", RequiresAPIKey: true, SupportsImages: true},
-	{ID: "ollama", Title: "Ollama", Description: "Local Ollama OpenAI-compatible endpoint", DefaultBaseURL: "http://127.0.0.1:11434/v1", ModelHint: "qwen2.5-coder:latest", Local: true, SupportsImages: true},
-	{ID: "openai-compatible", Title: "Custom server", Description: "Any server URL; Koder detects what it supports", ModelHint: "model-id", SupportsImages: true},
-}
-
-func Catalog() []Descriptor {
-	out := make([]Descriptor, len(catalog))
-	copy(out, catalog)
-	return out
-}
-
-func Lookup(id string) (Descriptor, bool) {
-	for _, item := range catalog {
-		if item.ID == strings.TrimSpace(id) {
-			return item, true
-		}
-	}
-	return Descriptor{}, false
-}
-
-func BuildDraft(id string, existing map[string]config.Provider) (ConnectDraft, error) {
-	desc, ok := Lookup(id)
-	if !ok {
-		return ConnectDraft{}, fmt.Errorf("provider %q not found", id)
-	}
-	draft := ConnectDraft{
-		OriginalProviderID: UniqueProviderID(desc.ID, existing),
-		ProviderID:         UniqueProviderID(desc.ID, existing),
-		TemplateID:         desc.ID,
-		Kind:               ProviderKindCompatible,
-		Name:               desc.Title,
-		BaseURL:            desc.DefaultBaseURL,
-		Model:              desc.ModelHint,
+// NewDraft returns an empty draft for a new provider: probing fills in what
+// the server supports and names it.
+func NewDraft() ConnectDraft {
+	return ConnectDraft{
 		Stream:             true,
 		Timeout:            2 * time.Minute,
-		Headers:            cloneHeaders(desc.Headers),
+		Headers:            map[string]string{},
 		PromptProgressMode: config.NormalizePromptProgressMode("auto"),
 	}
-	return draft, nil
 }
 
-func BuildDraftForExisting(id string, existing config.Provider) (ConnectDraft, error) {
-	templateID := strings.TrimSpace(existing.TemplateID)
-	if templateID == "" {
-		templateID = inferTemplateID(id, existing)
-	}
-	desc, ok := Lookup(templateID)
-	if !ok {
-		desc = Descriptor{
-			ID:             templateID,
-			Title:          firstNonEmpty(existing.Name, id),
-			Description:    "Configured provider",
-			DefaultBaseURL: existing.BaseURL,
-		}
-	}
+func BuildDraftForExisting(id string, existing config.Provider) ConnectDraft {
 	return ConnectDraft{
 		OriginalProviderID:      id,
 		ProviderID:              id,
-		TemplateID:              templateID,
-		Kind:                    firstNonEmpty(existing.Kind, ProviderKindCompatible),
-		AuthMethod:              existing.AuthMethod,
-		Name:                    firstNonEmpty(existing.Name, desc.Title),
-		BaseURL:                 firstNonEmpty(existing.BaseURL, desc.DefaultBaseURL),
+		Name:                    firstNonEmpty(existing.Name, id),
+		BaseURL:                 existing.BaseURL,
 		Transport:               existing.Transport,
 		APIKey:                  existing.APIKey,
 		APIKeyEnv:               existing.APIKeyEnv,
-		Model:                   desc.ModelHint,
 		Stream:                  existing.Stream,
 		Timeout:                 existing.Timeout,
 		Disabled:                existing.Disabled,
@@ -155,14 +81,12 @@ func BuildDraftForExisting(id string, existing config.Provider) (ConnectDraft, e
 		PromptProgressCheckedAt: existing.PromptProgressCheckedAt,
 		PromptProgressTarget:    existing.PromptProgressTarget,
 		Features:                existing.Features,
-	}, nil
+	}
 }
 
 func (d ConnectDraft) ToConfig() config.Provider {
 	cfg := config.Provider{
-		TemplateID:              strings.TrimSpace(d.TemplateID),
-		Kind:                    firstNonEmpty(d.Kind, ProviderKindCompatible),
-		AuthMethod:              strings.TrimSpace(d.AuthMethod),
+		Kind:                    ProviderKindCompatible,
 		Name:                    strings.TrimSpace(d.Name),
 		BaseURL:                 strings.TrimSpace(d.BaseURL),
 		Transport:               config.NormalizeTransport(d.Transport),
@@ -182,8 +106,11 @@ func (d ConnectDraft) ToConfig() config.Provider {
 	return cfg
 }
 
-// Probe detects the draft's provider and, when it serves chat, checks
-// whether it reports prompt progress while streaming.
+// Probe looks for everything Koder knows how to use on the draft's server:
+// the endpoints Detect checks and, when it serves chat, which request
+// options it takes (llama.cpp-style chat template arguments, streamed prompt
+// progress). The transport follows from what it found, so nobody has to
+// know what kind of server it is.
 func Probe(ctx context.Context, draft ConnectDraft, recorder *debugsrv.Recorder) (ProbeResult, error) {
 	detection, err := Detect(ctx, draft.ProviderID, draft.ToConfig(), recorder)
 	if err != nil {
@@ -210,6 +137,12 @@ func Probe(ctx context.Context, draft ConnectDraft, recorder *debugsrv.Recorder)
 	if !detection.Features.Chat {
 		return result, nil
 	}
+	previous := draft.Features != nil && draft.Features.TemplateKwargs
+	result.Features.TemplateKwargs = acceptsTemplateKwargs(ctx, draft, selected, previous, recorder)
+	if result.Features.TemplateKwargs && result.Transport == config.TransportOpenAI {
+		result.Transport = config.TransportLlama
+	}
+	draft.Transport = result.Transport
 	probed, supported := probePromptProgress(ctx, draft, selected, recorder)
 	result.PromptProgressProbed, result.PromptProgressSupported = probed, supported
 	if probed {
@@ -219,6 +152,37 @@ func Probe(ctx context.Context, draft ConnectDraft, recorder *debugsrv.Recorder)
 	return result, nil
 }
 
+// acceptsTemplateKwargs reports whether the server takes chat template
+// arguments, which llama.cpp, vLLM, SGLang and similar servers pass to the
+// model's template (enable_thinking among them), and which hosted APIs
+// reject as unknown. A failure that is not a rejection, such as a busy
+// server, keeps what was found before.
+func acceptsTemplateKwargs(ctx context.Context, draft ConnectDraft, modelID string, previous bool, recorder *debugsrv.Recorder) bool {
+	cfg := draft.ToConfig()
+	cfg.Stream = false
+	client, err := New(draft.ProviderID, cfg, recorder)
+	if err != nil {
+		return previous
+	}
+	_, err = client.CompleteChat(ctx, ChatRequest{
+		Model:    strings.TrimSpace(modelID),
+		Messages: []Message{{Role: RoleUser, Content: "ping"}},
+		ExtraBody: map[string]any{
+			"max_tokens":           1,
+			"chat_template_kwargs": map[string]any{"enable_thinking": false},
+		},
+	})
+	if err == nil {
+		return true
+	}
+	if apiErr, ok := errors.AsType[*APIError](err); ok && apiErr.StatusCode >= 400 && apiErr.StatusCode < 500 {
+		return false
+	}
+	return previous
+}
+
+// probePromptProgress streams a one-token reply asking for prompt progress
+// and reports whether the server sent any.
 func probePromptProgress(ctx context.Context, draft ConnectDraft, modelID string, recorder *debugsrv.Recorder) (bool, bool) {
 	mode := config.NormalizePromptProgressMode(draft.PromptProgressMode)
 	if mode == "disabled" {
@@ -242,13 +206,11 @@ func probePromptProgress(ctx context.Context, draft ConnectDraft, modelID string
 		},
 	}
 	resp, err := client.StreamChatResponse(ctx, req, nil)
-	if err != nil {
-		return true, false
-	}
-	_ = resp
-	return true, true
+	return true, err == nil && resp.PromptProgressSeen
 }
 
+// selectedProbeModel is the requested model when the server lists it, or
+// else its first chat model.
 func selectedProbeModel(models []domain.Model, requested string) (string, error) {
 	if len(models) == 0 {
 		return "", fmt.Errorf("provider returned no models")
@@ -261,13 +223,17 @@ func selectedProbeModel(models []domain.Model, requested string) (string, error)
 			}
 		}
 	}
+	for _, model := range models {
+		if model.SupportsChat || !model.ChatKnown {
+			return strings.TrimSpace(model.ID), nil
+		}
+	}
 	return strings.TrimSpace(models[0].ID), nil
 }
 
+// ValidateDraft checks a draft can be probed. A new provider has no ID
+// until probing names it.
 func ValidateDraft(draft ConnectDraft) error {
-	if strings.TrimSpace(draft.ProviderID) == "" {
-		return fmt.Errorf("provider id is required")
-	}
 	if strings.TrimSpace(draft.BaseURL) == "" {
 		return fmt.Errorf("base url is required")
 	}
@@ -329,19 +295,4 @@ func UniqueProviderID(base string, existing map[string]config.Provider) string {
 			return candidate
 		}
 	}
-}
-
-func inferTemplateID(id string, existing config.Provider) string {
-	if desc, ok := Lookup(id); ok {
-		return desc.ID
-	}
-	for _, desc := range Catalog() {
-		if strings.EqualFold(strings.TrimSpace(existing.Name), desc.Title) {
-			return desc.ID
-		}
-		if strings.EqualFold(strings.TrimSpace(existing.BaseURL), desc.DefaultBaseURL) {
-			return desc.ID
-		}
-	}
-	return ProviderKindCompatible
 }

@@ -125,9 +125,9 @@ type Claude struct {
 }
 
 type Provider struct {
-	TemplateID              string            `toml:"template_id"`
+	TemplateID              string            `toml:"template_id,omitempty"` // no longer used; providers have no templates
 	Kind                    string            `toml:"kind"`
-	AuthMethod              string            `toml:"auth_method"`
+	AuthMethod              string            `toml:"auth_method,omitempty"`
 	Name                    string            `toml:"name"`
 	BaseURL                 string            `toml:"base_url"`
 	Transport               string            `toml:"transport,omitempty"`
@@ -155,6 +155,8 @@ type ProviderFeatures struct {
 	Speech        bool      `toml:"speech"`
 	Transcription bool      `toml:"transcription"`
 	LlamaProps    bool      `toml:"llama_props"`
+	// TemplateKwargs reports that the server takes chat_template_kwargs.
+	TemplateKwargs bool `toml:"chat_template_kwargs"`
 }
 
 // ModelConfig stores settings for one provider/model pair.

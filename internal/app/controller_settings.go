@@ -36,32 +36,29 @@ func (c *Controller) Providers() ProviderState {
 	return c.providerStateLocked()
 }
 
-// NewProviderDraft returns a draft initialized from a provider template.
-func (c *Controller) NewProviderDraft(templateID string) (ProviderDraft, error) {
-	c.mu.RLock()
-	cfg := c.cfg
-	c.mu.RUnlock()
-	templateID = strings.TrimSpace(templateID)
-	if templateID == "" {
-		templateID = provider.ProviderKindCompatible
-	}
-	draft, err := provider.BuildDraft(templateID, cfg.Providers)
-	if err != nil {
-		return ProviderDraft{}, err
-	}
-	return providerDraftFromCatalog(draft), nil
+// NewProviderDraft returns an empty draft for a new provider; probing it
+// finds what the server supports and names it.
+func (c *Controller) NewProviderDraft() ProviderDraft {
+	return providerDraftFromCatalog(provider.NewDraft())
 }
 
-// TestProvider probes a provider draft by listing models.
+// TestProvider probes a provider draft without saving what it finds.
 func (c *Controller) TestProvider(ctx context.Context, draft ProviderDraft) (ProviderProbeResult, error) {
+	_, report, err := c.probeDraft(ctx, providerDraftToCatalog(draft))
+	return report, err
+}
+
+// probeDraft probes a draft's server and reports what it found for display.
+// A server that wants credentials is reported, not failed.
+func (c *Controller) probeDraft(ctx context.Context, draft provider.ConnectDraft) (*provider.ProbeResult, ProviderProbeResult, error) {
 	started := time.Now()
-	result, err := provider.Probe(ctx, providerDraftToCatalog(draft), nil)
+	result, err := provider.Probe(ctx, draft, nil)
 	if err != nil {
 		c.recordProviderProbe(draft.ProviderID, nil, started, err)
 		if errors.Is(err, provider.ErrAuthRequired) {
-			return ProviderProbeResult{AuthRequired: true, Error: err.Error()}, nil
+			return nil, ProviderProbeResult{AuthRequired: true, Error: err.Error()}, nil
 		}
-		return ProviderProbeResult{}, err
+		return nil, ProviderProbeResult{}, err
 	}
 	c.recordProviderProbe(draft.ProviderID, result.Models, started, nil)
 	models := make([]string, 0, len(result.Models))
@@ -70,8 +67,8 @@ func (c *Controller) TestProvider(ctx context.Context, draft ProviderDraft) (Pro
 		models = append(models, item.ID)
 		details = append(details, ProviderProbeModel{ID: item.ID, Kinds: providerProbeCapabilities([]domain.Model{item}), ContextWindow: item.ContextWindow})
 	}
-	suggestedID, suggestedName := c.suggestedProviderName(draft, result.Models)
-	return ProviderProbeResult{
+	suggestedID, suggestedName := c.suggestedProviderName(draft.OriginalProviderID, result.Models)
+	return &result, ProviderProbeResult{
 		BaseURL:                 result.BaseURL,
 		SuggestedID:             suggestedID,
 		SuggestedName:           suggestedName,
@@ -86,6 +83,37 @@ func (c *Controller) TestProvider(ctx context.Context, draft ProviderDraft) (Pro
 		PromptProgressSupported: result.PromptProgressSupported,
 		PromptProgressCheckedAt: timePointer(result.PromptProgressCheckedAt),
 	}, nil
+}
+
+// ReprobeProvider probes a saved provider again and stores what it finds.
+func (c *Controller) ReprobeProvider(ctx context.Context, providerID string) (ProviderProbeResult, ProviderState, error) {
+	providerID = strings.TrimSpace(providerID)
+	c.mu.RLock()
+	providerCfg, ok := c.cfg.Providers[providerID]
+	c.mu.RUnlock()
+	if !ok {
+		return ProviderProbeResult{}, ProviderState{}, fmt.Errorf("provider %q is not configured", providerID)
+	}
+	probe, report, err := c.probeDraft(ctx, provider.BuildDraftForExisting(providerID, providerCfg))
+	if err != nil || probe == nil {
+		return report, c.Providers(), err
+	}
+	c.mu.Lock()
+	if current, ok := c.cfg.Providers[providerID]; ok {
+		applyProbe(&current, *probe)
+		c.cfg.Providers[providerID] = current
+		if err := c.cfg.Save(); err != nil {
+			c.mu.Unlock()
+			return ProviderProbeResult{}, ProviderState{}, err
+		}
+		if c.agent != nil {
+			c.agent.UpdateConfig(c.cfg)
+		}
+	}
+	state := c.providerStateLocked()
+	c.mu.Unlock()
+	c.broadcast("snapshot", c.State())
+	return report, state, nil
 }
 
 func providerProbeCapabilities(models []domain.Model) []string {
@@ -129,19 +157,16 @@ func providerProbeCapabilities(models []domain.Model) []string {
 	return capabilities
 }
 
-// suggestedProviderName names a new custom provider after its first model.
-// Presets and existing providers keep their names.
-func (c *Controller) suggestedProviderName(draft ProviderDraft, models []domain.Model) (string, string) {
-	if strings.TrimSpace(draft.TemplateID) != provider.ProviderKindCompatible {
-		return "", ""
-	}
+// suggestedProviderName names a new provider after its first model.
+// Existing providers keep their names.
+func (c *Controller) suggestedProviderName(originalID string, models []domain.Model) (string, string) {
 	base := providerIDFromModels(models)
 	if base == "" {
 		return "", ""
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if _, exists := c.cfg.Providers[strings.TrimSpace(draft.OriginalProviderID)]; exists {
+	if _, exists := c.cfg.Providers[strings.TrimSpace(originalID)]; exists {
 		return "", ""
 	}
 	return provider.UniqueProviderID(base, c.cfg.Providers), models[0].ID
@@ -155,6 +180,7 @@ func providerFeatureLabels(features config.ProviderFeatures, promptProgress bool
 		enabled bool
 	}{
 		{"Chat completions", features.Chat},
+		{"Chat template arguments", features.TemplateKwargs},
 		{"Streaming prompt progress", promptProgress},
 		{"Decisions", features.Decisions},
 		{"Speech synthesis", features.Speech},
@@ -182,6 +208,11 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 	if err := provider.ValidateDraft(catalogDraft); err != nil {
 		return ProviderState{}, err
 	}
+	c.mu.RLock()
+	if existing, ok := c.cfg.Providers[strings.TrimSpace(catalogDraft.OriginalProviderID)]; ok {
+		catalogDraft.Features = existing.Features
+	}
+	c.mu.RUnlock()
 	if !catalogDraft.Disabled {
 		started := time.Now()
 		probe, err := provider.Probe(ctx, catalogDraft, nil)
@@ -201,6 +232,9 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 		draft.PromptProgressProbed = probe.PromptProgressProbed
 		draft.PromptProgressSupported = probe.PromptProgressSupported
 		draft.PromptProgressCheckedAt = timePointer(probe.PromptProgressCheckedAt)
+		if strings.TrimSpace(catalogDraft.ProviderID) == "" {
+			catalogDraft.ProviderID, catalogDraft.Name = c.suggestedProviderName("", probe.Models)
+		}
 	}
 	originalID := strings.TrimSpace(catalogDraft.OriginalProviderID)
 	catalogDraft.ProviderID = strings.TrimSpace(catalogDraft.ProviderID)
@@ -237,11 +271,7 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 	}
 	applyProviderDraftPreferences(&next, draft)
 	if strings.TrimSpace(next.Name) == "" {
-		if desc, found := provider.Lookup(catalogDraft.TemplateID); found {
-			next.Name = desc.Title
-		} else {
-			next.Name = catalogDraft.ProviderID
-		}
+		next.Name = catalogDraft.ProviderID
 	}
 	if originalID != "" && originalID != catalogDraft.ProviderID {
 		delete(c.cfg.Providers, originalID)
@@ -1616,36 +1646,15 @@ func modelConfigForPair(cfg config.Config, providerID, modelID string) config.Mo
 }
 
 func (c *Controller) providerStateLocked() ProviderState {
-	catalog := make([]ProviderCatalogItem, 0, len(provider.Catalog()))
-	for _, item := range provider.Catalog() {
-		catalog = append(catalog, ProviderCatalogItem{
-			ID:             item.ID,
-			Title:          item.Title,
-			Description:    item.Description,
-			DefaultBaseURL: item.DefaultBaseURL,
-			ModelHint:      item.ModelHint,
-			Local:          item.Local,
-			RequiresAPIKey: item.RequiresAPIKey,
-		})
-	}
-
 	ids := slices.Sorted(maps.Keys(c.cfg.Providers))
 
 	providers := make([]ProviderConfigItem, 0, len(ids))
 	drafts := make(map[string]ProviderDraft, len(ids))
 	for _, id := range ids {
 		cfg := c.cfg.Providers[id]
-		templateID := strings.TrimSpace(cfg.TemplateID)
-		if templateID == "" {
-			if draft, err := provider.BuildDraftForExisting(id, cfg); err == nil {
-				templateID = draft.TemplateID
-			}
-		}
 		providers = append(providers, ProviderConfigItem{
 			ID:                      id,
 			Name:                    providerEntryLabel(id, cfg),
-			TemplateID:              templateID,
-			Kind:                    strings.TrimSpace(cfg.Kind),
 			BaseURL:                 strings.TrimSpace(cfg.BaseURL),
 			Disabled:                cfg.Disabled,
 			Default:                 id == c.cfg.Defaults.ProviderID,
@@ -1655,15 +1664,12 @@ func (c *Controller) providerStateLocked() ProviderState {
 			PromptProgressCheckedAt: timePointer(cfg.PromptProgressCheckedAt),
 			Health:                  c.providerRuntimeHealth(id, cfg.Disabled),
 		})
-		if draft, err := provider.BuildDraftForExisting(id, cfg); err == nil {
-			drafts[id] = providerDraftFromCatalog(draft)
-		}
+		drafts[id] = providerDraftFromCatalog(provider.BuildDraftForExisting(id, cfg))
 	}
 
 	return ProviderState{
 		DefaultProvider: strings.TrimSpace(c.cfg.Defaults.ProviderID),
 		DefaultModel:    strings.TrimSpace(c.cfg.Defaults.ModelID),
-		Catalog:         catalog,
 		Providers:       providers,
 		Drafts:          drafts,
 	}
@@ -1680,9 +1686,6 @@ func providerDraftFromCatalog(draft provider.ConnectDraft) ProviderDraft {
 	return ProviderDraft{
 		OriginalProviderID:      strings.TrimSpace(draft.OriginalProviderID),
 		ProviderID:              strings.TrimSpace(draft.ProviderID),
-		TemplateID:              strings.TrimSpace(draft.TemplateID),
-		Kind:                    strings.TrimSpace(draft.Kind),
-		AuthMethod:              strings.TrimSpace(draft.AuthMethod),
 		Name:                    strings.TrimSpace(draft.Name),
 		BaseURL:                 strings.TrimSpace(draft.BaseURL),
 		Transport:               strings.TrimSpace(draft.Transport),
@@ -1704,9 +1707,6 @@ func providerDraftToCatalog(draft ProviderDraft) provider.ConnectDraft {
 	return provider.ConnectDraft{
 		OriginalProviderID: strings.TrimSpace(draft.OriginalProviderID),
 		ProviderID:         strings.TrimSpace(draft.ProviderID),
-		TemplateID:         strings.TrimSpace(draft.TemplateID),
-		Kind:               strings.TrimSpace(draft.Kind),
-		AuthMethod:         strings.TrimSpace(draft.AuthMethod),
 		Name:               strings.TrimSpace(draft.Name),
 		BaseURL:            strings.TrimSpace(draft.BaseURL),
 		Transport:          strings.TrimSpace(draft.Transport),
@@ -1759,7 +1759,6 @@ func applyNewProviderDefaults(next *config.Provider) {
 }
 
 func applyProviderDraftPreferences(next *config.Provider, draft ProviderDraft) {
-	next.AuthMethod = strings.TrimSpace(draft.AuthMethod)
 	next.APIKeyEnv = strings.TrimSpace(draft.APIKeyEnv)
 	if timeout := parseDurationOrZero(draft.Timeout); timeout > 0 {
 		next.Timeout = timeout

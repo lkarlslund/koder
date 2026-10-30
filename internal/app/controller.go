@@ -191,32 +191,18 @@ type AccessState struct {
 	GlobalMounts []accesssettings.Mount  `json:"global_mounts"`
 }
 
-// ProviderState describes configured and available provider templates.
+// ProviderState describes the configured providers.
 type ProviderState struct {
 	DefaultProvider string                   `json:"default_provider"`
 	DefaultModel    string                   `json:"default_model"`
-	Catalog         []ProviderCatalogItem    `json:"catalog"`
 	Providers       []ProviderConfigItem     `json:"providers"`
 	Drafts          map[string]ProviderDraft `json:"drafts"`
-}
-
-// ProviderCatalogItem is one provider template offered by the provider catalog.
-type ProviderCatalogItem struct {
-	ID             string `json:"id"`
-	Title          string `json:"title"`
-	Description    string `json:"description"`
-	DefaultBaseURL string `json:"default_base_url"`
-	ModelHint      string `json:"model_hint"`
-	Local          bool   `json:"local"`
-	RequiresAPIKey bool   `json:"requires_api_key"`
 }
 
 // ProviderConfigItem is one configured provider row.
 type ProviderConfigItem struct {
 	ID                      string        `json:"id"`
 	Name                    string        `json:"name"`
-	TemplateID              string        `json:"template_id"`
-	Kind                    string        `json:"kind"`
 	BaseURL                 string        `json:"base_url"`
 	Disabled                bool          `json:"disabled"`
 	Default                 bool          `json:"default"`
@@ -231,9 +217,6 @@ type ProviderConfigItem struct {
 type ProviderDraft struct {
 	OriginalProviderID      string            `json:"original_provider_id"`
 	ProviderID              string            `json:"provider_id"`
-	TemplateID              string            `json:"template_id"`
-	Kind                    string            `json:"kind"`
-	AuthMethod              string            `json:"auth_method"`
 	Name                    string            `json:"name"`
 	BaseURL                 string            `json:"base_url"`
 	Transport               string            `json:"transport"`

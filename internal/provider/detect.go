@@ -107,13 +107,8 @@ func detectedTransport(baseURL string, features config.ProviderFeatures, items [
 		return config.TransportDashScope
 	}
 	for _, item := range items {
-		switch strings.ToLower(strings.TrimSpace(item.OwnedBy)) {
-		case "ninfer":
+		if strings.EqualFold(strings.TrimSpace(item.OwnedBy), "ninfer") {
 			return config.TransportNinfer
-		case "quench6k":
-			// It takes llama.cpp's request fields, such as the chat
-			// template's enable_thinking, but serves no /props.
-			return config.TransportLlama
 		}
 	}
 	if features.LlamaProps {

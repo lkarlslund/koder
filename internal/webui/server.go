@@ -1680,13 +1680,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 	case "provider_state":
 		return s.controller.Providers(), nil
 	case "new_provider_draft":
-		var in struct {
-			TemplateID string `json:"template_id"`
-		}
-		if err := decodeParams(params, &in); err != nil {
-			return nil, err
-		}
-		return s.controller.NewProviderDraft(in.TemplateID)
+		return s.controller.NewProviderDraft(), nil
 	case "memories":
 		var in struct {
 			SessionID id.ID `json:"session_id"`
@@ -1717,6 +1711,18 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return s.controller.TestProvider(ctx, in)
+	case "reprobe_provider":
+		var in struct {
+			ProviderID string `json:"provider_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		probe, providers, err := s.controller.ReprobeProvider(ctx, in.ProviderID)
+		if err != nil {
+			return nil, err
+		}
+		return s.preferencesAndState(ctx, clientID, map[string]any{"providers": providers, "probe": probe})
 	case "save_provider":
 		var in app.ProviderDraft
 		if err := decodeParams(params, &in); err != nil {

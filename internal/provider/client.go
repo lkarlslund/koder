@@ -438,18 +438,18 @@ type rawToolCall struct {
 }
 
 type Client struct {
-	http     *http.Client
-	baseURL  string
-	llamaURL string
-	apiKey   string
-	headers  map[string]string
-	provider string
-	kind     string
-	recorder *debugsrv.Recorder
-	health   *HealthTracker
-	features *config.ProviderFeatures
-	probeMu  sync.Mutex
-	probes   map[string]endpointSupport
+	http           *http.Client
+	baseURL        string
+	llamaURL       string
+	apiKey         string
+	headers        map[string]string
+	provider       string
+	templateKwargs bool
+	recorder       *debugsrv.Recorder
+	health         *HealthTracker
+	features       *config.ProviderFeatures
+	probeMu        sync.Mutex
+	probes         map[string]endpointSupport
 }
 
 type ChatResponse struct {
@@ -492,15 +492,15 @@ func New(id string, cfg config.Provider, recorder *debugsrv.Recorder, healthTrac
 			Timeout:   0,
 			Transport: transport,
 		},
-		baseURL:  baseURL,
-		llamaURL: llamaServerBaseURL(baseURL),
-		apiKey:   cfg.APIKey,
-		headers:  cfg.Headers,
-		provider: id,
-		kind:     cfg.Kind,
-		features: cfg.Features,
-		recorder: recorder,
-		health:   health,
+		baseURL:        baseURL,
+		llamaURL:       llamaServerBaseURL(baseURL),
+		apiKey:         cfg.APIKey,
+		headers:        cfg.Headers,
+		provider:       id,
+		templateKwargs: takesTemplateKwargs(cfg),
+		features:       cfg.Features,
+		recorder:       recorder,
+		health:         health,
 	}, nil
 }
 

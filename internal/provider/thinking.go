@@ -1,6 +1,10 @@
 package provider
 
-import "maps"
+import (
+	"maps"
+
+	"github.com/lkarlslund/koder/internal/config"
+)
 
 // WithoutThinking turns off the thinking controls that req sends: the chat
 // template's enable_thinking, DashScope's top-level enable_thinking, and
@@ -38,15 +42,15 @@ func WithoutThinking(req ChatRequest) (ChatRequest, bool) {
 }
 
 // WithoutThinking turns thinking off for a request to this provider. Beyond
-// the controls req already sends, a custom OpenAI-compatible server is sent
-// the chat template's enable_thinking=false, which llama.cpp, vLLM and SGLang
+// the controls req already sends, a server that takes chat template
+// arguments is sent enable_thinking=false, which llama.cpp, vLLM and SGLang
 // servers pass to the model's template; thinking models such as Qwen think by
 // default without being asked.
 func (c *Client) WithoutThinking(req ChatRequest) (ChatRequest, bool) {
 	if next, ok := WithoutThinking(req); ok {
 		return next, true
 	}
-	if c == nil || c.kind != ProviderKindCompatible {
+	if c == nil || !c.templateKwargs {
 		return req, false
 	}
 	body := maps.Clone(req.ExtraBody)
@@ -56,4 +60,18 @@ func (c *Client) WithoutThinking(req ChatRequest) (ChatRequest, bool) {
 	body["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
 	req.ExtraBody = body
 	return req, true
+}
+
+// takesTemplateKwargs reports whether probing found the server takes chat
+// template arguments, or its transport is one that does.
+func takesTemplateKwargs(cfg config.Provider) bool {
+	if cfg.Features != nil && cfg.Features.TemplateKwargs {
+		return true
+	}
+	switch OverlayTransport(cfg) {
+	case config.TransportLlama, config.TransportNinfer:
+		return true
+	default:
+		return false
+	}
 }

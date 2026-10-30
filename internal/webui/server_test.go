@@ -3401,8 +3401,6 @@ func TestWebSocketSetModelAcknowledgesAndUpdatesChat(t *testing.T) {
 	if _, err := ctrl.SaveProvider(context.Background(), app.ProviderDraft{
 		OriginalProviderID: "test",
 		ProviderID:         "test",
-		TemplateID:         "openai-compatible",
-		Kind:               "openai-compatible",
 		Name:               "Test",
 		BaseURL:            providerServer.URL + "/v1",
 		Model:              "model",
@@ -4173,7 +4171,7 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 		t.Fatalf("dial websocket: %v", err)
 	}
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-	save := fmt.Sprintf(`{"id":1,"method":"save_provider","params":{"original_provider_id":"","provider_id":"local","template_id":"openai-compatible","kind":"openai-compatible","name":"Local","base_url":%q,"api_key":"secret","model":"stale-model","headers":{"X-Test":"yes"}}}`, providerServer.URL+"/v1")
+	save := fmt.Sprintf(`{"id":1,"method":"save_provider","params":{"original_provider_id":"","provider_id":"local","name":"Local","base_url":%q,"api_key":"secret","model":"stale-model","headers":{"X-Test":"yes"}}}`, providerServer.URL+"/v1")
 	if err := conn.Write(ctx, websocket.MessageText, []byte(save)); err != nil {
 		t.Fatalf("write save_provider: %v", err)
 	}
@@ -4308,7 +4306,7 @@ func TestWebSocketTestProviderReturnsProbeResult(t *testing.T) {
 		t.Fatalf("dial websocket: %v", err)
 	}
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-	request := fmt.Sprintf(`{"id":1,"method":"test_provider","params":{"provider_id":"probe","template_id":"openai-compatible","kind":"openai-compatible","name":"Probe","base_url":%q,"api_key":"secret","model":"alpha","headers":{}}}`, providerServer.URL+"/v1")
+	request := fmt.Sprintf(`{"id":1,"method":"test_provider","params":{"provider_id":"probe","name":"Probe","base_url":%q,"api_key":"secret","model":"alpha","headers":{}}}`, providerServer.URL+"/v1")
 	if err := conn.Write(ctx, websocket.MessageText, []byte(request)); err != nil {
 		t.Fatalf("write test_provider: %v", err)
 	}

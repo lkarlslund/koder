@@ -49,7 +49,7 @@ func TestProviderDetectionMigratesProvidersAndLegacyDecisionURL(t *testing.T) {
 	controller := New(cfg, nil)
 
 	ctx := context.Background()
-	detection, err := detectProvider(ctx, "halo", cfg.Providers["halo"])
+	probe, err := probeProvider(ctx, "halo", cfg.Providers["halo"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestProviderDetectionMigratesProvidersAndLegacyDecisionURL(t *testing.T) {
 	if decisionProvider == nil || !settled {
 		t.Fatalf("legacy decision endpoint was not detected: %v %v", decisionProvider, settled)
 	}
-	controller.applyProviderDetections(map[string]provider.Detection{"halo": detection}, decisionProvider, settled)
+	controller.applyProviderProbes(map[string]provider.ProbeResult{"halo": probe}, decisionProvider, settled)
 
 	saved, err := config.Load()
 	if err != nil {
@@ -91,7 +91,7 @@ func TestTestProviderReportsAuthAndSuggestsName(t *testing.T) {
 	}))
 	defer locked.Close()
 	controller := New(config.Default(), nil)
-	result, err := controller.TestProvider(context.Background(), ProviderDraft{ProviderID: "cloud", TemplateID: "openai", Kind: provider.ProviderKindCompatible, BaseURL: locked.URL + "/v1"})
+	result, err := controller.TestProvider(context.Background(), ProviderDraft{BaseURL: locked.URL + "/v1"})
 	if err != nil || !result.AuthRequired {
 		t.Fatalf("result = %+v, err = %v; want auth required", result, err)
 	}
@@ -107,7 +107,7 @@ func TestTestProviderReportsAuthAndSuggestsName(t *testing.T) {
 		}
 	}))
 	defer open.Close()
-	result, err = controller.TestProvider(context.Background(), ProviderDraft{ProviderID: "openai-compatible", TemplateID: provider.ProviderKindCompatible, Kind: provider.ProviderKindCompatible, BaseURL: open.URL})
+	result, err = controller.TestProvider(context.Background(), ProviderDraft{BaseURL: open.URL})
 	if err != nil {
 		t.Fatal(err)
 	}

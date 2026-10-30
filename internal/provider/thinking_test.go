@@ -27,9 +27,9 @@ func TestWithoutThinking(t *testing.T) {
 	}
 }
 
-func TestClientWithoutThinkingAsksCustomServers(t *testing.T) {
+func TestClientWithoutThinkingAsksServersThatTakeTemplateArguments(t *testing.T) {
 	req := ChatRequest{ExtraBody: map[string]any{"return_progress": true}}
-	custom := &Client{kind: ProviderKindCompatible}
+	custom := &Client{templateKwargs: true}
 	next, ok := custom.WithoutThinking(req)
 	want := map[string]any{"return_progress": true, "chat_template_kwargs": map[string]any{"enable_thinking": false}}
 	if !ok || !reflect.DeepEqual(next.ExtraBody, want) {
@@ -38,7 +38,7 @@ func TestClientWithoutThinkingAsksCustomServers(t *testing.T) {
 	if _, ok := req.ExtraBody["chat_template_kwargs"]; ok {
 		t.Fatal("original request changed")
 	}
-	if _, ok := (&Client{kind: "openai"}).WithoutThinking(req); ok {
-		t.Fatal("a hosted API was sent an unrequested thinking control")
+	if _, ok := (&Client{}).WithoutThinking(req); ok {
+		t.Fatal("a server that rejects template arguments was sent an unrequested thinking control")
 	}
 }

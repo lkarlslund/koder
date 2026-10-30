@@ -12,44 +12,59 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 )
 
-func TestBuildDraftUsesDescriptorDefaults(t *testing.T) {
-	draft, err := BuildDraft("openai", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if draft.ProviderID != "openai" {
-		t.Fatalf("unexpected provider id: %q", draft.ProviderID)
-	}
-	if draft.BaseURL != "https://api.openai.com/v1" {
-		t.Fatalf("unexpected base url: %q", draft.BaseURL)
-	}
-}
-
-func TestBuildDraftGeneratesUniqueProviderID(t *testing.T) {
-	draft, err := BuildDraft("openrouter", map[string]config.Provider{
-		"openrouter": {},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if draft.ProviderID != "openrouter-2" {
-		t.Fatalf("unexpected provider id: %q", draft.ProviderID)
-	}
-}
-
 func TestBuildDraftForExistingProvider(t *testing.T) {
-	draft, err := BuildDraftForExisting("openrouter-work", config.Provider{
-		TemplateID: "openrouter",
-		Kind:       "openai-compatible",
-		Name:       "OpenRouter Work",
-		BaseURL:    "https://example.com/v1",
-		APIKey:     "secret",
+	draft := BuildDraftForExisting("work", config.Provider{
+		Name:    "Work",
+		BaseURL: "https://example.com/v1",
+		APIKey:  "secret",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if draft.ProviderID != "openrouter-work" || draft.TemplateID != "openrouter" || draft.BaseURL != "https://example.com/v1" || draft.APIKey != "secret" || draft.Model == "" {
+	if draft.ProviderID != "work" || draft.OriginalProviderID != "work" || draft.BaseURL != "https://example.com/v1" || draft.APIKey != "secret" {
 		t.Fatalf("expected existing provider values, got %#v", draft)
+	}
+}
+
+// Probing decides the transport from what the server takes: a server that
+// accepts chat template arguments is sent them, one that rejects them as
+// unknown (as hosted APIs do) is not.
+func TestProbeFindsChatTemplateArguments(t *testing.T) {
+	for _, accepts := range []bool{true, false} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/v1/models":
+				_, _ = w.Write([]byte(`{"data":[{"id":"model-a"}]}`))
+			case "/v1/chat/completions":
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if _, ok := body["chat_template_kwargs"]; ok && !accepts {
+					http.Error(w, `{"error":{"message":"Unrecognized request argument supplied: chat_template_kwargs"}}`, http.StatusBadRequest)
+					return
+				}
+				if body["stream"] == true {
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"p\"}}]}\n\ndata: [DONE]\n\n"))
+					return
+				}
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"pong"}}]}`))
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		result, err := Probe(context.Background(), ConnectDraft{ProviderID: "test", BaseURL: server.URL + "/v1", Headers: map[string]string{}}, nil)
+		server.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := config.TransportOpenAI
+		if accepts {
+			want = config.TransportLlama
+		}
+		if result.Features.TemplateKwargs != accepts || result.Transport != want {
+			t.Fatalf("accepts=%v: kwargs=%v transport=%q", accepts, result.Features.TemplateKwargs, result.Transport)
+		}
+		// A stream without progress chunks does not count as prompt progress.
+		if result.PromptProgressSupported {
+			t.Fatalf("accepts=%v: prompt progress reported without progress chunks", accepts)
+		}
 	}
 }
 
@@ -73,7 +88,6 @@ func TestProbeReturnsSortedModels(t *testing.T) {
 
 	result, err := Probe(context.Background(), ConnectDraft{
 		ProviderID: "test",
-		Kind:       ProviderKindCompatible,
 		BaseURL:    server.URL + "/v1",
 		Model:      "a-model",
 		Headers:    map[string]string{},
@@ -111,7 +125,6 @@ func TestProbeAutoSelectsDetectedModelWhenDraftModelIsUnavailable(t *testing.T) 
 
 	result, err := Probe(context.Background(), ConnectDraft{
 		ProviderID: "test",
-		Kind:       ProviderKindCompatible,
 		BaseURL:    server.URL + "/v1",
 		Model:      "missing-model",
 		Headers:    map[string]string{},
@@ -149,7 +162,6 @@ func TestProbeDetectsPromptProgressSupport(t *testing.T) {
 
 	result, err := Probe(context.Background(), ConnectDraft{
 		ProviderID: "test",
-		Kind:       ProviderKindCompatible,
 		BaseURL:    server.URL + "/v1",
 		Model:      "model-a",
 		Headers:    map[string]string{},
@@ -176,7 +188,6 @@ func TestProbeRejectsProvidersWithoutModels(t *testing.T) {
 
 	_, err := Probe(context.Background(), ConnectDraft{
 		ProviderID: "test",
-		Kind:       ProviderKindCompatible,
 		BaseURL:    server.URL + "/v1",
 		Model:      "missing-model",
 		Headers:    map[string]string{},
@@ -189,7 +200,6 @@ func TestProbeRejectsProvidersWithoutModels(t *testing.T) {
 func TestConnectDraftToConfigPersistsAPIKeyWhenSet(t *testing.T) {
 	cfg := ConnectDraft{
 		ProviderID: "ollama",
-		Kind:       ProviderKindCompatible,
 		BaseURL:    "http://127.0.0.1:11434/v1",
 		APIKey:     "persist-me",
 		Model:      "qwen",
@@ -202,7 +212,6 @@ func TestConnectDraftToConfigPersistsAPIKeyWhenSet(t *testing.T) {
 func TestValidateDraftAllowsEmptyAPIKeyForRemoteProviders(t *testing.T) {
 	err := ValidateDraft(ConnectDraft{
 		ProviderID: "openai",
-		Kind:       ProviderKindCompatible,
 		BaseURL:    "https://api.openai.com/v1",
 		Model:      "gpt-5.4",
 	})
@@ -214,7 +223,6 @@ func TestValidateDraftAllowsEmptyAPIKeyForRemoteProviders(t *testing.T) {
 func TestValidateDraftAllowsEmptyModelBeforeProbe(t *testing.T) {
 	err := ValidateDraft(ConnectDraft{
 		ProviderID: "openai",
-		Kind:       ProviderKindCompatible,
 		BaseURL:    "https://api.openai.com/v1",
 	})
 	if err != nil {
@@ -237,7 +245,6 @@ func TestProbeUsesValidProviderConfig(t *testing.T) {
 
 	_, err := Probe(context.Background(), ConnectDraft{
 		ProviderID: "openai",
-		Kind:       ProviderKindCompatible,
 		BaseURL:    server.URL,
 		APIKey:     "secret",
 		Model:      "model-a",
@@ -259,7 +266,6 @@ func TestProbeSurfacesUnauthorizedWhenAPIKeyMissing(t *testing.T) {
 
 	_, err := Probe(context.Background(), ConnectDraft{
 		ProviderID: "openai",
-		Kind:       ProviderKindCompatible,
 		BaseURL:    server.URL,
 		Model:      "model-a",
 	}, nil)
@@ -274,7 +280,6 @@ func TestProbeSurfacesUnauthorizedWhenAPIKeyMissing(t *testing.T) {
 func TestClientStillSupportsConfigFromDraft(t *testing.T) {
 	client, err := New("test", ConnectDraft{
 		ProviderID: "test",
-		Kind:       ProviderKindCompatible,
 		BaseURL:    "https://example.com/v1",
 		APIKey:     "secret",
 		Model:      "model-a",

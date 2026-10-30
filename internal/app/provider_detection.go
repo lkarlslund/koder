@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -13,18 +14,21 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 )
 
-const providerDetectionTimeout = 20 * time.Second
+// providerProbeTimeout bounds one provider's probe, which lists its models,
+// checks its endpoints and sends two one-token chat requests.
+const providerProbeTimeout = 45 * time.Second
 
-// DetectProvidersInBackground detects providers saved before feature
-// detection existed and migrates the legacy browser decision endpoint into a
-// provider. Providers that cannot be reached are retried on the next start.
-func (c *Controller) DetectProvidersInBackground(ctx context.Context) {
+// ProbeProvidersInBackground probes every enabled provider again, so what
+// each server supports is current after a restart, and migrates the legacy
+// browser decision endpoint into a provider. A provider that cannot be
+// reached keeps what was found last time.
+func (c *Controller) ProbeProvidersInBackground(ctx context.Context) {
 	c.mu.RLock()
 	cfg := c.cfg
 	c.mu.RUnlock()
 	var pending []string
 	for id, providerCfg := range cfg.Providers {
-		if !providerCfg.Disabled && providerCfg.Features == nil {
+		if !providerCfg.Disabled {
 			pending = append(pending, id)
 		}
 	}
@@ -33,27 +37,57 @@ func (c *Controller) DetectProvidersInBackground(ctx context.Context) {
 		return
 	}
 	go func() {
-		detected := map[string]provider.Detection{}
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		probed := map[string]provider.ProbeResult{}
 		for _, id := range pending {
-			if detection, err := detectProvider(ctx, id, cfg.Providers[id]); err == nil {
-				detected[id] = detection
-			} else {
-				slog.Info("provider detection failed", "provider", id, "error", err)
-			}
+			wg.Go(func() {
+				result, err := probeProvider(ctx, id, cfg.Providers[id])
+				if err != nil {
+					slog.Info("provider probe failed", "provider", id, "error", err)
+					return
+				}
+				mu.Lock()
+				probed[id] = result
+				mu.Unlock()
+			})
 		}
+		wg.Wait()
 		var decisionProvider *provider.Detection
 		dropLegacy := false
 		if legacyURL != "" {
 			decisionProvider, dropLegacy = detectLegacyDecisionProvider(ctx, cfg, legacyURL)
 		}
-		c.applyProviderDetections(detected, decisionProvider, dropLegacy)
+		c.applyProviderProbes(probed, decisionProvider, dropLegacy)
 	}()
 }
 
+func probeProvider(ctx context.Context, id string, providerCfg config.Provider) (provider.ProbeResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, providerProbeTimeout)
+	defer cancel()
+	return provider.Probe(ctx, provider.BuildDraftForExisting(id, providerCfg), nil)
+}
+
 func detectProvider(ctx context.Context, id string, providerCfg config.Provider) (provider.Detection, error) {
-	ctx, cancel := context.WithTimeout(ctx, providerDetectionTimeout)
+	ctx, cancel := context.WithTimeout(ctx, providerProbeTimeout)
 	defer cancel()
 	return provider.Detect(ctx, id, providerCfg, nil)
+}
+
+// applyProbe records what a probe found on a provider's server.
+func applyProbe(cfg *config.Provider, result provider.ProbeResult) {
+	features := result.Features
+	cfg.Features = &features
+	cfg.Transport = result.Transport
+	if result.BaseURL != "" {
+		cfg.BaseURL = result.BaseURL
+	}
+	if result.PromptProgressProbed {
+		cfg.PromptProgressProbed = true
+		cfg.PromptProgressSupported = result.PromptProgressSupported
+		cfg.PromptProgressCheckedAt = result.PromptProgressCheckedAt
+		cfg.PromptProgressTarget = result.PromptProgressTarget
+	}
 }
 
 // detectLegacyDecisionProvider resolves the old task_decision_url setting.
@@ -77,16 +111,15 @@ func detectLegacyDecisionProvider(ctx context.Context, cfg config.Config, legacy
 	return &detection, true
 }
 
-func (c *Controller) applyProviderDetections(detected map[string]provider.Detection, decisionProvider *provider.Detection, dropLegacy bool) {
+func (c *Controller) applyProviderProbes(probed map[string]provider.ProbeResult, decisionProvider *provider.Detection, dropLegacy bool) {
 	c.mu.Lock()
 	changed := false
-	for id, detection := range detected {
+	for id, result := range probed {
 		providerCfg, ok := c.cfg.Providers[id]
-		if !ok || providerCfg.Features != nil {
+		if !ok {
 			continue
 		}
-		providerCfg.Features = &detection.Features
-		providerCfg.Transport = detection.Transport
+		applyProbe(&providerCfg, result)
 		c.cfg.Providers[id] = providerCfg
 		changed = true
 	}
@@ -96,12 +129,11 @@ func (c *Controller) applyProviderDetections(detected map[string]provider.Detect
 		}
 		id := provider.UniqueProviderID(cmp.Or(providerIDFromModels(decisionProvider.Models), "decisions"), c.cfg.Providers)
 		next := config.Provider{
-			TemplateID: provider.ProviderKindCompatible,
-			Kind:       provider.ProviderKindCompatible,
-			Name:       id,
-			BaseURL:    decisionProvider.BaseURL,
-			Transport:  decisionProvider.Transport,
-			Features:   &decisionProvider.Features,
+			Kind:      provider.ProviderKindCompatible,
+			Name:      id,
+			BaseURL:   decisionProvider.BaseURL,
+			Transport: decisionProvider.Transport,
+			Features:  &decisionProvider.Features,
 		}
 		applyNewProviderDefaults(&next)
 		c.cfg.Providers[id] = next

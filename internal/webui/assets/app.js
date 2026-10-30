@@ -1125,7 +1125,7 @@
 		showPhoneBinding: false, phoneBinding: null, phoneBindingLoading: false, phoneBindingError: '', voiceDevices: [], voiceDevicesLoading: false, voiceDevicesError: '',
         showSessions: false, sessionTypeFilters: {sessions: true, chats: true, voice: true}, sessionStatusFilters: {active: true, starred: false, archived: false}, sessionSearchQuery: '', sessionSearchIDs: null, sessionSearchTimer: null, sessionSearchSeq: 0, sessionSearching: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, folderPicker: {open: false, target: '', path: '', parent: '', folders: [], loading: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         confirmationDialog: {open: false, title: '', message: '', confirmLabel: 'Confirm', danger: false}, confirmationResolver: null,
-		memoryState: null, memoryEditor: null, memoryStatus: '', providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerStep: 'details', providerProbe: null, providerNeedsKey: false, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
+		memoryState: null, memoryEditor: null, memoryStatus: '', providerState: {providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerProbe: null, providerReprobing: {}, providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
 		showModelDetails: false, modelDetails: null, settingsModelQuery: '', showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
 		settingsSkillQuery: '', showSkillInspector: false, skillInspection: null, skillInspectionLoading: false,
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary', mcpTesting: false, mcpSaving: false,
@@ -5738,7 +5738,6 @@
           this.updateSessionOrganization(session, {archived: false});
         },
         openProviderDialog() { this.openSettingsDialog('providers'); },
-        providerTemplates() { return this.providerState.catalog || []; },
         providerRows() { return this.providerState.providers || []; },
 		normalizeRuntimeHealth(health) {
 		  const state = health && typeof health === 'object' ? health : {};
@@ -5814,51 +5813,41 @@
 		},
         setProviderDraft(draft) {
           this.providerDraft = Object.assign({headers: {}}, draft || {});
-          this.providerHeadersText = JSON.stringify(this.providerDraft.headers || {}, null, 2);
           this.providerModelOptions = [];
           this.providerProbe = null;
           this.providerStatus = ''; this.providerStatusKind = 'secondary';
         },
-        // An existing provider is already detected; a new one is once Next succeeds.
+        // An existing provider is already probed; a new one is once Test succeeds.
         providerDetected() { return !!this.providerProbe || !!this.providerDraft?.original_provider_id && !!(this.providerState.drafts || {})[this.providerDraft.original_provider_id]; },
         editProvider(id) {
           const draft = (this.providerState.drafts || {})[id];
           if (!draft) return;
           this.setProviderDraft(draft);
-          this.providerNeedsKey = !!(draft.api_key || draft.api_key_env);
-          this.providerStep = 'details';
           this.showProviderEditor = true;
         },
         addProvider() {
-          this.providerDraft = null; this.providerProbe = null; this.providerNeedsKey = false;
-          this.providerStatus = ''; this.providerStatusKind = 'secondary';
-          this.providerStep = 'preset';
-          this.showProviderEditor = true;
-        },
-        chooseProviderPreset(template) {
-          this.rpc('new_provider_draft', {template_id: template.id}).then(draft => {
+          this.rpc('new_provider_draft', {}).then(draft => {
             this.setProviderDraft(draft);
-            this.providerNeedsKey = !!template.requires_api_key;
-            this.providerStep = 'details';
+            this.showProviderEditor = true;
           }).catch(err => this.showToast(err.message));
+        },
+        // reprobeProvider probes a saved provider's server again and keeps what it finds.
+        reprobeProvider(id) {
+          if (!id || this.providerReprobing[id]) return;
+          this.providerReprobing = Object.assign({}, this.providerReprobing, {[id]: true});
+          this.rpc('reprobe_provider', {provider_id: id}).then(result => {
+            this.applyProviderMutation(result);
+            const probe = result?.probe || {};
+            if (probe.auth_required) { this.showToast(id + ': the server wants an API key'); return; }
+            this.showToast(id + ': ' + (probe.model_count || 0) + ' model' + (probe.model_count === 1 ? '' : 's') + (probe.features?.length ? ' · ' + probe.features.join(', ') : ''));
+          }).catch(err => this.showToast(id + ': ' + err.message)).finally(() => {
+            const next = Object.assign({}, this.providerReprobing); delete next[id]; this.providerReprobing = next;
+          });
         },
         closeProviderEditor() { this.showProviderEditor = false; this.providerDraft = null; this.providerProbe = null; this.providerModelOptions = []; this.providerStatus = ''; this.providerStatusKind = 'secondary'; },
         providerDraftPayload() {
           if (!this.providerDraft) return null;
-          let headers = {};
-          try {
-            headers = this.providerHeadersText.trim() ? JSON.parse(this.providerHeadersText) : {};
-          } catch (err) {
-            this.providerStatus = 'Invalid headers JSON: ' + err.message; this.providerStatusKind = 'danger';
-            return null;
-          }
-          if (!headers || Array.isArray(headers) || typeof headers !== 'object') {
-            this.providerStatus = 'Headers JSON must be an object'; this.providerStatusKind = 'danger';
-            return null;
-          }
-          const cleanHeaders = {};
-          for (const [key, value] of Object.entries(headers)) cleanHeaders[key] = String(value);
-          return Object.assign({}, this.providerDraft, {headers: cleanHeaders});
+          return Object.assign({}, this.providerDraft, {headers: this.providerDraft.headers || {}});
         },
         testProvider() {
           const payload = this.providerDraftPayload(); if (!payload) return;
@@ -5866,7 +5855,6 @@
           this.providerProbe = null;
           this.rpc('test_provider', payload).then(result => {
             if (result.auth_required) {
-              this.providerNeedsKey = true;
               this.providerStatus = (payload.api_key ? 'The server rejected this API key. ' : 'This server needs an API key. ') + (result.error || '');
               this.providerStatusKind = 'warning';
               return;

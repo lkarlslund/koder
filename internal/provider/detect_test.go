@@ -71,11 +71,6 @@ func TestDetectChatServers(t *testing.T) {
 			transport: config.TransportNinfer,
 		},
 		{
-			name:      "quench6k",
-			gets:      map[string]string{"/v1/models": `{"data":[{"id":"Qwen/Qwen3.8-Flash-Next","owned_by":"quench6k"}]}`},
-			transport: config.TransportLlama,
-		},
-		{
 			name: "llama.cpp",
 			gets: map[string]string{
 				"/v1/models": `{"data":[{"id":"local","owned_by":"llamacpp"}]}`,
@@ -131,7 +126,7 @@ func TestProbeSkipsPromptProgressWithoutChat(t *testing.T) {
 		}
 	}))
 	t.Cleanup(server.Close)
-	result, err := Probe(context.Background(), ConnectDraft{ProviderID: "laya", BaseURL: server.URL, Kind: ProviderKindCompatible, PromptProgressMode: "auto"}, nil)
+	result, err := Probe(context.Background(), ConnectDraft{ProviderID: "laya", BaseURL: server.URL, PromptProgressMode: "auto"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
