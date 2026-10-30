@@ -2896,7 +2896,7 @@ function timeoutLabel(value) {
         },
         // activityItems lists what is live in the active chat right now, in one
         // shape for the sidebar: its processes (running, or ended in the last
-        // few minutes), the browser tabs it owns and its scheduled prompts.
+        // half minute), the browser tabs it owns and its scheduled prompts.
         activityItems() {
           const now = this.activityNow;
           const items = [];
@@ -2910,20 +2910,25 @@ function timeoutLabel(value) {
         execProcessRecent(process, now) {
           if (this.execProcessState(process) === 'running') return true;
           const ended = Date.parse(process?.ended_at || '');
-          return !isNaN(ended) && now - ended < 5 * 60 * 1000;
+          return !isNaN(ended) && now - ended < 30 * 1000;
+        },
+        // execProcessElapsed is how long a process has run so far, or ran.
+        execProcessElapsed(process, now) {
+          const started = Date.parse(process?.started_at || '');
+          const ended = Date.parse(process?.ended_at || '');
+          if (isNaN(started)) return NaN;
+          return (this.execProcessState(process) === 'running' || isNaN(ended) ? now : ended) - started;
         },
         processActivity(process, now) {
           const command = this.execProcessCommand(process);
           const label = String(process?.label || '').trim();
-          const started = Date.parse(process?.started_at || '');
-          const ended = Date.parse(process?.ended_at || '');
           const running = this.execProcessState(process) === 'running';
-          const elapsed = isNaN(started) ? NaN : (running || isNaN(ended) ? now : ended) - started;
+          const elapsed = activityDuration(this.execProcessElapsed(process, now));
           return {
             key: 'process:' + this.execProcessID(process), kind: 'process', ref: process,
             icon: 'bi-terminal', title: label || command || this.execProcessID(process),
             subtitle: label ? command : '',
-            time: activityDuration(elapsed), timeTitle: running ? 'Running for' : 'Ran for',
+            time: elapsed && !running ? 'took ' + elapsed : elapsed, timeTitle: running ? 'Running for' : 'Finished,',
             status: this.processActivityStatus(process),
           };
         },
@@ -4253,7 +4258,7 @@ function timeoutLabel(value) {
           add('state', this.execProcessState(process));
           const started = new Date(process?.started_at || '');
           if (!isNaN(started.getTime())) add('started', started.toLocaleString());
-          const runtime = this.processActivity(process, this.activityNow).time;
+          const runtime = activityDuration(this.execProcessElapsed(process, this.activityNow));
           if (runtime) add('runtime', runtime);
           add('exit code', this.execProcessExitCode(process));
           add('workdir', process?.workdir || process?.Workdir || '');

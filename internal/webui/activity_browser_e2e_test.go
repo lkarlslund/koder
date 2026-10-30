@@ -107,4 +107,22 @@ func TestSidebarActivityListsProcessesAndOpensDetails(t *testing.T) {
 	if !strings.HasPrefix(modalTitle, "Wait for the build server") {
 		t.Fatalf("modal subtitle = %q", modalTitle)
 	}
+
+	// A finished process says how long it took, and leaves the list half a
+	// minute after it ended.
+	var took string
+	var listedLater int
+	if err := chromedp.Run(browserCtx,
+		chromedp.Evaluate(`document.querySelector('[data-activity="process"] .activity-time').textContent.trim()`, &took),
+		chromedp.Evaluate(`(() => {
+			const app = document.documentElement._x_dataStack[0];
+			const later = app.activityNow + 31000;
+			return app.allExecProcesses().filter(p => app.execProcessRecent(p, later)).length;
+		})()`, &listedLater),
+	); err != nil {
+		t.Fatalf("read finished process: %v", err)
+	}
+	if !strings.HasPrefix(took, "took ") || listedLater != 0 {
+		t.Fatalf("finished process time = %q, still listed 31s later: %d", took, listedLater)
+	}
 }
