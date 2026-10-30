@@ -3696,11 +3696,22 @@ function timeoutLabel(value) {
           if (kind === 'milestones') { this.hiddenMilestoneStatuses = {}; writeJSONPreference('hiddenMilestoneStatuses', {}); }
           else { this.hiddenChatStatuses = {}; writeJSONPreference('hiddenChatStatuses', {}); }
         },
+        // filterSummary names what the filter lets through: All, the one or two
+        // statuses it hides or shows, or how many statuses it shows.
         filterSummary(kind) {
-          if (!this.filterHiding(kind)) return 'All';
-          const shown = kind === 'milestones' ? this.visibleMilestones().length : this.visibleChats().length;
-          const total = this.filterOptions(kind).reduce((sum, option) => sum + option.count, 0);
-          return shown + ' of ' + total;
+          const options = this.filterOptions(kind);
+          const shown = options.filter(option => this.filterEnabled(kind, option.status));
+          const hidden = options.filter(option => !this.filterEnabled(kind, option.status));
+          const names = list => list.map(option => option.label.toLowerCase()).join(', ');
+          if (hidden.length === 0) return 'All';
+          if (shown.length === 0) return 'None';
+          if (hidden.length <= 2) return 'No ' + names(hidden);
+          if (shown.length <= 2) return names(shown).replace(/^./, c => c.toUpperCase());
+          return shown.length + ' of ' + options.length;
+        },
+        filterTitle(kind, what) {
+          const hidden = this.filterOptions(kind).filter(option => !this.filterEnabled(kind, option.status)).reduce((sum, option) => sum + option.count, 0);
+          return 'Choose which ' + what + ' to show' + (hidden ? ' (' + hidden + ' hidden now)' : '');
         },
         toggleFilterMenu(kind) { this.filterMenuOpen = this.filterMenuOpen === kind ? '' : kind; },
         chatSnapshot(chat) {

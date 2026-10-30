@@ -72,7 +72,7 @@ func TestSidebarListsFilterAndMarkScheduledChats(t *testing.T) {
 		chromedp.Evaluate(`document.querySelectorAll('.list-filter-menu.show .list-filter-option').length`, &page.MenuOptions),
 		// Hiding idle chats hides the only chat and says so on the toggle.
 		chromedp.Evaluate(`Array.from(document.querySelectorAll('.list-filter-menu.show .list-filter-option')).find(el => el.textContent.includes('Idle')).querySelector('input').click()`, nil),
-		chromedp.Poll(`document.querySelector('[data-list-filter="chats"]').textContent.trim() === '0 of 1'`, nil),
+		chromedp.Poll(`document.querySelector('[data-list-filter="chats"]').textContent.trim() === 'No idle, archived'`, nil),
 		chromedp.Evaluate(`document.querySelectorAll('.chat-list-item').length`, &page.FilteredRows),
 		chromedp.Evaluate(`Array.from(document.querySelectorAll('.list-filter-menu.show .dropdown-item')).find(el => el.textContent.trim() === 'Show all').click()`, nil),
 		chromedp.Poll(`document.querySelector('[data-list-filter="chats"]').textContent.trim() === 'All'`, nil),
@@ -80,7 +80,7 @@ func TestSidebarListsFilterAndMarkScheduledChats(t *testing.T) {
 	); err != nil {
 		t.Fatalf("sidebar lists: %v", err)
 	}
-	if page.HeaderLines != 1 || page.ChatBadge != "1" || page.GitShown || page.ChipRows != 0 || page.Summary != "All" || page.MenuOptions < 2 || page.FilteredRows != 0 || page.AfterReset != "All" {
+	if page.HeaderLines != 1 || page.ChatBadge != "1" || page.GitShown || page.ChipRows != 0 || page.Summary != "No archived" || page.MenuOptions < 2 || page.FilteredRows != 0 || page.AfterReset != "All" {
 		t.Fatalf("sidebar = %+v", page)
 	}
 

@@ -40,8 +40,9 @@
     .topbar-session-edit:hover, .topbar-session-edit:focus-visible { color: var(--bs-body-color); }
     /* A list's status filter: a small toggle beside its heading that opens
        a dropdown of checkboxes, so the header stays on one line. */
-    .list-filter { position: relative; min-width: 0; }
-    .list-filter-toggle { display: inline-flex; align-items: center; gap: .3rem; padding: .08rem .45rem; border: 1px solid var(--bs-border-color); border-radius: 999px; background: transparent; color: var(--bs-secondary-color); font-size: .72rem; line-height: 1.4; white-space: nowrap; }
+    .list-filter { position: relative; min-width: 0; flex: 0 1 auto; }
+    .list-filter-toggle > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .list-filter-toggle { max-width: 100%; display: inline-flex; align-items: center; gap: .3rem; padding: .08rem .45rem; border: 1px solid var(--bs-border-color); border-radius: 999px; background: transparent; color: var(--bs-secondary-color); font-size: .72rem; line-height: 1.4; white-space: nowrap; }
     .list-filter-toggle:hover, .list-filter-toggle:focus-visible, .list-filter-toggle[aria-expanded="true"] { border-color: rgba(var(--bs-primary-rgb), .55); color: var(--bs-body-color); outline: none; }
     .list-filter-toggle.filtering { border-color: var(--bs-primary-border-subtle); background: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis); }
     .list-filter-caret { font-size: .6rem; }

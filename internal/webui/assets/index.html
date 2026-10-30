@@ -338,7 +338,7 @@
           <span class="sidebar-heading">Chats</span>
           <template x-if="workspaceSessionMode()">
           <div class="list-filter" x-show="filterOptions('chats').length > 0" @click.outside="filterMenuOpen === 'chats' && (filterMenuOpen = '')" @keydown.escape="filterMenuOpen = ''">
-            <button type="button" class="list-filter-toggle" :class="{'filtering': filterHiding('chats')}" :aria-expanded="filterMenuOpen === 'chats'" title="Choose which chats to show" data-list-filter="chats" @click="toggleFilterMenu('chats')"><i class="bi bi-funnel"></i><span x-text="filterSummary('chats')"></span><i class="bi bi-chevron-down list-filter-caret"></i></button>
+            <button type="button" class="list-filter-toggle" :class="{'filtering': filterHiding('chats')}" :aria-expanded="filterMenuOpen === 'chats'" :title="filterTitle('chats', 'chats')" data-list-filter="chats" @click="toggleFilterMenu('chats')"><i class="bi bi-funnel"></i><span x-text="filterSummary('chats')"></span><i class="bi bi-chevron-down list-filter-caret"></i></button>
             <div class="dropdown-menu list-filter-menu shadow" :class="{'show': filterMenuOpen === 'chats'}" x-show="filterMenuOpen === 'chats'" style="display: none;">
               <template x-for="option in filterOptions('chats')" :key="option.status">
                 <label class="dropdown-item list-filter-option" :class="{'list-filter-empty': option.count === 0}">
@@ -415,7 +415,7 @@
         <div class="sidebar-info-row">
           <span class="sidebar-heading">Milestones</span>
           <div class="list-filter" x-show="filterOptions('milestones').length > 0" @click.outside="filterMenuOpen === 'milestones' && (filterMenuOpen = '')" @keydown.escape="filterMenuOpen = ''">
-            <button type="button" class="list-filter-toggle" :class="{'filtering': filterHiding('milestones')}" :aria-expanded="filterMenuOpen === 'milestones'" title="Choose which milestones to show" data-list-filter="milestones" @click="toggleFilterMenu('milestones')"><i class="bi bi-funnel"></i><span x-text="filterSummary('milestones')"></span><i class="bi bi-chevron-down list-filter-caret"></i></button>
+            <button type="button" class="list-filter-toggle" :class="{'filtering': filterHiding('milestones')}" :aria-expanded="filterMenuOpen === 'milestones'" :title="filterTitle('milestones', 'milestones')" data-list-filter="milestones" @click="toggleFilterMenu('milestones')"><i class="bi bi-funnel"></i><span x-text="filterSummary('milestones')"></span><i class="bi bi-chevron-down list-filter-caret"></i></button>
             <div class="dropdown-menu list-filter-menu shadow" :class="{'show': filterMenuOpen === 'milestones'}" x-show="filterMenuOpen === 'milestones'" style="display: none;">
               <template x-for="option in filterOptions('milestones')" :key="option.status">
                 <label class="dropdown-item list-filter-option" :class="{'list-filter-empty': option.count === 0}">
