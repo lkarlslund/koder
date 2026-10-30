@@ -2088,7 +2088,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `timelineItemActionAvailable(item) && workspaceSessionMode()`) ||
 		!strings.Contains(fullPage, `x-show="quickChatMode()" :title="activeModelTooltip()" @click="openModelDialog()"`) ||
 		!strings.Contains(fullPage, `class="sidebar p-3 bg-body-tertiary" x-show="sessionLoadedMode()"`) ||
-		!strings.Contains(fullPage, `x-show="workspaceSessionMode() && allMilestoneItems().length > 0"`) {
+		!strings.Contains(fullPage, `x-reveal="workspaceSessionMode() && allMilestoneItems().length > 0"`) {
 		t.Fatalf("expected Quick Chat mode to retain the chat sidebar while hiding orchestration controls")
 	}
 	if !strings.Contains(fullPage, `voiceChatMode()`) ||
@@ -2100,7 +2100,7 @@ func TestIndexServesHTML(t *testing.T) {
 		strings.Contains(fullPage, `new_voice_chat`) {
 		t.Fatalf("expected counted session tabs and voice-chat rendering without browser creation controls")
 	}
-	if !strings.Contains(fullPage, `class="chat-status-line" x-show="chatStatusValue(chat) !== 'idle'"`) ||
+	if !strings.Contains(fullPage, `class="chat-status-line" x-reveal="chatStatusValue(chat) !== 'idle'"`) ||
 		!strings.Contains(fullPage, `x-text="chatStatusLabel(chat)"`) ||
 		!strings.Contains(fullPage, `.chat-status-line { display: flex;`) {
 		t.Fatalf("expected each non-idle chat to show its detailed phase below the chat row")
@@ -2814,7 +2814,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `.planning-tree { display: grid; gap: .05rem;`) || !strings.Contains(fullPage, `.planning-row { width: 100%; display: grid;`) || !strings.Contains(fullPage, `--milestone-depth`) || !strings.Contains(fullPage, `padding: .12rem 0`) {
 		t.Fatalf("expected compact milestone spacing in sidebar")
 	}
-	if !strings.Contains(fullPage, `x-show="workspaceSessionMode() && allMilestoneItems().length > 0"`) || strings.Contains(fullPage, `milestoneItems().length === 0`) {
+	if !strings.Contains(fullPage, `x-reveal="workspaceSessionMode() && allMilestoneItems().length > 0"`) || strings.Contains(fullPage, `milestoneItems().length === 0`) {
 		t.Fatalf("expected milestones sidebar section to hide when there are no milestones")
 	}
 	if !strings.Contains(fullPage, `showArchivedPlanning`) ||
@@ -2943,7 +2943,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `toolCancelable(tool)`) || !strings.Contains(fullPage, `cancelTool(tool)`) || !strings.Contains(fullPage, `this.rpc('cancel_tool', {tool_call_id: toolCallID})`) {
 		t.Fatalf("expected running tool cards to expose a scoped cancel action")
 	}
-	if !strings.Contains(fullPage, `x-show="approvals().length > 0"`) {
+	if !strings.Contains(fullPage, `x-reveal="approvals().length > 0"`) {
 		t.Fatalf("expected approvals sidebar section to hide when there are no approvals")
 	}
 	if !strings.Contains(fullPage, `toolStatus(tool) === 'awaiting_approval'`) {
@@ -2958,7 +2958,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `chatPendingApprovals(chat)`) || !strings.Contains(fullPage, `bi-exclamation-triangle-fill`) {
 		t.Fatalf("expected chats with pending approvals to render a warning triangle status")
 	}
-	if !strings.Contains(fullPage, `x-show="chatStatusValue(chat) !== 'idle'"`) {
+	if !strings.Contains(fullPage, `x-reveal="chatStatusValue(chat) !== 'idle'"`) {
 		t.Fatalf("expected idle chats to omit the separate status line")
 	}
 	if !strings.Contains(fullPage, `.chat-list-item.active .chat-status-icon.status-running`) || !strings.Contains(fullPage, `drop-shadow(0 0 2px rgba(0, 0, 0, .55))`) {

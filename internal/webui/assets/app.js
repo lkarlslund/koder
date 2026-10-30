@@ -1045,6 +1045,52 @@ function activityDuration(ms) {
   return Math.floor(hours / 24) + 'd ' + (hours % 24) + 'h';
 }
 
+// x-reveal shows and hides an element like x-show, but folds it open or
+// shut while it fades, so the sidebar moves smoothly when things come and
+// go. The value 'enter' also folds a new element open on its first render.
+const revealClosed = {height: '0px', paddingTop: '0px', paddingBottom: '0px', marginTop: '0px', marginBottom: '0px', borderTopWidth: '0px', borderBottomWidth: '0px', opacity: '0'};
+function revealBox(el) {
+  const style = getComputedStyle(el);
+  const box = {height: el.offsetHeight + 'px'};
+  for (const prop of Object.keys(revealClosed)) if (prop !== 'height') box[prop] = style[prop];
+  return box;
+}
+function revealFold(el, show, fold) {
+  const from = fold.anim ? revealBox(el) : (show ? revealClosed : revealBox(el));
+  fold.anim?.cancel();
+  el.style.display = '';
+  const to = show ? revealBox(el) : revealClosed;
+  const duration = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 220;
+  el.style.overflow = 'hidden';
+  const anim = fold.anim = el.animate([from, to], {duration, easing: 'ease'});
+  anim.onfinish = () => {
+    if (fold.anim !== anim) return;
+    fold.anim = null;
+    el.style.overflow = '';
+    if (!show) el.style.display = 'none';
+  };
+}
+document.addEventListener('alpine:init', () => {
+  Alpine.directive('reveal', (el, {expression}, {effect, evaluateLater}) => {
+    const value = evaluateLater(expression);
+    const fold = {shown: null, anim: null};
+    effect(() => value(next => {
+      const show = !!next;
+      if (show === fold.shown) return;
+      const first = fold.shown === null;
+      fold.shown = show;
+      if (first && next !== 'enter') {
+        el.style.display = show ? '' : 'none';
+        return;
+      }
+      revealFold(el, show, fold);
+    }));
+  });
+});
+// A row that drops out of a revealed list stays this long, folding shut.
+const revealLeaveMS = 240;
+const revealLists = new Map();
+
 function timeoutLabel(value) {
       const ms = Number(value || 0);
       if (!Number.isFinite(ms) || ms <= 0) return '';
@@ -1146,7 +1192,7 @@ function timeoutLabel(value) {
         toolCommandModal: {open: false, command: '', subtitle: '', meta: [], output: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-		browserStatus: {state: 'unknown', owned_tabs: 0}, browserStatusTimer: null, browserTabs: [], browserTabsLoading: false, activityNow: Date.now(), activityTimer: null, talkChatID: '', workspacePollTimer: null, scheduledJobs: {sessions: {}, chats: {}}, filterMenuOpen: '', cronJobModal: {open: false, jobID: ''},
+		browserStatus: {state: 'unknown', owned_tabs: 0}, browserStatusTimer: null, browserTabs: [], browserTabsLoading: false, activityNow: Date.now(), activityTimer: null, revealTick: 0, revealExpired: 0, talkChatID: '', workspacePollTimer: null, scheduledJobs: {sessions: {}, chats: {}}, filterMenuOpen: '', cronJobModal: {open: false, jobID: ''},
 		browserPreview: {open: false, tab: null, rate: Number(readPreference('browserPreviewRate', '2')), src: '', loading: false, error: '', lastUpdated: '', timer: null, generation: 0},
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
@@ -2907,6 +2953,58 @@ function timeoutLabel(value) {
         cronJobTooltip(job) {
           const kind = job?.recurring ? 'Recurring' : 'One-shot';
           return kind + ' job ' + (job?.id || '') + ' (' + (job?.cron || '') + '), next run ' + this.cronJobNextRun(job) + '\n\n' + (job?.prompt || '');
+        },
+        // revealList keeps a row that drops out of a sidebar list for a moment,
+        // in its old place, so x-reveal="revealOf(...)" can fold it away; rows
+        // that turn up later fold open. A new scope (another chat or session)
+        // starts over without animating.
+        revealList(name, scope, items, keyOf) {
+          void this.revealExpired;
+          let list = revealLists.get(name);
+          if (!list || list.scope !== scope) {
+            for (const gone of list?.gone.values() || []) clearTimeout(gone.timer);
+            list = {scope, last: null, state: new Map(), gone: new Map()};
+            revealLists.set(name, list);
+          }
+          let changed = false;
+          const keys = new Set(items.map(keyOf));
+          for (const item of items) {
+            const key = keyOf(item);
+            const gone = list.gone.get(key);
+            if (gone) {
+              clearTimeout(gone.timer);
+              list.gone.delete(key);
+            }
+            if (list.last && list.state.get(key) !== true && list.state.get(key) !== 'enter') {
+              list.state.set(key, 'enter');
+              changed = true;
+            } else if (!list.state.has(key)) {
+              list.state.set(key, true);
+            }
+          }
+          (list.last || []).forEach((item, index) => {
+            const key = keyOf(item);
+            if (keys.has(key) || list.gone.has(key)) return;
+            const timer = setTimeout(() => {
+              list.gone.delete(key);
+              list.state.delete(key);
+              list.last = list.last.filter(row => keyOf(row) !== key);
+              this.revealExpired++;
+            }, revealLeaveMS);
+            list.gone.set(key, {item, index, timer});
+            list.state.set(key, false);
+            changed = true;
+          });
+          const rows = items.slice();
+          for (const gone of [...list.gone.values()].sort((a, b) => a.index - b.index)) rows.splice(Math.min(gone.index, rows.length), 0, gone.item);
+          list.last = rows;
+          if (changed) queueMicrotask(() => this.revealTick++);
+          return rows;
+        },
+        revealOf(name, key) {
+          void this.revealTick;
+          const state = revealLists.get(name)?.state.get(key);
+          return state === undefined ? true : state;
         },
         // activityItems lists what is live in the active chat right now, in one
         // shape for the sidebar: its processes (running, or ended in the last

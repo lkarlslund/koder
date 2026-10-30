@@ -55,8 +55,8 @@
     .active .scheduled-badge, .chat-list-item.active .scheduled-badge { background: rgba(255, 255, 255, .2); color: #fff; }
     /* The sidebar's activity list: things live in the chat right now, each
        a row of type icon, description, runtime and status, opening details. */
-    .activity-list { display: grid; gap: .3rem; margin-top: .3rem; max-height: min(26rem, 50vh); overflow-y: auto; }
-    .activity-row { width: 100%; display: grid; grid-template-columns: 1.75rem minmax(0, 1fr) auto 1rem; align-items: center; gap: .5rem; padding: .35rem .5rem .35rem .4rem; border: 1px solid var(--bs-border-color); border-radius: .45rem; background: var(--bs-body-bg); color: var(--bs-body-color); text-align: left; cursor: pointer; transition: border-color .12s, background-color .12s; }
+    .activity-list { display: flex; flex-direction: column; max-height: min(26rem, 50vh); overflow-y: auto; }
+    .activity-row { width: 100%; flex: 0 0 auto; margin-top: .3rem; display: grid; grid-template-columns: 1.75rem minmax(0, 1fr) auto 1rem; align-items: center; gap: .5rem; padding: .35rem .5rem .35rem .4rem; border: 1px solid var(--bs-border-color); border-radius: .45rem; background: var(--bs-body-bg); color: var(--bs-body-color); text-align: left; cursor: pointer; transition: border-color .12s, background-color .12s; }
     .activity-row:hover, .activity-row:focus-visible { border-color: rgba(var(--bs-primary-rgb), .55); background: var(--bs-secondary-bg); outline: none; }
     .activity-icon { display: inline-grid; place-items: center; width: 1.75rem; height: 1.75rem; border-radius: .4rem; font-size: .92rem; background: var(--bs-secondary-bg); color: var(--bs-secondary-color); }
     .activity-icon-process { background: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis); }

@@ -125,4 +125,43 @@ func TestSidebarActivityListsProcessesAndOpensDetails(t *testing.T) {
 	if !strings.HasPrefix(took, "took ") || listedLater != 0 {
 		t.Fatalf("finished process time = %q, still listed 31s later: %d", took, listedLater)
 	}
+
+	// When it leaves, the row folds shut and fades instead of vanishing,
+	// the section with it, and then both are gone.
+	var leaving struct {
+		Height, Opacity, SectionHeight float64
+		Animating                      bool
+	}
+	var gone struct{ Rows, SectionShown bool }
+	if err := chromedp.Run(browserCtx,
+		chromedp.Evaluate(`(() => {
+			const app = document.documentElement._x_dataStack[0];
+			app.activityNow += 31000;
+			return true;
+		})()`, nil),
+		chromedp.Sleep(110*time.Millisecond),
+		chromedp.Evaluate(`(() => {
+			const row = document.querySelector('[data-activity="process"]');
+			const section = document.querySelector('.activity-list').closest('.sidebar-section');
+			return {
+				Height: row ? row.getBoundingClientRect().height : -1,
+				Opacity: row ? Number(getComputedStyle(row).opacity) : -1,
+				SectionHeight: section.getBoundingClientRect().height,
+				Animating: !!row && row.getAnimations().length > 0,
+			};
+		})()`, &leaving),
+		chromedp.Sleep(500*time.Millisecond),
+		chromedp.Evaluate(`({
+			Rows: !!document.querySelector('[data-activity="process"]'),
+			SectionShown: !!document.querySelector('.activity-list')?.offsetParent,
+		})`, &gone),
+	); err != nil {
+		t.Fatalf("watch process leave: %v", err)
+	}
+	if !leaving.Animating || leaving.Height <= 0 || leaving.Height >= 40 || leaving.Opacity <= 0 || leaving.Opacity >= 1 || leaving.SectionHeight <= 0 {
+		t.Fatalf("leaving row mid-way = %+v", leaving)
+	}
+	if gone.Rows || gone.SectionShown {
+		t.Fatalf("after leaving = %+v", gone)
+	}
 }

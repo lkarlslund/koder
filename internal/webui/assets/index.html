@@ -311,14 +311,14 @@
           </div>
         </div>
       </div>
-      <div class="sidebar-section" x-show="activityItems().length > 0" style="display: none;">
+      <div class="sidebar-section" x-reveal="activityItems().length > 0" style="display: none;">
         <div class="sidebar-heading-row">
           <span class="sidebar-heading">Activity</span>
           <span class="status-filter-count" x-text="activityItems().length"></span>
         </div>
         <div class="activity-list">
-          <template x-for="item in activityItems()" :key="item.key">
-            <button type="button" class="activity-row" :data-activity="item.kind" @click="openActivity(item)">
+          <template x-for="item in revealList('activity', activeChatID(), activityItems(), item => item.key)" :key="item.key">
+            <button type="button" class="activity-row" x-reveal="revealOf('activity', item.key)" :data-activity="item.kind" @click="openActivity(item)">
               <span class="activity-icon" :class="'activity-icon-' + item.kind"><i class="bi" :class="item.icon"></i></span>
               <span class="activity-text">
                 <span class="activity-title" x-text="item.title"></span>
@@ -361,8 +361,8 @@
           </div>
         </div>
         <div class="list-group list-group-flush sidebar-list">
-          <template x-for="chat in visibleChats()" :key="chat.ID || chat.id">
-			<div class="list-group-item list-group-item-action chat-list-item" :draggable="workspaceSessionMode()" :class="{'active': chatID(chat) === state.active_chat_id, 'dragging': dragChatID === chatID(chat), 'opacity-75': chatArchived(chat), 'chat-switching': switchingChat.id === chatID(chat), ['chat-backend-' + chatBackend(chat)]: true}" @click="switchChat(chatID(chat), $event)" @auxclick.prevent="switchChat(chatID(chat), $event)" @dragstart="startChatDrag($event, chatID(chat))" @dragover.prevent="overChatDrag($event, chatID(chat))" @drop.stop.prevent="dropChat($event, chatID(chat))" @dragend="endChatDrag()">
+          <template x-for="chat in revealList('chats', activeSessionID(), visibleChats(), chat => chatID(chat))" :key="chat.ID || chat.id">
+			<div class="list-group-item list-group-item-action chat-list-item" x-reveal="revealOf('chats', chatID(chat))" :draggable="workspaceSessionMode()" :class="{'active': chatID(chat) === state.active_chat_id, 'dragging': dragChatID === chatID(chat), 'opacity-75': chatArchived(chat), 'chat-switching': switchingChat.id === chatID(chat), ['chat-backend-' + chatBackend(chat)]: true}" @click="switchChat(chatID(chat), $event)" @auxclick.prevent="switchChat(chatID(chat), $event)" @dragstart="startChatDrag($event, chatID(chat))" @dragover.prevent="overChatDrag($event, chatID(chat))" @drop.stop.prevent="dropChat($event, chatID(chat))" @dragend="endChatDrag()">
               <div class="d-flex align-items-center gap-1">
                 <div class="d-flex align-items-center gap-1 flex-grow-1 text-start chat-list-main chat-list-content" role="button" tabindex="0" :class="{'text-white': chatID(chat) === state.active_chat_id}" @click.stop="switchChat(chatID(chat), $event)" @auxclick.stop.prevent="switchChat(chatID(chat), $event)" @keydown.enter.stop.prevent="switchChat(chatID(chat), $event)" @keydown.space.stop.prevent="switchChat(chatID(chat), $event)">
 				  <i class="bi bi-grip-vertical chat-drag-handle" title="Drag to reorder" x-show="workspaceSessionMode()"></i>
@@ -386,11 +386,11 @@
 				  <button type="button" class="btn btn-outline-danger" title="Delete chat" @click.stop="deleteChat(chat)"><i class="bi bi-trash"></i></button>
 				</div>
               </div>
-              <div class="chat-status-line" x-show="chatStatusValue(chat) !== 'idle'" :title="chatStatusLabel(chat)" style="display: none;">
+              <div class="chat-status-line" x-reveal="chatStatusValue(chat) !== 'idle'" :title="chatStatusLabel(chat)" style="display: none;">
                 <i class="chat-status-icon bi" :class="[chatStatusIcon(chat), chatStatusClass(chat)]"></i>
                 <span class="text-truncate" x-text="chatStatusLabel(chat)"></span>
               </div>
-              <div class="chat-activity-line" x-show="chatActivitySummary(chat) && chatStatusValue(chat) !== 'idle'" :title="chatActivityLabel(chat)" style="display: none;">
+              <div class="chat-activity-line" x-reveal="chatActivitySummary(chat) && chatStatusValue(chat) !== 'idle'" :title="chatActivityLabel(chat)" style="display: none;">
                 <i class="bi bi-signpost-split"></i>
                 <span class="text-truncate" x-text="chatActivityLabel(chat)"></span>
               </div>
@@ -398,10 +398,10 @@
           </template>
         </div>
       </div>
-      <div class="sidebar-section" x-show="approvals().length > 0" style="display: none;">
+      <div class="sidebar-section" x-reveal="approvals().length > 0" style="display: none;">
         <div class="sidebar-heading">Approvals</div>
-        <template x-for="approval in approvals()" :key="approval.ToolCallID || approval.tool_call_id">
-          <div class="border rounded p-2 sidebar-card">
+        <template x-for="approval in revealList('approvals', activeChatID(), approvals(), approval => approval.ToolCallID || approval.tool_call_id)" :key="approval.ToolCallID || approval.tool_call_id">
+          <div class="border rounded p-2 sidebar-card" x-reveal="revealOf('approvals', approval.ToolCallID || approval.tool_call_id)">
             <div class="small fw-semibold" x-text="approval.Tool || approval.tool"></div>
             <div class="small text-secondary" x-text="approval.Command || approval.command"></div>
             <div class="btn-group btn-group-sm mt-2">
@@ -411,7 +411,7 @@
           </div>
         </template>
       </div>
-	  <div class="sidebar-section" x-show="workspaceSessionMode() && allMilestoneItems().length > 0" style="display: none;">
+	  <div class="sidebar-section" x-reveal="workspaceSessionMode() && allMilestoneItems().length > 0" style="display: none;">
         <div class="sidebar-info-row">
           <span class="sidebar-heading">Milestones</span>
           <div class="list-filter" x-show="filterOptions('milestones').length > 0" @click.outside="filterMenuOpen === 'milestones' && (filterMenuOpen = '')" @keydown.escape="filterMenuOpen = ''">
@@ -473,7 +473,7 @@
           </template>
         </div>
       </div>
-	  <div class="sidebar-section" x-show="workspaceSessionMode() && gitStatus().available" style="display: none;">
+	  <div class="sidebar-section" x-reveal="workspaceSessionMode() && gitStatus().available" style="display: none;">
         <div class="sidebar-info-row git-summary-row">
           <span class="sidebar-heading">Git</span>
           <span class="fw-semibold text-truncate" x-show="gitStatus().available" x-text="gitStatus().branch || '-'"></span>

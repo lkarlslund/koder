@@ -73,6 +73,7 @@ func TestSidebarListsFilterAndMarkScheduledChats(t *testing.T) {
 		// Hiding idle chats hides the only chat and says so on the toggle.
 		chromedp.Evaluate(`Array.from(document.querySelectorAll('.list-filter-menu.show .list-filter-option')).find(el => el.textContent.includes('Idle')).querySelector('input').click()`, nil),
 		chromedp.Poll(`document.querySelector('[data-list-filter="chats"]').textContent.trim() === 'No idle, archived'`, nil),
+		chromedp.Poll(`document.querySelectorAll('.chat-list-item').length === 0`, nil, chromedp.WithPollingTimeout(2*time.Second)),
 		chromedp.Evaluate(`document.querySelectorAll('.chat-list-item').length`, &page.FilteredRows),
 		chromedp.Evaluate(`Array.from(document.querySelectorAll('.list-filter-menu.show .dropdown-item')).find(el => el.textContent.trim() === 'Show all').click()`, nil),
 		chromedp.Poll(`document.querySelector('[data-list-filter="chats"]').textContent.trim() === 'All'`, nil),
