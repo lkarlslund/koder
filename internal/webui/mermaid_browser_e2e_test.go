@@ -35,6 +35,7 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 		AfterOffset  float64 `json:"afterOffset"`
 		Count        int     `json:"count"`
 		LatestShown  bool    `json:"latestShown"`
+		LatestFits   bool    `json:"latestFits"`
 	}
 	var paginationTailResult struct {
 		BottomGap float64 `json:"bottomGap"`
@@ -296,6 +297,13 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 					afterOffset: anchored.getBoundingClientRect().top - transcript.getBoundingClientRect().top,
 					count: app.timeline().length,
 					latestShown: document.querySelector('.timeline-latest-button')?.offsetParent !== null,
+					// The button's own box, and so its background, covers its label.
+					latestFits: (() => {
+						const button = document.querySelector('.timeline-latest-button');
+						const label = button?.querySelector('span')?.getBoundingClientRect();
+						const box = button?.getBoundingClientRect();
+						return !!label && !!box && box.top <= label.top && box.bottom >= label.bottom;
+					})(),
 				};
 			}));
 		})()`, nil),
@@ -378,7 +386,7 @@ func TestTranscriptClientBatchesAndReconcilesEnhancements(t *testing.T) {
 	if mermaidLightboxResult.HTMLLength == 0 || mermaidLightboxResult.Width <= 0 || mermaidLightboxResult.Height <= 0 {
 		t.Fatalf("expanded Mermaid dimensions = %+v, want retained SVG with positive width and height", mermaidLightboxResult)
 	}
-	if paginationAnchorResult.ItemID != "current-5" || paginationAnchorResult.Count != 30 || !paginationAnchorResult.LatestShown || math.Abs(paginationAnchorResult.BeforeOffset-paginationAnchorResult.AfterOffset) > 0.5 {
+	if paginationAnchorResult.ItemID != "current-5" || paginationAnchorResult.Count != 30 || !paginationAnchorResult.LatestShown || !paginationAnchorResult.LatestFits || math.Abs(paginationAnchorResult.BeforeOffset-paginationAnchorResult.AfterOffset) > 0.5 {
 		t.Fatalf("pagination anchor = %+v, want current-5 at an unchanged offset across a 30-item prepended window", paginationAnchorResult)
 	}
 	if paginationTailResult.BottomGap != 0 || !paginationTailResult.Stick || paginationTailResult.Count != 20 {
