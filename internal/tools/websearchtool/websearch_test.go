@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -73,8 +74,10 @@ func TestNormalizeDomainList(t *testing.T) {
 }
 
 func TestWebSearchFallsBackToTheNextProvider(t *testing.T) {
+	var failingCalls atomic.Int32
 	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
+		failingCalls.Add(1)
+		w.WriteHeader(http.StatusPaymentRequired)
 	}))
 	defer failing.Close()
 	working := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -95,8 +98,17 @@ func TestWebSearchFallsBackToTheNextProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Meta["provider"] != "tavily" || !strings.HasPrefix(result.Output, "Results from Tavily (Exa: rate limited") || !strings.Contains(result.Output, "Published 2026-10-01") {
+	if result.Meta["provider"] != "tavily" || !strings.HasPrefix(result.Output, "Results from Tavily (Exa: out of credits") || !strings.Contains(result.Output, "Published 2026-10-01") {
 		t.Fatalf("result = %#v", result)
+	}
+
+	// Exa ran out of credits, so the next search leaves it alone.
+	result, err = tool{}.Call(context.Background(), tools.Options{Runtime: runtime, Request: req})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failingCalls.Load() != 1 || !strings.HasPrefix(result.Output, "Results from Tavily (Exa skipped: out of credits or quota until ") {
+		t.Fatalf("second search: %d calls to Exa, output %q", failingCalls.Load(), result.Output)
 	}
 
 	runtime.WebSearch = []websearch.Backend{}

@@ -85,9 +85,14 @@ func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) 
 	if len(backends) == 0 {
 		return tools.Result{}, errors.New("no web search provider is enabled; enable one under Settings > Search")
 	}
-	// Providers are tried in order of preference until one answers.
+	// Providers are tried in order of preference until one answers, skipping
+	// those backing off after refusing for quota, rate or key reasons.
 	var failures []string
 	for _, backend := range backends {
+		if until, reason := backend.BackingOff(time.Now()); reason != nil {
+			failures = append(failures, fmt.Sprintf("%s skipped: %v until %s", backend.Provider.Title, reason, until.Local().Format("15:04")))
+			continue
+		}
 		results, err := backend.Provider.Search(ctx, runtime.HTTPClient, backend.Settings, query)
 		if err != nil {
 			failures = append(failures, err.Error())

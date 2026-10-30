@@ -485,7 +485,7 @@ func searchDuckDuckGo(ctx context.Context, client *http.Client, s Settings, q Qu
 	if err != nil {
 		return nil, err
 	}
-	if err := statusError(resp.StatusCode, nil); err != nil {
+	if err := statusError(resp, nil); err != nil {
 		return nil, err
 	}
 	results := parseDuckDuckGo(string(body))

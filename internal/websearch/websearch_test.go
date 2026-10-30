@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -190,7 +191,7 @@ func TestProviderErrorsSayWhy(t *testing.T) {
 	if _, err := tavily.Search(context.Background(), nil, Settings{}, Query{Text: "x"}); err == nil || !strings.Contains(err.Error(), "needs an API key") {
 		t.Fatalf("missing key: %v", err)
 	}
-	for status, want := range map[int]error{http.StatusUnauthorized: ErrUnauthorized, http.StatusTooManyRequests: ErrRateLimited, 432: ErrRateLimited} {
+	for status, want := range map[int]error{http.StatusUnauthorized: ErrUnauthorized, http.StatusTooManyRequests: ErrRateLimited, http.StatusPaymentRequired: ErrQuotaExhausted, 432: ErrQuotaExhausted} {
 		server, _ := fakeProvider(t, status, `{"detail":"no"}`)
 		_, err := tavily.Search(context.Background(), server.Client(), Settings{APIKey: "k", BaseURL: server.URL}, Query{Text: "x"})
 		if !errors.Is(err, want) || !strings.HasPrefix(err.Error(), "Tavily: ") {
@@ -207,5 +208,59 @@ func TestSiteOperators(t *testing.T) {
 	q := Query{Text: "x", AllowedDomains: []string{"a.com", "b.org"}, BlockedDomains: []string{"c.net"}}
 	if got := withSiteOperators(q); got != "x (site:a.com OR site:b.org) -site:c.net" {
 		t.Fatalf("query = %q", got)
+	}
+}
+
+func TestBackoffGrowsAndClears(t *testing.T) {
+	b := &backoff{entries: map[string]backoffEntry{}}
+	now := time.Now()
+	key := backoffKey("exa", Settings{APIKey: "k"})
+	quota := fmt.Errorf("Exa: %w", ErrQuotaExhausted)
+
+	b.record(key, quota, now)
+	if until, reason := b.waiting(key, now); !errors.Is(reason, ErrQuotaExhausted) || !until.Equal(now.Add(time.Hour)) {
+		t.Fatalf("first refusal: %v until %v", reason, until)
+	}
+	b.record(key, quota, now)
+	if until, _ := b.waiting(key, now); !until.Equal(now.Add(2 * time.Hour)) {
+		t.Fatalf("second refusal waits until %v", until)
+	}
+	for range 10 {
+		b.record(key, quota, now)
+	}
+	if until, _ := b.waiting(key, now); !until.Equal(now.Add(24 * time.Hour)) {
+		t.Fatalf("waits are capped, got %v", until)
+	}
+	if _, reason := b.waiting(backoffKey("exa", Settings{APIKey: "new key"}), now); reason != nil {
+		t.Fatal("a new key inherited the old key's backoff")
+	}
+	if _, reason := b.waiting(key, now.Add(25*time.Hour)); reason != nil {
+		t.Fatal("the backoff did not expire")
+	}
+	b.record(key, errors.New("connection reset"), now)
+	if _, reason := b.waiting(key, now); reason == nil {
+		t.Fatal("an ordinary failure cleared the backoff")
+	}
+	b.record(key, nil, now)
+	if _, reason := b.waiting(key, now); reason != nil {
+		t.Fatal("success did not clear the backoff")
+	}
+}
+
+func TestBackoffHonoursRetryAfter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "90")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	t.Cleanup(server.Close)
+	tavily, _ := Lookup("tavily")
+	backend := Backend{Provider: tavily, Settings: Settings{APIKey: "k", BaseURL: server.URL}}
+	before := time.Now()
+	if _, err := tavily.Search(context.Background(), server.Client(), backend.Settings, Query{Text: "x"}); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("err = %v", err)
+	}
+	until, reason := backend.BackingOff(before)
+	if !errors.Is(reason, ErrRateLimited) || until.Before(before.Add(90*time.Second)) || until.After(time.Now().Add(90*time.Second)) {
+		t.Fatalf("backing off for %v until %v", reason, until)
 	}
 }

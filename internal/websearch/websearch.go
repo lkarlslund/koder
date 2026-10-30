@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -108,7 +109,8 @@ func (p Provider) Ready(s Settings) error {
 }
 
 // Search runs q. Whatever the provider supports natively, the results are
-// then filtered by domain and recency, deduplicated and cut to q.Limit.
+// then filtered by domain and recency, deduplicated and cut to q.Limit. The
+// outcome feeds the provider's backoff, which Search itself does not check.
 func (p Provider) Search(ctx context.Context, client *http.Client, s Settings, q Query) ([]Result, error) {
 	if err := p.Ready(s); err != nil {
 		return nil, err
@@ -119,6 +121,7 @@ func (p Provider) Search(ctx context.Context, client *http.Client, s Settings, q
 	q.Limit = min(max(q.Limit, 1), MaxLimit)
 	s.APIKey, s.BaseURL = strings.TrimSpace(s.APIKey), strings.TrimRight(strings.TrimSpace(s.BaseURL), "/")
 	results, err := p.search(ctx, client, s, q)
+	providerBackoff.record(backoffKey(p.ID, s), err, time.Now())
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", p.Title, err)
 	}
@@ -226,7 +229,7 @@ func doJSON(ctx context.Context, client *http.Client, method, endpoint string, h
 	if err != nil {
 		return err
 	}
-	if err := statusError(resp.StatusCode, data); err != nil {
+	if err := statusError(resp, data); err != nil {
 		return err
 	}
 	if err := json.Unmarshal(data, out); err != nil {
@@ -235,13 +238,36 @@ func doJSON(ctx context.Context, client *http.Client, method, endpoint string, h
 	return nil
 }
 
-// ErrRateLimited marks a provider refusing because of rate or quota limits.
-var ErrRateLimited = errors.New("rate limited or out of quota")
+// ErrRateLimited marks a provider refusing because requests came too fast.
+var ErrRateLimited = errors.New("rate limited")
+
+// ErrQuotaExhausted marks a provider refusing because the account's credits
+// or plan limit are used up.
+var ErrQuotaExhausted = errors.New("out of credits or quota")
 
 // ErrUnauthorized marks a provider rejecting the API key.
 var ErrUnauthorized = errors.New("API key rejected")
 
-func statusError(status int, body []byte) error {
+// retryAfterError carries a provider's Retry-After hint with its error.
+type retryAfterError struct {
+	err   error
+	after time.Duration
+}
+
+func (e *retryAfterError) Error() string { return e.err.Error() }
+func (e *retryAfterError) Unwrap() error { return e.err }
+
+// retryAfter returns the wait a provider asked for, or zero.
+func retryAfter(err error) time.Duration {
+	var hint *retryAfterError
+	if errors.As(err, &hint) {
+		return hint.after
+	}
+	return 0
+}
+
+func statusError(resp *http.Response, body []byte) error {
+	status := resp.StatusCode
 	if status >= 200 && status < 300 && status != http.StatusAccepted {
 		return nil
 	}
@@ -252,9 +278,16 @@ func statusError(status int, body []byte) error {
 	switch {
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		return fmt.Errorf("%w (status %d): %s", ErrUnauthorized, status, detail)
-	// 202 is DuckDuckGo's soft rate limit; 402 and 432 are quota errors.
-	case status == http.StatusTooManyRequests || status == http.StatusPaymentRequired || status == 432 || status == http.StatusAccepted:
-		return fmt.Errorf("%w (status %d): %s", ErrRateLimited, status, detail)
+	// 432 and 433 are Tavily's plan and pay-as-you-go limits.
+	case status == http.StatusPaymentRequired || status == 432 || status == 433:
+		return fmt.Errorf("%w (status %d): %s", ErrQuotaExhausted, status, detail)
+	// 202 is DuckDuckGo's soft rate limit.
+	case status == http.StatusTooManyRequests || status == http.StatusAccepted:
+		err := fmt.Errorf("%w (status %d): %s", ErrRateLimited, status, detail)
+		if seconds, convErr := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After"))); convErr == nil && seconds > 0 {
+			return &retryAfterError{err: err, after: time.Duration(seconds) * time.Second}
+		}
+		return err
 	default:
 		return fmt.Errorf("status %d: %s", status, detail)
 	}
