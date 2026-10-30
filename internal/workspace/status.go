@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -67,6 +68,7 @@ func Snapshot(ctx context.Context, dir string) (SnapshotResult, error) {
 	}
 	statusCmd := exec.CommandContext(ctx, "git", "status", "--short", "--branch", "--untracked-files=normal")
 	statusCmd.Dir = projectRoot
+	statusCmd.Env = readOnlyGitEnv()
 	statusOutput, err := statusCmd.Output()
 	if err != nil {
 		return result, nil
@@ -74,6 +76,7 @@ func Snapshot(ctx context.Context, dir string) (SnapshotResult, error) {
 
 	numstatCmd := exec.CommandContext(ctx, "git", "diff", "--numstat", "--find-renames", "HEAD")
 	numstatCmd.Dir = projectRoot
+	numstatCmd.Env = readOnlyGitEnv()
 	numstatOutput, err := numstatCmd.Output()
 	if err != nil {
 		numstatOutput = nil
@@ -214,4 +217,10 @@ func (s Status) SummaryLine() string {
 		fmt.Sprintf("?%d", s.Untracked),
 	}
 	return strings.Join(parts, "  ")
+}
+
+// readOnlyGitEnv stops git status from refreshing .git/index while it scans,
+// which would wake the workspace watcher and start the scan again.
+func readOnlyGitEnv() []string {
+	return append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
 }

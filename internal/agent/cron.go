@@ -31,6 +31,22 @@ func (e *Engine) CronJobs(ctx context.Context, chatID id.ID) ([]cron.Job, error)
 	return e.cron.List(ctx, chatID)
 }
 
+// CronJobCounts returns how many cron jobs each session and chat has.
+func (e *Engine) CronJobCounts(ctx context.Context) (cron.Counts, error) {
+	if e == nil || e.cron == nil {
+		return cron.Counts{}, fmt.Errorf("cron is unavailable")
+	}
+	return e.cron.Counts(ctx)
+}
+
+// OnCronChange sets a function called after a cron job is added or removed.
+func (e *Engine) OnCronChange(fn func()) {
+	if e == nil || e.cron == nil {
+		return
+	}
+	e.cron.OnChange(fn)
+}
+
 // DeleteCronJob deletes one of a chat's cron jobs.
 func (e *Engine) DeleteCronJob(ctx context.Context, chatID id.ID, jobID string) error {
 	if e == nil || e.cron == nil {

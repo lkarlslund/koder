@@ -15,6 +15,7 @@ import (
 	"github.com/lkarlslund/koder/internal/browserapi"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/cron"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
@@ -73,7 +74,10 @@ type State struct {
 	RestartNeeded  bool                       `json:"restart_needed"`
 	RestartBuild   RestartBuildInfo           `json:"restart_build,omitempty"`
 	SettingsHealth SettingsHealth             `json:"settings_health"`
-	Error          string                     `json:"error,omitempty"`
+	// ScheduledJobs counts cron jobs per session and chat, so the session
+	// and chat lists can show which ones will run on their own.
+	ScheduledJobs cron.Counts `json:"scheduled_jobs"`
+	Error         string      `json:"error,omitempty"`
 }
 
 // Selection identifies the browser client's selected session/chat.
@@ -538,9 +542,10 @@ type ComposerCompletionItem struct {
 
 // SessionState describes workspace-scoped sessions.
 type SessionState struct {
-	ProjectRoot string           `json:"project_root"`
-	Sessions    []domain.Session `json:"sessions"`
-	QuickChats  []domain.Session `json:"quick_chats"`
+	ProjectRoot   string           `json:"project_root"`
+	Sessions      []domain.Session `json:"sessions"`
+	QuickChats    []domain.Session `json:"quick_chats"`
+	ScheduledJobs cron.Counts      `json:"scheduled_jobs"`
 }
 
 type ChatBackendState struct {
@@ -867,8 +872,24 @@ func (c *Controller) Start(ctx context.Context, mode StartupMode, projectRoot st
 	if err := c.resumeRestartInterruptedChats(ctx); err != nil {
 		slog.Warn("resume restart-interrupted chats failed", "error", err)
 	}
+	c.agent.OnCronChange(func() {
+		c.broadcast("scheduled_jobs", c.scheduledJobCounts(context.Background()))
+	})
 	c.agent.StartCron()
 	return nil
+}
+
+// scheduledJobCounts is how many cron jobs each session and chat has, or
+// empty counts when they cannot be read.
+func (c *Controller) scheduledJobCounts(ctx context.Context) cron.Counts {
+	if c == nil || c.agent == nil {
+		return cron.Counts{Sessions: map[id.ID]int{}, Chats: map[id.ID]int{}}
+	}
+	counts, err := c.agent.CronJobCounts(ctx)
+	if err != nil {
+		return cron.Counts{Sessions: map[id.ID]int{}, Chats: map[id.ID]int{}}
+	}
+	return counts
 }
 
 // State returns process-wide browser app metadata. It never includes a selected
@@ -890,6 +911,7 @@ func (c *Controller) State() State {
 	if sessionState, err := c.Sessions(ctx); err == nil {
 		base.Sessions = sessionState.Sessions
 		base.QuickChats = sessionState.QuickChats
+		base.ScheduledJobs = sessionState.ScheduledJobs
 	}
 	return base
 }
@@ -955,6 +977,7 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection)
 	c.mu.RUnlock()
 	if sessions, err := c.workspaceSessions(ctx); err == nil {
 		base.Sessions, base.QuickChats = splitSessions(sessions, false)
+		base.ScheduledJobs = c.scheduledJobCounts(ctx)
 	} else if len(base.Sessions) == 0 {
 		return State{}, err
 	}
@@ -1015,6 +1038,7 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection)
 		RestartNeeded:  base.RestartNeeded,
 		RestartBuild:   base.RestartBuild,
 		SettingsHealth: base.SettingsHealth,
+		ScheduledJobs:  base.ScheduledJobs,
 		Error:          base.Error,
 	}, nil
 }
@@ -1943,7 +1967,7 @@ func (c *Controller) Sessions(ctx context.Context) (SessionState, error) {
 	projectRoot := c.projectRoot
 	c.mu.RUnlock()
 	regular, quick := splitSessions(sessions, false)
-	return SessionState{ProjectRoot: projectRoot, Sessions: regular, QuickChats: quick}, nil
+	return SessionState{ProjectRoot: projectRoot, Sessions: regular, QuickChats: quick, ScheduledJobs: c.scheduledJobCounts(ctx)}, nil
 }
 
 // ManageableSessions returns workspace sessions including archived entries so
@@ -1957,7 +1981,7 @@ func (c *Controller) ManageableSessions(ctx context.Context) (SessionState, erro
 	projectRoot := c.projectRoot
 	c.mu.RUnlock()
 	regular, quick := splitSessions(sessions, true)
-	return SessionState{ProjectRoot: projectRoot, Sessions: regular, QuickChats: quick}, nil
+	return SessionState{ProjectRoot: projectRoot, Sessions: regular, QuickChats: quick, ScheduledJobs: c.scheduledJobCounts(ctx)}, nil
 }
 
 // CreateSession creates a new session without changing controller selection.
@@ -2225,6 +2249,31 @@ func (c *Controller) RefreshWorkspaceForSelection(ctx context.Context, selection
 		return workspacepkg.SnapshotResult{}, err
 	}
 	return workspacepkg.SnapshotResult{Status: owner.WorkspaceStatus(), Diff: owner.WorkspaceDiff()}, nil
+}
+
+// PollWorkspaceForSelection refreshes the selected session's git status if
+// the last scan is older than the refresh interval. Clients viewing a session
+// poll it, which covers what the file watcher misses: trees too large to
+// watch and changes it does not see. A change reaches clients as a delta.
+func (c *Controller) PollWorkspaceForSelection(ctx context.Context, selection Selection) error {
+	if selection.SessionID == "" || c.agent == nil {
+		return nil
+	}
+	owner, err := c.agent.LoadSession(ctx, selection.SessionID)
+	if err != nil {
+		return err
+	}
+	if !c.sessionInWorkspace(owner.Snapshot().Session) {
+		return nil
+	}
+	minInterval := c.workspaceRefreshMinInterval
+	if minInterval <= 0 {
+		minInterval = defaultWorkspaceRefreshMinInterval
+	}
+	if refreshed := owner.WorkspaceStatus().RefreshedAt; !refreshed.IsZero() && time.Since(refreshed) < minInterval {
+		return nil
+	}
+	return c.refreshSessionWorkspace(ctx, owner, workspaceRefreshTimer)
 }
 
 func (c *Controller) WorkspaceDiffForSelection(ctx context.Context, selection Selection) (workspacepkg.Diff, error) {

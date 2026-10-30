@@ -1018,6 +1018,8 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return map[string]bool{"started": true}, s.controller.CompactForSelection(ctx, s.appSelection(clientID), in.Instructions)
+	case "poll_workspace":
+		return map[string]bool{"ok": true}, s.controller.PollWorkspaceForSelection(ctx, s.appSelection(clientID))
 	case "refresh_workspace":
 		result, err := s.controller.RefreshWorkspaceForSelection(ctx, s.appSelection(clientID))
 		if err != nil {
@@ -1878,6 +1880,7 @@ func (s *Server) welcomeState(ctx context.Context, message string) app.State {
 		Build:         state.Build,
 		RestartNeeded: state.RestartNeeded,
 		RestartBuild:  state.RestartBuild,
+		ScheduledJobs: sessionState.ScheduledJobs,
 		Error:         strings.TrimSpace(message),
 	}
 }

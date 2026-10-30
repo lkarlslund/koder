@@ -79,8 +79,49 @@ type Scheduler struct {
 	deliver Deliver
 	now     func() time.Time
 	wake    chan struct{}
+	// onChange, when set, is called after a job is added or removed.
+	onChange func()
 	// mu serializes changes to jobs between the tool and the run loop.
 	mu sync.Mutex
+}
+
+// OnChange sets a function called, outside the scheduler's lock, after a
+// job is added or removed.
+func (s *Scheduler) OnChange(fn func()) {
+	s.mu.Lock()
+	s.onChange = fn
+	s.mu.Unlock()
+}
+
+func (s *Scheduler) changed() {
+	s.mu.Lock()
+	fn := s.onChange
+	s.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+// Counts is how many jobs each session and each chat has.
+type Counts struct {
+	Sessions map[id.ID]int `json:"sessions"`
+	Chats    map[id.ID]int `json:"chats"`
+}
+
+// Counts returns how many jobs each session and chat has.
+func (s *Scheduler) Counts(ctx context.Context) (Counts, error) {
+	s.mu.Lock()
+	jobs, err := s.jobs.List(ctx, store.All[Job]())
+	s.mu.Unlock()
+	counts := Counts{Sessions: map[id.ID]int{}, Chats: map[id.ID]int{}}
+	if err != nil {
+		return counts, err
+	}
+	for _, job := range jobs {
+		counts.Sessions[job.SessionID]++
+		counts.Chats[job.ChatID]++
+	}
+	return counts, nil
 }
 
 // NewScheduler returns a scheduler over st. It delivers nothing until Run.
@@ -114,6 +155,14 @@ func (s *Scheduler) Create(ctx context.Context, sessionID, chatID id.ID, spec, p
 	if err != nil {
 		return Job{}, err
 	}
+	job, err := s.create(ctx, sessionID, chatID, expr, prompt, recurring)
+	if err == nil {
+		s.changed()
+	}
+	return job, err
+}
+
+func (s *Scheduler) create(ctx context.Context, sessionID, chatID id.ID, expr, prompt string, recurring bool) (Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	existing, err := s.listLocked(ctx, chatID)
@@ -155,6 +204,14 @@ func (s *Scheduler) listLocked(ctx context.Context, chatID id.ID) ([]Job, error)
 
 // Delete removes one of a chat's jobs.
 func (s *Scheduler) Delete(ctx context.Context, chatID id.ID, jobID string) (Job, error) {
+	job, err := s.delete(ctx, chatID, jobID)
+	if err == nil {
+		s.changed()
+	}
+	return job, err
+}
+
+func (s *Scheduler) delete(ctx context.Context, chatID id.ID, jobID string) (Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	job, err := s.jobs.Get(ctx, strings.TrimSpace(jobID))
@@ -271,12 +328,14 @@ func (s *Scheduler) reschedule(ctx context.Context, job Job, now time.Time) {
 
 func (s *Scheduler) remove(ctx context.Context, job Job, reason string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.jobs.Delete(ctx, job.ID); err != nil && !store.IsNotFound(err) {
+	err := s.jobs.Delete(ctx, job.ID)
+	s.mu.Unlock()
+	if err != nil && !store.IsNotFound(err) {
 		slog.Warn("cron: delete job", "job_id", job.ID, "error", err)
 		return
 	}
 	slog.Info("cron: removed job", "job_id", job.ID, "chat_id", job.ChatID, "reason", reason)
+	s.changed()
 }
 
 // nextRun is the job's first run after now in local time, with its fixed

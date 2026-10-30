@@ -1146,7 +1146,7 @@ function timeoutLabel(value) {
         toolCommandModal: {open: false, command: '', subtitle: '', meta: [], output: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-		browserStatus: {state: 'unknown', owned_tabs: 0}, browserStatusTimer: null, browserTabs: [], browserTabsLoading: false, activityNow: Date.now(), activityTimer: null, cronJobModal: {open: false, jobID: ''},
+		browserStatus: {state: 'unknown', owned_tabs: 0}, browserStatusTimer: null, browserTabs: [], browserTabsLoading: false, activityNow: Date.now(), activityTimer: null, workspacePollTimer: null, scheduledJobs: {sessions: {}, chats: {}}, filterMenuOpen: '', cronJobModal: {open: false, jobID: ''},
 		browserPreview: {open: false, tab: null, rate: Number(readPreference('browserPreviewRate', '2')), src: '', loading: false, error: '', lastUpdated: '', timer: null, generation: 0},
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
@@ -1176,6 +1176,12 @@ function timeoutLabel(value) {
 		  this.browserStatusTimer = setInterval(() => this.refreshBrowserStatus(), 5000);
 		  // Runtimes in the sidebar's activity list tick while it shows anything.
 		  this.activityTimer = setInterval(() => { if (this.activityItems().length) this.activityNow = Date.now(); }, 1000);
+		  // Git status follows the workspace on its own: the server watches files
+		  // where it can, and a visible page asks it to check every 10 seconds.
+		  this.workspacePollTimer = setInterval(() => {
+			if (document.visibilityState !== 'visible' || !this.workspaceSessionMode() || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+			this.rpc('poll_workspace', {}).catch(() => {});
+		  }, 10000);
           this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); this.observeTranscriptEnhancements(); this.scheduleTranscriptEnhancement(); this.observeLastTranscriptItem(); });
         },
         initializeRouteHydration() {
@@ -1728,6 +1734,7 @@ function timeoutLabel(value) {
           if (msg.type === 'selection_delta') this.applySelectionDelta(msg.payload);
           if (msg.type === 'workspace_delta') this.applyWorkspaceDelta(msg.payload);
           if (msg.type === 'git_delta') this.applyGitDelta(msg.payload);
+          if (msg.type === 'scheduled_jobs') this.applyScheduledJobs(msg.payload);
           if (msg.type === 'theme') { this.theme = msg.payload.theme || 'auto'; writePreference('theme', this.theme); this.applyTheme(); }
         },
         applyStateDelta(delta) {
@@ -2485,6 +2492,7 @@ function timeoutLabel(value) {
           const currentSessionID = String(this.state?.session?.id || this.state?.session?.ID || '').trim();
           if (incomingSessionID !== currentSessionID) this.clearTimelineCaches();
           this.state = this.cacheStateTimelines(s || {});
+          this.applyScheduledJobs(this.state.scheduled_jobs);
 		  this.settingsHealth = this.state.settings_health || this.state.SettingsHealth || this.settingsHealth;
 		  if (this.browserVoiceClient && (this.browserVoiceClient.options.sessionID !== this.currentSessionID() || this.browserVoiceClient.options.chatID !== String(this.activeChatID() || '').trim())) {
 			this.stopBrowserVoice();
@@ -3521,13 +3529,6 @@ function timeoutLabel(value) {
           this.hiddenMilestoneStatuses = {...this.hiddenMilestoneStatuses, [key]: !this.hiddenMilestoneStatuses[key]};
           writeJSONPreference('hiddenMilestoneStatuses', this.hiddenMilestoneStatuses);
         },
-        milestoneStatusFilterClass(status) {
-          const key = String(status || 'pending');
-          return {
-            ['status-filter-' + key.replaceAll('_', '-')]: true,
-            active: this.milestoneStatusFilterEnabled(key),
-          };
-        },
         milestoneStatusFilterTitle(filter) {
           return (this.milestoneStatusFilterEnabled(filter.status) ? 'Hide ' : 'Show ') + filter.label + ' milestones';
         },
@@ -3682,9 +3683,26 @@ function timeoutLabel(value) {
           this.hiddenChatStatuses = {...this.hiddenChatStatuses, [key]: !this.hiddenChatStatuses[key]};
           writeJSONPreference('hiddenChatStatuses', this.hiddenChatStatuses);
         },
-        chatStatusFilterTitle(filter) {
-          return (this.chatStatusFilterEnabled(filter.status) ? 'Hide ' : 'Show ') + filter.label + ' chats';
+        // Status filters for the sidebar's lists (chats, milestones) share one
+        // dropdown of checkboxes, so each list header stays on one line.
+        filterOptions(kind) { return kind === 'milestones' ? this.milestoneStatusFilterOptions() : this.chatStatusFilterOptions(); },
+        filterEnabled(kind, status) { return kind === 'milestones' ? this.milestoneStatusFilterEnabled(status) : this.chatStatusFilterEnabled(status); },
+        toggleFilter(kind, status) { if (kind === 'milestones') this.toggleMilestoneStatusFilter(status); else this.toggleChatStatusFilter(status); },
+        // filterHiding reports whether the filter hides anything in the list now;
+        // filterUnticked whether any status is unticked, even one with no items.
+        filterHiding(kind) { return this.filterOptions(kind).some(option => option.count > 0 && !this.filterEnabled(kind, option.status)); },
+        filterUnticked(kind) { return this.filterOptions(kind).some(option => !this.filterEnabled(kind, option.status)); },
+        showAllFilter(kind) {
+          if (kind === 'milestones') { this.hiddenMilestoneStatuses = {}; writeJSONPreference('hiddenMilestoneStatuses', {}); }
+          else { this.hiddenChatStatuses = {}; writeJSONPreference('hiddenChatStatuses', {}); }
         },
+        filterSummary(kind) {
+          if (!this.filterHiding(kind)) return 'All';
+          const shown = kind === 'milestones' ? this.visibleMilestones().length : this.visibleChats().length;
+          const total = this.filterOptions(kind).reduce((sum, option) => sum + option.count, 0);
+          return shown + ' of ' + total;
+        },
+        toggleFilterMenu(kind) { this.filterMenuOpen = this.filterMenuOpen === kind ? '' : kind; },
         chatSnapshot(chat) {
           const id = this.chatID(chat);
           const snapshots = this.state.snapshots || this.state.Snapshots || {};
@@ -4059,15 +4077,6 @@ function timeoutLabel(value) {
           if (code.includes('A')) return 'text-bg-success';
           if (code.includes('M') || code.includes('R') || code.includes('C')) return 'text-bg-warning';
           return 'text-bg-secondary';
-        },
-        refreshWorkspace() {
-          this.rpc('refresh_workspace', {}).then(result => {
-            const status = result?.workspace_status || result?.WorkspaceStatus || result?.workspace || result?.Workspace;
-            if (status !== undefined) this.applyWorkspaceDelta({workspace_status: status});
-            const diff = result?.git_diff || result?.GitDiff || result?.diff || result?.Diff;
-            if (diff !== undefined) this.applyGitDelta({git_diff: diff});
-          }).catch(err => this.showToast(err.message || 'refresh workspace failed'));
-          this.closeMobileSidebar();
         },
         toolIcon(kind) {
           if (kind === 'request_user_input') return 'bi-question-circle';
@@ -5474,6 +5483,7 @@ function timeoutLabel(value) {
           this.sessionLoading = true;
           return this.rpc('list_sessions', {}).then(result => {
             this.sessionState = this.normalizeSessionState(result);
+            this.applyScheduledJobs(result?.scheduled_jobs);
             this.state.sessions = this.sessionState.sessions;
             this.state.Sessions = this.state.sessions;
             this.state.quick_chats = this.sessionState.quick_chats;
@@ -5484,6 +5494,14 @@ function timeoutLabel(value) {
           }).catch(err => this.showToast(err.message)).finally(() => { this.sessionLoading = false; });
         },
         loadWelcomeSessions() { return this.refreshSessionSelector(); },
+        applyScheduledJobs(counts) {
+          if (!counts || typeof counts !== 'object') return;
+          this.scheduledJobs = {sessions: counts.sessions || {}, chats: counts.chats || {}};
+        },
+        // How many cron jobs a session or chat has, so the lists can show which will run on their own.
+        sessionScheduledCount(session) { return Number(this.scheduledJobs.sessions[this.sessionID(session)] || 0); },
+        chatScheduledCount(chat) { return Number(this.scheduledJobs.chats[this.chatID(chat)] || 0); },
+        scheduledCountTitle(count, what) { return count === 1 ? 'This ' + what + ' has a scheduled prompt' : 'This ' + what + ' has ' + count + ' scheduled prompts'; },
         normalizeSessionState(value) {
           const source = value || {};
           const sessions = source.sessions || source.Sessions || [];

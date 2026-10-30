@@ -152,7 +152,17 @@ func (w *Watcher) emit() {
 
 func (w *Watcher) addExistingDirs() error {
 	var counts watchCounts
-	return w.addDirTree(w.root, &counts)
+	if err := w.addDirTree(w.root, &counts); err != nil {
+		return err
+	}
+	// The top of .git changes on commits, staging, checkouts and fetches
+	// (HEAD, index, FETCH_HEAD), none of which touch the working tree.
+	if info, err := os.Stat(filepath.Join(w.root, ".git")); err == nil && info.IsDir() {
+		if err := w.watch.Add(filepath.Join(w.root, ".git")); err != nil && !errors.Is(err, fsnotify.ErrClosed) {
+			return fmt.Errorf("watch .git: %w", err)
+		}
+	}
+	return nil
 }
 
 type watchCounts struct {

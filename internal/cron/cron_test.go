@@ -203,3 +203,39 @@ func TestSchedulerKeepsChatsApart(t *testing.T) {
 		t.Fatalf("over the limit: %v", err)
 	}
 }
+
+// Counts report each session's and chat's jobs, and OnChange fires when a job
+// is added or removed, whether by the tool or by running out.
+func TestSchedulerCountsJobsAndReportsChanges(t *testing.T) {
+	ctx := context.Background()
+	s, c := newTestScheduler(t, at(t, "2026-10-30 10:00"), func(Job, Delivery) error { return nil })
+	changes := 0
+	s.OnChange(func() { changes++ })
+	once, err := s.Create(ctx, "s1", "c1", "17 10 30 10 *", "check the deploy", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Create(ctx, "s1", "c2", "1h", "look at the queue", true); err != nil {
+		t.Fatal(err)
+	}
+	every, err := s.Create(ctx, "s2", "c3", "1h", "tidy up", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts, err := s.Counts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.Sessions["s1"] != 2 || counts.Sessions["s2"] != 1 || counts.Chats["c1"] != 1 || counts.Chats["c3"] != 1 || changes != 3 {
+		t.Fatalf("counts = %+v after %d changes", counts, changes)
+	}
+	if _, err := s.Delete(ctx, "c3", every.ID); err != nil {
+		t.Fatal(err)
+	}
+	c.now = once.NextRunAt.Add(time.Second)
+	s.tick(ctx)
+	counts, _ = s.Counts(ctx)
+	if counts.Sessions["s2"] != 0 || counts.Chats["c1"] != 0 || counts.Sessions["s1"] != 1 || changes != 5 {
+		t.Fatalf("counts = %+v after %d changes", counts, changes)
+	}
+}

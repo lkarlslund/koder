@@ -336,21 +336,29 @@
       <div class="sidebar-section">
         <div class="sidebar-info-row">
           <span class="sidebar-heading">Chats</span>
-		  <div class="d-flex align-items-center gap-1" x-show="workspaceSessionMode()">
+          <template x-if="workspaceSessionMode()">
+          <div class="list-filter" x-show="filterOptions('chats').length > 0" @click.outside="filterMenuOpen === 'chats' && (filterMenuOpen = '')" @keydown.escape="filterMenuOpen = ''">
+            <button type="button" class="list-filter-toggle" :class="{'filtering': filterHiding('chats')}" :aria-expanded="filterMenuOpen === 'chats'" title="Choose which chats to show" data-list-filter="chats" @click="toggleFilterMenu('chats')"><i class="bi bi-funnel"></i><span x-text="filterSummary('chats')"></span><i class="bi bi-chevron-down list-filter-caret"></i></button>
+            <div class="dropdown-menu list-filter-menu shadow" :class="{'show': filterMenuOpen === 'chats'}" x-show="filterMenuOpen === 'chats'" style="display: none;">
+              <template x-for="option in filterOptions('chats')" :key="option.status">
+                <label class="dropdown-item list-filter-option" :class="{'list-filter-empty': option.count === 0}">
+                  <input type="checkbox" class="form-check-input m-0" :checked="filterEnabled('chats', option.status)" @change="toggleFilter('chats', option.status)">
+                  <i class="bi" :class="option.icon"></i>
+                  <span class="flex-grow-1" x-text="option.label"></span>
+                  <span class="list-filter-count" x-text="option.count"></span>
+                </label>
+              </template>
+              <div class="dropdown-divider"></div>
+              <button type="button" class="dropdown-item small" :disabled="!filterUnticked('chats')" @click="showAllFilter('chats')">Show all</button>
+            </div>
+          </div>
+          </template>
+		  <div class="d-flex align-items-center gap-1 ms-auto" x-show="workspaceSessionMode()">
             <button class="btn btn-sm btn-outline-secondary" title="Cleanup chats" @click="openCleanupDialog()"><i class="bi bi-magic"></i></button>
 			<div class="new-chat-picker" @click.outside="newChatMenuOpen = false">
 			  <button class="btn btn-sm btn-outline-primary" type="button" title="New chat" @click="openChatCreator()"><i class="bi bi-plus-lg"></i></button>
 			</div>
           </div>
-        </div>
-		<div class="status-filter-row" x-show="workspaceSessionMode() && chatStatusFilterOptions().length > 0">
-          <template x-for="filter in chatStatusFilterOptions()" :key="filter.status">
-            <button type="button" class="status-filter-button" :class="{'active': chatStatusFilterEnabled(filter.status)}" :title="chatStatusFilterTitle(filter)" @click="toggleChatStatusFilter(filter.status)">
-              <i class="bi" :class="filter.icon"></i>
-              <span x-text="filter.label"></span>
-              <span class="status-filter-count" x-text="filter.count"></span>
-            </button>
-          </template>
         </div>
         <div class="list-group list-group-flush sidebar-list">
           <template x-for="chat in visibleChats()" :key="chat.ID || chat.id">
@@ -364,6 +372,7 @@
 				  <i class="bi bi-mic-fill" x-show="chatTypeIcon(chat) === 'bi-mic-fill'"></i>
 				  <i class="bi bi-archive" x-show="chatTypeIcon(chat) === 'bi-archive'"></i>
                   <span class="text-truncate chat-title" x-text="chatTitle(chat)"></span>
+                  <span class="scheduled-badge" x-show="chatScheduledCount(chat) > 0" :title="scheduledCountTitle(chatScheduledCount(chat), 'chat')" data-scheduled-chat><i class="bi bi-clock"></i><span x-text="chatScheduledCount(chat)"></span></span>
 				  <button type="button" class="btn btn-sm p-0 border-0 bg-transparent chat-title-edit" title="Rename chat" x-show="workspaceSessionMode()" @click.stop="renameChat(chat)" @pointerdown.stop @mousedown.stop draggable="false">
                     <i class="bi bi-pencil"></i>
                   </button>
@@ -405,16 +414,22 @@
 	  <div class="sidebar-section" x-show="workspaceSessionMode() && allMilestoneItems().length > 0" style="display: none;">
         <div class="sidebar-info-row">
           <span class="sidebar-heading">Milestones</span>
-		  <button type="button" class="btn btn-sm" :class="showArchivedPlanning ? 'btn-warning' : 'btn-outline-warning'" x-show="archivedPlanningCount() > 0" :title="showArchivedPlanning ? 'Hide archived milestones and tasks' : 'Show archived milestones and tasks'" @click="toggleArchivedPlanning()"><i class="bi bi-archive"></i><span class="visually-hidden">Toggle archived planning items</span><span class="badge text-bg-dark ms-1" x-text="archivedPlanningCount()"></span></button>
-        </div>
-        <div class="status-filter-row" x-show="milestoneStatusFilterOptions().length > 0">
-          <template x-for="filter in milestoneStatusFilterOptions()" :key="filter.status">
-            <button type="button" class="status-filter-button" :class="milestoneStatusFilterClass(filter.status)" :title="milestoneStatusFilterTitle(filter)" @click="toggleMilestoneStatusFilter(filter.status)">
-              <i class="bi" :class="filter.icon"></i>
-              <span x-text="filter.label"></span>
-              <span class="status-filter-count" x-text="filter.count"></span>
-            </button>
-          </template>
+          <div class="list-filter" x-show="filterOptions('milestones').length > 0" @click.outside="filterMenuOpen === 'milestones' && (filterMenuOpen = '')" @keydown.escape="filterMenuOpen = ''">
+            <button type="button" class="list-filter-toggle" :class="{'filtering': filterHiding('milestones')}" :aria-expanded="filterMenuOpen === 'milestones'" title="Choose which milestones to show" data-list-filter="milestones" @click="toggleFilterMenu('milestones')"><i class="bi bi-funnel"></i><span x-text="filterSummary('milestones')"></span><i class="bi bi-chevron-down list-filter-caret"></i></button>
+            <div class="dropdown-menu list-filter-menu shadow" :class="{'show': filterMenuOpen === 'milestones'}" x-show="filterMenuOpen === 'milestones'" style="display: none;">
+              <template x-for="option in filterOptions('milestones')" :key="option.status">
+                <label class="dropdown-item list-filter-option" :class="{'list-filter-empty': option.count === 0}">
+                  <input type="checkbox" class="form-check-input m-0" :checked="filterEnabled('milestones', option.status)" @change="toggleFilter('milestones', option.status)">
+                  <i class="bi" :class="option.icon"></i>
+                  <span class="flex-grow-1" x-text="option.label"></span>
+                  <span class="list-filter-count" x-text="option.count"></span>
+                </label>
+              </template>
+              <div class="dropdown-divider"></div>
+              <button type="button" class="dropdown-item small" :disabled="!filterUnticked('milestones')" @click="showAllFilter('milestones')">Show all</button>
+            </div>
+          </div>
+		  <button type="button" class="btn btn-sm ms-auto" :class="showArchivedPlanning ? 'btn-warning' : 'btn-outline-warning'" x-show="archivedPlanningCount() > 0" :title="showArchivedPlanning ? 'Hide archived milestones and tasks' : 'Show archived milestones and tasks'" @click="toggleArchivedPlanning()"><i class="bi bi-archive"></i><span class="visually-hidden">Toggle archived planning items</span><span class="badge text-bg-dark ms-1" x-text="archivedPlanningCount()"></span></button>
         </div>
         <template x-if="milestoneSummary()">
           <div class="sidebar-note" x-text="milestoneSummary()"></div>
@@ -458,7 +473,7 @@
           </template>
         </div>
       </div>
-	  <div class="sidebar-section" x-show="workspaceSessionMode()">
+	  <div class="sidebar-section" x-show="workspaceSessionMode() && gitStatus().available" style="display: none;">
         <div class="sidebar-info-row git-summary-row">
           <span class="sidebar-heading">Git</span>
           <span class="fw-semibold text-truncate" x-show="gitStatus().available" x-text="gitStatus().branch || '-'"></span>
@@ -471,11 +486,7 @@
             <span class="diff-del ms-1" x-text="'-' + (gitStatus().deleted || 0)"></span>
             <span class="text-info ms-1" x-text="'?' + (gitStatus().untracked || 0)"></span>
           </span>
-          <button class="btn btn-sm btn-outline-secondary" title="Refresh git status" @click="refreshWorkspace()"><i class="bi bi-arrow-clockwise"></i></button>
         </div>
-        <template x-if="!gitStatus().available">
-          <div class="text-secondary">No git repository</div>
-        </template>
         <template x-if="gitStatus().available">
           <div class="sidebar-compact-block">
             <div class="list-group list-group-flush sidebar-list" x-show="gitTreeRows().length > 0">
@@ -1138,19 +1149,19 @@
             <button type="button" class="btn btn-link text-start p-0 flex-grow-1 text-decoration-none" :class="sessionID(session) === activeSessionID() ? 'text-white' : 'text-body'" @click="switchSession(sessionID(session), $event)" @auxclick.stop.prevent="switchSession(sessionID(session), $event)">
               <template x-if="isQuickSession(session)">
                 <span>
-                  <span class="fw-semibold"><i class="bi bi-lightning-charge me-1"></i><span x-text="sessionTitle(session)"></span></span>
+                  <span class="fw-semibold"><i class="bi bi-lightning-charge me-1"></i><span x-text="sessionTitle(session)"></span><span class="scheduled-badge ms-2" x-show="sessionScheduledCount(session) > 0" :title="scheduledCountTitle(sessionScheduledCount(session), 'session')" data-scheduled-session><i class="bi bi-clock"></i><span x-text="sessionScheduledCount(session)"></span></span></span>
                   <span class="d-block small opacity-75" x-text="session.LastMessage || session.last_message || 'Standalone Quick Chat'"></span>
                 </span>
               </template>
               <template x-if="isVoiceSession(session)">
                 <span>
-                  <span class="fw-semibold"><i class="bi bi-telephone-fill me-1"></i><span x-text="sessionTitle(session)"></span></span>
+                  <span class="fw-semibold"><i class="bi bi-telephone-fill me-1"></i><span x-text="sessionTitle(session)"></span><span class="scheduled-badge ms-2" x-show="sessionScheduledCount(session) > 0" :title="scheduledCountTitle(sessionScheduledCount(session), 'session')" data-scheduled-session><i class="bi bi-clock"></i><span x-text="sessionScheduledCount(session)"></span></span></span>
                   <span class="d-block small opacity-75" x-text="session.LastMessage || session.last_message || 'Voice coordination chat'"></span>
                 </span>
               </template>
               <template x-if="!isQuickSession(session) && !isVoiceSession(session)">
                 <span>
-  				<span class="fw-semibold"><i class="bi me-1" :class="isVoiceSession(session) ? 'bi-telephone-fill' : 'bi-folder'"></i><span x-text="sessionTitle(session)"></span></span>
+  				<span class="fw-semibold"><i class="bi me-1" :class="isVoiceSession(session) ? 'bi-telephone-fill' : 'bi-folder'"></i><span x-text="sessionTitle(session)"></span><span class="scheduled-badge ms-2" x-show="sessionScheduledCount(session) > 0" :title="scheduledCountTitle(sessionScheduledCount(session), 'session')" data-scheduled-session><i class="bi bi-clock"></i><span x-text="sessionScheduledCount(session)"></span></span></span>
   				<span class="d-block small opacity-75 text-truncate" x-text="isVoiceSession(session) ? 'Voice coordination chat' : sessionProjectRoot(session)"></span>
                   <span class="d-block small opacity-75">
                     <template x-if="session.LastMessage || session.last_message"><span x-text="session.LastMessage || session.last_message"></span></template>

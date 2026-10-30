@@ -38,6 +38,20 @@
     .mobile-sidebar-fab { position: fixed; left: .75rem; bottom: calc(5rem + env(safe-area-inset-bottom, 0px)); z-index: 1030; width: 2.75rem; height: 2.75rem; padding: 0; border-radius: 999px; }
     .topbar-session-edit { --bs-btn-padding-x: .2rem; --bs-btn-padding-y: .05rem; line-height: 1; color: var(--bs-secondary-color); text-decoration: none; }
     .topbar-session-edit:hover, .topbar-session-edit:focus-visible { color: var(--bs-body-color); }
+    /* A list's status filter: a small toggle beside its heading that opens
+       a dropdown of checkboxes, so the header stays on one line. */
+    .list-filter { position: relative; min-width: 0; }
+    .list-filter-toggle { display: inline-flex; align-items: center; gap: .3rem; padding: .08rem .45rem; border: 1px solid var(--bs-border-color); border-radius: 999px; background: transparent; color: var(--bs-secondary-color); font-size: .72rem; line-height: 1.4; white-space: nowrap; }
+    .list-filter-toggle:hover, .list-filter-toggle:focus-visible, .list-filter-toggle[aria-expanded="true"] { border-color: rgba(var(--bs-primary-rgb), .55); color: var(--bs-body-color); outline: none; }
+    .list-filter-toggle.filtering { border-color: var(--bs-primary-border-subtle); background: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis); }
+    .list-filter-caret { font-size: .6rem; }
+    .list-filter-menu { top: calc(100% + .25rem); left: 0; min-width: 12.5rem; padding: .3rem 0; font-size: .82rem; z-index: 1035; }
+    .list-filter-option { display: flex; align-items: center; gap: .5rem; padding: .3rem .75rem; cursor: pointer; }
+    .list-filter-option.list-filter-empty { color: var(--bs-secondary-color); }
+    .list-filter-count { min-width: 1.3rem; padding: 0 .3rem; border-radius: 999px; background: var(--bs-secondary-bg); color: var(--bs-secondary-color); text-align: center; font-size: .7rem; font-variant-numeric: tabular-nums; }
+    /* Marks a session or chat that has cron jobs, so it can be found later. */
+    .scheduled-badge { display: inline-flex; align-items: center; gap: .2rem; padding: 0 .35rem; border-radius: 999px; font-size: .7rem; font-weight: 600; line-height: 1.35; vertical-align: middle; background: var(--bs-warning-bg-subtle); color: var(--bs-warning-text-emphasis); white-space: nowrap; }
+    .active .scheduled-badge, .chat-list-item.active .scheduled-badge { background: rgba(255, 255, 255, .2); color: #fff; }
     /* The sidebar's activity list: things live in the chat right now, each
        a row of type icon, description, runtime and status, opening details. */
     .activity-list { display: grid; gap: .3rem; margin-top: .3rem; max-height: min(26rem, 50vh); overflow-y: auto; }
@@ -85,10 +99,15 @@
     .timeline-latest-button { pointer-events: auto; box-shadow: 0 .25rem .9rem rgba(0, 0, 0, .2); }
     .sidebar-resizer { min-height: 0; cursor: col-resize; background: var(--bs-border-color); opacity: .55; touch-action: none; }
     .sidebar-resizer:hover, .sidebar-resizer.resizing { background: var(--bs-primary); opacity: 1; }
-    .sidebar { min-height: 0; overflow: auto; border-left: 1px solid var(--bs-border-color); }
-    .sidebar-section { margin-bottom: .7rem; }
+    /* The sidebar uses one compact text size, so values, chat titles and the
+       git tree match the activity rows instead of body-sized text. */
+    .sidebar { min-height: 0; overflow: auto; border-left: 1px solid var(--bs-border-color); font-size: .875rem; }
+    .sidebar .model-trigger { font-size: inherit; }
+    .sidebar-section { margin-bottom: .8rem; }
     .sidebar-info-row { display: flex; align-items: center; gap: .45rem; min-width: 0; min-height: 1.55rem; }
+    .sidebar-info-row .btn-sm { flex: 0 0 auto; padding: .05rem .35rem; line-height: 1.2; }
     .sidebar-label, .sidebar-heading { color: var(--bs-secondary-color); font-size: .82rem; line-height: 1.2; flex: 0 0 auto; }
+    .sidebar-label { min-width: 3.4rem; }
     .sidebar-heading { font-weight: 600; }
     .sidebar-heading-row { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
     .sidebar-value { min-width: 0; flex: 1 1 auto; }

@@ -17,7 +17,7 @@ import (
 func TestSidebarActivityListsProcessesAndOpensDetails(t *testing.T) {
 	chromium := chromiumForTest(t)
 	workdir := t.TempDir()
-	ctrl, engine := newTestControllerAndEngine(t, workdir)
+	ctrl, engine, _ := newTestControllerAndEngine(t, workdir)
 	state := selectedTestState(t, ctrl)
 	manager := engine.ExecManager()
 	if manager == nil {

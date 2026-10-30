@@ -2783,8 +2783,8 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `milestoneDependsOnKey`) ||
 		!strings.Contains(fullPage, `milestoneStatusFilterOptions()`) ||
 		!strings.Contains(fullPage, `milestoneFilterStatuses()`) ||
-		!strings.Contains(fullPage, `milestoneStatusFilterClass(filter.status)`) ||
-		!strings.Contains(fullPage, `toggleMilestoneStatusFilter(filter.status)`) ||
+		!strings.Contains(fullPage, `filterOptions('milestones')`) ||
+		!strings.Contains(fullPage, `toggleMilestoneStatusFilter(status)`) ||
 		!strings.Contains(fullPage, `hiddenMilestoneStatuses`) {
 		t.Fatalf("expected sidebar to filter milestones by status")
 	}
@@ -2835,14 +2835,14 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `gitFiles()`) {
 		t.Fatalf("expected sidebar to render git diff files")
 	}
-	if !strings.Contains(fullPage, `refresh_workspace`) {
-		t.Fatalf("expected git sidebar refresh RPC")
+	if !strings.Contains(fullPage, `rpc('poll_workspace', {})`) || strings.Contains(fullPage, `title="Refresh git status"`) {
+		t.Fatalf("expected git status to refresh itself, without a refresh button")
 	}
 	if !strings.Contains(fullPage, `git-summary-row`) ||
 		!strings.Contains(fullPage, `x-text="gitStatus().branch || '-'"`) ||
 		!strings.Contains(fullPage, `x-text="'+' + (gitStatus().added || 0)"`) ||
-		!strings.Contains(fullPage, `title="Refresh git status"`) {
-		t.Fatalf("expected git branch, change summary, and refresh button on one compact row")
+		!strings.Contains(fullPage, `workspaceSessionMode() && gitStatus().available`) {
+		t.Fatalf("expected git branch and change summary on one compact row, shown only in a git repository")
 	}
 	if !strings.Contains(fullPage, `@pointerdown="startSidebarResize($event)"`) {
 		t.Fatalf("expected draggable sidebar divider")
@@ -2874,7 +2874,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `visibleChats()`) ||
 		!strings.Contains(fullPage, `chatStatusFilterOptions()`) ||
 		!strings.Contains(fullPage, `chatFilterStatuses()`) ||
-		!strings.Contains(fullPage, `toggleChatStatusFilter(filter.status)`) ||
+		!strings.Contains(fullPage, `filterOptions('chats')`) ||
 		!strings.Contains(fullPage, `hiddenChatStatuses`) ||
 		!strings.Contains(fullPage, `Archive this chat?`) ||
 		!strings.Contains(fullPage, `bi-archive`) {
@@ -4620,11 +4620,11 @@ func newTestController(t *testing.T) *app.Controller {
 
 func newTestControllerWithWorkdir(t *testing.T, workdir string) *app.Controller {
 	t.Helper()
-	ctrl, _ := newTestControllerAndEngine(t, workdir)
+	ctrl, _, _ := newTestControllerAndEngine(t, workdir)
 	return ctrl
 }
 
-func newTestControllerAndEngine(t *testing.T, workdir string) (*app.Controller, *agent.Engine) {
+func newTestControllerAndEngine(t *testing.T, workdir string) (*app.Controller, *agent.Engine, *store.Store) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -4662,7 +4662,7 @@ func newTestControllerAndEngine(t *testing.T, workdir string) (*app.Controller, 
 	if _, err := ctrl.CreateSession(context.Background(), "Test Session", workdir, false); err != nil {
 		t.Fatalf("create test session: %v", err)
 	}
-	return ctrl, engine
+	return ctrl, engine, st
 }
 
 func selectedTestState(t *testing.T, ctrl *app.Controller) app.State {
