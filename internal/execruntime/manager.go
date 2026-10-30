@@ -149,11 +149,13 @@ type CleanupRequest struct {
 }
 
 type Snapshot struct {
-	ProcessID   string
-	SessionID   id.ID
-	ChatID      id.ID
-	ToolCallID  string
-	Command     string
+	ProcessID  string
+	SessionID  id.ID
+	ChatID     id.ID
+	ToolCallID string
+	Command    string
+	// Label is the user-facing description the command was started with.
+	Label       string
 	Workdir     string
 	Shell       string
 	TTY         bool
@@ -747,6 +749,7 @@ func (p *process) snapshot(maxBytes int) Snapshot {
 		ChatID:       p.chatID,
 		ToolCallID:   p.toolCallID,
 		Command:      p.command,
+		Label:        p.label,
 		Workdir:      p.workdir,
 		Shell:        p.shell,
 		TTY:          p.tty,
@@ -781,6 +784,7 @@ func (p *process) drainSnapshot(maxBytes int) Snapshot {
 		ChatID:       p.chatID,
 		ToolCallID:   p.toolCallID,
 		Command:      p.command,
+		Label:        p.label,
 		Workdir:      p.workdir,
 		Shell:        p.shell,
 		TTY:          p.tty,

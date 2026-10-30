@@ -311,68 +311,26 @@
           </div>
         </div>
       </div>
-      <div class="sidebar-section" x-show="execProcessCount() > 0" style="display: none;">
+      <div class="sidebar-section" x-show="activityItems().length > 0" style="display: none;">
         <div class="sidebar-heading-row">
-          <span class="sidebar-heading">Processes</span>
-          <button type="button" class="status-filter-button" :class="{active: showAllExecProcesses}" :title="execProcessFilterTooltip()" @click="toggleExecProcessFilter()">
-            <span x-text="showAllExecProcesses ? 'All' : 'Running'"></span>
-            <span class="status-filter-count" x-text="execProcessCountLabel()"></span>
-          </button>
+          <span class="sidebar-heading">Activity</span>
+          <span class="status-filter-count" x-text="activityItems().length"></span>
         </div>
-        <div class="exec-process-list">
-          <template x-for="process in execProcesses()" :key="execProcessID(process)">
-            <div class="exec-process-row" role="button" tabindex="0" title="Open process console" @click="openExecProcessConsole(process)" @keydown.enter.prevent="openExecProcessConsole(process)" @keydown.space.prevent="openExecProcessConsole(process)" @mouseenter="showExecProcessTooltip(process, $event)" @mousemove="positionExecProcessTooltip($event)" @mouseleave="hideExecProcessTooltip()" @focusin="showExecProcessTooltip(process, $event)" @focusout="hideExecProcessTooltip()">
-              <i class="bi bi-terminal"></i>
-              <span class="exec-process-command text-truncate" :title="execProcessTooltip(process)" x-text="execProcessCommand(process)"></span>
-              <span class="badge exec-process-state" :class="execProcessClass(process)" x-text="execProcessLabel(process)"></span>
-              <button type="button" class="exec-process-action" title="Terminate process" :disabled="!execProcessTerminable(process)" @click.stop="terminateExecProcess(process)"><i class="bi bi-x-octagon"></i></button>
-            </div>
+        <div class="activity-list">
+          <template x-for="item in activityItems()" :key="item.key">
+            <button type="button" class="activity-row" :data-activity="item.kind" @click="openActivity(item)">
+              <span class="activity-icon" :class="'activity-icon-' + item.kind"><i class="bi" :class="item.icon"></i></span>
+              <span class="activity-text">
+                <span class="activity-title" x-text="item.title"></span>
+                <span class="activity-subtitle" x-show="item.subtitle" x-text="item.subtitle"></span>
+              </span>
+              <span class="activity-time" x-show="item.time" :aria-label="item.timeTitle + ' ' + item.time" x-text="item.time"></span>
+              <span class="activity-status" :class="item.status.cls" :aria-label="item.status.label">
+                <span class="spinner-border" x-show="item.status.spin"></span>
+                <i class="bi" :class="item.status.icon" x-show="!item.status.spin"></i>
+              </span>
+            </button>
           </template>
-        </div>
-      </div>
-      <div class="sidebar-section" x-show="cronJobs().length > 0" style="display: none;">
-        <div class="sidebar-heading-row">
-          <span class="sidebar-heading">Scheduled</span>
-        </div>
-        <div class="exec-process-list">
-          <template x-for="job in cronJobs()" :key="job.id">
-            <div class="exec-process-row" style="cursor: default;" :title="cronJobTooltip(job)">
-              <i class="bi" :class="job.recurring ? 'bi-arrow-repeat' : 'bi-alarm'"></i>
-              <span class="exec-process-command text-truncate" x-text="job.prompt"></span>
-              <span class="badge exec-process-state text-bg-secondary" x-text="cronJobNextRun(job)"></span>
-              <button type="button" class="exec-process-action" title="Delete scheduled job" @click.stop="deleteCronJob(job)"><i class="bi bi-trash"></i></button>
-            </div>
-          </template>
-        </div>
-      </div>
-      <div class="sidebar-section browser-sidebar-section" x-show="browserStatus?.state === 'running'" style="display: none;">
-        <div class="sidebar-heading-row">
-          <span class="sidebar-heading">Browser</span>
-          <button type="button" class="status-filter-button active" :title="browserStatusTitle()" @click="toggleBrowserPanel()" :aria-expanded="browserPanelOpen">
-            <i class="bi bi-globe2"></i>
-            <span>Running</span>
-            <span class="status-filter-count" x-text="browserStatus?.owned_tabs || 0"></span>
-            <i class="bi" :class="browserPanelOpen ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
-          </button>
-        </div>
-        <div x-show="browserPanelOpen" x-transition style="display: none;">
-          <div class="browser-tab-list">
-            <div class="sidebar-note" x-show="browserTabsLoading && browserOwnedTabs().length === 0"><span class="spinner-border spinner-border-sm me-1"></span>Loading tabs</div>
-            <div class="sidebar-note text-danger" x-show="browserPanelError" x-text="browserPanelError"></div>
-            <div class="sidebar-note" x-show="!browserTabsLoading && !browserPanelError && browserOwnedTabs().length === 0">No tabs owned by this chat.</div>
-            <template x-for="tab in browserOwnedTabs()" :key="tab.id">
-              <button type="button" class="browser-tab-row" @click="openBrowserPreview(tab)" :title="tab.url || tab.title">
-                <i class="bi" :class="tab.selected ? 'bi-window-stack text-primary' : 'bi-window'"></i>
-                <span class="browser-tab-title text-truncate" x-text="tab.title || tab.url || 'Untitled tab'"></span>
-                <span class="badge exec-process-state" :class="tab.selected ? 'text-bg-primary' : 'text-bg-secondary'" x-text="tab.selected ? 'active' : 'tab'"></span>
-                <i class="bi bi-chevron-right text-secondary"></i>
-              </button>
-            </template>
-          </div>
-          <div class="browser-sidebar-footer">
-            <button type="button" class="btn btn-sm btn-outline-secondary" @click="refreshBrowserTabs()" :disabled="browserTabsLoading" title="Refresh browser tabs"><i class="bi bi-arrow-clockwise"></i></button>
-            <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeBrowserPanel(); openSettingsDialog('browser')" title="Browser settings"><i class="bi bi-gear"></i></button>
-          </div>
         </div>
       </div>
       <div class="sidebar-section">
@@ -618,10 +576,6 @@
     </form>
   </div>
 
-  <div class="exec-process-tooltip shadow" x-show="execHover.open && !execProcessModal.open" :style="execHoverStyle()" style="display: none;">
-    <div class="exec-process-tooltip-title" x-text="execHover.title"></div>
-    <pre x-text="execHover.output"></pre>
-  </div>
 
   <div class="browser-voice-backdrop" x-show="browserVoice.open" x-transition @keydown.escape.window="closeBrowserVoice()" style="display: none;">
     <section class="browser-voice-panel" role="dialog" aria-modal="true" aria-labelledby="browser-voice-title">
@@ -736,6 +690,7 @@
           <div class="small text-secondary text-truncate" x-text="execProcessModalSubtitle()"></div>
         </div>
         <div class="d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-sm btn-outline-danger" title="Stop process" x-show="execProcessModalProcess() && execProcessTerminable(execProcessModalProcess())" @click="terminateExecProcess(execProcessModalProcess())"><i class="bi bi-stop-circle me-1"></i>Stop</button>
           <button type="button" class="btn btn-sm btn-outline-secondary" title="Copy output" @click="copyExecProcessOutput()"><i class="bi bi-copy"></i></button>
           <button type="button" class="btn btn-sm btn-outline-secondary" title="Close" @click="closeExecProcessConsole()"><i class="bi bi-x-lg"></i></button>
         </div>
@@ -757,6 +712,32 @@
           </div>
           <div class="tool-command-output-body exec-process-console-output"><template x-for="(entry, index) in execProcessModalStream()" :key="index"><span :class="execProcessStreamClass(entry)" :title="execProcessStreamTitle(entry)" x-text="entry.text"></span></template><span x-show="execProcessModalStream().length === 0">No output or input yet</span></div>
         </section>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal-backdrop-lite" x-show="cronJobModal.open" x-transition @click.self="closeCronJobModal()" @keydown.escape.window="closeCronJobModal()" style="display: none;">
+    <section class="tool-command-modal bg-body border rounded shadow" role="dialog" aria-modal="true" aria-label="Scheduled prompt">
+      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+        <div class="min-w-0">
+          <div class="fw-semibold"><i class="bi me-1" :class="cronJobModalJob()?.recurring ? 'bi-arrow-repeat' : 'bi-alarm'"></i> Scheduled prompt</div>
+          <div class="small text-secondary text-truncate" x-text="cronJobModalJob() ? 'Next run ' + cronJobNextRun(cronJobModalJob()) : 'This job has run or been deleted'"></div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-sm btn-outline-danger" title="Delete scheduled prompt" x-show="cronJobModalJob()" @click="deleteCronJob(cronJobModalJob())"><i class="bi bi-trash me-1"></i>Delete</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" title="Close" @click="closeCronJobModal()"><i class="bi bi-x-lg"></i></button>
+        </div>
+      </header>
+      <div class="tool-command-modal-body" x-show="cronJobModalJob()">
+        <div class="tool-command-meta">
+          <template x-for="row in cronJobModalMeta()" :key="row.label">
+            <div class="tool-command-meta-row">
+              <span class="text-secondary" x-text="row.label"></span>
+              <span class="font-monospace" x-text="row.value"></span>
+            </div>
+          </template>
+        </div>
+        <pre class="tool-command-full" x-text="cronJobModalJob()?.prompt || ''"></pre>
       </div>
     </section>
   </div>

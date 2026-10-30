@@ -1033,7 +1033,19 @@
       const body = renderCompactLines(lines, 1, 0, 1, true);
       return '<div class="tool-result-body tool-result-body-mono tool-result-copy-overlay">' + copyOutputButton('copy-output-overlay') + body + '</div>';
     }
-    function timeoutLabel(value) {
+    // activityDuration is a compact elapsed time for the sidebar: 42s, 12m, 1h 05m, 2d 3h.
+function activityDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return seconds + 's';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes + 'm';
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + 'h ' + String(minutes % 60).padStart(2, '0') + 'm';
+  return Math.floor(hours / 24) + 'd ' + (hours % 24) + 'h';
+}
+
+function timeoutLabel(value) {
       const ms = Number(value || 0);
       if (!Number.isFinite(ms) || ms <= 0) return '';
       if (ms < 1000) return String(ms) + 'ms';
@@ -1134,12 +1146,12 @@
         toolCommandModal: {open: false, command: '', subtitle: '', meta: [], output: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-		browserStatus: {state: 'unknown', owned_tabs: 0}, browserStatusTimer: null, browserPanelOpen: false, browserTabs: [], browserTabsLoading: false, browserPanelError: '', browserPanelTimer: null,
+		browserStatus: {state: 'unknown', owned_tabs: 0}, browserStatusTimer: null, browserTabs: [], browserTabsLoading: false, activityNow: Date.now(), activityTimer: null, cronJobModal: {open: false, jobID: ''},
 		browserPreview: {open: false, tab: null, rate: Number(readPreference('browserPreviewRate', '2')), src: '', loading: false, error: '', lastUpdated: '', timer: null, generation: 0},
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
 		chatCreator: {open: false, loading: false, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}},
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptScrollOperation: 0, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptEnhancementObserver: null, transcriptEnhancementFrame: 0, transcriptEnhanceTimer: null, transcriptDOMUpdateScheduled: false, transcriptDOMUpdateCallbacks: [], scrollRestoreSeq: 0, timelineLoading: {}, timelineRepairing: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), showAllExecProcesses: readPreference('showAllExecProcesses', 'false') === 'true', ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execHover: {open: false, title: '', output: '', x: 0, y: 0}, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, composerDefaultSteer: readPreference('composerDefaultSend', 'steer') === 'steer', reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptScrollOperation: 0, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptEnhancementObserver: null, transcriptEnhancementFrame: 0, transcriptEnhanceTimer: null, transcriptDOMUpdateScheduled: false, transcriptDOMUpdateCallbacks: [], scrollRestoreSeq: 0, timelineLoading: {}, timelineRepairing: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, composerDefaultSteer: readPreference('composerDefaultSend', 'steer') === 'steer', reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
           this.syncBrowserTabActivity();
@@ -1162,6 +1174,8 @@
           this.websocketHealthTimer = setInterval(() => this.checkWebsocketHealth(), 5000);
 		  this.refreshBrowserStatus();
 		  this.browserStatusTimer = setInterval(() => this.refreshBrowserStatus(), 5000);
+		  // Runtimes in the sidebar's activity list tick while it shows anything.
+		  this.activityTimer = setInterval(() => { if (this.activityItems().length) this.activityNow = Date.now(); }, 1000);
           this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); this.observeTranscriptEnhancements(); this.scheduleTranscriptEnhancement(); this.observeLastTranscriptItem(); });
         },
         initializeRouteHydration() {
@@ -2864,11 +2878,6 @@
           const processes = snapshot.ExecProcesses || snapshot.exec_processes || [];
           return Array.isArray(processes) ? processes : [];
         },
-        execProcesses() {
-          const processes = this.allExecProcesses();
-          if (this.showAllExecProcesses) return processes;
-          return processes.filter(process => this.execProcessState(process) === 'running');
-        },
         execProcessCount() { return this.allExecProcesses().length; },
         cronJobs() {
           const jobs = this.activeSnapshot().CronJobs;
@@ -2885,26 +2894,96 @@
           const kind = job?.recurring ? 'Recurring' : 'One-shot';
           return kind + ' job ' + (job?.id || '') + ' (' + (job?.cron || '') + '), next run ' + this.cronJobNextRun(job) + '\n\n' + (job?.prompt || '');
         },
+        // activityItems lists what is live in the active chat right now, in one
+        // shape for the sidebar: its processes (running, or ended in the last
+        // few minutes), the browser tabs it owns and its scheduled prompts.
+        activityItems() {
+          const now = this.activityNow;
+          const items = [];
+          for (const process of this.allExecProcesses()) {
+            if (this.execProcessRecent(process, now)) items.push(this.processActivity(process, now));
+          }
+          for (const tab of this.browserOwnedTabs()) items.push(this.tabActivity(tab, now));
+          for (const job of this.cronJobs()) items.push(this.jobActivity(job, now));
+          return items;
+        },
+        execProcessRecent(process, now) {
+          if (this.execProcessState(process) === 'running') return true;
+          const ended = Date.parse(process?.ended_at || '');
+          return !isNaN(ended) && now - ended < 5 * 60 * 1000;
+        },
+        processActivity(process, now) {
+          const command = this.execProcessCommand(process);
+          const label = String(process?.label || '').trim();
+          const started = Date.parse(process?.started_at || '');
+          const ended = Date.parse(process?.ended_at || '');
+          const running = this.execProcessState(process) === 'running';
+          const elapsed = isNaN(started) ? NaN : (running || isNaN(ended) ? now : ended) - started;
+          return {
+            key: 'process:' + this.execProcessID(process), kind: 'process', ref: process,
+            icon: 'bi-terminal', title: label || command || this.execProcessID(process),
+            subtitle: label ? command : '',
+            time: activityDuration(elapsed), timeTitle: running ? 'Running for' : 'Ran for',
+            status: this.processActivityStatus(process),
+          };
+        },
+        processActivityStatus(process) {
+          const state = this.execProcessState(process);
+          const code = this.execProcessExitCode(process);
+          if (state === 'running') return {spin: true, cls: 'text-primary', label: 'Running'};
+          if (state === 'terminated') return {icon: 'bi-stop-circle-fill', cls: 'text-warning', label: 'Stopped'};
+          if (state === 'lost') return {icon: 'bi-question-circle-fill', cls: 'text-secondary', label: 'Lost track of it'};
+          if (state === 'failed' || (code !== '' && code !== '0')) return {icon: 'bi-x-circle-fill', cls: 'text-danger', label: code !== '' ? 'Exited with code ' + code : 'Failed'};
+          return {icon: 'bi-check-circle-fill', cls: 'text-success', label: 'Finished'};
+        },
+        tabActivity(tab, now) {
+          const opened = Date.parse(tab?.opened_at || '');
+          let host = '';
+          try { host = tab?.url ? new URL(tab.url).host : ''; } catch (err) { host = tab?.url || ''; }
+          return {
+            key: 'tab:' + tab.id, kind: 'tab', ref: tab,
+            icon: 'bi-globe2', title: tab?.title || tab?.url || 'New tab', subtitle: host,
+            time: activityDuration(isNaN(opened) ? NaN : now - opened), timeTitle: 'Open for',
+            status: tab?.selected ? {icon: 'bi-eye-fill', cls: 'text-primary', label: 'Current tab'} : {icon: 'bi-dot', cls: 'text-secondary', label: 'Background tab'},
+          };
+        },
+        jobActivity(job, now) {
+          const next = Date.parse(job?.next_run_at || '');
+          return {
+            key: 'job:' + job.id, kind: 'job', ref: job,
+            icon: job?.recurring ? 'bi-arrow-repeat' : 'bi-alarm', title: job?.prompt || job?.id || 'Scheduled prompt',
+            subtitle: (job?.recurring ? 'Repeats · ' : 'Once · ') + this.cronJobNextRun(job),
+            time: isNaN(next) ? '' : 'in ' + activityDuration(Math.max(0, next - now)), timeTitle: 'Next run',
+            status: {icon: 'bi-clock', cls: 'text-secondary', label: job?.recurring ? 'Recurring' : 'One-shot'},
+          };
+        },
+        openActivity(item) {
+          if (item?.kind === 'process') this.openExecProcessConsole(item.ref);
+          else if (item?.kind === 'tab') this.openBrowserPreview(item.ref);
+          else if (item?.kind === 'job') this.cronJobModal = {open: true, jobID: String(item.ref?.id || '')};
+        },
+        cronJobModalJob() { return this.cronJobs().find(job => String(job?.id || '') === this.cronJobModal.jobID) || null; },
+        closeCronJobModal() { this.cronJobModal = {open: false, jobID: ''}; },
+        cronJobModalMeta() {
+          const job = this.cronJobModalJob();
+          if (!job) return [];
+          const when = value => { const date = new Date(value || ''); return isNaN(date.getTime()) ? '' : date.toLocaleString(); };
+          return [
+            {label: 'schedule', value: (job.recurring ? 'Recurring' : 'One-shot') + ' · ' + (job.cron || '')},
+            {label: 'next run', value: when(job.next_run_at)},
+            {label: 'last run', value: when(job.last_fired_at)},
+            {label: 'created', value: when(job.created_at)},
+            {label: 'job id', value: job.id || ''},
+          ].filter(row => row.value);
+        },
         deleteCronJob(job) {
           const jobID = String(job?.id || '').trim();
           if (!jobID) return;
-          this.rpc('delete_cron_job', {chat_id: this.activeChatID(), job_id: jobID}).catch(err => this.showToast(err.message || 'delete cron job failed'));
+          this.rpc('delete_cron_job', {chat_id: this.activeChatID(), job_id: jobID}).then(() => {
+            if (this.cronJobModal.jobID === jobID) this.closeCronJobModal();
+          }).catch(err => this.showToast(err.message || 'delete cron job failed'));
         },
         runningExecProcessCount() { return this.allExecProcesses().filter(process => this.execProcessState(process) === 'running').length; },
-        execProcessCountLabel() {
-          const running = this.runningExecProcessCount();
-          const total = this.execProcessCount();
-          return this.showAllExecProcesses ? String(total) : String(running);
-        },
-        execProcessFilterTooltip() {
-          const running = this.runningExecProcessCount();
-          const total = this.execProcessCount();
-          return this.showAllExecProcesses ? 'Showing all processes for this chat (' + running + ' running of ' + total + ')' : 'Showing running processes for this chat (' + running + ' of ' + total + ')';
-        },
-        toggleExecProcessFilter() {
-          this.showAllExecProcesses = !this.showAllExecProcesses;
-          writePreference('showAllExecProcesses', this.showAllExecProcesses ? 'true' : 'false');
-        },
         activeQueue() { const snapshot = this.activeSnapshot(); return snapshot.QueuedInputs || snapshot.queued_inputs || snapshot.queue || []; },
         timelineItemID(item) { return String(item?.id || item?.ID || '').trim(); },
         timelineItemActionLabel(item) {
@@ -4142,7 +4221,6 @@
         openExecProcessConsole(process) {
           const processID = this.execProcessID(process);
           if (!processID) return;
-          this.hideExecProcessTooltip();
           this.execProcessModal = {open: true, processID};
         },
         closeExecProcessConsole() {
@@ -4154,7 +4232,8 @@
         execProcessModalSubtitle() {
           const process = this.execProcessModalProcess();
           if (!process) return this.execProcessModal.processID || 'Process unavailable';
-          return this.execProcessLabel(process);
+          const label = String(process?.label || '').trim();
+          return label ? label + ' · ' + this.processActivityStatus(process).label : this.execProcessLabel(process);
         },
         execProcessModalCommand() {
           const process = this.execProcessModalProcess();
@@ -4169,8 +4248,13 @@
             const text = String(value ?? '').trim();
             if (text) rows.push({label, value: text});
           };
+          add('doing', process?.label || '');
           add('process id', this.execProcessID(process));
           add('state', this.execProcessState(process));
+          const started = new Date(process?.started_at || '');
+          if (!isNaN(started.getTime())) add('started', started.toLocaleString());
+          const runtime = this.processActivity(process, this.activityNow).time;
+          if (runtime) add('runtime', runtime);
           add('exit code', this.execProcessExitCode(process));
           add('workdir', process?.workdir || process?.Workdir || '');
           add('timeout', this.execProcessTimeout(process));
@@ -4202,27 +4286,6 @@
           const output = this.execProcessModalOutput();
           if (!navigator.clipboard || !output) return;
           navigator.clipboard.writeText(output).then(() => this.showToast('Copied process output')).catch(() => this.showToast('Could not copy process output'));
-        },
-        showExecProcessTooltip(process, event) {
-          if (this.execProcessModal.open) return;
-          this.execHover = {...this.execHover, open: true, title: this.execProcessTooltip(process), output: this.execProcessOutput(process)};
-          this.positionExecProcessTooltip(event);
-        },
-        positionExecProcessTooltip(event) {
-          if (!event) return;
-          const rect = event.currentTarget?.getBoundingClientRect ? event.currentTarget.getBoundingClientRect() : null;
-          const x = rect ? rect.left - 12 : event.clientX;
-          const y = rect ? rect.top : event.clientY;
-          this.execHover = {...this.execHover, x: Math.max(8, x), y: Math.max(8, y)};
-        },
-        hideExecProcessTooltip() {
-          this.execHover = {...this.execHover, open: false};
-        },
-        execHoverStyle() {
-          const width = Math.min(672, Math.max(280, window.innerWidth - 24));
-          const left = Math.max(8, Math.min(this.execHover.x - width, window.innerWidth - width - 8));
-          const top = Math.max(8, Math.min(this.execHover.y, window.innerHeight - 120));
-          return 'left: ' + left + 'px; top: ' + top + 'px; width: ' + width + 'px;';
         },
         terminateExecProcess(process) {
           const processID = this.execProcessID(process);
@@ -6231,37 +6294,22 @@
 		  if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 		  this.rpc('browser_action', {action: 'status'}).then(status => {
 			this.browserStatus = status || this.browserStatus;
-			if (this.browserStatus?.state !== 'running' && this.browserPanelOpen) this.closeBrowserPanel();
+			this.loadBrowserTabs();
 		  }).catch(() => {});
 		},
-		toggleBrowserPanel() {
-		  this.browserPanelOpen = !this.browserPanelOpen;
-		  if (!this.browserPanelOpen) return this.closeBrowserPanel();
-		  this.refreshBrowserTabs();
-		},
-		closeBrowserPanel() {
-		  this.browserPanelOpen = false;
-		  if (this.browserPanelTimer) clearTimeout(this.browserPanelTimer);
-		  this.browserPanelTimer = null;
-		},
 		browserOwnedTabs() { return (this.browserTabs || []).filter(tab => !!tab?.owned); },
-		refreshBrowserTabs() {
-		  if (!this.browserPanelOpen || this.browserTabsLoading || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-		  this.browserTabsLoading = true; this.browserPanelError = '';
-		  if (this.browserPanelTimer) clearTimeout(this.browserPanelTimer);
-		  this.browserPanelTimer = null;
+		// loadBrowserTabs fetches this chat's tabs while it owns any, so they show in the activity list.
+		loadBrowserTabs() {
+		  if (this.browserStatus?.state !== 'running' || !(this.browserStatus?.owned_tabs > 0)) { this.browserTabs = []; return; }
+		  if (this.browserTabsLoading || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+		  this.browserTabsLoading = true;
 		  this.rpc('browser_tabs', {}).then(result => {
 			this.browserStatus = result?.status || this.browserStatus;
 			this.browserTabs = Array.isArray(result?.tabs) ? result.tabs : [];
-			if (this.browserStatus?.state !== 'running') this.closeBrowserPanel();
-		  }).catch(err => { this.browserPanelError = err.message || String(err); }).finally(() => {
-			this.browserTabsLoading = false;
-			if (this.browserPanelOpen) this.browserPanelTimer = setTimeout(() => this.refreshBrowserTabs(), 3000);
-		  });
+		  }).catch(() => {}).finally(() => { this.browserTabsLoading = false; });
 		},
 		openBrowserPreview(tab) {
 		  if (!tab?.id) return;
-		  this.closeBrowserPanel();
 		  const generation = Number(this.browserPreview?.generation || 0) + 1;
 		  const rate = Math.max(0, Number(this.browserPreview?.rate ?? readPreference('browserPreviewRate', '2')) || 0);
 		  this.browserPreview = {open: true, tab: {...tab}, rate, src: '', loading: false, error: '', lastUpdated: '', timer: null, generation};

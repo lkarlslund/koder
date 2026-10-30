@@ -57,6 +57,7 @@ type ownedTab struct {
 	id       string
 	targetID target.ID
 	owner    browserapi.Chat
+	openedAt time.Time
 	ctx      context.Context
 	cancel   context.CancelFunc
 	mu       sync.Mutex
@@ -387,7 +388,7 @@ func (m *Manager) Tabs(ctx context.Context, chat browserapi.Chat) ([]browserapi.
 		if info == nil {
 			continue
 		}
-		result = append(result, browserapi.Tab{ID: tab.id, Title: info.Title, URL: info.URL, Owned: tab.owner.ChatID == chat.ChatID && chat.ChatID != "", Unowned: tab.owner.ChatID == "", Selected: tab.id == selected})
+		result = append(result, browserapi.Tab{ID: tab.id, Title: info.Title, URL: info.URL, Owned: tab.owner.ChatID == chat.ChatID && chat.ChatID != "", Unowned: tab.owner.ChatID == "", Selected: tab.id == selected, OpenedAt: tab.openedAt})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result, nil
@@ -475,7 +476,7 @@ func (m *Manager) NewTab(ctx context.Context, chat browserapi.Chat, rawURL strin
 		cancel()
 		return browserapi.Tab{}, fmt.Errorf("configure browser tab attachment: %w", err)
 	}
-	tab := &ownedTab{id: newOpaqueID("tab"), targetID: targetID, owner: chat, ctx: tabCtx, cancel: cancel, requests: map[string]*requestState{}}
+	tab := &ownedTab{id: newOpaqueID("tab"), targetID: targetID, owner: chat, openedAt: time.Now(), ctx: tabCtx, cancel: cancel, requests: map[string]*requestState{}}
 	m.monitorTab(tab)
 	m.mu.Lock()
 	m.tabs[tab.id] = tab
@@ -1534,7 +1535,7 @@ func (m *Manager) syncTargets(infos []*target.Info) []*ownedTab {
 		if chromedpContext == nil || chromedpContext.Target == nil || chromedpContext.Target.TargetID != info.TargetID {
 			ctx, cancel = chromedp.NewContext(m.browserCtx, chromedp.WithTargetID(info.TargetID))
 		}
-		tab := &ownedTab{id: newOpaqueID("tab"), targetID: info.TargetID, owner: owner, ctx: ctx, cancel: cancel, requests: map[string]*requestState{}}
+		tab := &ownedTab{id: newOpaqueID("tab"), targetID: info.TargetID, owner: owner, openedAt: time.Now(), ctx: ctx, cancel: cancel, requests: map[string]*requestState{}}
 		m.tabs[tab.id] = tab
 		added = append(added, tab)
 		if owner.ChatID != "" && m.selected[owner.ChatID] == "" {

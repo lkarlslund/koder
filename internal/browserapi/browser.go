@@ -31,6 +31,8 @@ type Tab struct {
 	Owned    bool   `json:"owned"`
 	Unowned  bool   `json:"unowned"`
 	Selected bool   `json:"selected"`
+	// OpenedAt is when Koder opened or adopted the tab.
+	OpenedAt time.Time `json:"opened_at,omitzero"`
 }
 
 type Snapshot struct {

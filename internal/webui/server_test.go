@@ -2421,13 +2421,11 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `.tool-image-thumb`) {
 		t.Fatalf("expected visual inspection results to render clickable image thumbnails with a lightbox")
 	}
-	if !strings.Contains(fullPage, `execProcesses()`) ||
+	if !strings.Contains(fullPage, `activityItems()`) ||
 		!strings.Contains(fullPage, `allExecProcesses()`) ||
-		!strings.Contains(fullPage, `showAllExecProcesses`) ||
 		!strings.Contains(fullPage, `execProcessState(process) === 'running'`) ||
-		!strings.Contains(fullPage, `exec-process-tooltip`) ||
-		!strings.Contains(fullPage, `execHoverStyle()`) ||
-		!strings.Contains(fullPage, `openExecProcessConsole(process)`) ||
+		strings.Contains(fullPage, `exec-process-tooltip`) ||
+		!strings.Contains(fullPage, `openExecProcessConsole(item.ref)`) ||
 		!strings.Contains(fullPage, `Process console`) ||
 		!strings.Contains(fullPage, `execProcessModalOutput()`) ||
 		!strings.Contains(fullPage, `execProcessModalStream()`) ||
@@ -2985,16 +2983,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if strings.Contains(fullPage, `setInterval(() => this.renderTabActivityIcon(true)`) {
 		t.Fatalf("expected the busy favicon to remain static because browsers do not reliably repaint animated favicons")
 	}
-	if !strings.Contains(fullPage, `toggleBrowserPanel()`) ||
-		!strings.Contains(fullPage, `class="sidebar-section browser-sidebar-section"`) ||
-		!strings.Contains(fullPage, `x-show="browserStatus?.state === 'running'"`) ||
-		!strings.Contains(fullPage, `class="status-filter-button active"`) ||
-		!strings.Contains(fullPage, `class="badge exec-process-state"`) ||
+	if !strings.Contains(fullPage, `tabActivity(tab, now)`) ||
 		!strings.Contains(fullPage, `rpc('browser_tabs', {})`) ||
 		!strings.Contains(fullPage, `rpc('browser_tab_preview', {tab_id: preview.tab.id})`) ||
 		!strings.Contains(fullPage, `x-model.number="browserPreview.rate"`) ||
 		!strings.Contains(fullPage, `class="browser-preview-image"`) {
-		t.Fatalf("expected running browser disclosure to match process styling and provide owned tabs with adjustable live screenshot preview")
+		t.Fatalf("expected owned browser tabs in the activity list, with adjustable live screenshot preview")
 	}
 	if strings.Contains(fullPage, `class="browser-control`) {
 		t.Fatalf("expected browser status to live in the sidebar rather than the top action bar")
@@ -4626,6 +4620,12 @@ func newTestController(t *testing.T) *app.Controller {
 
 func newTestControllerWithWorkdir(t *testing.T, workdir string) *app.Controller {
 	t.Helper()
+	ctrl, _ := newTestControllerAndEngine(t, workdir)
+	return ctrl
+}
+
+func newTestControllerAndEngine(t *testing.T, workdir string) (*app.Controller, *agent.Engine) {
+	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
@@ -4662,7 +4662,7 @@ func newTestControllerWithWorkdir(t *testing.T, workdir string) *app.Controller 
 	if _, err := ctrl.CreateSession(context.Background(), "Test Session", workdir, false); err != nil {
 		t.Fatalf("create test session: %v", err)
 	}
-	return ctrl
+	return ctrl, engine
 }
 
 func selectedTestState(t *testing.T, ctrl *app.Controller) app.State {
