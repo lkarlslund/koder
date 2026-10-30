@@ -76,10 +76,12 @@ func Args(cmd Command) ([]string, error) {
 	// Later binds cover earlier ones, so grants go shallowest first and a
 	// deeper grant (a project inside a read-only shared folder) wins.
 	for _, grant := range accesssettings.Grants(settings, workdir) {
-		if grant.Mode == accesssettings.ModeDevice {
-			args = append(args, "--dev-bind", grant.Path, grant.Path)
-		} else {
-			args = appendAccess(args, grant.Mode, grant.Path)
+		for _, path := range grant.Paths() {
+			if grant.Mode == accesssettings.ModeDevice {
+				args = append(args, "--dev-bind", path, path)
+			} else {
+				args = appendAccess(args, grant.Mode, path)
+			}
 		}
 	}
 	for _, bind := range cmd.Binds {

@@ -133,8 +133,8 @@ func Validate(settings Settings) error {
 }
 
 // NormalizeMounts canonicalizes explicit host folder grants. A leading ~/ is
-// expanded for configuration and UI convenience; other shell expansions are
-// deliberately unsupported.
+// expanded for configuration and UI convenience, and a path may be a glob
+// (see Grant.Paths); other shell expansions are deliberately unsupported.
 func NormalizeMounts(mounts []Mount) []Mount {
 	out := make([]Mount, 0, len(mounts))
 	for _, mount := range mounts {
@@ -159,6 +159,9 @@ func ValidateMounts(mounts []Mount) error {
 		}
 		if mount.Mode == ModeNone {
 			return fmt.Errorf("mount path %q has no access mode", mount.Path)
+		}
+		if _, err := filepath.Match(mount.Path, ""); err != nil {
+			return fmt.Errorf("mount path %q is not a valid pattern: %w", mount.Path, err)
 		}
 	}
 	return nil
@@ -267,7 +270,7 @@ func hasExplicitMapping(settings Settings, abs string, projectRoot string) bool 
 		return true
 	}
 	for _, mount := range settings.Mounts {
-		if fsutil.Within(mount.Path, abs) {
+		if (Grant{Path: mount.Path}).Covers(abs) {
 			return true
 		}
 	}
@@ -316,10 +319,45 @@ func Grants(settings Settings, projectRoot string) []Grant {
 	return grants
 }
 
+// IsPattern reports whether a grant path is a glob such as /dev/video*.
+func IsPattern(path string) bool {
+	return strings.ContainsAny(path, "*?[")
+}
+
+// Paths lists the host paths the grant exposes right now. A glob is matched
+// against the filesystem each time, so a device plugged in later is picked
+// up by the next command; a glob that matches nothing exposes nothing.
+func (grant Grant) Paths() []string {
+	if !IsPattern(grant.Path) {
+		return []string{grant.Path}
+	}
+	matches, err := filepath.Glob(grant.Path)
+	if err != nil {
+		return nil
+	}
+	return matches
+}
+
+// Covers reports whether abs is the grant's path or inside it. For a glob,
+// abs or one of its parents must match the pattern.
+func (grant Grant) Covers(abs string) bool {
+	if !IsPattern(grant.Path) {
+		return fsutil.Within(grant.Path, abs)
+	}
+	for path := filepath.Clean(abs); ; path = filepath.Dir(path) {
+		if ok, _ := filepath.Match(grant.Path, path); ok {
+			return true
+		}
+		if parent := filepath.Dir(path); parent == path {
+			return false
+		}
+	}
+}
+
 func modeForPath(settings Settings, abs string, projectRoot string) Mode {
 	grants := Grants(settings, projectRoot)
 	for idx := len(grants) - 1; idx >= 0; idx-- {
-		if fsutil.Within(grants[idx].Path, abs) {
+		if grants[idx].Covers(abs) {
 			return grants[idx].Mode
 		}
 	}

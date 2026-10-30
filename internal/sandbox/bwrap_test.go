@@ -354,3 +354,43 @@ func TestArgsAppliesBindsAfterGrants(t *testing.T) {
 		t.Fatal("relative bind source was accepted")
 	}
 }
+
+// A glob grant exposes whatever matches it when the command starts, and
+// nothing else beside it.
+func TestBwrapExposesGlobMatches(t *testing.T) {
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("bwrap not installed")
+	}
+	t.Setenv(envDisableNetUnshare, "1")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := os.MkdirTemp(home, ".koder-sandbox-glob-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(base) })
+	for name, text := range map[string]string{"video0": "cam0", "video1": "cam1", "audio": "mic"} {
+		if err := os.WriteFile(filepath.Join(base, name), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settings := accesssettings.LockedDown()
+	settings.Mounts = []accesssettings.Mount{{Path: filepath.Join(base, "video*"), Mode: accesssettings.ModeDevice}}
+	executable, args, err := WrapCommand(Command{
+		Executable: "/bin/sh",
+		Args:       []string{"-c", `test "$(cat "$1/video0")$(cat "$1/video1")" = cam0cam1 && test ! -e "$1/audio"`, "sh", base},
+		Workdir:    t.TempDir(),
+		Settings:   settings,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command(executable, args...).CombinedOutput(); err != nil {
+		t.Fatalf("run sandbox with glob mount: %v: %s", err, output)
+	}
+	if !slices.Contains(args, filepath.Join(base, "video0")) || slices.Contains(args, filepath.Join(base, "video*")) {
+		t.Fatalf("glob was not expanded: %#v", args)
+	}
+}

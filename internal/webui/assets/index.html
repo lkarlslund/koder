@@ -1049,7 +1049,7 @@
         <div class="settings-list-header mt-4">
           <div>
             <div class="fw-semibold">Extra folders</div>
-            <div class="small text-secondary">Use device access only for host device nodes such as /dev/bus/usb.</div>
+            <div class="small text-secondary">Use device access only for host device nodes such as /dev/bus/usb. Paths may be globs, such as /dev/video*; /dev gives every device.</div>
           </div>
           <button type="button" class="btn btn-sm btn-outline-primary" @click="addAccessMount(accessDraft)"><i class="bi bi-plus-lg"></i></button>
         </div>
@@ -1792,7 +1792,7 @@
                 <div class="settings-list-header">
                   <div>
                     <div class="fw-semibold">Folders shared with every session</div>
-                    <div class="small text-secondary">Host folders inherited by existing and new Koder and Codex sandboxes. Prefer read-only unless a cache or tool must write; use device access for paths such as /dev/bus/usb.</div>
+                    <div class="small text-secondary">Host folders inherited by existing and new Koder and Codex sandboxes. Prefer read-only unless a cache or tool must write; use device access for paths such as /dev/bus/usb. Paths may be globs, such as /dev/video*.</div>
                   </div>
                   <button type="button" class="btn btn-sm btn-outline-primary" title="Add global folder" aria-label="Add global folder" @click="addGlobalAccessMount()"><i class="bi bi-plus-lg"></i></button>
                 </div>

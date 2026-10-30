@@ -94,6 +94,22 @@ func TestNormalizeMountsPreservesDeviceAccess(t *testing.T) {
 	}
 }
 
+func TestGlobMountsCoverMatchingPaths(t *testing.T) {
+	settings := Settings{Root: ModeReadOnly, Mounts: []Mount{{Path: "/dev/video*", Mode: ModeDevice}}}
+	if err := Validate(settings); err != nil {
+		t.Fatalf("glob mount should validate: %v", err)
+	}
+	if err := Allows(settings, Request{Kind: AccessWrite, Path: "/dev/video0"}); err != nil {
+		t.Fatalf("matching device should be writable: %v", err)
+	}
+	if err := Allows(settings, Request{Kind: AccessWrite, Path: "/dev/snd/pcmC0D0p"}); err == nil {
+		t.Fatal("a path the glob does not match should stay blocked")
+	}
+	if err := Validate(Settings{Mounts: []Mount{{Path: "/dev/[video", Mode: ModeDevice}}}); err == nil {
+		t.Fatal("a malformed pattern should be rejected")
+	}
+}
+
 func TestWithInheritedMountsCombinesGlobalAndSessionRules(t *testing.T) {
 	home := t.TempDir()
 	cache := filepath.Join(home, ".cache")
