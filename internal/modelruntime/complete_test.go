@@ -230,14 +230,20 @@ func TestChatWithRetryRetriesTransientEOFBeforeStreamingStarts(t *testing.T) {
 	if resp.Text != "hello" {
 		t.Fatalf("expected final response text hello, got %#v", resp)
 	}
-	var sawRetry bool
+	var sawRetry, sawResume bool
 	for evt := range events {
-		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, "connection dropped") {
+		if evt.Kind == domain.EventKindStatus && evt.Meta[domain.EventMetaRetry] == domain.EventRetryWaiting && strings.HasPrefix(evt.Text, "Connection dropped") && evt.Meta[domain.EventMetaRetryAttempt] == "1" {
 			sawRetry = true
 		}
+		if evt.Kind == domain.EventKindStatus && evt.Meta[domain.EventMetaRetry] == domain.EventRetryResumed {
+			sawResume = true
+		}
 	}
-	if len(waited) != 1 || waited[0] != defaultTransientRetryWait {
-		t.Fatalf("expected single transient retry wait of %s, got %#v", defaultTransientRetryWait, waited)
+	if len(waited) != 1 || waited[0] < baseRetryDelay*8/10 || waited[0] > baseRetryDelay*12/10 {
+		t.Fatalf("expected one retry wait of about %s, got %#v", baseRetryDelay, waited)
+	}
+	if !sawResume {
+		t.Fatal("expected a status saying the request is sent again")
 	}
 	if !sawRetry {
 		t.Fatal("expected transient retry status event")
@@ -247,7 +253,7 @@ func TestChatWithRetryRetriesTransientEOFBeforeStreamingStarts(t *testing.T) {
 	}
 }
 
-func TestChatWithRetryDoesNotRetryAfterPartialStreamFailure(t *testing.T) {
+func TestChatWithRetryDoesNotRetryAMalformedStream(t *testing.T) {
 	t.Parallel()
 
 	var requests int
@@ -398,5 +404,64 @@ func TestChatWithRetryOpportunisticallyDisablesRejectedPromptProgress(t *testing
 	}
 	if !config.PromptProgressObservationValid(updated) || updated.PromptProgressCheckedAt.IsZero() {
 		t.Fatalf("expected timestamped prompt progress observation, got %#v", updated)
+	}
+}
+
+// A stream cut off partway is retried from the start, and the retry status
+// says the output already streamed is to be replaced.
+func TestChatWithRetryRestartsAStreamCutOffPartway(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requests == 1 {
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n"))
+			w.(http.Flusher).Flush()
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Errorf("hijack: %v", err)
+				return
+			}
+			_ = conn.Close()
+			return
+		}
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}],\"usage\":{\"total_tokens\":1}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second, Stream: true}}
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
+	runtime := New(Config{Config: cfg})
+	runtime.SetRetryPause(func(context.Context, time.Duration, func(time.Duration)) error { return nil })
+	client, err := provider.New("test", cfg.Providers["test"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := make(chan domain.Event, 16)
+	session := domain.Session{ID: "session-test"}
+	chat := domain.Chat{ID: "chat-test", SessionID: session.ID, ProviderID: "test", ModelID: "test-model"}
+	resp, _, _, err := runtime.chatWithRetry(context.Background(), session, chat, client, events, provider.ChatRequest{
+		Model:    "test-model",
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hello"}},
+		Stream:   true,
+	}, domain.TimelineItem{ID: chatpkg.NewTimelineID(time.Now().UTC())})
+	close(events)
+	if err != nil {
+		t.Fatalf("expected the restarted stream to succeed, got %v", err)
+	}
+	var restart string
+	for evt := range events {
+		if evt.Kind == domain.EventKindStatus && evt.Meta[domain.EventMetaRetry] == domain.EventRetryWaiting {
+			restart = evt.Meta[domain.EventMetaRetryRestart]
+		}
+	}
+	if resp.Text != "hello" || requests != 2 || restart != "true" {
+		t.Fatalf("response %q after %d requests, restart %q", resp.Text, requests, restart)
 	}
 }

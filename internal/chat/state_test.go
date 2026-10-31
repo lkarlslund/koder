@@ -217,3 +217,30 @@ func TestChatStateCurrentContextSizeIgnoresCompactionEstimate(t *testing.T) {
 		t.Fatalf("expected compaction estimate ignored, got %#v", got)
 	}
 }
+
+// A restarted model request starts its assistant item over instead of
+// appending to what the failed attempt streamed.
+func TestResetActiveAssistantDropsStreamedOutput(t *testing.T) {
+	state := NewTimelineState(domain.Chat{ID: "chat"}, nil, nil)
+	if err := state.AppendAssistantReasoning("chat", "thinking"); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.AppendAssistantText("chat", "hel"); err != nil {
+		t.Fatal(err)
+	}
+	item, reset := state.ResetActiveAssistant()
+	if !reset {
+		t.Fatal("expected streamed output to be dropped")
+	}
+	if err := state.AppendAssistantText("chat", "hello"); err != nil {
+		t.Fatal(err)
+	}
+	record := state.LatestActiveAssistant()
+	msg := record.Item.Content.(domain.AssistantMessage)
+	if record.Item.ID != item.ID || msg.Text != "hello" || msg.Reasoning.Text != "" {
+		t.Fatalf("assistant after reset = %q / %q", msg.Text, msg.Reasoning.Text)
+	}
+	if _, again := state.ResetActiveAssistant(); !again {
+		t.Fatal("new output should be droppable again")
+	}
+}

@@ -1568,6 +1568,32 @@ func (c *Controller) StopForSelection(ctx context.Context, selection Selection) 
 	return stopRuntime(rt, chat.CancelReasonUserInterruptHard)
 }
 
+// RetryNowForSelection retries the selected chat's failed model request at
+// once instead of waiting out the backoff.
+func (c *Controller) RetryNowForSelection(ctx context.Context, selection Selection) error {
+	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return err
+	}
+	if rt == nil || !rt.RetryNow() {
+		return fmt.Errorf("the chat is not waiting to retry")
+	}
+	return nil
+}
+
+// GiveUpRetryForSelection stops the selected chat from retrying its failed
+// model request, so the turn ends with the error.
+func (c *Controller) GiveUpRetryForSelection(ctx context.Context, selection Selection) error {
+	_, _, _, rt, err := c.resolveSelectedRuntime(ctx, selection, true)
+	if err != nil {
+		return err
+	}
+	if rt == nil || !rt.GiveUpRetry() {
+		return fmt.Errorf("the chat is not waiting to retry")
+	}
+	return nil
+}
+
 func stopRuntime(rt *chat.Chat, reason chat.CancelReason) error {
 	if rt == nil {
 		return fmt.Errorf("no active chat")

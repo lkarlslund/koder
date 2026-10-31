@@ -999,6 +999,21 @@ const (
 	// EventMetaPromptProgress marks provider prompt preprocessing progress.
 	EventMetaPromptProgress = "prompt_progress"
 
+	// EventMetaRetry marks a status event about retrying a failed model
+	// request: EventRetryWaiting announces the wait, with the EventMetaRetry*
+	// details, and EventRetryResumed says the request is being sent again.
+	EventMetaRetry        = "retry"
+	EventMetaRetryAt      = "retry_at"
+	EventMetaRetryAttempt = "retry_attempt"
+	EventMetaRetryMax     = "retry_max"
+	EventMetaRetryReason  = "retry_reason"
+	EventMetaRetryError   = "retry_error"
+	// EventMetaRetryRestart is "true" when the failed attempt had streamed
+	// output, which the retry replaces.
+	EventMetaRetryRestart = "retry_restart"
+	EventRetryWaiting     = "waiting"
+	EventRetryResumed     = "resumed"
+
 	// EventRefreshQueue asks chat runtimes to reload queued inputs from storage.
 	EventRefreshQueue = "queue"
 )

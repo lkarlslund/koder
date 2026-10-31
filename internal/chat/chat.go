@@ -18,6 +18,7 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
+	"github.com/lkarlslund/koder/internal/retrywait"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/textutil"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -125,9 +126,20 @@ type Snapshot struct {
 	Turn       Turn
 	Status     Status
 	StatusText string
+	// Retry is set while a failed model request waits to be retried.
+	Retry      *RetryWait
 	Context    domain.ContextUsage
 	TokenUsage domain.Usage
 	Active     bool
+}
+
+// RetryWait describes the wait before a failed model request is retried.
+type RetryWait struct {
+	At      time.Time `json:"at"`
+	Attempt int       `json:"attempt"`
+	Max     int       `json:"max,omitempty"`
+	Reason  string    `json:"reason,omitempty"`
+	Error   string    `json:"error,omitempty"`
 }
 
 type Update struct {
@@ -152,12 +164,16 @@ type Chat struct {
 	mu sync.RWMutex
 	// toolUpdateMu keeps full-item persistence in the same order as in-memory
 	// mutations when several tool calls in one assistant item finish together.
-	toolUpdateMu      sync.Mutex
-	session           domain.Session
-	chat              domain.Chat
-	state             *ChatState
-	status            Status
-	statusText        string
+	toolUpdateMu sync.Mutex
+	session      domain.Session
+	chat         domain.Chat
+	state        *ChatState
+	status       Status
+	statusText   string
+	// retry is the wait before a failed model request is retried, while
+	// there is one; retryGate lets a person cut it short or give up.
+	retry             *RetryWait
+	retryGate         retrywait.Gate
 	active            bool
 	cancel            context.CancelFunc
 	toolCancels       map[string]context.CancelFunc
@@ -1588,6 +1604,23 @@ func (r *Chat) EnsureTimeline(ctx context.Context) error {
 	return nil
 }
 
+func (r *Chat) retryCopy() *RetryWait {
+	if r.retry == nil || !r.active {
+		return nil
+	}
+	retry := *r.retry
+	return &retry
+}
+
+// RetryNow cuts short the wait before a failed model request is retried.
+// It reports whether the chat was waiting.
+func (r *Chat) RetryNow() bool { return r.retryGate.RetryNow() }
+
+// GiveUpRetry ends the wait before a failed model request is retried
+// without retrying, so the turn ends with the error. It reports whether the
+// chat was waiting.
+func (r *Chat) GiveUpRetry() bool { return r.retryGate.GiveUp() }
+
 func (r *Chat) Snapshot() Snapshot {
 	return r.snapshot(true)
 }
@@ -1596,7 +1629,7 @@ func (r *Chat) snapshot(includeTimeline bool) Snapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.state == nil {
-		return Snapshot{Session: r.session, Chat: r.chat, TimelineHasMore: !r.timelineLoaded || r.timelineHasOlder, TimelineLoadedAll: r.timelineLoaded && !r.timelineHasOlder, Turn: turnForStatus(r.status, r.active, r.cancelState), Status: r.status, StatusText: r.statusText, TokenUsage: r.chat.TokenUsage.Normalized(), Active: r.active}
+		return Snapshot{Session: r.session, Chat: r.chat, TimelineHasMore: !r.timelineLoaded || r.timelineHasOlder, TimelineLoadedAll: r.timelineLoaded && !r.timelineHasOlder, Turn: turnForStatus(r.status, r.active, r.cancelState), Status: r.status, StatusText: r.statusText, Retry: r.retryCopy(), TokenUsage: r.chat.TokenUsage.Normalized(), Active: r.active}
 	}
 	chatRecord := r.state.Chat()
 	pendingInputCalls := r.state.PendingUserInputCalls()
@@ -1612,6 +1645,7 @@ func (r *Chat) snapshot(includeTimeline bool) Snapshot {
 		Turn:              turnForStatus(r.status, r.active, r.cancelState),
 		Status:            r.status,
 		StatusText:        r.statusText,
+		Retry:             r.retryCopy(),
 		Context:           r.state.CurrentContextSize(),
 		TokenUsage:        chatRecord.TokenUsage.Normalized(),
 		Active:            r.active,
@@ -2719,7 +2753,7 @@ func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.
 			chat.ContextTokensKnown = r.chat.ContextTokensKnown
 		})
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(retrywait.WithGate(context.Background(), &r.retryGate))
 	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
@@ -2807,7 +2841,7 @@ func (r *Chat) handleCompact(instructions string, reply chan<- error) {
 	}
 	chatID := r.chat.ID
 	sessionID := r.chat.SessionID
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(retrywait.WithGate(context.Background(), &r.retryGate))
 	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
@@ -2899,7 +2933,7 @@ func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID str
 		return
 	}
 	r.mu.Lock()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(retrywait.WithGate(context.Background(), &r.retryGate))
 	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
@@ -2936,7 +2970,7 @@ func (r *Chat) handleDenyWithTurnLoop(service ToolTurnService, toolCallID string
 		return
 	}
 	r.mu.Lock()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(retrywait.WithGate(context.Background(), &r.retryGate))
 	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
@@ -3033,7 +3067,7 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) 
 		r.mu.Unlock()
 		return
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(retrywait.WithGate(context.Background(), &r.retryGate))
 	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
@@ -3095,6 +3129,8 @@ func (r *Chat) handleStreamEventForTurn(turn uint64, evt domain.Event) {
 	contextChanged := false
 	tokenUsageChanged := false
 	metadataChanged := false
+	// Anything that happens next in the turn ends a retry wait.
+	r.retry = nil
 	if queueErr != nil {
 		r.status = StatusErrored
 		r.statusText = queueErr.Error()
@@ -3259,7 +3295,20 @@ func (r *Chat) handleStreamEventForTurn(turn uint64, evt domain.Event) {
 		r.cancelState = CancelStateNone
 		r.running = nil
 	case domain.EventKindStatus:
-		if text, ok := promptProgressStatusText(evt.Meta); ok {
+		if retry, ok := retryWaitFromMeta(evt.Meta); ok {
+			r.retry = retry
+			r.status = StatusWaitingLLM
+			r.statusText = evt.Text
+			if evt.Meta[domain.EventMetaRetryRestart] == "true" && r.state != nil {
+				if item, reset := r.state.ResetActiveAssistant(); reset {
+					evt.Item = item
+					transcriptChanged = true
+				}
+			}
+		} else if evt.Meta[domain.EventMetaRetry] == domain.EventRetryResumed {
+			r.status = StatusWaitingLLM
+			r.statusText = evt.Text
+		} else if text, ok := promptProgressStatusText(evt.Meta); ok {
 			r.status = StatusWaitingLLM
 			r.statusText = text
 		} else if text, ok := compactionStatusText(evt); ok {
@@ -3347,6 +3396,21 @@ func (r *Chat) queueRefreshForEvent(evt domain.Event) ([]domain.QueuedInput, boo
 		return nil, false, fmt.Errorf("refresh queued inputs: %w", err)
 	}
 	return cloneQueuedInputs(chat.QueuedInputs), true, nil
+}
+
+// retryWaitFromMeta reads the wait a status event announces before a model
+// request is retried.
+func retryWaitFromMeta(meta map[string]string) (*RetryWait, bool) {
+	if meta[domain.EventMetaRetry] != domain.EventRetryWaiting {
+		return nil, false
+	}
+	at, err := time.Parse(time.RFC3339Nano, meta[domain.EventMetaRetryAt])
+	if err != nil {
+		return nil, false
+	}
+	attempt, _ := strconv.Atoi(meta[domain.EventMetaRetryAttempt])
+	max, _ := strconv.Atoi(meta[domain.EventMetaRetryMax])
+	return &RetryWait{At: at, Attempt: attempt, Max: max, Reason: meta[domain.EventMetaRetryReason], Error: meta[domain.EventMetaRetryError]}, true
 }
 
 func promptProgressStatusText(meta map[string]string) (string, bool) {
@@ -3559,7 +3623,7 @@ func (r *Chat) maybeDispatchNext() {
 			chat.ContextTokensKnown = r.chat.ContextTokensKnown
 		})
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(retrywait.WithGate(context.Background(), &r.retryGate))
 	ctx = WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()

@@ -3959,6 +3959,7 @@ func TestRunPromptPersistsAssistantErrorOnBackendFailure(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
+	engine.retryPause = func(context.Context, time.Duration, func(time.Duration)) error { return nil }
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -6538,7 +6539,7 @@ func TestRunPromptRetriesRateLimitAndCompletes(t *testing.T) {
 
 	var sawRetryStatus bool
 	for _, evt := range events {
-		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, "rate limit hit") {
+		if evt.Kind == domain.EventKindStatus && strings.HasPrefix(evt.Text, "Rate limited") {
 			sawRetryStatus = true
 		}
 		if evt.Kind == domain.EventKindError {
@@ -6566,7 +6567,7 @@ func TestRunPromptRetriesRateLimitAndCompletes(t *testing.T) {
 	}
 }
 
-func TestRunPromptRateLimitStatusCountsDown(t *testing.T) {
+func TestRunPromptRateLimitStatusSaysWhenItRetries(t *testing.T) {
 	t.Parallel()
 
 	var requests int
@@ -6602,33 +6603,40 @@ func TestRunPromptRateLimitStatusCountsDown(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	engine := New(cfg, st, nil)
-	engine.retryPause = func(_ context.Context, delay time.Duration, onTick func(time.Duration)) error {
-		for _, remaining := range []time.Duration{delay, 2 * time.Second, time.Second, 0} {
-			onTick(remaining)
-		}
-		return nil
-	}
+	engine.retryPause = func(context.Context, time.Duration, func(time.Duration)) error { return nil }
 	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	start := time.Now()
 	events := runLivePromptDefault(t, engine, st, session, "hello")
 
-	var statuses []string
+	// One status announces the wait with when it ends, so clients can count
+	// down on their own, and another says the request is being sent again.
+	var waiting, resumed []domain.Event
 	for _, evt := range events {
-		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, "rate limit hit") {
-			statuses = append(statuses, evt.Text)
+		switch {
+		case evt.Kind != domain.EventKindStatus:
+		case evt.Meta[domain.EventMetaRetry] == domain.EventRetryWaiting:
+			waiting = append(waiting, evt)
+		case evt.Meta[domain.EventMetaRetry] == domain.EventRetryResumed:
+			resumed = append(resumed, evt)
 		}
 	}
-	if len(statuses) < 4 {
-		t.Fatalf("expected countdown statuses, got %#v", statuses)
+	if len(waiting) != 1 || len(resumed) != 1 {
+		t.Fatalf("retry statuses: waiting %#v, resumed %#v", waiting, resumed)
 	}
-	wantSuffixes := []string{"3s, retry 1)", "2s, retry 1)", "1s, retry 1)", "0s, retry 1)"}
-	for idx, want := range wantSuffixes {
-		if !strings.HasSuffix(statuses[idx], want) {
-			t.Fatalf("expected status %d to end with %q, got %q", idx, want, statuses[idx])
-		}
+	meta := waiting[0].Meta
+	at, err := time.Parse(time.RFC3339Nano, meta[domain.EventMetaRetryAt])
+	if err != nil || at.Sub(start) < 2*time.Second || at.Sub(start) > 5*time.Second {
+		t.Fatalf("retry at %q, %v; want about 3s after %s", meta[domain.EventMetaRetryAt], err, start)
+	}
+	if meta[domain.EventMetaRetryAttempt] != "1" || meta[domain.EventMetaRetryMax] != "10" || meta[domain.EventMetaRetryReason] != "Rate limited" || !strings.Contains(meta[domain.EventMetaRetryError], "429") {
+		t.Fatalf("retry meta = %#v", meta)
+	}
+	if waiting[0].Text != "Rate limited, waiting to retry (attempt 1 of 10)" {
+		t.Fatalf("retry status = %q", waiting[0].Text)
 	}
 }
 
@@ -7517,7 +7525,8 @@ func TestRunPromptPersistsEventNoticeWhenRetriesExhausted(t *testing.T) {
 	if notice, ok := errorItem.Content.(domain.Notice); !ok || notice.Kind != "model_error" || !strings.Contains(notice.Text, "Error: chat status 429") {
 		t.Fatalf("expected error event to carry persisted model error notice, got %#v", errorItem)
 	}
-	const expectedAttempts = 4
+	// The first request and ten retries.
+	const expectedAttempts = 11
 	if requests != expectedAttempts {
 		t.Fatalf("expected %d attempts, got %d", expectedAttempts, requests)
 	}

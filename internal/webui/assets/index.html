@@ -60,10 +60,6 @@
       </div>
     </nav>
 
-    <button class="btn btn-primary mobile-sidebar-fab shadow" type="button" title="Open sidebar" x-show="sessionLoadedMode() && !mobileSidebarOpen" @click="openMobileSidebar()" style="display: none;">
-      <i class="bi bi-layout-sidebar-inset-reverse"></i>
-      <span class="visually-hidden">Open sidebar</span>
-    </button>
 
     <main class="hydrating-view p-3" x-show="hydratingSessionMode()" style="display: none;">
       <section class="hydrating-panel text-center">
@@ -516,6 +512,21 @@
     </aside>
 
     <form class="composer p-3 bg-body" x-show="sessionLoadedMode()" @submit.prevent="send()">
+      <button class="btn btn-primary mobile-sidebar-fab shadow" type="button" title="Open sidebar" x-show="sessionLoadedMode() && !mobileSidebarOpen" @click="openMobileSidebar()" style="display: none;">
+      <i class="bi bi-layout-sidebar-inset-reverse"></i>
+      <span class="visually-hidden">Open sidebar</span>
+    </button>
+      <div class="retry-banner mb-2" x-reveal="activeRetry()" role="status" data-retry style="display: none;">
+        <i class="bi bi-arrow-repeat retry-banner-icon" aria-hidden="true"></i>
+        <div class="retry-banner-text">
+          <div class="retry-banner-headline" x-text="retryHeadline()"></div>
+          <div class="retry-banner-error text-truncate" x-show="activeRetry()?.error" :title="activeRetry()?.error" x-text="activeRetry()?.error"></div>
+        </div>
+        <div class="retry-banner-actions">
+          <button type="button" class="btn btn-sm btn-primary" title="Retry the request now" @click="retryNow()">Try now</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" title="Stop retrying and end the turn with the error" @click="giveUpRetry()">Cancel</button>
+        </div>
+      </div>
       <div class="composer-queue mb-2" x-show="activeQueue().length > 0" style="display: none;">
         <template x-for="item in activeQueue()" :key="queueItemID(item)">
           <div class="composer-queue-item" draggable="true" :class="{'dragging': dragQueueID === queueItemID(item)}" @dragstart="startQueueDrag($event, queueItemID(item))" @dragover.prevent="overQueueDrag($event, queueItemID(item))" @drop.stop.prevent="dropQueue($event, queueItemID(item))" @dragend="endQueueDrag()">

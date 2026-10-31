@@ -64,10 +64,13 @@ type Runtime struct {
 }
 
 const (
-	maxRateLimitRetries       = 3
-	maxTransientChatRetries   = 3
-	defaultRateLimitRetryWait = 5 * time.Second
-	defaultTransientRetryWait = 250 * time.Millisecond
+	// A failed model request is retried this many times, waiting
+	// baseRetryDelay, doubling up to maxRetryDelay, unless the server's
+	// Retry-After asks for longer (up to maxRetryAfter).
+	maxModelRetries = 10
+	baseRetryDelay  = 2 * time.Second
+	maxRetryDelay   = 30 * time.Second
+	maxRetryAfter   = 5 * time.Minute
 	cavemanThinkingMaxBytes   = 4 * 1024
 	cavemanThinkingMaxTokens  = 256
 )

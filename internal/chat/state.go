@@ -595,6 +595,32 @@ func (s *ChatState) LatestActiveAssistant() *TimelineRecord {
 	return nil
 }
 
+// ResetActiveAssistant empties the text and reasoning streamed into the
+// active assistant item, so a model request restarted after its stream broke
+// does not append to the output of the attempt that failed. It returns the
+// item and reports whether there was streamed output to drop.
+func (s *ChatState) ResetActiveAssistant() (domain.TimelineItem, bool) {
+	if s == nil {
+		return domain.TimelineItem{}, false
+	}
+	record := s.LatestActiveAssistant()
+	if record == nil || record.Item.Sealed() {
+		return domain.TimelineItem{}, false
+	}
+	assistant, ok := record.Item.Content.(domain.AssistantMessage)
+	if !ok || (assistant.Text == "" && assistant.Reasoning.Text == "") {
+		return domain.TimelineItem{}, false
+	}
+	assistant.Text = ""
+	assistant.Reasoning = domain.ReasoningContent{}
+	record.text = streamedText{}
+	record.reasoning = streamedText{}
+	record.Item.Content = assistant
+	record.Item.UpdatedAt = time.Now().UTC()
+	record.revision++
+	return record.Item, true
+}
+
 // AppendAssistantText appends text to the active assistant item.
 func (s *ChatState) AppendAssistantText(chatID id.ID, text string) error {
 	if s == nil || text == "" {

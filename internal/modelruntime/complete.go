@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
@@ -17,6 +19,7 @@ import (
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/retrywait"
 	"github.com/lkarlslund/koder/internal/textutil"
 	"github.com/lkarlslund/koder/internal/tokenestimate"
 )
@@ -160,57 +163,42 @@ func (r *Runtime) chatWithRetry(ctx context.Context, session domain.Session, cha
 			}
 			continue
 		}
-		var apiErr *provider.APIError
-		if errors.As(err, &apiErr) && apiErr.StatusCode == 429 {
-			if attempt >= maxRateLimitRetries {
-				return provider.ChatResponse{}, streamed, cavemanJob{}, err
-			}
-			delay := apiErr.RetryAfter
-			if delay <= 0 {
-				delay = defaultRateLimitRetryWait
-			}
-			retryNumber := attempt + 1
-			initialStatus := formatRateLimitRetryStatus(delay, retryNumber)
-			r.RecordLifecycle(sessionID, "rate_limit_retry", initialStatus, map[string]string{
-				"retry":       strconv.Itoa(retryNumber),
-				"retry_after": delay.String(),
-			})
-			lastRemaining := time.Duration(-1)
-			if err := r.retryPause(ctx, delay, func(remaining time.Duration) {
-				if remaining == lastRemaining {
-					return
-				}
-				lastRemaining = remaining
-				if out != nil {
-					out <- domain.Event{Kind: domain.EventKindStatus, Text: formatRateLimitRetryStatus(remaining, retryNumber)}
-				}
-			}); err != nil {
-				return provider.ChatResponse{}, streamed, cavemanJob{}, err
-			}
-			continue
-		}
-		if !shouldRetryTransientChatError(err, req.Stream, receivedStream) || attempt >= maxTransientChatRetries {
+		reason, retryable := retryReason(err)
+		if !retryable || attempt >= maxModelRetries {
 			return provider.ChatResponse{}, streamed, cavemanJob{}, err
 		}
-		delay := transientChatRetryDelay(attempt)
 		retryNumber := attempt + 1
-		initialStatus := formatTransientRetryStatus(delay, retryNumber)
-		r.RecordLifecycle(sessionID, "transport_retry", initialStatus, map[string]string{
+		delay := modelRetryDelay(attempt, err)
+		waiting := formatRetryStatus(reason, retryNumber)
+		r.RecordLifecycle(sessionID, "model_retry", waiting, map[string]string{
 			"retry":       strconv.Itoa(retryNumber),
 			"retry_after": delay.String(),
 			"error":       err.Error(),
 		})
-		lastRemaining := time.Duration(-1)
-		if err := r.retryPause(ctx, delay, func(remaining time.Duration) {
-			if remaining == lastRemaining {
-				return
+		if out != nil {
+			out <- domain.Event{Kind: domain.EventKindStatus, Text: waiting, Meta: map[string]string{
+				domain.EventMetaRetry:        domain.EventRetryWaiting,
+				domain.EventMetaRetryAt:      time.Now().Add(delay).UTC().Format(time.RFC3339Nano),
+				domain.EventMetaRetryAttempt: strconv.Itoa(retryNumber),
+				domain.EventMetaRetryMax:     strconv.Itoa(maxModelRetries),
+				domain.EventMetaRetryReason:  reason,
+				domain.EventMetaRetryError:   err.Error(),
+				// The retry starts the response over, so the output this
+				// attempt streamed is dropped. Tools only run once a response
+				// is complete, so none ran for it.
+				domain.EventMetaRetryRestart: strconv.FormatBool(receivedStream),
+			}}
+		}
+		if waitErr := r.retryPause(ctx, delay, nil); waitErr != nil {
+			if errors.Is(waitErr, retrywait.ErrGaveUp) {
+				return provider.ChatResponse{}, streamed, cavemanJob{}, err
 			}
-			lastRemaining = remaining
-			if out != nil {
-				out <- domain.Event{Kind: domain.EventKindStatus, Text: formatTransientRetryStatus(remaining, retryNumber)}
-			}
-		}); err != nil {
-			return provider.ChatResponse{}, streamed, cavemanJob{}, err
+			return provider.ChatResponse{}, streamed, cavemanJob{}, waitErr
+		}
+		if out != nil {
+			out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Retrying (attempt %d of %d)", retryNumber, maxModelRetries), Meta: map[string]string{
+				domain.EventMetaRetry: domain.EventRetryResumed,
+			}}
 		}
 	}
 }
@@ -528,86 +516,69 @@ func (r *Runtime) setPromptProgressSupport(providerID id.ID, supported bool) {
 	}
 }
 
+// waitForRetry waits out a retry delay, which the chat's retry gate can cut
+// short or turn into giving up.
 func waitForRetry(ctx context.Context, delay time.Duration, onTick func(time.Duration)) error {
-	if delay <= 0 {
-		delay = defaultRateLimitRetryWait
-	}
-	remaining := roundRetryDelay(delay)
-	if onTick != nil {
-		onTick(remaining)
-	}
-	if remaining <= 0 {
-		return nil
-	}
-	deadline := time.Now().Add(delay)
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			next := time.Until(deadline)
-			if next <= 0 {
-				if onTick != nil {
-					onTick(0)
-				}
-				return nil
-			}
-			rounded := roundRetryDelay(next)
-			if onTick != nil {
-				onTick(rounded)
-			}
-		}
-	}
+	return retrywait.FromContext(ctx).Wait(ctx, delay, onTick)
 }
 
-func formatRateLimitRetryStatus(delay time.Duration, retryNumber int) string {
-	delay = roundRetryDelay(delay)
-	return fmt.Sprintf("Working (rate limit hit, retrying in %s, retry %d)", delay, retryNumber)
+// formatRetryStatus is the chat status while it waits to retry. It leaves
+// out the countdown, which clients show from the retry time.
+func formatRetryStatus(reason string, retryNumber int) string {
+	return fmt.Sprintf("%s, waiting to retry (attempt %d of %d)", reason, retryNumber, maxModelRetries)
 }
 
-func formatTransientRetryStatus(delay time.Duration, retryNumber int) string {
-	delay = roundRetryDelay(delay)
-	return fmt.Sprintf("Working (connection dropped, retrying in %s, retry %d)", delay, retryNumber)
+// modelRetryDelay is the wait before retry attempt+1: what the server asked
+// for in Retry-After, or else exponential backoff with jitter, so many chats
+// failing together don't come back in step.
+func modelRetryDelay(attempt int, err error) time.Duration {
+	var apiErr *provider.APIError
+	if errors.As(err, &apiErr) && apiErr.RetryAfter > 0 {
+		return min(apiErr.RetryAfter, maxRetryAfter)
+	}
+	delay := baseRetryDelay << min(attempt, 10)
+	delay = min(delay, maxRetryDelay)
+	jitter := 0.8 + 0.4*rand.Float64()
+	return time.Duration(float64(delay) * jitter)
 }
 
-func transientChatRetryDelay(attempt int) time.Duration {
-	delay := defaultTransientRetryWait
-	for i := 0; i < attempt; i++ {
-		delay *= 3
-	}
-	return delay
-}
-
-func shouldRetryTransientChatError(err error, stream bool, receivedStream bool) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
-	if stream && receivedStream {
-		return false
-	}
-	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-		return true
+// retryReason says why a failed model request is worth retrying, in words
+// for the person waiting, or reports that it is not: the server refused the
+// request itself, the response was malformed, or the turn was canceled.
+func retryReason(err error) (string, bool) {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return "", false
 	}
 	var apiErr *provider.APIError
 	if errors.As(err, &apiErr) {
-		return apiErr.StatusCode == 502 || apiErr.StatusCode == 503 || apiErr.StatusCode == 504
+		switch code := apiErr.StatusCode; {
+		case code == 429:
+			return "Rate limited", true
+		case code == 529 || strings.Contains(strings.ToLower(apiErr.Body), "overloaded"):
+			return "Server overloaded", true
+		case code == 408 || code == 504:
+			return "Server timed out", true
+		case code == 409 || code == 425 || code >= 500:
+			return fmt.Sprintf("Server error %d", code), true
+		default:
+			return "", false
+		}
 	}
+	var interrupted *provider.StreamInterruptedError
+	var dnsErr *net.DNSError
 	var netErr net.Error
-	return errors.As(err, &netErr) && netErr.Timeout()
-}
-
-func roundRetryDelay(delay time.Duration) time.Duration {
-	if delay <= 0 {
-		return 0
+	switch {
+	case errors.As(err, &interrupted), errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, syscall.ECONNRESET), errors.Is(err, syscall.EPIPE):
+		return "Connection dropped", true
+	case errors.Is(err, syscall.ECONNREFUSED), errors.Is(err, syscall.EHOSTUNREACH), errors.Is(err, syscall.ENETUNREACH):
+		return "Can't reach the server", true
+	case errors.As(err, &dnsErr):
+		return "Can't look up the server", true
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
+		return "Request timed out", true
+	case errors.As(err, &netErr):
+		return "Network error", true
+	default:
+		return "", false
 	}
-	delay = delay.Round(time.Second)
-	if delay <= 0 {
-		return time.Second
-	}
-	return delay
 }

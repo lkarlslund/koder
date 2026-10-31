@@ -2011,3 +2011,16 @@ func TestCapabilityStoreIgnoresStaleHeuristicFalseWhenProbeIsInconclusive(t *tes
 		t.Fatalf("expected stale heuristic entry to be ignored for model enrichment, got %#v", model)
 	}
 }
+
+func TestRetryAfterPrefersMilliseconds(t *testing.T) {
+	now := time.Now()
+	header := http.Header{}
+	header.Set("Retry-After", "7")
+	if got := retryAfter(header, now); got != 7*time.Second {
+		t.Fatalf("Retry-After 7 = %s", got)
+	}
+	header.Set("Retry-After-Ms", "1500")
+	if got := retryAfter(header, now); got != 1500*time.Millisecond {
+		t.Fatalf("retry-after-ms 1500 = %s", got)
+	}
+}

@@ -1221,7 +1221,7 @@ function timeoutLabel(value) {
 		  this.refreshBrowserStatus();
 		  this.browserStatusTimer = setInterval(() => this.refreshBrowserStatus(), 5000);
 		  // Runtimes in the sidebar's activity list tick while it shows anything.
-		  this.activityTimer = setInterval(() => { if (this.activityItems().length) this.activityNow = Date.now(); }, 1000);
+		  this.activityTimer = setInterval(() => { if (this.activityItems().length || this.activeRetry()) this.activityNow = Date.now(); }, 1000);
 		  // Git status follows the workspace on its own: the server watches files
 		  // where it can, and a visible page asks it to check every 10 seconds.
 		  this.workspacePollTimer = setInterval(() => {
@@ -1940,6 +1940,7 @@ function timeoutLabel(value) {
           if (delta.token_usage !== undefined) next.TokenUsage = delta.token_usage;
           if (delta.status !== undefined) next.Status = delta.status;
           if (delta.status_text !== undefined) next.StatusText = delta.status_text;
+          if (delta.retry !== undefined) next.Retry = delta.retry;
           if (delta.active !== undefined) next.Active = delta.active;
           if (delta.replace_timeline || delta.ReplaceTimeline) {
             const timeline = Array.isArray(delta.timeline || delta.Timeline) ? (delta.timeline || delta.Timeline) : [];
@@ -3298,6 +3299,21 @@ function timeoutLabel(value) {
         userMessageSourceQualifier(item) { return userMessageSourceQualifierText(item); },
         userMessageIcon(item) { return userMessageIconClass(item); },
         userMessageIsNotification(item) { return userMessageIsNotificationSource(item); },
+        // activeRetry is the wait before the active chat retries a failed model
+        // request, while there is one.
+        activeRetry() {
+          const snapshot = this.activeSnapshot();
+          return snapshot.Active && snapshot.Retry ? snapshot.Retry : null;
+        },
+        retryHeadline() {
+          const retry = this.activeRetry();
+          if (!retry) return '';
+          const left = Math.max(0, Math.ceil((Date.parse(retry.at) - this.activityNow) / 1000));
+          const attempt = retry.max ? 'attempt ' + retry.attempt + ' of ' + retry.max : 'attempt ' + retry.attempt;
+          return (retry.reason || 'Request failed') + ' · ' + (left > 0 ? 'retrying in ' + activityDuration(left * 1000) : 'retrying') + ' (' + attempt + ')';
+        },
+        retryNow() { this.rpc('retry_now', {}).catch(err => this.showToast?.(String(err?.message || err))); },
+        giveUpRetry() { this.rpc('give_up_retry', {}).catch(err => this.showToast?.(String(err?.message || err))); },
         statusText() { const snapshot = this.activeSnapshot(); return snapshot.StatusText || snapshot.status_text || snapshot.Status || 'idle'; },
         chatInterruptible() {
           const snapshot = this.activeSnapshot();

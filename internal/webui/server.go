@@ -979,6 +979,10 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return map[string]bool{"queued": true}, s.controller.AbortAndSendQueueItemNowForSelection(ctx, s.appSelection(clientID), in.ID)
 	case "stop":
 		return map[string]bool{"stopped": true}, s.controller.StopForSelection(ctx, s.appSelection(clientID))
+	case "retry_now":
+		return map[string]bool{"retrying": true}, s.controller.RetryNowForSelection(ctx, s.appSelection(clientID))
+	case "give_up_retry":
+		return map[string]bool{"stopped": true}, s.controller.GiveUpRetryForSelection(ctx, s.appSelection(clientID))
 	case "stop_after_turn":
 		return map[string]bool{"stopping": true}, s.controller.StopAfterCurrentTurnForSelection(ctx, s.appSelection(clientID))
 	case "shutdown":
@@ -2099,6 +2103,7 @@ type chatDelta struct {
 	TokenUsage        any                   `json:"token_usage,omitempty"`
 	Status            string                `json:"status,omitempty"`
 	StatusText        string                `json:"status_text,omitempty"`
+	Retry             *chat.RetryWait       `json:"retry"`
 	Active            bool                  `json:"active"`
 	ReplaceTimeline   bool                  `json:"replace_timeline,omitempty"`
 	Error             string                `json:"error,omitempty"`
@@ -2233,6 +2238,7 @@ func chatDeltaFromUpdate(update chat.Update) chatDelta {
 		PendingInputCalls: snapshot.PendingInputCalls,
 		Status:            string(snapshot.Status),
 		StatusText:        snapshot.StatusText,
+		Retry:             snapshot.Retry,
 		Active:            snapshot.Active,
 		ReplaceTimeline:   update.ReplaceTimeline,
 	}

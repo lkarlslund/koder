@@ -91,6 +91,15 @@ type TranscriptionResponse struct {
 	Language string `json:"language,omitempty"`
 }
 
+// retryAfter is how long the server asked us to wait before retrying:
+// retry-after-ms in milliseconds, else Retry-After in seconds or as a date.
+func retryAfter(header http.Header, now time.Time) time.Duration {
+	if ms, err := strconv.ParseFloat(strings.TrimSpace(header.Get("Retry-After-Ms")), 64); err == nil && ms > 0 {
+		return time.Duration(ms * float64(time.Millisecond))
+	}
+	return parseRetryAfter(header.Get("Retry-After"), now)
+}
+
 func parseRetryAfter(value string, now time.Time) time.Duration {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -583,7 +592,7 @@ func (c *Client) listModelItems(ctx context.Context) ([]modelResponseItem, error
 			Operation:  "list models",
 			StatusCode: resp.StatusCode,
 			Body:       strings.TrimSpace(string(body)),
-			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+			RetryAfter: retryAfter(resp.Header, time.Now()),
 		}
 	}
 
@@ -839,7 +848,7 @@ func (c *Client) propsRequest(ctx context.Context, baseURL, path string) (propsR
 			Operation:  "props",
 			StatusCode: resp.StatusCode,
 			Body:       strings.TrimSpace(string(body)),
-			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+			RetryAfter: retryAfter(resp.Header, time.Now()),
 		}
 	}
 	var payload propsResponse
@@ -899,7 +908,7 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (response 
 			Operation:  "chat",
 			StatusCode: resp.StatusCode,
 			Body:       strings.TrimSpace(string(body)),
-			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+			RetryAfter: retryAfter(resp.Header, time.Now()),
 		}
 	}
 
@@ -1017,7 +1026,7 @@ func (c *Client) ProbeTTSSupport(ctx context.Context, modelID string) (supported
 		Operation:  "tts probe",
 		StatusCode: resp.StatusCode,
 		Body:       strings.TrimSpace(string(bodyBytes)),
-		RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		RetryAfter: retryAfter(resp.Header, time.Now()),
 	}
 }
 
@@ -1148,7 +1157,7 @@ func speechResponseError(resp *http.Response) error {
 			Operation:  "tts",
 			StatusCode: resp.StatusCode,
 			Body:       strings.TrimSpace(string(bodyBytes)),
-			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+			RetryAfter: retryAfter(resp.Header, time.Now()),
 		}
 	}
 	return nil
@@ -1303,7 +1312,7 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 			Operation:  "chat",
 			StatusCode: resp.StatusCode,
 			Body:       strings.TrimSpace(string(body)),
-			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+			RetryAfter: retryAfter(resp.Header, time.Now()),
 		}
 	}
 	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
