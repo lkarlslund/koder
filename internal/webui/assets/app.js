@@ -920,7 +920,7 @@
       const args = toolArgs(tool);
       const path = firstValue(data, ['path', 'Path']) || firstValue(args, ['path']);
       const command = firstValue(data, ['command', 'Command']) || firstValue(args, ['command', 'cmd']);
-      const comment = firstValue(data, ['comment', 'Comment']) || firstValue(args, ['comment']);
+      const description = firstValue(data, ['description', 'Description']) || firstValue(args, ['description']) || firstValue(data, ['comment', 'Comment']) || firstValue(args, ['comment']);
       switch (kind) {
         case 'file_read': return readTitle(path, args, data);
         case 'file_write': return path ? 'Write ' + path : 'Write file';
@@ -930,7 +930,7 @@
           return 'Run command';
         }
         case 'exec_command': {
-          const label = comment || compactCommandLabel(command);
+          const label = description || compactCommandLabel(command);
           return label ? 'Start exec ' + label : 'Start exec';
         }
         case 'exec_session': return actionLabel(toolAction(tool)) + ' exec session';
@@ -993,10 +993,10 @@
       if (String((tool && tool.tool) || '') === 'chat_send') return chatSendMessage(args);
       if (String((tool && tool.tool) || '') === 'chats' && ['queue', 'steer', 'interrupt'].includes(toolAction(tool))) return chatSendMessage(args);
       const execCommand = String((tool && tool.tool) || '') === 'exec_command';
-      if (execCommand && args.comment) return '';
+      if (execCommand && (args.description || args.comment)) return '';
       const values = [];
       if (args.command) values.push(compactCommandLabel(args.command));
-      // exec_command's title already shows cmd when there is no comment.
+      // exec_command's title already shows cmd when there is no description.
       if (args.cmd && !execCommand) values.push(compactCommandLabel(args.cmd));
       if (args.process_id) values.push('process_id=' + args.process_id);
       const timeout = timeoutLabel(args.timeout_ms || args.yield_time_ms);
@@ -4275,11 +4275,11 @@ function timeoutLabel(value) {
           const command = this.toolCommandText(tool);
           if (!command) return;
           const args = toolArgs(tool);
-          const comment = String(firstValue(args, ['comment']) || firstValue(toolData(tool), ['comment', 'Comment']) || '').trim();
+          const description = String(firstValue(args, ['description']) || firstValue(toolData(tool), ['description', 'Description']) || firstValue(args, ['comment']) || firstValue(toolData(tool), ['comment', 'Comment']) || '').trim();
           this.toolCommandModal = {
             open: true,
             command,
-            subtitle: comment || this.toolCallID(tool) || 'Exact command',
+            subtitle: description || this.toolCallID(tool) || 'Exact command',
             meta: this.toolCommandMeta(tool),
             output: String(firstValue(toolData(tool), ['output', 'Output']) || toolResultText(tool) || toolErrorText(tool) || '').trim(),
           };

@@ -32,18 +32,21 @@ func TestExecToolOutputExpansionAndWaitInspection(t *testing.T) {
 	t.Cleanup(cancelDeadline)
 
 	var result struct {
-		Summary          string `json:"summary"`
-		Expanded         bool   `json:"expanded"`
-		ExpandedText     string `json:"expandedText"`
-		WaitSummary      string `json:"waitSummary"`
-		WaitInspectable  bool   `json:"waitInspectable"`
-		InspectedCommand string `json:"inspectedCommand"`
-		InspectedProcess string `json:"inspectedProcess"`
-		MCPSummary       string `json:"mcpSummary"`
-		MCPExpanded      bool   `json:"mcpExpanded"`
-		MCPCopied        string `json:"mcpCopied"`
-		PreCopyButton    bool   `json:"preCopyButton"`
-		PreCopied        string `json:"preCopied"`
+		DescriptionTitle    string `json:"descriptionTitle"`
+		LegacyTitle         string `json:"legacyTitle"`
+		DescriptionSubtitle string `json:"descriptionSubtitle"`
+		Summary             string `json:"summary"`
+		Expanded            bool   `json:"expanded"`
+		ExpandedText        string `json:"expandedText"`
+		WaitSummary         string `json:"waitSummary"`
+		WaitInspectable     bool   `json:"waitInspectable"`
+		InspectedCommand    string `json:"inspectedCommand"`
+		InspectedProcess    string `json:"inspectedProcess"`
+		MCPSummary          string `json:"mcpSummary"`
+		MCPExpanded         bool   `json:"mcpExpanded"`
+		MCPCopied           string `json:"mcpCopied"`
+		PreCopyButton       bool   `json:"preCopyButton"`
+		PreCopied           string `json:"preCopied"`
 	}
 	if err := chromedp.Run(browserCtx,
 		chromedp.Navigate(server.URL()),
@@ -52,7 +55,12 @@ func TestExecToolOutputExpansionAndWaitInspection(t *testing.T) {
 		chromedp.Evaluate(`(() => {
 			const app = document.documentElement._x_dataStack[0];
 			Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: async text => { window.__copiedOutput = text; }}});
-			const host = document.createElement('div');
+			const described = {tool: 'exec_command', args: {cmd: 'pwd', description: 'Show working directory', comment: 'Old label'}};
+            const descriptionTitle = app.toolTitle(described);
+            const legacyTitle = app.toolTitle({tool: 'exec_command', result: {data: {command: 'pwd', comment: 'Historical label'}}});
+            app.openToolCommandModal(described);
+            const descriptionSubtitle = app.toolCommandModal.subtitle;
+            const host = document.createElement('div');
 			host.innerHTML = app.toolResultHTML({
 				tool: 'exec_command',
 				result: {data: {output: 'first line\nsecond line\nthird line\nfourth line'}}
@@ -95,7 +103,8 @@ func TestExecToolOutputExpansionAndWaitInspection(t *testing.T) {
 			const preCopyButton = markdownHost.querySelector('.copyable-mono > .copy-output-button');
 			preCopyButton?.click();
 			return {
-				summary: summary?.textContent || '',
+				descriptionTitle, legacyTitle, descriptionSubtitle,
+ summary: summary?.textContent || '',
 				expanded: details?.open === true,
 				expandedText: details?.querySelector('.tool-result-expanded')?.textContent || '',
 				waitSummary: waitHost.querySelector('.tool-result-omitted-details summary')?.textContent || '',
@@ -113,6 +122,9 @@ func TestExecToolOutputExpansionAndWaitInspection(t *testing.T) {
 		t.Fatalf("exercise exec tool rendering: %v", err)
 	}
 
+	if result.DescriptionTitle != "Start exec Show working directory" || result.LegacyTitle != "Start exec Historical label" || result.DescriptionSubtitle != "Show working directory" {
+		t.Fatalf("description rendering: %#v", result)
+	}
 	if result.Summary != "... 3 lines omitted ..." || !result.Expanded {
 		t.Fatalf("omitted output summary=%q expanded=%v", result.Summary, result.Expanded)
 	}

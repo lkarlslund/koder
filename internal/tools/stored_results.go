@@ -82,7 +82,8 @@ type BashStoredResult struct {
 type ExecStoredResult struct {
 	ProcessID   string `json:"process_id"`
 	Command     string `json:"command"`
-	Comment     string `json:"comment,omitempty"`
+	Description string `json:"description,omitempty"`
+	Comment     string `json:"comment,omitempty"` // Historical results only.
 	Workdir     string `json:"workdir,omitempty"`
 	Shell       string `json:"shell,omitempty"`
 	TTY         bool   `json:"tty,omitempty"`

@@ -17,7 +17,7 @@ import (
 func TestCommandSpecGuidesMinimalExecutableCommand(t *testing.T) {
 	spec := tools.Info(domain.ToolKindExecCommand)
 	text := strings.Join([]string{spec.Description, spec.Usage, spec.Parameters}, "\n")
-	for _, want := range []string{"executable-only", "do not include reasoning", "explanatory comments", "comment", "output-settle", "Defaults to 10000"} {
+	for _, want := range []string{"executable-only", "do not include reasoning", "explanatory comments", "description", "output-settle", "Defaults to 10000"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected exec_command spec to contain %q, got:\n%s", want, text)
 		}
@@ -60,7 +60,7 @@ func TestExecSessionDefinitionAndWaitDispatch(t *testing.T) {
 func TestCommandNormalizeArgs(t *testing.T) {
 	args, err := (commandTool{}).NormalizeArgs(map[string]string{
 		"cmd":           "sleep 1",
-		"comment":       "  run a short sleep\nfor testing  ",
+		"description":   "  run a short sleep\nfor testing  ",
 		"workdir":       "./sub",
 		"tty":           "true",
 		"yield_time_ms": "250",
@@ -68,7 +68,7 @@ func TestCommandNormalizeArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalize args: %v", err)
 	}
-	if args["cmd"] != "sleep 1" || args["comment"] != "run a short sleep for testing" || args["workdir"] != "sub" || args["tty"] != "true" || args["yield_time_ms"] != "250" {
+	if args["cmd"] != "sleep 1" || args["description"] != "run a short sleep for testing" || args["workdir"] != "sub" || args["tty"] != "true" || args["yield_time_ms"] != "250" {
 		t.Fatalf("unexpected normalized args: %#v", args)
 	}
 }
@@ -82,10 +82,13 @@ func TestCommandExecuteDefaultsToSessionProjectRoot(t *testing.T) {
 		ChatID:    "chat-1",
 		Exec:      control,
 	}, Request: tools.Request{
-		Args: map[string]string{"cmd": "pwd", "comment": "show current directory"},
+		Args: map[string]string{"cmd": "pwd", "description": "show current directory"},
 	}})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
+	}
+	if control.start.Label != "show current directory" {
+		t.Fatalf("session label = %q", control.start.Label)
 	}
 	if control.start.Workdir != root {
 		t.Fatalf("expected session project root workdir %q, got %q", root, control.start.Workdir)
@@ -103,8 +106,8 @@ func TestCommandExecuteDefaultsToSessionProjectRoot(t *testing.T) {
 	if stored.Workdir != "." {
 		t.Fatalf("expected stored relative workdir '.', got %q", stored.Workdir)
 	}
-	if stored.Comment != "show current directory" || result.Meta["comment"] != "show current directory" {
-		t.Fatalf("expected stored comment metadata, stored=%#v meta=%#v", stored, result.Meta)
+	if stored.Description != "show current directory" || result.Meta["description"] != "show current directory" {
+		t.Fatalf("expected stored description metadata, stored=%#v meta=%#v", stored, result.Meta)
 	}
 }
 
@@ -156,6 +159,7 @@ func TestYieldTimeRejectsZero(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, err := tool.NormalizeArgs(map[string]string{
 				"cmd":           "sleep 1",
+				"description":   "Run a short sleep",
 				"process_id":    "exec_1",
 				"yield_time_ms": "0",
 			})
@@ -332,7 +336,7 @@ func TestCommandResultStatesFactsWithoutInstructions(t *testing.T) {
 
 func TestCommandNotifyLinesReachesTheRuntime(t *testing.T) {
 	control := &recordingExecControl{startState: execruntime.StateRunning}
-	args, err := (commandTool{}).NormalizeArgs(map[string]string{"cmd": "tail -f app.log", "notify": "lines", "comment": "errors in app.log"})
+	args, err := (commandTool{}).NormalizeArgs(map[string]string{"cmd": "tail -f app.log", "notify": "lines", "description": "errors in app.log"})
 	if err != nil {
 		t.Fatalf("normalize: %v", err)
 	}
@@ -351,7 +355,7 @@ func TestCommandNotifyLinesReachesTheRuntime(t *testing.T) {
 	if !strings.Contains(result.Output, "reporting: "+tools.ExecReportingLines) {
 		t.Fatalf("output = %q", result.Output)
 	}
-	if _, err := (commandTool{}).NormalizeArgs(map[string]string{"cmd": "true", "notify": "always"}); err == nil {
+	if _, err := (commandTool{}).NormalizeArgs(map[string]string{"cmd": "true", "description": "Do nothing", "notify": "always"}); err == nil {
 		t.Fatal("expected an invalid notify value to be rejected")
 	}
 }
@@ -383,5 +387,29 @@ func TestListShowsOnlyRunningSessionsWithShortCommands(t *testing.T) {
 	want := "Listed running exec sessions\nexec_2 [running] python3 - <<'PY' …\nexec_3 [running] " + strings.Repeat("a", 120) + " …"
 	if result.Output != want {
 		t.Fatalf("output:\n%s\nwant:\n%s", result.Output, want)
+	}
+}
+
+func TestCommandRequiresDescription(t *testing.T) {
+	for _, args := range []map[string]string{
+		{"cmd": "pwd"},
+		{"cmd": "pwd", "description": " \n\t "},
+		{"cmd": "pwd", "comment": "Legacy annotation"},
+	} {
+		_, err := (commandTool{}).NormalizeArgs(args)
+		if err == nil || !strings.Contains(err.Error(), "description is required") {
+			t.Fatalf("NormalizeArgs(%v) error = %v", args, err)
+		}
+	}
+	spec := tools.Info(domain.ToolKindExecCommand)
+	if !strings.Contains(spec.Parameters, `"required":["cmd","description"]`) || strings.Contains(spec.Parameters, `"comment":`) {
+		t.Fatalf("unexpected schema: %s", spec.Parameters)
+	}
+}
+
+func TestSessionSnapshotPreservesDescription(t *testing.T) {
+	stored := storedFromSnapshot(execruntime.Snapshot{Label: "Watch build output"}, "")
+	if stored.Description != "Watch build output" {
+		t.Fatalf("description = %q", stored.Description)
 	}
 }

@@ -41,8 +41,8 @@ func init() {
 	tools.Register(commandTool{}, tools.ToolSpec{
 		Title:       "Start exec session",
 		Description: "Start a persistent shell command session.",
-		Usage:       "Run a shell command in the workspace. Short commands return their output directly; commands still running after the startup wait or a brief output-settle period become persistent exec sessions managed with exec_session. A running session reports its exit to this chat as a notification, which starts a new turn when the chat is idle. With notify=lines, each batch of new stdout lines is also a notification, which suits watching a log or a build: filter the command to the lines that matter, including failures (for example `tail -f app.log | grep --line-buffered -E 'ERROR|Ready'`). Lines within 200 ms share one notification, each line is cut at 500 bytes, notifications over about one per 2 s are dropped and counted, and a session whose output stays over that rate for 30 s is stopped. A notify=lines session stops after timeout_ms, 5 minutes by default and 30 at most. Keep cmd executable-only: do not include reasoning, commentary, plans, status updates, or explanatory shell comments. Put explanations in normal assistant text. Prefer dedicated file and search tools where available.",
-		Parameters:  `{"type":"object","properties":{"cmd":{"type":"string","description":"Exact executable shell command. Keep it small; do not include reasoning, commentary, plans, status updates, or explanatory comments."},"comment":{"type":"string","description":"Optional short user-facing description of what this exec does. Use this for long or dense commands instead of relying on cmd as the visible label."},"workdir":{"type":"string","description":"Optional workspace-relative working directory; use this instead of cd."},"timeout_ms":{"type":"integer","minimum":0,"maximum":9223372036854,"description":"Optional timeout in milliseconds; omit for no timeout"},"tty":{"type":"boolean","description":"Enable tty mode for interactive commands"},"shell":{"type":"string","description":"Optional shell binary name or path"},"login":{"type":"boolean","description":"Use login shell semantics; defaults to true"},"yield_time_ms":{"type":"integer","minimum":1,"maximum":30000,"description":"Optional maximum startup wait in milliseconds. The call returns sooner when output settles. Defaults to 10000."},"notify":{"type":"string","enum":["exit","lines"],"description":"What a session still running after the startup wait reports to this chat: exit (default) reports the exit once; lines also reports each batch of new stdout lines."}},"required":["cmd"],"additionalProperties":false}`,
+		Usage:       "Run a shell command in the workspace. Short commands return their output directly; commands still running after the startup wait or a brief output-settle period become persistent exec sessions managed with exec_session. A running session reports its exit to this chat as a notification, which starts a new turn when the chat is idle. With notify=lines, each batch of new stdout lines is also a notification, which suits watching a log or a build: filter the command to the lines that matter, including failures (for example `tail -f app.log | grep --line-buffered -E 'ERROR|Ready'`). Lines within 200 ms share one notification, each line is cut at 500 bytes, notifications over about one per 2 s are dropped and counted, and a session whose output stays over that rate for 30 s is stopped. A notify=lines session stops after timeout_ms, 5 minutes by default and 30 at most. Keep cmd executable-only: do not include reasoning, commentary, plans, status updates, or explanatory shell comments. Provide a required description explaining what the command accomplishes. Prefer dedicated file and search tools where available.",
+		Parameters:  `{"type":"object","properties":{"cmd":{"type":"string","description":"Exact executable shell command. Keep it small; do not include reasoning, commentary, plans, status updates, or explanatory comments."},"description":{"type":"string","minLength":1,"description":"Required short user-facing description of what this command accomplishes. Use one concise sentence."},"workdir":{"type":"string","description":"Optional workspace-relative working directory; use this instead of cd."},"timeout_ms":{"type":"integer","minimum":0,"maximum":9223372036854,"description":"Optional timeout in milliseconds; omit for no timeout"},"tty":{"type":"boolean","description":"Enable tty mode for interactive commands"},"shell":{"type":"string","description":"Optional shell binary name or path"},"login":{"type":"boolean","description":"Use login shell semantics; defaults to true"},"yield_time_ms":{"type":"integer","minimum":1,"maximum":30000,"description":"Optional maximum startup wait in milliseconds. The call returns sooner when output settles. Defaults to 10000."},"notify":{"type":"string","enum":["exit","lines"],"description":"What a session still running after the startup wait reports to this chat: exit (default) reports the exit once; lines also reports each batch of new stdout lines."}},"required":["cmd","description"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(statusTool{}, tools.ToolSpec{
@@ -119,9 +119,11 @@ func (commandTool) NormalizeArgs(args map[string]string) (map[string]string, err
 		return nil, errors.New("cmd is empty")
 	}
 	out := map[string]string{"cmd": cmd}
-	if comment := normalizeComment(args["comment"]); comment != "" {
-		out["comment"] = comment
+	description := normalizeDescription(args["description"])
+	if description == "" {
+		return nil, errors.New("description is required and must not be blank")
 	}
+	out["description"] = description
 	if workdir := tools.NormalizePathInput(args["workdir"]); workdir != "" {
 		out["workdir"] = workdir
 	}
@@ -237,8 +239,8 @@ func (cleanupTool) NormalizeArgs(args map[string]string) (map[string]string, err
 }
 
 func (commandTool) Preview(req tools.Request) string {
-	if comment := strings.TrimSpace(req.Args["comment"]); comment != "" {
-		return comment
+	if description := strings.TrimSpace(req.Args["description"]); description != "" {
+		return description
 	}
 	return req.Args["cmd"]
 }
@@ -290,7 +292,7 @@ func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 		YieldTime:      durationArg(req.Args, "yield_time_ms", defaultYieldTime),
 		PreviewBytes:   outputLimit(runtime, req),
 		AccessSettings: settings,
-		Label:          normalizeComment(req.Args["comment"]),
+		Label:          normalizeDescription(req.Args["description"]),
 		Notify:         notify,
 	})
 	if err != nil {
@@ -305,7 +307,7 @@ func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 		}
 	}
 	stored.Workdir = rel
-	stored.Comment = req.Args["comment"]
+	stored.Description = req.Args["description"]
 	meta := map[string]string{
 		"process_id": snap.ProcessID,
 		"command":    snap.Command,
@@ -316,8 +318,8 @@ func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 	if snap.ExitCode != nil {
 		meta["exit_code"] = strconv.Itoa(*snap.ExitCode)
 	}
-	if stored.Comment != "" {
-		meta["comment"] = stored.Comment
+	if stored.Description != "" {
+		meta["description"] = stored.Description
 	}
 	return tools.Result{
 		Output: tools.DisplayTextForStored(tools.ExecCommand, stored),
@@ -326,14 +328,14 @@ func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 	}, nil
 }
 
-func normalizeComment(value string) string {
-	comment := strings.TrimSpace(value)
-	if comment == "" {
+func normalizeDescription(value string) string {
+	description := strings.TrimSpace(value)
+	if description == "" {
 		return ""
 	}
-	comment = strings.Join(strings.Fields(comment), " ")
-	const maxCommentRunes = 160
-	return textutil.TruncateRunes(comment, maxCommentRunes)
+	description = strings.Join(strings.Fields(description), " ")
+	const maxDescriptionRunes = 160
+	return textutil.TruncateRunes(description, maxDescriptionRunes)
 }
 
 func (statusTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
@@ -529,6 +531,7 @@ func storedFromSnapshot(snap execruntime.Snapshot, message string) tools.ExecSto
 	stored := tools.ExecStoredResult{
 		ProcessID:    snap.ProcessID,
 		Command:      snap.Command,
+		Description:  snap.Label,
 		Workdir:      snap.Workdir,
 		Shell:        snap.Shell,
 		TTY:          snap.TTY,

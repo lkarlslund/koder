@@ -2388,8 +2388,8 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `if (args.process_id) values.push('process_id=' + args.process_id)`) ||
 		!strings.Contains(fullPage, `(args.yield_time_ms ? 'wait=' : 'timeout=') + timeout`) ||
 		!strings.Contains(fullPage, `function compactCommandLabel(command)`) ||
-		!strings.Contains(fullPage, `const label = comment || compactCommandLabel(command)`) ||
-		!strings.Contains(fullPage, `if (execCommand && args.comment) return ''`) ||
+		!strings.Contains(fullPage, `const label = description || compactCommandLabel(command)`) ||
+		!strings.Contains(fullPage, `if (execCommand && (args.description || args.comment)) return ''`) ||
 		!strings.Contains(fullPage, `if (command) lines.push('command: ' + command)`) ||
 		!strings.Contains(fullPage, `if (timeout) lines.push('timeout: ' + timeout)`) ||
 		!strings.Contains(fullPage, `function execResultLines(data, fallback)`) ||
