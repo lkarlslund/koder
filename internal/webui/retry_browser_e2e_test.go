@@ -2,6 +2,8 @@ package webui
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -16,8 +18,13 @@ import (
 // and when, and offers to try now or give up.
 func TestRetryBannerTriesNowAndCancels(t *testing.T) {
 	chromium := chromiumForTest(t)
-	// The test provider's host never resolves, so every request fails.
-	ctrl, _, _ := newTestControllerAndEngine(t, t.TempDir())
+	// Keep failures local and immediate. DNS/network delays can outlast the
+	// retry banner's cancel window and make this test hang on shutdown.
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(provider.Close)
+	ctrl, _, _ := newTestControllerAndEngine(t, t.TempDir(), provider.URL+"/v1")
 	state := selectedTestState(t, ctrl)
 	serverCtx, stopServer := context.WithCancel(context.Background())
 	server := startBrowserTestServer(t, serverCtx, ctrl)
@@ -66,7 +73,7 @@ func TestRetryBannerTriesNowAndCancels(t *testing.T) {
 	if err := chromedp.Run(browserCtx,
 		chromedp.Poll(`!!document.querySelector('[data-retry]')?.offsetParent && document.querySelector('.retry-banner-headline').textContent.includes('attempt 1 of 10')`, nil),
 		chromedp.Evaluate(read, &first),
-		chromedp.Click(`[data-retry] .btn-primary`, chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector("[data-retry] .btn-primary").click()`, nil),
 		chromedp.Poll(`document.querySelector('.retry-banner-headline')?.textContent.includes('attempt 2 of 10')`, nil, chromedp.WithPollingTimeout(5*time.Second)),
 		chromedp.Evaluate(read, &second),
 	); err != nil {
@@ -81,7 +88,7 @@ func TestRetryBannerTriesNowAndCancels(t *testing.T) {
 
 	var gone bool
 	if err := chromedp.Run(browserCtx,
-		chromedp.Click(`[data-retry] .btn-outline-secondary`, chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector("[data-retry] .btn-outline-secondary").click()`, nil),
 		chromedp.Poll(`!document.querySelector('[data-retry]')?.offsetParent`, nil, chromedp.WithPollingTimeout(3*time.Second)),
 		chromedp.Evaluate(`!document.querySelector('[data-retry]')?.offsetParent`, &gone),
 	); err != nil {

@@ -4624,7 +4624,7 @@ func newTestControllerWithWorkdir(t *testing.T, workdir string) *app.Controller 
 	return ctrl
 }
 
-func newTestControllerAndEngine(t *testing.T, workdir string) (*app.Controller, *agent.Engine, *store.Store) {
+func newTestControllerAndEngine(t *testing.T, workdir string, providerURL ...string) (*app.Controller, *agent.Engine, *store.Store) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -4635,8 +4635,12 @@ func newTestControllerAndEngine(t *testing.T, workdir string) (*app.Controller, 
 	}
 	cfg.Defaults.ProviderID = "test"
 	cfg.Defaults.ModelID = "model"
+	baseURL := "https://example.invalid/v1"
+	if len(providerURL) > 0 {
+		baseURL = providerURL[0]
+	}
 	cfg.Providers = map[string]config.Provider{
-		"test": {BaseURL: "https://example.invalid/v1"},
+		"test": {BaseURL: baseURL},
 	}
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "model", ContextWindow: 32768})
 	if err := cfg.Save(); err != nil {
