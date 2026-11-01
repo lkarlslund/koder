@@ -242,6 +242,9 @@ func (commandTool) Preview(req tools.Request) string {
 	if description := strings.TrimSpace(req.Args["description"]); description != "" {
 		return description
 	}
+	if description := strings.TrimSpace(req.Args["comment"]); description != "" {
+		return description
+	}
 	return req.Args["cmd"]
 }
 func (statusTool) Preview(req tools.Request) string { return "Inspect " + req.Args["process_id"] }

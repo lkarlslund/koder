@@ -454,10 +454,27 @@ func (r *Runtime) requestForToolCall(ctx context.Context, chatID id.ID, toolCall
 	if err != nil {
 		return tools.Request{}, err
 	}
+	return requestFromPersistedToolCall(call)
+}
+
+// requestFromPersistedToolCall upgrades queued calls created before descriptions
+// became required. New provider calls still use the strict tool normalizer.
+func requestFromPersistedToolCall(call domain.ToolCall) (tools.Request, error) {
+	args := maps.Clone(call.Args)
+	if call.Tool == tools.ExecCommand && strings.TrimSpace(args["description"]) == "" {
+		if args == nil {
+			args = make(map[string]string)
+		}
+		args["description"] = strings.TrimSpace(args["comment"])
+		if args["description"] == "" {
+			args["description"] = "Run previously queued command"
+		}
+		delete(args, "comment")
+	}
 	return tools.Normalize(tools.Request{
 		Tool:       call.Tool,
 		ToolCallID: string(call.ToolCallID),
-		Args:       maps.Clone(call.Args),
+		Args:       args,
 	})
 }
 
@@ -468,11 +485,7 @@ func pendingExecutableToolCallsForTurn(ctx context.Context, rt *chatpkg.Chat) ([
 	}
 	requests := make([]tools.Request, 0, len(calls))
 	for _, call := range calls {
-		req, err := tools.Normalize(tools.Request{
-			Tool:       call.Tool,
-			ToolCallID: string(call.ToolCallID),
-			Args:       maps.Clone(call.Args),
-		})
+		req, err := requestFromPersistedToolCall(call)
 		if err != nil {
 			return nil, err
 		}

@@ -1110,6 +1110,13 @@ func Normalize(req Request) (Request, error) {
 }
 
 func Preview(req Request) string {
+	// Exec previews also describe historical calls that predate required
+	// descriptions. Displaying them must not apply today's execution schema.
+	if req.Tool == ExecCommand {
+		if tool, _, ok := lookupWithSpec(req.Tool); ok {
+			return tool.Preview(req)
+		}
+	}
 	req, tool, err := normalizeRequest(req)
 	if err != nil {
 		return req.Tool.String()

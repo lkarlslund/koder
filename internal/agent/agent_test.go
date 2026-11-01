@@ -2747,57 +2747,84 @@ func TestHandleModelToolCallsStopsAfterToolBatchWhenStopRequested(t *testing.T) 
 }
 
 func TestResumePendingToolCallsExecutesAndContinues(t *testing.T) {
-	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		tool tools.ID
+		args map[string]string
+	}{
+		{"legacy bash", tools.Bash, map[string]string{"command": "printf hi"}},
+		{"exec without description", tools.ExecCommand, map[string]string{"cmd": "printf hi"}},
+		{"exec with legacy comment", tools.ExecCommand, map[string]string{"cmd": "printf hi", "comment": "Print greeting"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	var requests int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/chat/completions" {
-			http.NotFound(w, r)
-			return
-		}
-		requests++
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
-	}))
-	defer server.Close()
+			var requests int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/chat/completions" {
+					http.NotFound(w, r)
+					return
+				}
+				requests++
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+			}))
+			defer server.Close()
 
-	cfg := testConfig(t)
-	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
-	cfg.Defaults.ProviderID = "test"
-	cfg.Defaults.ModelID = "test-model"
-	cfg.Permissions.Profile = permissionprofile.ProfileFullAccess
+			cfg := testConfig(t)
+			cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
+			cfg.Defaults.ProviderID = "test"
+			cfg.Defaults.ModelID = "test-model"
+			cfg.Permissions.Profile = permissionprofile.ProfileFullAccess
 
-	st, err := store.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
+			st, err := store.Open(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = st.Close() }()
 
-	engine := New(cfg, st, nil)
-	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := setSessionPermissionProfile(context.Background(), st, session.ID, permissionprofile.ProfileFullAccess); err != nil {
-		t.Fatal(err)
-	}
-	chat := defaultChatForSession(t, st, session.ID)
-	req := tools.Request{
-		Tool:       domain.ToolKindBash,
-		ToolCallID: "call_1",
-		Args:       map[string]string{"command": "printf hi"},
-	}
-	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
+			engine := New(cfg, st, nil)
+			session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := setSessionPermissionProfile(context.Background(), st, session.ID, permissionprofile.ProfileFullAccess); err != nil {
+				t.Fatal(err)
+			}
+			chat := defaultChatForSession(t, st, session.ID)
+			req := tools.Request{
+				Tool:       tt.tool,
+				ToolCallID: "call_1",
+				Args:       tt.args,
+			}
+			appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
 
-	rt, err := engine.Chat(context.Background(), session, chat)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(rt.Close)
-	items := waitForTimelineCondition(t, st, chat.ID, func(items []domain.TimelineItem) bool {
-		var sawToolResult bool
-		var sawFinalAnswer bool
-		for _, item := range items {
-			if assistant, ok := item.Content.(domain.AssistantMessage); ok {
+			rt, err := engine.Chat(context.Background(), session, chat)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(rt.Close)
+			items := waitForTimelineCondition(t, st, chat.ID, func(items []domain.TimelineItem) bool {
+				var sawToolResult bool
+				var sawFinalAnswer bool
+				for _, item := range items {
+					if assistant, ok := item.Content.(domain.AssistantMessage); ok {
+						if call := assistant.ToolByID(domain.ToolCallID("call_1")); call != nil && call.Result != nil && strings.Contains(call.Result.Text, "hi") {
+							sawToolResult = true
+						}
+						if assistant.Text == "done" {
+							sawFinalAnswer = true
+						}
+					}
+				}
+				return sawToolResult && sawFinalAnswer
+			})
+			var sawToolResult bool
+			var sawFinalAnswer bool
+			for _, item := range items {
+				assistant, ok := item.Content.(domain.AssistantMessage)
+				if !ok {
+					continue
+				}
 				if call := assistant.ToolByID(domain.ToolCallID("call_1")); call != nil && call.Result != nil && strings.Contains(call.Result.Text, "hi") {
 					sawToolResult = true
 				}
@@ -2805,33 +2832,18 @@ func TestResumePendingToolCallsExecutesAndContinues(t *testing.T) {
 					sawFinalAnswer = true
 				}
 			}
-		}
-		return sawToolResult && sawFinalAnswer
-	})
-	var sawToolResult bool
-	var sawFinalAnswer bool
-	for _, item := range items {
-		assistant, ok := item.Content.(domain.AssistantMessage)
-		if !ok {
-			continue
-		}
-		if call := assistant.ToolByID(domain.ToolCallID("call_1")); call != nil && call.Result != nil && strings.Contains(call.Result.Text, "hi") {
-			sawToolResult = true
-		}
-		if assistant.Text == "done" {
-			sawFinalAnswer = true
-		}
+			if !sawToolResult {
+				t.Fatal("expected resumed tool result")
+			}
+			if !sawFinalAnswer {
+				t.Fatal("expected final assistant answer")
+			}
+			if requests != 1 {
+				t.Fatalf("expected one continuation request, got %d", requests)
+			}
+			waitForChatInactive(t, rt)
+		})
 	}
-	if !sawToolResult {
-		t.Fatal("expected resumed tool result")
-	}
-	if !sawFinalAnswer {
-		t.Fatal("expected final assistant answer")
-	}
-	if requests != 1 {
-		t.Fatalf("expected one continuation request, got %d", requests)
-	}
-	waitForChatInactive(t, rt)
 }
 
 func TestResumePendingToolCallsIgnoresLaterQueuedUserMessage(t *testing.T) {
