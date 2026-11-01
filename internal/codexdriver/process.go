@@ -56,6 +56,7 @@ func (f *sandboxProcessFactory) DiscoveryConfig(context.Context) (codexapp.Confi
 }
 
 func (f *sandboxProcessFactory) ChatConfig(_ context.Context, session domain.Session, chatRecord domain.Chat, threadID string) (ChatProcessConfig, error) {
+	session.ProjectRoot = chatRecord.WorkingDirectory(session)
 	if strings.TrimSpace(session.ProjectRoot) == "" {
 		return ChatProcessConfig{}, fmt.Errorf("session %s has no project root", session.ID)
 	}
@@ -70,6 +71,7 @@ func (f *sandboxProcessFactory) ChatConfig(_ context.Context, session domain.Ses
 	if f.cfg.Access != nil {
 		settings = accesssettings.Normalize(f.cfg.Access(session))
 	}
+	settings = chatRecord.WorktreeAccess(settings)
 	if settings.Tmp == accesssettings.TmpSession && strings.TrimSpace(settings.TmpDir) == "" {
 		settings.TmpDir = filepath.Join(os.TempDir(), "koder-session-tmp", string(session.ID))
 		if err := os.MkdirAll(settings.TmpDir, 0o700); err != nil {

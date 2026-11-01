@@ -1196,7 +1196,8 @@ function timeoutLabel(value) {
 		browserPreview: {open: false, tab: null, rate: Number(readPreference('browserPreviewRate', '2')), src: '', loading: false, error: '', lastUpdated: '', timer: null, generation: 0},
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
-		chatCreator: {open: false, loading: false, busy: false, error: '', backends: [], draft: {title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}},
+		worktreeManager: {open: false, busy: false, error: '', items: []},
+		chatCreator: {open: false, loading: false, busy: false, error: '', backends: [], draft: {isolation: '', title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}},
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptScrollOperation: 0, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptEnhancementObserver: null, transcriptEnhancementFrame: 0, transcriptEnhanceTimer: null, transcriptDOMUpdateScheduled: false, transcriptDOMUpdateCallbacks: [], scrollRestoreSeq: 0, timelineLoading: {}, timelineRepairing: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, composerDefaultSteer: readPreference('composerDefaultSend', 'steer') === 'steer', reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           this.initializeRouteHydration();
@@ -1226,7 +1227,9 @@ function timeoutLabel(value) {
 		  // where it can, and a visible page asks it to check every 10 seconds.
 		  this.workspacePollTimer = setInterval(() => {
 			if (document.visibilityState !== 'visible' || !this.workspaceSessionMode() || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-			this.rpc('poll_workspace', {}).catch(() => {});
+			if (this.activeWorktree()) {
+              this.rpc('refresh_workspace', {}).then(result => { this.applyWorkspaceDelta(result); this.applyGitDelta(result); }).catch(() => {});
+            } else this.rpc('poll_workspace', {}).catch(() => {});
 		  }, 10000);
           this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); this.observeTranscriptEnhancements(); this.scheduleTranscriptEnhancement(); this.observeLastTranscriptItem(); });
         },
@@ -1900,6 +1903,8 @@ function timeoutLabel(value) {
           if (sessionID && sessionID !== this.currentSessionID()) return;
           const status = delta.workspace_status || delta.Workspace || delta.workspace;
           if (status === undefined) return;
+          const root = String(status.project_root || status.ProjectRoot || '');
+          if (root && root !== this.activeCheckoutRoot()) return;
           this.state.workspace_status = status;
           this.state.Workspace = status;
           this.reportClientStateSoon();
@@ -1910,6 +1915,8 @@ function timeoutLabel(value) {
           if (sessionID && sessionID !== this.currentSessionID()) return;
           const diff = delta.git_diff || delta.GitDiff || delta.diff || delta.Diff;
           if (diff === undefined) return;
+          const root = String(diff.project_root || diff.ProjectRoot || '');
+          if (root && root !== this.activeCheckoutRoot()) return;
           this.state.git_diff = diff;
           this.state.GitDiff = diff;
           this.reportClientStateSoon();
@@ -4128,6 +4135,8 @@ function timeoutLabel(value) {
           if (value === 'streaming_response' || value === 'streaming_thoughts' || value === 'running') return 'bi-arrow-repeat';
           return 'bi-circle';
         },
+        activeWorktree() { const chat = this.activeChat(); return chat?.Worktree || chat?.worktree || null; },
+        activeCheckoutRoot() { const wt = this.activeWorktree(); const session = this.state.session || this.state.Session || {}; return String(wt?.working_directory || wt?.WorkingDirectory || wt?.path || wt?.Path || session.ProjectRoot || session.project_root || this.state.project_root || ''); },
         gitStatus() { return this.state.workspace_status || this.state.Workspace || {}; },
         gitDiff() { return this.state.git_diff || this.state.GitDiff || {}; },
         gitFiles() { return this.gitDiff().files || this.gitDiff().Files || []; },
@@ -4797,9 +4806,17 @@ function timeoutLabel(value) {
           this.switchingChat = {active: false, id: '', title: '', startedAt: 0};
           this.reportClientStateSoon();
         },
+        openWorktrees() {
+          this.worktreeManager = {open: true, busy: true, error: '', items: []};
+          this.rpc('worktrees', {}).then(items => { this.worktreeManager.items = items || []; this.worktreeManager.busy = false; }).catch(err => { this.worktreeManager.error = err.message; this.worktreeManager.busy = false; });
+        },
+        cleanupWorktree(item) {
+          this.worktreeManager.busy = true; this.worktreeManager.error = '';
+          this.rpc('worktrees', {operation: 'cleanup', chat_id: item.chat_id}).then(() => this.rpc('worktrees', {})).then(items => { this.worktreeManager.items = items || []; this.worktreeManager.busy = false; }).catch(err => { this.worktreeManager.error = err.message; this.worktreeManager.busy = false; });
+        },
 		openChatCreator() {
 		  this.newChatMenuOpen = false;
-		  this.chatCreator = {open: true, loading: true, busy: false, error: '', backends: [], draft: {title: '', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}};
+		  this.chatCreator = {open: true, loading: true, busy: false, error: '', backends: [], draft: {isolation: '', title: '', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}};
 		  this.rpc('chat_backends', {}).then(backends => {
 			this.chatCreator.backends = Array.isArray(backends) ? backends : [];
 			this.configureChatCreatorInheritedModel();
@@ -4865,6 +4882,7 @@ function timeoutLabel(value) {
 		  if (!backend?.available) { this.chatCreator.error = backend?.detail || 'Selected backend is unavailable'; return; }
 		  this.chatCreator.busy = true; this.chatCreator.error = '';
 		  const payload = {...draft, title: String(draft.title || '').trim()};
+          if (!payload.isolation) delete payload.isolation;
 		  if (draft.workflow_role !== 'execution') { payload.milestone_key = ''; payload.task_ref = ''; }
 		  if (draft.backend === 'koder') payload.tool_states = {};
 		  this.rpc('new_chat', payload).then(s => { this.chatCreator.open = false; this.chatCreator.busy = false; this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); this.syncActiveChatURL(); this.closeMobileSidebar(); }).catch(err => { this.chatCreator.busy = false; this.chatCreator.error = err.message; });

@@ -127,7 +127,7 @@ func (s *Server) handleSessionFilesAPI(w http.ResponseWriter, r *http.Request, s
 }
 
 func (s *Server) handleSessionFileTree(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
-	root, rel, full, err := s.sessionFilePath(r.Context(), sessionID, r.URL.Query().Get("path"))
+	root, rel, full, err := s.sessionFilePath(r.Context(), sessionID, r.URL.Query().Get("path"), id.ID(r.URL.Query().Get("chat")))
 	if err != nil {
 		writeFileBrowserError(w, err)
 		return
@@ -156,7 +156,7 @@ func (s *Server) handleSessionFileTree(w http.ResponseWriter, r *http.Request, s
 }
 
 func (s *Server) handleSessionFileRead(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
-	root, rel, full, err := s.sessionFilePath(r.Context(), sessionID, r.URL.Query().Get("path"))
+	root, rel, full, err := s.sessionFilePath(r.Context(), sessionID, r.URL.Query().Get("path"), id.ID(r.URL.Query().Get("chat")))
 	if err != nil {
 		writeFileBrowserError(w, err)
 		return
@@ -215,7 +215,7 @@ func (s *Server) handleSessionFileRead(w http.ResponseWriter, r *http.Request, s
 }
 
 func (s *Server) handleSessionFileRaw(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
-	_, rel, full, err := s.sessionFilePath(r.Context(), sessionID, r.URL.Query().Get("path"))
+	_, rel, full, err := s.sessionFilePath(r.Context(), sessionID, r.URL.Query().Get("path"), id.ID(r.URL.Query().Get("chat")))
 	if err != nil {
 		writeFileBrowserError(w, err)
 		return
@@ -246,7 +246,7 @@ func (s *Server) handleSessionFileRaw(w http.ResponseWriter, r *http.Request, se
 }
 
 func (s *Server) handleSessionFileDownload(w http.ResponseWriter, r *http.Request, sessionID id.ID) {
-	_, rel, full, err := s.sessionFilePath(r.Context(), sessionID, r.URL.Query().Get("path"))
+	_, rel, full, err := s.sessionFilePath(r.Context(), sessionID, r.URL.Query().Get("path"), id.ID(r.URL.Query().Get("chat")))
 	if err != nil {
 		writeFileBrowserError(w, err)
 		return
@@ -317,7 +317,7 @@ func (s *Server) handleSessionFileSend(w http.ResponseWriter, r *http.Request, s
 }
 
 func (s *Server) fileBrowserPromptForSend(ctx context.Context, sessionID id.ID, req fileSendRequest) (string, error) {
-	root, rel, full, err := s.sessionFilePath(ctx, sessionID, req.Path)
+	root, rel, full, err := s.sessionFilePath(ctx, sessionID, req.Path, req.ChatID)
 	if err != nil {
 		return "", err
 	}
@@ -356,12 +356,12 @@ func (s *Server) fileBrowserPromptForSend(ctx context.Context, sessionID id.ID, 
 	return "Use this file content from `" + cleanPath + "`:\n\n" + fence + "\n" + string(data) + "\n```", nil
 }
 
-func (s *Server) sessionFilePath(ctx context.Context, sessionID id.ID, rawRel string) (string, string, string, error) {
-	session, err := s.controller.SessionByID(ctx, sessionID)
+func (s *Server) sessionFilePath(ctx context.Context, sessionID id.ID, rawRel string, chatID id.ID) (string, string, string, error) {
+	root, err := s.controller.CheckoutRootForSelection(ctx, app.Selection{SessionID: sessionID, ChatID: chatID})
 	if err != nil {
 		return "", "", "", err
 	}
-	root := strings.TrimSpace(session.ProjectRoot)
+	root = strings.TrimSpace(root)
 	if root == "" {
 		return "", "", "", fmt.Errorf("session has no project root")
 	}

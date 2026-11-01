@@ -263,12 +263,12 @@ func TestStartUsesControlAndReportsNoPollingContract(t *testing.T) {
 	}}}
 	result, err := (startTool{}).Call(context.Background(), tools.Options{Runtime: testRuntime(control), Request: tools.Request{
 		Tool: domain.ToolKindChatStart,
-		Args: map[string]string{"profile": "execution", "objective": "Implement alpha", "milestone_key": "alpha", "title": "Worker", "backend": "codex", "model_id": "gpt-test", "permission_profile": "readonly", "disabled_tools": "session_start,chat_start"},
+		Args: map[string]string{"profile": "execution", "objective": "Implement alpha", "milestone_key": "alpha", "title": "Worker", "isolation": "worktree", "backend": "codex", "model_id": "gpt-test", "permission_profile": "readonly", "disabled_tools": "session_start,chat_start"},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if control.lastStart.Profile != chatrole.Execution || control.lastStart.Objective != "Implement alpha" || control.lastStart.MilestoneKey != "alpha" || control.lastStart.Title != "Worker" || control.lastStart.Backend != domain.ChatBackendCodex || control.lastStart.ModelID != "gpt-test" || control.lastStart.PermissionProfile != "readonly" || control.lastStart.ToolStates[domain.ToolKindSessionStart] || control.lastStart.ToolStates[domain.ToolKindChatStart] || control.lastSessionID != "session-10" || control.lastParentChatID != "chat-20" {
+	if control.lastStart.Isolation != "worktree" || control.lastStart.Profile != chatrole.Execution || control.lastStart.Objective != "Implement alpha" || control.lastStart.MilestoneKey != "alpha" || control.lastStart.Title != "Worker" || control.lastStart.Backend != domain.ChatBackendCodex || control.lastStart.ModelID != "gpt-test" || control.lastStart.PermissionProfile != "readonly" || control.lastStart.ToolStates[domain.ToolKindSessionStart] || control.lastStart.ToolStates[domain.ToolKindChatStart] || control.lastSessionID != "session-10" || control.lastParentChatID != "chat-20" {
 		t.Fatalf("unexpected control call: %#v", control)
 	}
 	if !strings.Contains(result.Output, "Worker") || !strings.Contains(result.Output, "reporting: automatic when the child chat becomes idle") || strings.Contains(result.Output, "Do not poll") {
@@ -436,5 +436,19 @@ func TestCleanupArchivesIdleExecutionChildren(t *testing.T) {
 		!strings.Contains(result.Output, "child-plan") ||
 		!strings.Contains(result.Output, "not an execution chat") {
 		t.Fatalf("unexpected cleanup output: %q", result.Output)
+	}
+}
+
+func TestIsolationSchemaAndValidation(t *testing.T) {
+	for _, kind := range []tools.ID{tools.Chats, tools.ChatStart} {
+		if !strings.Contains(tools.Info(kind).Parameters, `"isolation"`) {
+			t.Fatalf("%s lacks isolation", kind)
+		}
+	}
+	if _, err := (startTool{}).NormalizeArgs(map[string]string{"profile": "execution", "objective": "Implement", "isolation": "unknown"}); err == nil {
+		t.Fatal("unknown isolation accepted")
+	}
+	if _, err := (worktreesTool{}).NormalizeArgs(map[string]string{"worktree_action": "cleanup"}); err == nil {
+		t.Fatal("cleanup without chat accepted")
 	}
 }

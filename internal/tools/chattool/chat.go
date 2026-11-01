@@ -2,6 +2,7 @@ package chattool
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -14,6 +15,13 @@ import (
 )
 
 func init() {
+	tools.Register(worktreesTool{}, tools.ToolSpec{
+		Title:      "Manage worktrees",
+		Usage:      "List managed worktrees, including interrupted creations. Safely clean up archived, unused checkouts after integrating their commits. Never discards files or unique commits; branches remain available for restore.",
+		Parameters: `{"type":"object","properties":{"worktree_action":{"type":"string","enum":["list","cleanup"]},"chat_id":{"type":"string"}},"additionalProperties":false}`,
+		Legacy:     true,
+	})
+
 	tools.Register(tools.ActionTool{
 		Kind: tools.Chats,
 		Routes: []tools.ActionRoute{
@@ -27,13 +35,14 @@ func init() {
 			{Action: "restore", Tool: tools.ChatArchive, FixedArgs: map[string]string{"archived": "false"}},
 			{Action: "rename", Tool: tools.ChatRename},
 			{Action: "cleanup", Tool: tools.ChatCleanup},
+			{Action: "worktrees", Tool: chatWorktrees},
 		},
 		BypassPermissions: true,
 	}, tools.ToolSpec{
 		Title:       "Chats",
 		Description: "List, create, coordinate, rename, archive, restore, and cancel chats in this session.",
-		Usage:       "Use list to discover chats. Use queue to add work after a child's current turn, steer to deliver guidance at its next turn boundary, or interrupt when it must stop its current turn and handle the message immediately. Use cancel to stop without sending a message. Child chats report back automatically, so do not poll them.",
-		Parameters:  `{"type":"object","properties":{"action":{"type":"string"},"archived":{"type":"boolean","description":"For list, include archived chats"},"profile":{"type":"string","description":"Registered chat profile"},"objective":{"type":"string"},"title":{"type":"string"},"backend":{"type":"string","enum":["koder","codex","claude"]},"interaction_mode":{"type":"string","enum":["text","voice"]},"model_id":{"type":"string"},"permission_profile":{"type":"string"},"milestone_key":{"type":"string"},"task_ref":{"type":"string"},"disabled_tools":{"type":"string"},"chat_id":{"type":"string"},"message":{"type":"string"},"hard":{"type":"boolean"}},"required":["action"],"additionalProperties":false}`,
+		Usage:       "Use list to discover chats. Use queue to add work after a child's current turn, steer to deliver guidance at its next turn boundary, or interrupt when it must stop its current turn and handle the message immediately. Use cancel to stop without sending a message. Child chats report back automatically, so do not poll them. Use worktrees to inspect retained checkouts and safely clean them up after explicit integration and archiving.",
+		Parameters:  `{"type":"object","properties":{"action":{"type":"string"},"archived":{"type":"boolean","description":"For list, include archived chats"},"profile":{"type":"string","description":"Registered chat profile"},"objective":{"type":"string"},"title":{"type":"string"},"backend":{"type":"string","enum":["koder","codex","claude"]},"interaction_mode":{"type":"string","enum":["text","voice"]},"model_id":{"type":"string"},"permission_profile":{"type":"string"},"milestone_key":{"type":"string"},"task_ref":{"type":"string"},"isolation":{"type":"string","enum":["worktree"],"description":"Create a separate git worktree and branch from the parent checkout HEAD for parallel edits. Uncommitted parent changes are not copied. The checkout is retained; integrate it explicitly."},"disabled_tools":{"type":"string"},"worktree_action":{"type":"string","enum":["list","cleanup"],"description":"For action=worktrees: list managed checkouts or safely remove an archived, unused, clean checkout whose commits are integrated into its parent. Branches are retained. Cleanup requires chat_id."},"chat_id":{"type":"string"},"message":{"type":"string"},"hard":{"type":"boolean"}},"required":["action"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(listTool{}, tools.ToolSpec{
@@ -46,8 +55,8 @@ func init() {
 	tools.Register(startTool{}, tools.ToolSpec{
 		Title:       "Start chat",
 		Description: "Start a background child chat using a registered chat profile.",
-		Usage:       "Start a background child chat using a registered chat profile and the Koder, Codex, or Claude Code backend. Omit backend to use the current chat's backend. A child may be scoped to one milestone or one task. If an existing child owns that scope, use chats action=steer instead. After starting a child, go idle unless you have unrelated work; it reports back automatically. Do not poll child chats.",
-		Parameters:  `{"type":"object","properties":{"profile":{"type":"string","description":"Registered chat profile such as orchestrator, planning, or execution"},"objective":{"type":"string","description":"Specific objective for the child chat"},"title":{"type":"string","description":"Optional chat title"},"backend":{"type":"string","enum":["koder","codex","claude"],"description":"Optional turn backend; defaults to the current chat's backend"},"interaction_mode":{"type":"string","enum":["text","voice"],"description":"Optional interaction mode; defaults to text"},"model_id":{"type":"string","description":"Optional backend model id"},"permission_profile":{"type":"string","description":"Optional Koder permission profile"},"milestone_key":{"type":"string","description":"Optional milestone scope; mutually exclusive with task_ref"},"task_ref":{"type":"string","description":"Optional single task scope; mutually exclusive with milestone_key"},"disabled_tools":{"type":"string","description":"Optional comma-separated Koder tool ids to disable for this chat"}},"required":["profile","objective"],"additionalProperties":false}`,
+		Usage:       "Start a background child chat using a registered chat profile and the Koder, Codex, or Claude Code backend. Omit backend to use the current chat's backend. Use isolation=worktree for independent parallel edits; without it, children share the parent checkout. Worktrees are retained after completion and archive; merge or cherry-pick their changes explicitly. A child may be scoped to one milestone or one task. If an existing child owns that scope, use chats action=steer instead. After starting a child, go idle unless you have unrelated work; it reports back automatically. Do not poll child chats.",
+		Parameters:  `{"type":"object","properties":{"profile":{"type":"string","description":"Registered chat profile such as orchestrator, planning, or execution"},"objective":{"type":"string","description":"Specific objective for the child chat"},"title":{"type":"string","description":"Optional chat title"},"backend":{"type":"string","enum":["koder","codex","claude"],"description":"Optional turn backend; defaults to the current chat's backend"},"interaction_mode":{"type":"string","enum":["text","voice"],"description":"Optional interaction mode; defaults to text"},"model_id":{"type":"string","description":"Optional backend model id"},"permission_profile":{"type":"string","description":"Optional Koder permission profile"},"milestone_key":{"type":"string","description":"Optional milestone scope; mutually exclusive with task_ref"},"task_ref":{"type":"string","description":"Optional single task scope; mutually exclusive with milestone_key"},"isolation":{"type":"string","enum":["worktree"],"description":"Create a separate git worktree and branch from the parent checkout HEAD. Uncommitted changes are not copied; integrate results explicitly."},"disabled_tools":{"type":"string","description":"Optional comma-separated Koder tool ids to disable for this chat"}},"required":["profile","objective"],"additionalProperties":false}`,
 		ExposeToLLM: true, Legacy: true,
 	})
 	tools.Register(messageTool{}, tools.ToolSpec{
@@ -85,6 +94,23 @@ func init() {
 	})
 }
 
+type worktreesTool struct{}
+
+const chatWorktrees tools.ID = "chat_worktrees"
+
+type WorktreeStatus struct {
+	Worktree domain.ChatWorktree `json:"worktree"`
+	ChatID   string              `json:"chat_id"`
+	State    string              `json:"state"`
+	Dirty    bool                `json:"dirty"`
+	Unmerged bool                `json:"unmerged"`
+	Error    string              `json:"error,omitempty"`
+}
+
+type WorktreeControl interface {
+	ManageWorktrees(context.Context, id.ID, id.ID, string, string) ([]WorktreeStatus, error)
+}
+
 type listTool struct{}
 type startTool struct{}
 type messageTool struct{}
@@ -107,6 +133,7 @@ const (
 )
 
 type Status struct {
+	Worktree           *domain.ChatWorktree
 	ID                 id.ID
 	ParentChatID       id.ID
 	Title              string
@@ -130,6 +157,7 @@ type Status struct {
 }
 
 type StartRequest struct {
+	Isolation         string
 	Profile           chatrole.Role
 	Objective         string
 	Title             string
@@ -182,6 +210,7 @@ func storedResult(statuses []Status) tools.ChatListStoredResult {
 	items := make([]tools.ChatStoredItem, 0, len(statuses))
 	for _, status := range statuses {
 		items = append(items, tools.ChatStoredItem{
+			Worktree:           status.Worktree,
 			ID:                 status.ID,
 			Title:              status.Title,
 			Role:               string(status.Role),
@@ -242,7 +271,12 @@ func (startTool) NormalizeArgs(args map[string]string) (map[string]string, error
 	if objective == "" {
 		return nil, errors.New("objective is required")
 	}
+	isolation := strings.TrimSpace(args["isolation"])
+	if isolation != "" && isolation != "worktree" {
+		return nil, errors.New("isolation must be worktree when specified")
+	}
 	out := map[string]string{
+		"isolation": isolation,
 		"profile":   profile,
 		"objective": objective,
 	}
@@ -442,6 +476,7 @@ func (startTool) Call(ctx context.Context, opts tools.Options) (tools.Result, er
 		return tools.Result{}, err
 	}
 	status, err := control.StartChat(ctx, runtime.SessionID, runtime.ChatID, StartRequest{
+		Isolation:         req.Args["isolation"],
 		Profile:           chatrole.Role(req.Args["profile"]),
 		Objective:         req.Args["objective"],
 		Title:             req.Args["title"],
@@ -648,4 +683,43 @@ func (cleanupTool) SummarizeResult(_ tools.Request, result tools.Result) (string
 
 func (renameTool) SummarizeResult(_ tools.Request, result tools.Result) (string, string) {
 	return "Renamed chat", result.Output
+}
+
+func (worktreesTool) ID() tools.ID             { return chatWorktrees }
+func (worktreesTool) BypassesPermission() bool { return true }
+func (worktreesTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	operation := strings.TrimSpace(args["worktree_action"])
+	if operation == "" {
+		operation = "list"
+	}
+	if operation != "list" && operation != "cleanup" {
+		return nil, errors.New("worktree_action must be list or cleanup")
+	}
+	chatID := strings.TrimSpace(args["chat_id"])
+	if operation == "cleanup" && chatID == "" {
+		return nil, errors.New("chat_id is required for worktree cleanup")
+	}
+	return map[string]string{"worktree_action": operation, "chat_id": chatID}, nil
+}
+func (worktreesTool) Preview(req tools.Request) string {
+	return "Worktrees: " + req.Args["worktree_action"]
+}
+func (worktreesTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
+	control, err := requireControl(opts.Runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	manager, ok := control.(WorktreeControl)
+	if !ok {
+		return tools.Result{}, errors.New("worktree management is unavailable")
+	}
+	statuses, err := manager.ManageWorktrees(ctx, opts.Runtime.SessionID, opts.Runtime.ChatID, opts.Request.Args["worktree_action"], opts.Request.Args["chat_id"])
+	if err != nil {
+		return tools.Result{}, err
+	}
+	data, err := json.MarshalIndent(statuses, "", "  ")
+	if err != nil {
+		return tools.Result{}, err
+	}
+	return tools.Result{Output: string(data)}, nil
 }

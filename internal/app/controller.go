@@ -1015,6 +1015,14 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection)
 		snapshots[chatRecord.ID] = snapshot
 		statuses[chatRecord.ID] = sidebarStatusFromSnapshot(snapshot)
 	}
+	workspaceStatus := owner.WorkspaceStatus()
+	if chatRecord.Worktree != nil {
+		workspaceSnapshot, err := workspacepkg.Snapshot(ctx, chatRecord.WorkingDirectory(session))
+		if err != nil {
+			return State{}, err
+		}
+		workspaceStatus = workspaceSnapshot.Status
+	}
 	return State{
 		Session:        session,
 		Sessions:       base.Sessions,
@@ -1028,12 +1036,12 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection)
 		Milestones:     ownerSnapshot.Plan,
 		Tasks:          slices.Clone(ownerSnapshot.Tasks),
 		TasksByKey:     cloneTasksByKey(ownerSnapshot.TasksByKey),
-		Workspace:      owner.WorkspaceStatus(),
+		Workspace:      workspaceStatus,
 		ContextWindow:  c.contextWindowForChat(chatRecord),
 		ModelInfo:      c.modelInfoForChat(chatRecord),
 		Theme:          base.Theme,
 		TTS:            base.TTS,
-		ProjectRoot:    session.ProjectRoot,
+		ProjectRoot:    chatRecord.WorkingDirectory(session),
 		Build:          base.Build,
 		RestartNeeded:  base.RestartNeeded,
 		RestartBuild:   base.RestartBuild,
@@ -2271,6 +2279,9 @@ func (c *Controller) RefreshWorkspaceForSelection(ctx context.Context, selection
 	if !c.sessionInWorkspace(session) {
 		return workspacepkg.SnapshotResult{}, fmt.Errorf("session %s does not belong to this workspace", selection.SessionID)
 	}
+	if selected, ok := chatByID(owner.Snapshot().Chats, selection.ChatID); ok && selected.Worktree != nil {
+		return workspacepkg.Snapshot(ctx, selected.WorkingDirectory(session))
+	}
 	if err := c.refreshSessionWorkspace(ctx, owner, workspaceRefreshUser); err != nil {
 		return workspacepkg.SnapshotResult{}, err
 	}
@@ -2316,6 +2327,10 @@ func (c *Controller) WorkspaceDiffForSelection(ctx context.Context, selection Se
 	session := owner.Snapshot().Session
 	if !c.sessionInWorkspace(session) {
 		return workspacepkg.Diff{}, fmt.Errorf("session %s does not belong to this workspace", selection.SessionID)
+	}
+	if selected, ok := chatByID(owner.Snapshot().Chats, selection.ChatID); ok && selected.Worktree != nil {
+		snapshot, err := workspacepkg.Snapshot(ctx, selected.WorkingDirectory(session))
+		return snapshot.Diff, err
 	}
 	return owner.WorkspaceDiff(), nil
 }
@@ -2425,11 +2440,11 @@ func (c *Controller) CompleteComposerForSelection(ctx context.Context, selection
 	}
 	projectRoot := ""
 	if selection.SessionID != "" {
-		session, err := c.SessionByID(ctx, selection.SessionID)
+		root, err := c.CheckoutRootForSelection(ctx, selection)
 		if err != nil {
 			return ComposerCompletions{}, err
 		}
-		projectRoot = session.ProjectRoot
+		projectRoot = root
 	}
 	if query, start, ok := composerSkillQuery(text, cursor); ok {
 		if projectRoot == "" {
@@ -2927,4 +2942,38 @@ func Touch(now time.Time, chat *domain.Chat) {
 
 func isStreamTextEvent(event *domain.Event) bool {
 	return event != nil && (event.Kind == domain.EventKindMessageDelta || event.Kind == domain.EventKindReasoning)
+}
+
+// WorktreesForSelection inspects or safely cleans up a session's managed checkouts.
+func (c *Controller) WorktreesForSelection(ctx context.Context, selection Selection, operation, chatID string) ([]chattool.WorktreeStatus, error) {
+	owner, session, selected, _, err := c.resolveSelectedRuntimeWithoutTouch(ctx, selection, true)
+	if err != nil {
+		return nil, err
+	}
+	control := owner.ChatToolControl(selected.ID).(chattool.WorktreeControl)
+	return control.ManageWorktrees(ctx, session.ID, selected.ID, operation, chatID)
+}
+
+// CheckoutRootForSelection resolves file browsing and completions against the
+// same checkout used by the selected chat's tools.
+func (c *Controller) CheckoutRootForSelection(ctx context.Context, selection Selection) (string, error) {
+	session, err := c.SessionByID(ctx, selection.SessionID)
+	if err != nil {
+		return "", err
+	}
+	if selection.ChatID == "" {
+		return session.ProjectRoot, nil
+	}
+	if c.agent == nil {
+		return "", fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, session.ID)
+	if err != nil {
+		return "", err
+	}
+	selected, ok := chatByID(owner.Snapshot().Chats, selection.ChatID)
+	if !ok {
+		return "", fmt.Errorf("chat %s does not belong to session %s", selection.ChatID, selection.SessionID)
+	}
+	return selected.WorkingDirectory(session), nil
 }

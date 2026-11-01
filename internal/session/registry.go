@@ -18,6 +18,8 @@ import (
 )
 
 type RegistryConfig struct {
+	WorktreeRoot         string
+	WorktreeInUse        func(string) error
 	DefaultProvider      string
 	DefaultModel         string
 	FollowForNewSessions bool
@@ -355,6 +357,15 @@ func (r *Registry) Delete(ctx context.Context, sessionID id.ID) error {
 			return err
 		}
 		owner = loaded
+	}
+	records, err := owner.worktreeRecords()
+	if err != nil {
+		return err
+	}
+	for _, record := range records {
+		if record.State != "removed" && record.State != "removing" {
+			return fmt.Errorf("clean up retained worktree %s before deleting this session; branch: %s", record.Path, record.Branch)
+		}
 	}
 	if config.BeforeChatDelete != nil {
 		for _, chatRecord := range owner.Snapshot().Chats {

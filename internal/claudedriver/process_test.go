@@ -97,3 +97,38 @@ func TestSandboxProcessFactoryRejectsUnsafeChatID(t *testing.T) {
 		}
 	}
 }
+
+func TestSandboxProcessFactoryUsesIsolatedCheckout(t *testing.T) {
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("bubblewrap unavailable")
+	}
+	parent, child, gitDir := t.TempDir(), t.TempDir(), t.TempDir()
+	factory := NewSandboxProcessFactory(SandboxProcessConfig{
+		Executable: "/bin/sh", ConfigDir: t.TempDir(), StateDir: t.TempDir(),
+		Access: func(domain.Session) accesssettings.Settings {
+			settings := accesssettings.LockedDown()
+			settings.Project = accesssettings.ModeReadWrite
+			return settings
+		},
+	})
+	spec, err := factory.ChatConfig(context.Background(), domain.Session{ID: "worktree-session", ProjectRoot: parent}, domain.Chat{ID: "worktree-child", Worktree: &domain.ChatWorktree{Path: child, GitDir: gitDir}}, []string{"-c", `touch child-only && touch "$1/shared-git-metadata"`, "sh", gitDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Client.Dir != child {
+		t.Fatalf("cwd=%s", spec.Client.Dir)
+	}
+	cmd := exec.Command(spec.Client.Executable, spec.Client.Args...)
+	cmd.Dir = parent
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("isolated process: %v: %s", err, out)
+	}
+	for _, path := range []string{filepath.Join(child, "child-only"), filepath.Join(gitDir, "shared-git-metadata")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(parent, "child-only")); !os.IsNotExist(err) {
+		t.Fatal("wrote to parent checkout")
+	}
+}

@@ -1022,6 +1022,18 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return map[string]bool{"started": true}, s.controller.CompactForSelection(ctx, s.appSelection(clientID), in.Instructions)
+	case "worktrees":
+		var in struct {
+			Operation string `json:"operation"`
+			ChatID    string `json:"chat_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		if in.Operation == "" {
+			in.Operation = "list"
+		}
+		return s.controller.WorktreesForSelection(ctx, s.appSelection(clientID), in.Operation, in.ChatID)
 	case "poll_workspace":
 		return map[string]bool{"ok": true}, s.controller.PollWorkspaceForSelection(ctx, s.appSelection(clientID))
 	case "refresh_workspace":

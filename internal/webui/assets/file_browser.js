@@ -331,15 +331,22 @@
         return query ? base + '?' + query : base;
       },
 
+      fileAPIURL(action, path) {
+        const params = new URLSearchParams();
+        if (path !== undefined) params.set('path', String(path || ''));
+        if (this.chatID) params.set('chat', this.chatID);
+        const query = params.toString();
+        return '/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/' + action + (query ? '?' + query : '');
+      },
       rawFileURL(path) {
-        return '/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/raw?path=' + encodeURIComponent(String(path || '').replace(/^\/+/, ''));
+        return this.fileAPIURL('raw', String(path || '').replace(/^\/+/, ''));
       },
 
       openFileURL(path) {
         return this.downloadFileURL(path) + '&inline=1';
       },
       downloadFileURL(path) {
-        return '/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/download?path=' + encodeURIComponent(String(path || '').replace(/^\/+/, ''));
+        return this.fileAPIURL('download', String(path || '').replace(/^\/+/, ''));
       },
 
       pathFromURL() {
@@ -381,7 +388,7 @@
         this.sendStatus = '';
         this.sendStatusKind = 'secondary';
         try {
-          const resp = await fetch('/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/send', {
+          const resp = await fetch(this.fileAPIURL('send'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(payload)
@@ -468,7 +475,7 @@
         this.mutationError = '';
         this.mutationStatus = '';
         try {
-          const response = await fetch('/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/' + action, {
+          const response = await fetch(this.fileAPIURL(action), {
             method: 'POST', headers: {'Content-Type': 'application/json', 'X-Koder-File-Action': '1'}, body: JSON.stringify(payload)
           });
           if (!response.ok) throw new Error(await response.text());
@@ -516,7 +523,7 @@
             this.mutationStatus = 'Uploading ' + (completed + failures.length + 1) + '/' + files.length + ': ' + file.name;
             try {
               if (file.size > 256 * 1024 * 1024) throw new Error('maximum size is 256 MB per file');
-              const response = await fetch('/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/upload?path=' + encodeURIComponent(path), {
+              const response = await fetch(this.fileAPIURL('upload', path), {
                 method: 'POST', headers: {'Content-Type': 'application/octet-stream', 'X-Koder-File-Action': '1'}, body: file
               });
               if (!response.ok) throw new Error(await response.text());
@@ -607,7 +614,7 @@
         this.treeLoading = true;
         this.treeError = '';
         try {
-          const response = await fetch('/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/tree?path=' + encodeURIComponent(path || ''), {cache: 'no-store'});
+          const response = await fetch(this.fileAPIURL('tree', path || ''), {cache: 'no-store'});
           if (!response.ok) throw new Error(await response.text() || 'tree load failed');
           const data = await response.json();
           this.projectRoot = data.project_root || this.projectRoot;
@@ -630,7 +637,7 @@
         this.file = null;
         this.setFileURL(path, options);
         try {
-          const response = await fetch('/api/sessions/' + encodeURIComponent(this.sessionID) + '/files/read?path=' + encodeURIComponent(path), {cache: 'no-store'});
+          const response = await fetch(this.fileAPIURL('read', path), {cache: 'no-store'});
           if (!response.ok) throw new Error(await response.text() || 'file load failed');
           const file = await response.json();
           if (request !== this.fileRequest) return;

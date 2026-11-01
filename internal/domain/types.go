@@ -3,6 +3,7 @@ package domain
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -495,6 +496,7 @@ func (m InteractionMode) Validate() error {
 // clients, and orchestration tools. Backend, workflow role, and interaction
 // mode are deliberately independent dimensions.
 type ChatCreateSpec struct {
+	Isolation         string          `json:"isolation,omitempty"`
 	Title             string          `json:"title,omitempty"`
 	Backend           ChatBackend     `json:"backend,omitempty"`
 	WorkflowRole      WorkflowRole    `json:"workflow_role,omitempty"`
@@ -508,6 +510,7 @@ type ChatCreateSpec struct {
 }
 
 func (s ChatCreateSpec) Normalized() ChatCreateSpec {
+	s.Isolation = strings.TrimSpace(s.Isolation)
 	s.Title = strings.TrimSpace(s.Title)
 	s.ProviderID = strings.TrimSpace(s.ProviderID)
 	s.ModelID = strings.TrimSpace(s.ModelID)
@@ -531,7 +534,47 @@ func (s ChatCreateSpec) Normalized() ChatCreateSpec {
 
 func (m InteractionMode) String() string { return string(m) }
 
+// ChatWorktree identifies a retained checkout owned by an isolated chat.
+type ChatWorktree struct {
+	Path             string `json:"path"`
+	WorkingDirectory string `json:"working_directory,omitempty"`
+	SourceDirectory  string `json:"source_directory,omitempty"`
+	Branch           string `json:"branch"`
+	BaseCommit       string `json:"base_commit"`
+	GitDir           string `json:"git_dir"`
+}
+
+// WorkingDirectory returns the checkout this chat uses for files and commands.
+func (c Chat) WorkingDirectory(session Session) string {
+	if c.Worktree != nil {
+		if c.Worktree.WorkingDirectory != "" {
+			return c.Worktree.WorkingDirectory
+		}
+		return c.Worktree.Path
+	}
+	return session.ProjectRoot
+}
+
+// WorktreeAccess allows Git to use the shared object database and this checkout's
+// index while preserving the project's read/write policy.
+func (c Chat) WorktreeAccess(settings accesssettings.Settings) accesssettings.Settings {
+	settings = accesssettings.Normalize(settings)
+	if c.Worktree == nil || c.Worktree.GitDir == "" || settings.Project == accesssettings.ModeNone {
+		return settings
+	}
+	for _, mount := range settings.Mounts {
+		if match, _ := filepath.Match(mount.Path, c.Worktree.GitDir); match {
+			return settings
+		}
+	}
+	settings.Mounts = append(slices.Clone(settings.Mounts), accesssettings.Mount{
+		Path: c.Worktree.GitDir, Mode: settings.Project,
+	})
+	return settings
+}
+
 type Chat struct {
+	Worktree               *ChatWorktree `json:",omitempty"`
 	ID                     ID
 	SessionID              ID
 	ParentChatID           *ID
@@ -622,6 +665,7 @@ type ChatActivity struct {
 
 func (c *Chat) UnmarshalJSON(data []byte) error {
 	type chatJSON struct {
+		Worktree               *ChatWorktree
 		ID                     ID
 		SessionID              ID
 		ParentChatID           *ID
@@ -679,6 +723,7 @@ func (c *Chat) UnmarshalJSON(data []byte) error {
 		interactionMode = InteractionModeVoice
 	}
 	*c = Chat{
+		Worktree:               raw.Worktree,
 		ID:                     raw.ID,
 		SessionID:              raw.SessionID,
 		ParentChatID:           raw.ParentChatID,

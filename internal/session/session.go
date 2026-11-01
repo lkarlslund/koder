@@ -52,9 +52,11 @@ type Event struct {
 
 // Session owns the live state for one persisted session.
 type Session struct {
-	store    *store.Store
-	chatsSrc *chatpkg.Source
-	planSrc  *planning.Source
+	worktreeMu        sync.Mutex
+	creatingWorktrees map[id.ID]string
+	store             *store.Store
+	chatsSrc          *chatpkg.Source
+	planSrc           *planning.Source
 
 	mu          sync.RWMutex
 	session     domain.Session
@@ -624,6 +626,9 @@ func (s *Session) newChatWithSpec(ctx context.Context, parentChatID *id.ID, spec
 		if !ok {
 			return nil, fmt.Errorf("parent chat %s not found", *parentChatID)
 		}
+		if template.Archived {
+			return nil, fmt.Errorf("restore parent chat %s before creating children", template.ID)
+		}
 	} else {
 		for _, candidate := range chats {
 			if candidate.ParentChatID == nil {
@@ -676,6 +681,10 @@ func (s *Session) newChatWithSpec(ctx context.Context, parentChatID *id.ID, spec
 		Position:           position,
 		CreatedAt:          now,
 		UpdatedAt:          now,
+	}
+	defer s.finishWorktreeCreation(chatRecord.ID)
+	if err := s.prepareChatWorktree(ctx, session, template, &chatRecord, spec.Isolation); err != nil {
+		return nil, err
 	}
 	return s.createChat(ctx, session, chatRecord)
 }
@@ -937,6 +946,13 @@ func (s *Session) UpdateChat(ctx context.Context, chatID id.ID, update chattool.
 	if archivingVisibleChat && nextChatID == "" {
 		return chattool.Status{}, "", fmt.Errorf("cannot archive the only visible chat in a session")
 	}
+	if update.Archived != nil && !*update.Archived && target.Worktree != nil {
+		s.worktreeMu.Lock()
+		defer s.worktreeMu.Unlock()
+		if err := s.restoreWorktreeLocked(ctx, target); err != nil {
+			return chattool.Status{}, "", err
+		}
+	}
 	config := s.configSnapshot()
 	if config.BeforeChatUpdate != nil {
 		if err := config.BeforeChatUpdate(ctx, target, update); err != nil {
@@ -1043,6 +1059,17 @@ func (s *Session) DeleteChat(ctx context.Context, chatID id.ID) error {
 	if beforeDelete := s.configSnapshot().BeforeChatDelete; beforeDelete != nil {
 		if err := beforeDelete(ctx, target); err != nil {
 			return err
+		}
+	}
+	if target.Worktree != nil {
+		records, err := s.worktreeRecords()
+		if err != nil {
+			return err
+		}
+		for _, record := range records {
+			if record.ChatID == string(target.ID) && record.State != "removed" && record.State != "removing" {
+				return fmt.Errorf("clean up the retained worktree before deleting chat %s; path: %s, branch: %s", target.ID, record.Path, record.Branch)
+			}
 		}
 	}
 	if runtime != nil {
@@ -2173,6 +2200,7 @@ func (s *Session) chatStatusLocked(chatID id.ID) chattool.Status {
 	}
 	return chattool.Status{
 		ID:                 chatRecord.ID,
+		Worktree:           chatRecord.Worktree,
 		ParentChatID:       chatParentID(chatRecord),
 		Title:              chatRecord.Title,
 		Role:               chatRecord.WorkflowRole,

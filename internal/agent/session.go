@@ -10,6 +10,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/fsutil"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/offeredfile"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
@@ -19,6 +20,7 @@ import (
 
 func (e *Engine) sessionRegistryConfig(defaults settings.NewSessionDefaults) sessionpkg.RegistryConfig {
 	cfg := sessionpkg.RegistryConfig{
+		WorktreeRoot:         filepath.Join(e.cfg.StateDir(), "worktrees"),
 		DefaultProvider:      defaults.ProviderID,
 		DefaultModel:         defaults.ModelID,
 		FollowForNewSessions: defaults.FollowForNewSessions,
@@ -26,6 +28,36 @@ func (e *Engine) sessionRegistryConfig(defaults settings.NewSessionDefaults) ses
 		PermissionProfile:    defaults.PermissionProfile,
 		AccessSettings:       defaults.Access,
 		MaxChildChats:        defaults.MaxChildChats,
+	}
+	cfg.WorktreeInUse = func(path string) error {
+		if e.registry == nil {
+			return nil
+		}
+		for _, owner := range e.registry.Loaded() {
+			snapshot := owner.Snapshot()
+			for _, chat := range snapshot.Chats {
+				if !fsutil.Within(path, chat.WorkingDirectory(snapshot.Session)) {
+					continue
+				}
+				status, err := owner.ChatStatus(context.Background(), chat.ID)
+				if err != nil {
+					return err
+				}
+				if (!snapshot.Session.Archived && !chat.Archived) || status.Busy || status.QueuedInputs > 0 || status.PendingApprovals > 0 {
+					return fmt.Errorf("checkout is still used by chat %s in session %s", chat.ID, snapshot.Session.ID)
+				}
+				if manager := e.ExecManager(); manager != nil {
+					if pending := manager.ExitReportsPending(snapshot.Session.ID, chat.ID); pending != nil {
+						select {
+						case <-pending:
+						default:
+							return fmt.Errorf("checkout still has running commands in chat %s", chat.ID)
+						}
+					}
+				}
+			}
+		}
+		return nil
 	}
 	cfg.PrepareChatSpec = e.prepareChatCreateSpec
 	cfg.ExitReportsPending = func(sessionID, chatID id.ID) <-chan bool {

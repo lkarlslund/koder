@@ -205,6 +205,10 @@ func (c chatControl) StartChat(ctx context.Context, sessionID, parentChatID id.I
 		CreatedAt:             now,
 		UpdatedAt:             now,
 	}
+	defer c.session.finishWorktreeCreation(chatRecord.ID)
+	if err := c.session.prepareChatWorktree(ctx, session, parentChat, &chatRecord, req.Isolation); err != nil {
+		return chattool.Status{}, err
+	}
 	if _, err := c.session.AddPreparedChat(ctx, chatRecord); err != nil {
 		return chattool.Status{}, err
 	}
@@ -322,6 +326,7 @@ func (s *Session) startPreparedChat(ctx context.Context, chatID id.ID, milestone
 	chatSnapshot := waitForChatQueuedOrActive(ctx, activeChat)
 	return chattool.Status{
 		ID:                 chatSnapshot.Chat.ID,
+		Worktree:           chatSnapshot.Chat.Worktree,
 		ParentChatID:       chatParentID(chatSnapshot.Chat),
 		Title:              chatSnapshot.Chat.Title,
 		Role:               chatSnapshot.Chat.WorkflowRole,
@@ -458,6 +463,9 @@ func (s *Session) childIdleNotification(ctx context.Context, chatRecord domain.C
 		chatID = chatRecord.ID
 	}
 	text := fmt.Sprintf("Chat %s is now idle.", chatID)
+	if chatRecord.Worktree != nil {
+		text += fmt.Sprintf("\nRetained worktree: %s\nBranch: %s\nBase commit: %s\nIntegrate changes explicitly; they have not been merged.", chatRecord.Worktree.Path, chatRecord.Worktree.Branch, chatRecord.Worktree.BaseCommit)
+	}
 	if chatRecord.ParentChatID == nil {
 		return text
 	}

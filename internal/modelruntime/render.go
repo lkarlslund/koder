@@ -36,6 +36,7 @@ func (r *Runtime) BuildConversationForTurn(_ context.Context, req chatpkg.TurnRe
 }
 
 func (r *Runtime) BuildPromptEnvelopeForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, prompt string, drafts []attachment.Draft, refs []reference.Draft, turnInstructions []provider.InstructionBlock) (provider.PromptEnvelope, error) {
+	session.ProjectRoot = chat.WorkingDirectory(session)
 	baseInstructions := r.BaseInstructionsForChat(session, chat)
 	envelope := provider.PromptEnvelope{Instructions: baseInstructions}
 	scope := r.newRenderScope(session, chat)
@@ -490,6 +491,7 @@ func modelToolResultBody(tool domain.ToolCall, status domain.ToolResultStatus, b
 }
 
 func (r *Runtime) BaseInstructionsForChat(session domain.Session, chat domain.Chat) []provider.InstructionBlock {
+	session.ProjectRoot = chat.WorkingDirectory(session)
 	instructions := []provider.InstructionBlock{{
 		Kind: provider.InstructionKindBaseSystem,
 		Text: r.systemPrompt(),
@@ -497,6 +499,7 @@ func (r *Runtime) BaseInstructionsForChat(session domain.Session, chat domain.Ch
 		Kind: provider.InstructionKindEnvironment,
 		Text: r.sessionEnvironmentPrompt(session),
 	}}
+
 	if roleText := strings.TrimSpace(chatrole.SystemPromptForChat(chat)); roleText != "" {
 		instructions = append(instructions, provider.InstructionBlock{
 			Kind: provider.InstructionKindProjectInstructions,

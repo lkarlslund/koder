@@ -190,6 +190,7 @@ func (m *Manager) RunTurn(ctx context.Context, rt *chat.Chat, turn chat.DriverTu
 		return errors.New("chat runtime is required")
 	}
 	snapshot := rt.Snapshot()
+	snapshot.Session.ProjectRoot = snapshot.Chat.WorkingDirectory(snapshot.Session)
 	if snapshot.Chat.EffectiveBackend() != domain.ChatBackendClaude {
 		return fmt.Errorf("claude driver cannot run backend %q", snapshot.Chat.EffectiveBackend())
 	}

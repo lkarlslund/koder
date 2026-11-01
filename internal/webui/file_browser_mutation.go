@@ -10,6 +10,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/lkarlslund/koder/internal/app"
 	"github.com/lkarlslund/koder/internal/id"
 )
 
@@ -39,16 +40,16 @@ func (s *Server) handleSessionFileMutation(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "missing file action header", http.StatusForbidden)
 		return
 	}
-	session, err := s.controller.SessionByID(r.Context(), sessionID)
+	projectRoot, err := s.controller.CheckoutRootForSelection(r.Context(), app.Selection{SessionID: sessionID, ChatID: id.ID(r.URL.Query().Get("chat"))})
 	if err != nil {
 		writeFileBrowserError(w, err)
 		return
 	}
-	if strings.TrimSpace(session.ProjectRoot) == "" {
+	if strings.TrimSpace(projectRoot) == "" {
 		http.Error(w, "session has no project root", http.StatusBadRequest)
 		return
 	}
-	root, err := os.OpenRoot(session.ProjectRoot)
+	root, err := os.OpenRoot(projectRoot)
 	if err != nil {
 		writeFileMutationError(w, err)
 		return

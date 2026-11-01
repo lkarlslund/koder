@@ -175,7 +175,7 @@ func (r *Runtime) ToolRuntime(ctx context.Context, rt *chatpkg.Chat) (tools.Runt
 }
 
 func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtime {
-	projectRoot := sessionProjectRoot(session)
+	projectRoot := chat.WorkingDirectory(session)
 	r.skillsMu.RLock()
 	disabledSkills := append([]string(nil), r.disabledSkills...)
 	skillCatalogMax := r.skillCatalogMax
@@ -202,7 +202,7 @@ func (r *Runtime) Runtime(session domain.Session, chat domain.Chat) tools.Runtim
 		DisabledSkillPaths:    disabledSkills,
 		SkillCatalogMaxChars:  skillCatalogMax,
 		FileTracker:           codeIntelFileTracker{root: projectRoot},
-		AccessSettings:        r.accessSettings(session),
+		AccessSettings:        chat.WorktreeAccess(r.accessSettings(session)),
 		OutputBudgetBytes:     r.outputBudgetBytes(chat),
 		Memory:                r.memory,
 	}

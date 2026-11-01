@@ -384,6 +384,7 @@ func forkRecordAt(ctx context.Context, st *store.Store, source domain.Chat, sour
 	now := time.Now().UTC()
 	chatRecord := domain.Chat{
 		ID:                    id.NewAt(now),
+		Worktree:              source.Worktree,
 		SessionID:             source.SessionID,
 		ParentChatID:          &parentID,
 		Title:                 strings.TrimSpace(title),

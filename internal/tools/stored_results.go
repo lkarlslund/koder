@@ -232,20 +232,21 @@ type MilestonePlanStoredResult struct {
 }
 
 type ChatStoredItem struct {
-	ID                 id.ID  `json:"id"`
-	Title              string `json:"title"`
-	Role               string `json:"role,omitempty"`
-	Backend            string `json:"backend,omitempty"`
-	InteractionMode    string `json:"interaction_mode,omitempty"`
-	ModelID            string `json:"model_id,omitempty"`
-	PermissionProfile  string `json:"permission_profile,omitempty"`
-	State              string `json:"state,omitempty"`
-	Archived           bool   `json:"archived,omitempty"`
-	QueuedInputs       int    `json:"queued_inputs,omitempty"`
-	ActiveMilestoneKey string `json:"active_milestone_key,omitempty"`
-	AssignedTaskRef    string `json:"assigned_task_ref,omitempty"`
-	StatusText         string `json:"status_text,omitempty"`
-	Response           string `json:"response,omitempty"`
+	Worktree           *domain.ChatWorktree `json:"worktree,omitempty"`
+	ID                 id.ID                `json:"id"`
+	Title              string               `json:"title"`
+	Role               string               `json:"role,omitempty"`
+	Backend            string               `json:"backend,omitempty"`
+	InteractionMode    string               `json:"interaction_mode,omitempty"`
+	ModelID            string               `json:"model_id,omitempty"`
+	PermissionProfile  string               `json:"permission_profile,omitempty"`
+	State              string               `json:"state,omitempty"`
+	Archived           bool                 `json:"archived,omitempty"`
+	QueuedInputs       int                  `json:"queued_inputs,omitempty"`
+	ActiveMilestoneKey string               `json:"active_milestone_key,omitempty"`
+	AssignedTaskRef    string               `json:"assigned_task_ref,omitempty"`
+	StatusText         string               `json:"status_text,omitempty"`
+	Response           string               `json:"response,omitempty"`
 }
 
 type ChatListStoredResult struct {
@@ -1568,6 +1569,9 @@ func formatChatListStoredResult(result ChatListStoredResult) string {
 			line += " {archived}"
 		}
 		lines = append(lines, line)
+		if item.Worktree != nil {
+			lines = append(lines, "worktree: "+item.Worktree.Path, "branch: "+item.Worktree.Branch, "base_commit: "+item.Worktree.BaseCommit)
+		}
 		if ref := strings.TrimSpace(item.ActiveMilestoneKey); ref != "" {
 			lines = append(lines, "milestone: "+ref)
 		}

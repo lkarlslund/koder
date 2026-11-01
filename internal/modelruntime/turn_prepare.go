@@ -27,7 +27,9 @@ func (r *Runtime) PreparePromptTurn(ctx context.Context, rt *chatpkg.Chat, input
 	if err := r.validateChatRequirements(chat); err != nil {
 		return nil, err
 	}
-	user, err := r.userMessageForPrompt(session, prompt, drafts, refs)
+	promptSession := session
+	promptSession.ProjectRoot = chat.WorkingDirectory(session)
+	user, err := r.userMessageForPrompt(promptSession, prompt, drafts, refs)
 	if err != nil {
 		return nil, err
 	}

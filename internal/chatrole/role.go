@@ -73,6 +73,7 @@ Answer the user's questions and complete requested work directly. Do not create,
 				"chat_archive",
 				"chat_rename",
 				"chat_cleanup",
+				"chat_worktrees",
 			),
 		},
 		Voice: {
@@ -123,6 +124,7 @@ Complete the user's requested work directly using the available tools.`),
 				"chat_archive",
 				"chat_rename",
 				"chat_cleanup",
+				"chat_worktrees",
 				"milestone_add",
 				"milestone_plan",
 				"milestone_write",
@@ -176,6 +178,10 @@ func SystemPrompt(role Role) string {
 func SystemPromptForChat(chat domain.Chat) string {
 	role := chat.EffectiveWorkflowRole()
 	base := SystemPrompt(role)
+	if chat.Worktree != nil {
+		cwd := chat.WorkingDirectory(domain.Session{})
+		base = strings.TrimSpace(fmt.Sprintf("%s\n\nThis chat uses a separate git worktree. Working directory: %s\nBranch: %s\nBase commit: %s\nUse this checkout for file and shell operations. Parent uncommitted changes were not copied. Translate source paths from %s into this checkout and re-read files. Keep work on this branch. Report the worktree path and branch for explicit integration; do not merge into or edit the source checkout.", base, cwd, chat.Worktree.Branch, chat.Worktree.BaseCommit, chat.Worktree.SourceDirectory))
+	}
 	if role != Execution {
 		return base
 	}
