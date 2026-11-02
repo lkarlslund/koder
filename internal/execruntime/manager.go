@@ -379,10 +379,6 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 		p.notify = NotifyExit
 	}
 	if p.notify == NotifyLines {
-		if p.timeout <= 0 {
-			p.timeout = DefaultLinesTimeout
-		}
-		p.timeout = min(p.timeout, MaxLinesTimeout)
 		p.monitor = newLineMonitor(func(lines string, suppressedBefore int) {
 			m.notify(Notification{
 				SessionID: p.sessionID,
@@ -435,6 +431,7 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 	starting = false
 	m.startMu.Unlock()
 	go m.waitForExit(p)
+	go m.reportJobAge(p)
 	if p.timeout > 0 {
 		go m.enforceTimeout(p, p.timeout)
 	}

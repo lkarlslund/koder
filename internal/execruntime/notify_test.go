@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -259,5 +260,54 @@ func TestExitReportsPendingSaysWhetherAReportWasSent(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("pending reports did not settle")
+	}
+}
+
+func TestJobAgeNoticesFollowLaunchMilestonesAndStopOnExit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mgr := NewManager()
+		rec := newNotificationRecorder(mgr)
+		p := &process{sessionID: "session", chatID: "chat", processID: "exec_age", label: "Long import", state: StateRunning, startedAt: time.Now(), done: make(chan struct{})}
+		go mgr.reportJobAge(p)
+		previous := time.Duration(0)
+		ages := []time.Duration{30 * time.Minute, time.Hour, 2 * time.Hour, 4 * time.Hour, 8 * time.Hour, 24 * time.Hour, 48 * time.Hour, 72 * time.Hour}
+		for i, age := range ages {
+			time.Sleep(age - previous - time.Nanosecond)
+			synctest.Wait()
+			if got := len(rec.snapshot()); got != i {
+				t.Fatalf("before %s: %d notices, want %d", age, got, i)
+			}
+			time.Sleep(time.Nanosecond)
+			synctest.Wait()
+			items := rec.snapshot()
+			if len(items) != i+1 {
+				t.Fatalf("at %s: %d notices", age, len(items))
+			}
+			n := items[i]
+			if n.Kind != NotificationAge || n.ChatID != "chat" || n.ProcessID != "exec_age" || !strings.Contains(n.Text, "runtime: "+age.String()) || !strings.Contains(n.Text, "no action is required") {
+				t.Fatalf("age notice: %#v", n)
+			}
+			previous = age
+		}
+		p.mu.Lock()
+		p.state = StateCompleted
+		close(p.done)
+		p.mu.Unlock()
+		synctest.Wait()
+		time.Sleep(48 * time.Hour)
+		synctest.Wait()
+		if len(rec.snapshot()) != len(ages) {
+			t.Fatal("notice after exit")
+		}
+	})
+}
+
+func TestLinesModeHasNoImplicitExpiryOrMaximumTimeout(t *testing.T) {
+	for _, timeout := range []time.Duration{0, 48 * time.Hour} {
+		mgr := NewManager()
+		snap := startTestProcess(t, mgr, StartRequest{Command: "sleep 30", Notify: NotifyLines, Timeout: timeout})
+		if snap.TimeoutMS != timeout.Milliseconds() {
+			t.Fatalf("timeout=%dms, want %s", snap.TimeoutMS, timeout)
+		}
 	}
 }

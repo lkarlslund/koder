@@ -221,9 +221,13 @@ its chat on its own. The model does not need to wait for it.
     Batches over the limit are dropped and counted, and the next notification
     says how many.
   - If output stays over the limit for 30 s, Koder stops the session.
-  - The session stops after `timeout_ms`, 5 minutes by default and 30 at most.
-    The exit notification then counts the events delivered.
+  - There is no default expiry or maximum age. An explicit `timeout_ms` still
+    stops the process at that deadline. The exit notification counts events delivered.
   - Stderr is not an event source; a watch command merges it with `2>&1`.
+
+All tracked exec jobs send informational still-running notices at ages 30 minutes,
+1 hour, 2 hours, 4 hours, 8 hours, 24 hours, and then every 24 hours. These notices
+do not terminate or restart the process and stop when it exits.
 
 Notifications are queued as steers with source `exec` or `monitor`: they start a
 turn when the chat is idle, and join the running turn at its next step

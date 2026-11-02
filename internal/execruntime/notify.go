@@ -38,6 +38,7 @@ type NotificationKind string
 const (
 	NotificationExit  NotificationKind = "exit"
 	NotificationLines NotificationKind = "lines"
+	NotificationAge   NotificationKind = "age"
 )
 
 // Notification is a report an exec session sends to its chat.
@@ -49,13 +50,7 @@ type Notification struct {
 	Text      string
 }
 
-const (
-	// Lines-mode sessions expire so a forgotten watch does not run forever.
-	DefaultLinesTimeout = 5 * time.Minute
-	MaxLinesTimeout     = 30 * time.Minute
-
-	exitReportBytes = 4 * 1024
-)
+const exitReportBytes = 4 * 1024
 
 // SetNotifier sets where exec sessions send their reports.
 func (m *Manager) SetNotifier(notify func(Notification)) {
@@ -223,4 +218,37 @@ func firstLine(text string) string {
 		return line + " …"
 	}
 	return line
+}
+
+// reportJobAge sends sparse informational reminders without limiting job lifetime.
+// Every deadline is relative to launch, not to the previous notification.
+func (m *Manager) reportJobAge(p *process) {
+	milestones := [...]time.Duration{30 * time.Minute, time.Hour, 2 * time.Hour, 4 * time.Hour, 8 * time.Hour, 24 * time.Hour}
+	for index := 0; ; index++ {
+		age := time.Duration(0)
+		if index < len(milestones) {
+			age = milestones[index]
+		} else {
+			age = time.Duration(index-len(milestones)+2) * 24 * time.Hour
+		}
+		timer := time.NewTimer(time.Until(p.startedAt.Add(age)))
+		select {
+		case <-p.done:
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		p.mu.RLock()
+		running := p.state == StateRunning && !p.stopRequested && !p.lost
+		p.mu.RUnlock()
+		if !running {
+			return
+		}
+		var text strings.Builder
+		text.WriteString("event: exec session still running (informational)\n")
+		writeSessionFields(&text, p.processID, p.label, p.command)
+		text.WriteString("runtime: " + time.Since(p.startedAt).Round(time.Second).String() + "\n")
+		text.WriteString("The process remains running. This is an age notice, not an error or a request to stop or restart it; no action is required.")
+		m.notify(Notification{SessionID: p.sessionID, ChatID: p.chatID, ProcessID: p.processID, Kind: NotificationAge, Text: text.String()})
+	}
 }
