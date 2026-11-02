@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -209,12 +210,16 @@ type Control interface {
 }
 
 type Manager struct {
-	startMu     sync.Mutex
-	mu          sync.RWMutex
-	nextID      uint64
-	processes   map[string]*process
-	subscribers map[id.ID]map[chan Event]struct{}
-	notifier    func(Notification)
+	journalMu     sync.Mutex
+	journalPath   string
+	journalFrozen bool
+	closed        bool
+	startMu       sync.Mutex
+	mu            sync.RWMutex
+	nextID        uint64
+	processes     map[string]*process
+	subscribers   map[id.ID]map[chan Event]struct{}
+	notifier      func(Notification)
 }
 
 type process struct {
@@ -316,6 +321,9 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 			m.startMu.Unlock()
 		}
 	}()
+	if m.closed {
+		return Snapshot{}, errors.New("Koder exec runtime is shutting down")
+	}
 	if err := ctx.Err(); err != nil {
 		return Snapshot{}, err
 	}
@@ -431,6 +439,11 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 	starting = false
 	m.startMu.Unlock()
 	go m.waitForExit(p)
+	if err := m.recordRunningJobs(); err != nil {
+		p.requestStop()
+		_ = terminateProcess(p)
+		return Snapshot{}, fmt.Errorf("persist running exec inventory: %w", err)
+	}
 	go m.reportJobAge(p)
 	if p.timeout > 0 {
 		go m.enforceTimeout(p, p.timeout)
@@ -684,6 +697,9 @@ func (m *Manager) waitForExit(p *process) {
 	p.closeDone()
 	p.mu.Unlock()
 	m.publish(Event{Kind: EventKindState, Snapshot: p.snapshot(defaultPreviewBytes)})
+	if err := m.recordRunningJobs(); err != nil {
+		slog.Error("persist completed exec inventory", "process_id", p.processID, "error", err)
+	}
 	m.reportExitIfDue(p)
 	close(p.settled)
 }
@@ -1045,6 +1061,7 @@ func terminateProcess(p *process) error {
 	p.endedAt = time.Now().UTC()
 	p.exitCode = intPtr(-1)
 	if runtime.GOOS != "windows" {
+		killDescendants := terminateDescendants(p.pid)
 		if err := processgroup.Terminate(p.proc); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			return err
 		}
@@ -1054,6 +1071,7 @@ func terminateProcess(p *process) error {
 				_ = processgroup.Kill(p.proc)
 			case <-p.done:
 			}
+			killDescendants()
 		}()
 		return nil
 	}

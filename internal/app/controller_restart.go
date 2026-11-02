@@ -15,6 +15,9 @@ const processRestartToolFailure = "Tool execution failed because koder restarted
 // interrupted chat are loaded. Tool calls that were in flight are failed so
 // the resumed turn starts from a settled transcript.
 func (c *Controller) resumeRestartInterruptedChats(ctx context.Context) error {
+	if err := c.agent.ExplainRestartedExecs(ctx); err != nil {
+		return err
+	}
 	chats, err := c.agent.AutoRestartChats(ctx)
 	if err != nil {
 		return err

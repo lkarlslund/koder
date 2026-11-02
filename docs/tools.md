@@ -164,6 +164,23 @@ RPC queue. Closing or switching previews aborts the old request; late replies
 cannot replace the new preview. Refresh failures clear the previous image and timestamp and show an explicit error; a stale capture is never presented as the refresh result.
 Normal agent screenshot operations still synchronize with tab interactions.
 
+## Exec jobs across Koder restarts
+
+Tracked exec jobs belong to one Koder process and do not survive a service
+restart. Koder keeps a private, atomic inventory of running jobs and clears
+completed jobs from it. On restart, each affected chat receives a one-time,
+persisted notification before interrupted chats resume, listing its old process
+IDs, descriptions, commands, working directories, and start times. Idle owners
+see the explanation on their next turn too. Old exec IDs must not be treated as
+live handles after a restart; inspect current jobs before starting replacements.
+
+An orderly shutdown explicitly stops tracked jobs and confirms that fact in the
+notice. After an unclean exit, the notice reports lost tracking and distinguishes
+that from confirmed OS process termination. No exit status is invented. This
+inventory covers Koder exec jobs, not detached processes or native external-agent
+jobs. Deployments from a version predating the inventory cannot retrospectively
+recover a complete list of its jobs.
+
 ## Idle browser reminders
 
 Chats retaining browser tabs receive one informational reminder after 5, 15,

@@ -113,6 +113,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		mcpManager = mcpManagers[0]
 	}
 	execRuntime := execruntime.NewManager()
+	execRuntime.SetRestartJournal(filepath.Join(cfg.StateDir(), "running-execs.json"))
 	settingsStore := settings.New(cfg)
 	healthTracker := provider.NewHealthTracker()
 	e := &Engine{

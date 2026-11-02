@@ -307,6 +307,9 @@ func (e *Engine) Shutdown(ctx context.Context, reason chat.CancelReason) error {
 	if e == nil {
 		return nil
 	}
+	if e.toolsRuntime != nil && e.toolsRuntime.ExecManager() != nil {
+		e.toolsRuntime.ExecManager().SetNotifier(nil)
+	}
 	if e.stopCron != nil {
 		e.stopCron()
 	}
@@ -322,5 +325,9 @@ func (e *Engine) Shutdown(ctx context.Context, reason chat.CancelReason) error {
 	if e.registry != nil {
 		registryErr = e.registry.Shutdown(ctx, reason)
 	}
-	return errors.Join(browserErr, mcpErr, registryErr, e.codex.Close(), e.claude.Close())
+	var execErr error
+	if e.toolsRuntime != nil && e.toolsRuntime.ExecManager() != nil {
+		execErr = e.toolsRuntime.ExecManager().Shutdown(ctx)
+	}
+	return errors.Join(browserErr, mcpErr, registryErr, execErr, e.codex.Close(), e.claude.Close())
 }
