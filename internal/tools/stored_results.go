@@ -82,10 +82,11 @@ type BashStoredResult struct {
 }
 
 type ExecStoredResult struct {
-	PID       int                        `json:"pid,omitempty"`
-	StartedAt string                     `json:"started_at,omitempty"`
-	ElapsedMS int64                      `json:"elapsed_ms,omitempty"`
-	Resources *execruntime.ResourceUsage `json:"resources,omitempty"`
+	RunningAtStart string                     `json:"running_at_start,omitempty"`
+	PID            int                        `json:"pid,omitempty"`
+	StartedAt      string                     `json:"started_at,omitempty"`
+	ElapsedMS      int64                      `json:"elapsed_ms,omitempty"`
+	Resources      *execruntime.ResourceUsage `json:"resources,omitempty"`
 
 	ProcessID   string `json:"process_id"`
 	Command     string `json:"command"`
@@ -1328,6 +1329,9 @@ func formatExecStoredResult(result ExecStoredResult) string {
 	}
 	if result.OmittedBytes > 0 {
 		lines = append(lines, fmt.Sprintf("output truncated: the first %d bytes were left out; showing the last %d. Pass a larger max_output_bytes or narrow the command to see more.", result.OmittedBytes, len(result.Output)))
+	}
+	if result.RunningAtStart != "" {
+		lines = append(lines, "exec inventory at launch:", result.RunningAtStart)
 	}
 	lines = append(lines, "output:")
 	switch output := strings.TrimSpace(result.Output); {

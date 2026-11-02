@@ -257,10 +257,12 @@ func TestWriteStdinMissingProcessIDListsRunningProcesses(t *testing.T) {
 }
 
 type recordingExecControl struct {
-	startState execruntime.State
-	start      execruntime.StartRequest
-	writeStdin execruntime.WriteStdinRequest
-	list       []execruntime.Snapshot
+	startState       execruntime.State
+	start            execruntime.StartRequest
+	writeStdin       execruntime.WriteStdinRequest
+	list             []execruntime.Snapshot
+	listRequest      execruntime.ListRequest
+	listedAfterStart bool
 }
 
 func (c *recordingExecControl) Start(_ context.Context, req execruntime.StartRequest) (execruntime.Snapshot, error) {
@@ -286,7 +288,9 @@ func (c *recordingExecControl) Status(context.Context, execruntime.StatusRequest
 	return execruntime.Snapshot{}, errors.New("not implemented")
 }
 
-func (c *recordingExecControl) List(context.Context, execruntime.ListRequest) ([]execruntime.Snapshot, error) {
+func (c *recordingExecControl) List(_ context.Context, req execruntime.ListRequest) ([]execruntime.Snapshot, error) {
+	c.listRequest = req
+	c.listedAfterStart = c.start.Command != ""
 	return c.list, nil
 }
 
@@ -318,8 +322,8 @@ func TestCommandResultStatesFactsWithoutInstructions(t *testing.T) {
 		state execruntime.State
 		want  string
 	}{
-		{execruntime.StateRunning, "process_id: exec_1\ncommand: sleep 60\nworkdir: .\nstate: running (startup wait ended; the command continues in the background)\nreporting: automatic: the exit arrives in this chat as a notification\noutput_mode: tail\noutput:\n(none yet)"},
-		{execruntime.StateCompleted, "process_id: exec_1\ncommand: sleep 60\nworkdir: .\nstate: completed\noutput_mode: tail\noutput:\n(none)"},
+		{execruntime.StateRunning, "process_id: exec_1\ncommand: sleep 60\nworkdir: .\nstate: running (startup wait ended; the command continues in the background)\nreporting: automatic: the exit arrives in this chat as a notification\noutput_mode: tail\nexec inventory at launch:\nNo other exec processes were running in this session at launch.\noutput:\n(none yet)"},
+		{execruntime.StateCompleted, "process_id: exec_1\ncommand: sleep 60\nworkdir: .\nstate: completed\noutput_mode: tail\nexec inventory at launch:\nNo other exec processes were running in this session at launch.\noutput:\n(none)"},
 	} {
 		control := &recordingExecControl{startState: tc.state}
 		result, err := (commandTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{
@@ -435,5 +439,34 @@ func TestListReportsResourceDetails(t *testing.T) {
 	args, err := (commandTool{}).NormalizeArgs(map[string]string{"cmd": "read value", "description": "Wait for input", "allow_duplicate": "true"})
 	if err != nil || args["allow_duplicate"] != "true" {
 		t.Fatalf("duplicate option=%v %v", args, err)
+	}
+}
+
+func TestCommandReportsExistingSessionJobsAtLaunch(t *testing.T) {
+	control := &recordingExecControl{list: []execruntime.Snapshot{
+		{ProcessID: "exec_existing", ChatID: "sibling", State: execruntime.StateRunning, Command: "proof", Label: "Existing proof", StartedAt: time.Now(), Elapsed: time.Minute, Resources: &execruntime.ResourceUsage{CPUSeconds: 42}},
+		{ProcessID: "exec_own", ChatID: "chat", State: execruntime.StateRunning, Command: "serve"},
+		{ProcessID: "exec_finished", State: execruntime.StateCompleted, Command: "old"},
+	}}
+	result, err := (commandTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{
+		Workdir: t.TempDir(), SessionID: "session", ChatID: "chat", Exec: control,
+	}, Request: tools.Request{Args: map[string]string{"cmd": "pwd", "description": "Inspect directory"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if control.listedAfterStart || control.listRequest.Scope != execruntime.ScopeSession || control.listRequest.SessionID != "session" {
+		t.Fatalf("inventory must be session-wide and precede launch: %#v", control)
+	}
+	for _, want := range []string{"exec_existing", "Existing proof", "sibling chat sibling", "this chat (you)", "started_at:", "elapsed:", "cpu"} {
+		if !strings.Contains(result.Output, want) {
+			t.Fatalf("missing %q in %s", want, result.Output)
+		}
+	}
+	if strings.Contains(result.Output, "exec_finished") {
+		t.Fatal("included completed work")
+	}
+	stored := result.Stored.(tools.ExecStoredResult)
+	if !strings.Contains(tools.DisplayTextForStored(tools.ExecCommand, stored), "exec_existing") {
+		t.Fatal("stored result lost launch inventory")
 	}
 }

@@ -288,6 +288,32 @@ func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 	if err != nil {
 		return tools.Result{}, err
 	}
+	// Snapshot existing jobs before starting so the new process is not included.
+	runningAtStart := "No other exec processes were running in this session at launch."
+	snaps, listErr := control.List(ctx, execruntime.ListRequest{SessionID: runtime.SessionID, ChatID: runtime.ChatID, Scope: execruntime.ScopeSession, MaxBytes: 1})
+	if listErr != nil {
+		runningAtStart = "Existing exec processes could not be listed; use exec_session list scope=session."
+	} else {
+		running := make([]execruntime.Snapshot, 0, len(snaps))
+		for _, existing := range snaps {
+			if existing.State == execruntime.StateRunning {
+				if existing.ChatID == runtime.ChatID {
+					existing.ChatID = "this chat (you)"
+				} else {
+					existing.ChatID = "sibling chat " + existing.ChatID
+				}
+				running = append(running, existing)
+			}
+		}
+		if len(running) > 0 {
+			total := len(running)
+			if len(running) > 16 {
+				running = running[:16]
+			}
+			listing := tools.ExecListFromSnapshots(running, "session", fmt.Sprintf("%d exec process(es) already running at launch (showing up to 16); reuse existing work where possible. Use exec_session list scope=session for current details.", total))
+			runningAtStart = textutil.TruncateRunes(tools.DisplayTextForStored(tools.ExecList, listing), 12000)
+		}
+	}
 	snap, err := control.Start(ctx, execruntime.StartRequest{
 		AllowDuplicate: boolArg(req.Args, "allow_duplicate", false),
 		SessionID:      runtime.SessionID,
@@ -310,6 +336,7 @@ func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 		return tools.Result{}, err
 	}
 	stored := storedFromSnapshot(snap, "")
+	stored.RunningAtStart = runningAtStart
 	if snap.State == execruntime.StateRunning {
 		stored.StateNote = tools.ExecStartRunningNote
 		stored.Reporting = tools.ExecReportingExit

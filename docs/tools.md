@@ -181,7 +181,11 @@ Completed commands retain final OS-reported CPU time when available.
 
 Exec inventories are available on demand through `exec_session list`, including
 `scope=session` for sibling jobs. They are not automatically injected into model
-requests. An empty output stream does not mean a job has stopped.
+requests. Each successful `exec_command` response includes a snapshot of processes
+that were already running in the session before launch (up to 16, including sibling
+chats), with their descriptions, owners, timing, and available resource metrics.
+This is historical launch context; use the list action for current state.
+An empty output stream does not mean a job has stopped.
 
 Starting an identical command in the same working directory while it is already
 running in this session is rejected, including simultaneous starts from sibling
