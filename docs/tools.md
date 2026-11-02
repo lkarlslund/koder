@@ -151,6 +151,19 @@ Before adding a callable name:
 Do not remove a legacy handler until persisted transcripts no longer need it or a
 storage migration has converted every call and result safely.
 
+## Browser tab previews
+
+The browser preview is a read-only viewport capture of an already owned tab.
+It does not select or activate that tab, refresh every browser target, or wait
+for the agent's navigation/interaction lock. Concurrent previews of one tab
+return a busy response instead of queuing behind each other.
+
+Preview captures have a three-second backend deadline. The UI uses a separate
+HTTP request with a four-second deadline, rather than the sequential WebSocket
+RPC queue. Closing or switching previews aborts the old request; late replies
+cannot replace the new preview. Refresh failures retain the last good image.
+Normal agent screenshot operations still synchronize with tab interactions.
+
 ## Exec inventory and resource usage
 
 `exec_session action=list` lists running Koder-managed commands. Use

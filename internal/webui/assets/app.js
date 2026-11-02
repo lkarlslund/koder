@@ -6484,14 +6484,17 @@ function timeoutLabel(value) {
 		},
 		openBrowserPreview(tab) {
 		  if (!tab?.id) return;
+		  if (this.browserPreview?.timer) clearTimeout(this.browserPreview.timer);
+          this.browserPreview?.controller?.abort();
 		  const generation = Number(this.browserPreview?.generation || 0) + 1;
 		  const rate = Math.max(0, Number(this.browserPreview?.rate ?? readPreference('browserPreviewRate', '2')) || 0);
-		  this.browserPreview = {open: true, tab: {...tab}, rate, src: '', loading: false, error: '', lastUpdated: '', timer: null, generation};
+		  this.browserPreview = {open: true, tab: {...tab}, sessionID: this.currentSessionID(), chatID: this.activeChatID(), controller: null, rate, src: '', loading: false, error: '', lastUpdated: '', timer: null, generation};
 		  this.reportClientStateSoon();
 		  this.refreshBrowserPreview(true);
 		},
 		closeBrowserPreview() {
 		  if (this.browserPreview?.timer) clearTimeout(this.browserPreview.timer);
+          this.browserPreview?.controller?.abort();
 		  this.browserPreview = {...this.browserPreview, open: false, src: '', loading: false, timer: null, generation: Number(this.browserPreview?.generation || 0) + 1};
 		  this.reportClientStateSoon();
 		},
@@ -6510,15 +6513,29 @@ function timeoutLabel(value) {
 		  if (preview.timer) clearTimeout(preview.timer);
 		  preview.timer = null; preview.loading = true; preview.error = '';
 		  const generation = preview.generation;
-		  this.rpc('browser_tab_preview', {tab_id: preview.tab.id}).then(result => {
+		  const controller = new AbortController();
+          preview.controller = controller;
+          const timeout = setTimeout(() => controller.abort(), 4000);
+          const query = new URLSearchParams({client_id: 'preview-' + this.clientID, selected_session: preview.sessionID || this.currentSessionID(), selected_chat: preview.chatID || this.activeChatID()});
+          fetch('/api/rpc/browser_tab_preview?' + query, {
+            method: 'POST', headers: {'Content-Type': 'application/json'}, cache: 'no-store',
+            signal: controller.signal, body: JSON.stringify({tab_id: preview.tab.id}),
+          }).then(async response => {
+            const payload = await response.json();
+            if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not capture this tab');
+            return payload.result;
+          }).then(result => {
 			if (!this.browserPreview.open || this.browserPreview.generation !== generation) return;
 			const encoded = String(result?.image_base64 || '');
 			if (!encoded) throw new Error('Browser returned an empty screenshot');
 			this.browserPreview.src = 'data:' + String(result?.mime || 'image/jpeg') + ';base64,' + encoded;
 			this.browserPreview.lastUpdated = new Date().toLocaleTimeString();
 		  }).catch(err => {
-			if (this.browserPreview.open && this.browserPreview.generation === generation) this.browserPreview.error = err.message || String(err);
+			if (this.browserPreview.open && this.browserPreview.generation === generation) {
+              this.browserPreview.error = err.name === 'AbortError' || /deadline exceeded/.test(err.message || '') ? 'Preview is busy. Try refreshing shortly.' : err.message || String(err);
+            }
 		  }).finally(() => {
+            clearTimeout(timeout);
 			if (!this.browserPreview.open || this.browserPreview.generation !== generation) return;
 			this.browserPreview.loading = false;
 			const rate = Number(this.browserPreview.rate) || 0;

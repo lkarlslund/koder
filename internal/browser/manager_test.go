@@ -216,3 +216,16 @@ func TestSandboxCommandHidesHomeAndUsesPrivateProfile(t *testing.T) {
 		}
 	}
 }
+
+func TestScreenshotTabDoesNotQueueBehindAnotherPreview(t *testing.T) {
+	manager := NewManager(config.Browser{}, t.TempDir())
+	chat := browserapi.Chat{SessionID: "session", ChatID: "chat"}
+	tab := &ownedTab{id: "tab", owner: chat}
+	manager.tabs[tab.id] = tab
+	tab.previewMu.Lock()
+	defer tab.previewMu.Unlock()
+	_, err := manager.ScreenshotTab(context.Background(), chat, tab.id, "jpeg", 72)
+	if err == nil || !strings.Contains(err.Error(), "preview capture is busy") {
+		t.Fatalf("concurrent preview error=%v", err)
+	}
+}

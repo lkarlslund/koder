@@ -54,6 +54,8 @@ const (
 )
 
 type ownedTab struct {
+	previewMu sync.Mutex
+
 	id       string
 	targetID target.ID
 	owner    browserapi.Chat
@@ -1242,24 +1244,29 @@ func (m *Manager) Screenshot(ctx context.Context, chat browserapi.Chat, locator 
 	if err != nil {
 		return browserapi.Binary{}, err
 	}
-	return m.captureScreenshot(ctx, tab, tabCtx, locator, fullPage, format, quality)
+	tab.mu.Lock()
+	defer tab.mu.Unlock()
+	return m.captureScreenshot(ctx, tabCtx, locator, fullPage, format, quality)
 }
 
 // ScreenshotTab captures one owned tab without changing the chat's selected tab.
 func (m *Manager) ScreenshotTab(ctx context.Context, chat browserapi.Chat, tabID, format string, quality int) (browserapi.Binary, error) {
-	if _, err := m.Tabs(ctx, chat); err != nil {
-		return browserapi.Binary{}, err
-	}
+	// A preview is a read-only observation. It must not wait behind navigation,
+	// interaction, or attachment of unrelated discovered targets.
 	tab, err := m.ownedTab(chat, strings.TrimSpace(tabID))
 	if err != nil {
 		return browserapi.Binary{}, err
 	}
-	return m.captureScreenshot(ctx, tab, tab.ctx, browserapi.Locator{}, false, format, quality)
+	if !tab.previewMu.TryLock() {
+		return browserapi.Binary{}, errors.New("preview capture is busy; retry shortly")
+	}
+	defer tab.previewMu.Unlock()
+	previewCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	return m.captureScreenshot(previewCtx, tab.ctx, browserapi.Locator{}, false, format, quality)
 }
 
-func (m *Manager) captureScreenshot(ctx context.Context, tab *ownedTab, tabCtx context.Context, locator browserapi.Locator, fullPage bool, format string, quality int) (browserapi.Binary, error) {
-	tab.mu.Lock()
-	defer tab.mu.Unlock()
+func (m *Manager) captureScreenshot(ctx context.Context, tabCtx context.Context, locator browserapi.Locator, fullPage bool, format string, quality int) (browserapi.Binary, error) {
 	var data []byte
 	mime, name := "image/png", "browser-screenshot.png"
 	if strings.EqualFold(format, "jpeg") {
@@ -1268,7 +1275,7 @@ func (m *Manager) captureScreenshot(ctx context.Context, tab *ownedTab, tabCtx c
 	if quality <= 0 || quality > 100 {
 		quality = 90
 	}
-	params := page.CaptureScreenshot().WithFromSurface(true)
+	params := page.CaptureScreenshot().WithFromSurface(true).WithOptimizeForSpeed(strings.EqualFold(format, "jpeg"))
 	if strings.EqualFold(format, "jpeg") {
 		params = params.WithFormat(page.CaptureScreenshotFormatJpeg).WithQuality(int64(quality))
 	} else {

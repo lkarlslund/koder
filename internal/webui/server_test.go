@@ -2985,7 +2985,7 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `tabActivity(tab, now)`) ||
 		!strings.Contains(fullPage, `rpc('browser_tabs', {})`) ||
-		!strings.Contains(fullPage, `rpc('browser_tab_preview', {tab_id: preview.tab.id})`) ||
+		!strings.Contains(fullPage, `fetch('/api/rpc/browser_tab_preview?' + query`) ||
 		!strings.Contains(fullPage, `x-model.number="browserPreview.rate"`) ||
 		!strings.Contains(fullPage, `class="browser-preview-image"`) {
 		t.Fatalf("expected owned browser tabs in the activity list, with adjustable live screenshot preview")

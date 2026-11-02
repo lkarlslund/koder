@@ -2,6 +2,7 @@ package browser
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"image"
 	"image/color"
@@ -543,6 +544,36 @@ func TestChromiumIntegration(t *testing.T) {
 	preview, err := m.ScreenshotTab(t.Context(), chat, tab.ID, "jpeg", 72)
 	if err != nil || preview.MIME != "image/jpeg" || len(preview.Data) == 0 {
 		t.Fatalf("capture specific tab: mime=%q bytes=%d err=%v", preview.MIME, len(preview.Data), err)
+	}
+	// The UI preview must remain available while an agent owns the tab's
+	// navigation/interaction lock.
+	previewTab, err := m.ownedTab(chat, tab.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previewTab.mu.Lock()
+	previewCtx, cancelPreview := context.WithTimeout(t.Context(), 2*time.Second)
+	type previewResult struct {
+		image browserapi.Binary
+		err   error
+	}
+	captured := make(chan previewResult, 1)
+	go func() {
+		image, err := m.ScreenshotTab(previewCtx, chat, tab.ID, "jpeg", 72)
+		captured <- previewResult{image, err}
+	}()
+	select {
+	case result := <-captured:
+		previewTab.mu.Unlock()
+		cancelPreview()
+		if result.err != nil || len(result.image.Data) == 0 {
+			t.Fatalf("preview while agent holds tab lock: %v", result.err)
+		}
+	case <-previewCtx.Done():
+		previewTab.mu.Unlock()
+		cancelPreview()
+		<-captured
+		t.Fatal("preview waited for the agent's tab operation")
 	}
 	if selected := m.selectedTab(chat.ChatID); selected != second.ID {
 		t.Fatalf("specific-tab screenshot changed selected tab from %q to %q", second.ID, selected)

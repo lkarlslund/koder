@@ -2206,11 +2206,12 @@
       <div class="browser-preview-body">
         <img x-show="browserPreview.src" class="browser-preview-image" :src="browserPreview.src" :alt="browserPreview.tab?.title || 'Browser tab preview'">
         <div class="browser-preview-placeholder text-secondary" x-show="!browserPreview.src && !browserPreview.error"><span class="spinner-border spinner-border-sm me-2" x-show="browserPreview.loading"></span><span x-text="browserPreview.loading ? 'Capturing tab' : 'No preview yet'"></span></div>
-        <div class="browser-preview-placeholder text-danger" x-show="browserPreview.error" x-text="browserPreview.error"></div>
+        <div class="browser-preview-placeholder text-danger" x-show="browserPreview.error && !browserPreview.src" x-text="browserPreview.error"></div>
         <div class="browser-preview-updating" x-show="browserPreview.loading && browserPreview.src"><span class="spinner-border spinner-border-sm"></span></div>
       </div>
       <footer class="browser-preview-footer border-top small text-secondary">
         <span x-text="browserPreview.rate ? 'Live preview' : 'Preview paused'"></span>
+        <span class="text-warning" x-show="browserPreview.error && browserPreview.src" x-text="browserPreview.error"></span>
         <span x-show="browserPreview.lastUpdated" x-text="browserPreview.lastUpdated ? 'Updated ' + browserPreview.lastUpdated : ''"></span>
       </footer>
     </section>
