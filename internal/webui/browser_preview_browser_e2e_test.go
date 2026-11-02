@@ -22,7 +22,7 @@ func TestBrowserPreviewUsesCancelableIndependentRequests(t *testing.T) {
 	defer stopBrowser()
 	ctx, cancel := context.WithTimeout(browser, 30*time.Second)
 	defer cancel()
-	var result struct{ FirstAborted, ClosedAborted, KeptImage, Independent, OwnerPinned bool }
+	var result struct{ FirstAborted, ClosedAborted, ClearedImage, Independent, OwnerPinned bool }
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(server.URL()+"/s/"+string(state.Session.ID)+"/c/"+string(state.ActiveChatID)),
 		chromedp.Poll(`document.documentElement._x_dataStack?.[0]?.connected === true && !!document.documentElement._x_dataStack[0].activeChatID() && !!document.documentElement._x_dataStack[0].currentSessionID()`, nil),
@@ -70,7 +70,7 @@ func TestBrowserPreviewUsesCancelableIndependentRequests(t *testing.T) {
    const query=new URL(window.__previewRequests[0].url,location.origin).searchParams;
    return {
     FirstAborted:window.__firstAborted,ClosedAborted:window.__closedAborted,
-    KeptImage:app.browserPreview.src===window.__lastPreview,
+    ClearedImage:app.browserPreview.src==='' && app.browserPreview.lastUpdated==='' && !!app.browserPreview.error,
     Independent:window.__previewRequests.length===5,
     OwnerPinned:query.get('selected_chat')===app.activeChatID() && query.get('client_id')!==app.clientID
    };
@@ -79,7 +79,7 @@ func TestBrowserPreviewUsesCancelableIndependentRequests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("preview requests: %v", err)
 	}
-	if !result.FirstAborted || !result.ClosedAborted || !result.KeptImage || !result.Independent || !result.OwnerPinned {
+	if !result.FirstAborted || !result.ClosedAborted || !result.ClearedImage || !result.Independent || !result.OwnerPinned {
 		t.Fatalf("preview behavior=%#v", result)
 	}
 }

@@ -161,7 +161,7 @@ return a busy response instead of queuing behind each other.
 Preview captures have a three-second backend deadline. The UI uses a separate
 HTTP request with a four-second deadline, rather than the sequential WebSocket
 RPC queue. Closing or switching previews aborts the old request; late replies
-cannot replace the new preview. Refresh failures retain the last good image.
+cannot replace the new preview. Refresh failures clear the previous image and timestamp and show an explicit error; a stale capture is never presented as the refresh result.
 Normal agent screenshot operations still synchronize with tab interactions.
 
 ## Exec inventory and resource usage

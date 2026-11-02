@@ -6532,6 +6532,8 @@ function timeoutLabel(value) {
 			this.browserPreview.lastUpdated = new Date().toLocaleTimeString();
 		  }).catch(err => {
 			if (this.browserPreview.open && this.browserPreview.generation === generation) {
+              this.browserPreview.src = '';
+              this.browserPreview.lastUpdated = '';
               this.browserPreview.error = err.name === 'AbortError' || /deadline exceeded/.test(err.message || '') ? 'Preview is busy. Try refreshing shortly.' : err.message || String(err);
             }
 		  }).finally(() => {
