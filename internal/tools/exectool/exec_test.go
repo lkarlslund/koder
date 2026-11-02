@@ -82,10 +82,13 @@ func TestCommandExecuteDefaultsToSessionProjectRoot(t *testing.T) {
 		ChatID:    "chat-1",
 		Exec:      control,
 	}, Request: tools.Request{
-		Args: map[string]string{"cmd": "pwd", "description": "show current directory"},
+		Args: map[string]string{"cmd": "pwd", "description": "show current directory", "allow_duplicate": "true"},
 	}})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
+	}
+	if !control.start.AllowDuplicate {
+		t.Fatal("explicit duplicate option did not reach runtime")
 	}
 	if control.start.Label != "show current directory" {
 		t.Fatalf("session label = %q", control.start.Label)
@@ -315,8 +318,8 @@ func TestCommandResultStatesFactsWithoutInstructions(t *testing.T) {
 		state execruntime.State
 		want  string
 	}{
-		{execruntime.StateRunning, "process_id: exec_1\nstate: running (startup wait ended; the command continues in the background)\nreporting: automatic: the exit arrives in this chat as a notification\noutput_mode: tail\noutput:\n(none yet)"},
-		{execruntime.StateCompleted, "process_id: exec_1\nstate: completed\noutput_mode: tail\noutput:\n(none)"},
+		{execruntime.StateRunning, "process_id: exec_1\ncommand: sleep 60\nworkdir: .\nstate: running (startup wait ended; the command continues in the background)\nreporting: automatic: the exit arrives in this chat as a notification\noutput_mode: tail\noutput:\n(none yet)"},
+		{execruntime.StateCompleted, "process_id: exec_1\ncommand: sleep 60\nworkdir: .\nstate: completed\noutput_mode: tail\noutput:\n(none)"},
 	} {
 		control := &recordingExecControl{startState: tc.state}
 		result, err := (commandTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{
@@ -411,5 +414,26 @@ func TestSessionSnapshotPreservesDescription(t *testing.T) {
 	stored := storedFromSnapshot(execruntime.Snapshot{Label: "Watch build output"}, "")
 	if stored.Description != "Watch build output" {
 		t.Fatalf("description = %q", stored.Description)
+	}
+}
+
+func TestListReportsResourceDetails(t *testing.T) {
+	started := time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)
+	control := &recordingExecControl{list: []execruntime.Snapshot{{
+		ProcessID: "exec_907", ChatID: "owner", PID: 1234, Command: "./dkextract-bin gateproof", Label: "Final gateproof", Workdir: "/research", State: execruntime.StateRunning, StartedAt: started, Elapsed: 130 * time.Second,
+		Resources: &execruntime.ResourceUsage{CPUSeconds: 1038, CPUPercent: 798.46, RSSBytes: 64 * 1024 * 1024, Processes: 4},
+	}}}
+	result, err := (listTool{}).Call(context.Background(), tools.Options{Runtime: tools.Runtime{SessionID: "session", ChatID: "chat", Exec: control}, Request: tools.Request{Tool: tools.ExecList}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"exec_907", "description: Final gateproof", "chat_id: owner", "pid: 1234", "workdir: /research", "started_at: 2026-11-02T10:00:00Z", "elapsed: 2m10s", "cpu_time: 17m18s", "798.5%", "rss: 64.0 MiB", "processes: 4"} {
+		if !strings.Contains(result.Output, want) {
+			t.Fatalf("missing %q: %s", want, result.Output)
+		}
+	}
+	args, err := (commandTool{}).NormalizeArgs(map[string]string{"cmd": "read value", "description": "Wait for input", "allow_duplicate": "true"})
+	if err != nil || args["allow_duplicate"] != "true" {
+		t.Fatalf("duplicate option=%v %v", args, err)
 	}
 }

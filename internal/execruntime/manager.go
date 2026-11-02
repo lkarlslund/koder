@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -84,6 +85,7 @@ type TerminalSize struct {
 }
 
 type StartRequest struct {
+	AllowDuplicate bool
 	SessionID      id.ID
 	ChatID         id.ID
 	ToolCallID     string
@@ -148,7 +150,19 @@ type CleanupRequest struct {
 	MaxBytes  int
 }
 
+// ResourceUsage is a best-effort aggregate over the command's process tree.
+// CPUPercent is the lifetime average: 100% means one fully occupied core.
+type ResourceUsage struct {
+	CPUSeconds float64 `json:"cpu_seconds"`
+	CPUPercent float64 `json:"cpu_average_percent"`
+	RSSBytes   uint64  `json:"rss_bytes,omitempty"`
+	Processes  int     `json:"process_count,omitempty"`
+}
+
 type Snapshot struct {
+	PID        int
+	Elapsed    time.Duration
+	Resources  *ResourceUsage
 	ProcessID  string
 	SessionID  id.ID
 	ChatID     id.ID
@@ -195,6 +209,7 @@ type Control interface {
 }
 
 type Manager struct {
+	startMu     sync.Mutex
 	mu          sync.RWMutex
 	nextID      uint64
 	processes   map[string]*process
@@ -203,6 +218,8 @@ type Manager struct {
 }
 
 type process struct {
+	pid         int
+	finalUsage  *ResourceUsage
 	mu          sync.RWMutex
 	outputWG    sync.WaitGroup
 	processID   string
@@ -291,6 +308,31 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 	}
 	if strings.TrimSpace(req.Workdir) == "" {
 		return Snapshot{}, errors.New("workdir is required")
+	}
+	m.startMu.Lock()
+	starting := true
+	defer func() {
+		if starting {
+			m.startMu.Unlock()
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return Snapshot{}, err
+	}
+	if !req.AllowDuplicate {
+		m.mu.RLock()
+		var duplicate Snapshot
+		for _, existing := range m.processes {
+			snap := existing.snapshot(1)
+			if snap.SessionID == req.SessionID && snap.State == StateRunning && snap.Command == command && filepath.Clean(snap.Workdir) == filepath.Clean(req.Workdir) {
+				duplicate = snap
+				break
+			}
+		}
+		m.mu.RUnlock()
+		if duplicate.ProcessID != "" {
+			return Snapshot{}, fmt.Errorf("identical command is already running as %s (chat %s, elapsed %s). Inspect it with exec_session status in its owning chat; coordinate with that chat or terminate the existing job before replacing it. Set allow_duplicate=true only for an intentional concurrent copy", duplicate.ProcessID, duplicate.ChatID, duplicate.Elapsed.Round(time.Second))
+		}
 	}
 	shell, args, err := shellArgs(req.Shell, req.Login, command)
 	if err != nil {
@@ -384,9 +426,14 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 		m.startOutputReader(p, p.ptyHandle, StreamSourceOutput)
 	}
 
+	p.mu.Lock()
+	p.pid = cmd.Process.Pid
+	p.mu.Unlock()
 	m.mu.Lock()
 	m.processes[p.processID] = p
 	m.mu.Unlock()
+	starting = false
+	m.startMu.Unlock()
 	go m.waitForExit(p)
 	if p.timeout > 0 {
 		go m.enforceTimeout(p, p.timeout)
@@ -427,6 +474,7 @@ func (m *Manager) Status(_ context.Context, req StatusRequest) (Snapshot, error)
 		return Snapshot{}, err
 	}
 	snap := p.snapshot(req.MaxBytes)
+	sampleResources([]*Snapshot{&snap})
 	if snap.State != StateRunning {
 		p.mu.Lock()
 		p.exitShown = true
@@ -441,7 +489,6 @@ func (m *Manager) List(_ context.Context, req ListRequest) ([]Snapshot, error) {
 		scope = ScopeChat
 	}
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 	var snaps []Snapshot
 	for _, p := range m.processes {
 		if !matchesScope(p, req.SessionID, req.ChatID, scope) {
@@ -449,6 +496,12 @@ func (m *Manager) List(_ context.Context, req ListRequest) ([]Snapshot, error) {
 		}
 		snaps = append(snaps, p.snapshot(req.MaxBytes))
 	}
+	m.mu.RUnlock()
+	pointers := make([]*Snapshot, 0, len(snaps))
+	for i := range snaps {
+		pointers = append(pointers, &snaps[i])
+	}
+	sampleResources(pointers)
 	sort.Slice(snaps, func(i, j int) bool {
 		if snaps[i].StartedAt.Equal(snaps[j].StartedAt) {
 			return snaps[i].ProcessID < snaps[j].ProcessID
@@ -608,6 +661,10 @@ func (m *Manager) waitForExit(p *process) {
 	p.outputWG.Wait()
 	err := p.proc.Wait()
 	p.mu.Lock()
+	if state := p.proc.ProcessState; state != nil {
+		cpu := (state.UserTime() + state.SystemTime()).Seconds()
+		p.finalUsage = &ResourceUsage{CPUSeconds: cpu}
+	}
 	if p.state == StateRunning {
 		exitCode := 0
 		state := StateCompleted
@@ -744,6 +801,9 @@ func (p *process) snapshot(maxBytes int) Snapshot {
 	}
 	output = tailOnLineBoundary(output, maxBytes)
 	return Snapshot{
+		PID:          p.pid,
+		Elapsed:      p.elapsed(),
+		Resources:    p.finalResources(),
 		ProcessID:    p.processID,
 		SessionID:    p.sessionID,
 		ChatID:       p.chatID,
@@ -779,6 +839,9 @@ func (p *process) drainSnapshot(maxBytes int) Snapshot {
 	}
 	output = tailOnLineBoundary(output, maxBytes)
 	return Snapshot{
+		PID:          p.pid,
+		Elapsed:      p.elapsed(),
+		Resources:    p.finalResources(),
 		ProcessID:    p.processID,
 		SessionID:    p.sessionID,
 		ChatID:       p.chatID,
@@ -1052,4 +1115,26 @@ func cloneIntPtr(value *int) *int {
 	}
 	v := *value
 	return &v
+}
+
+// elapsed and finalResources are called with p.mu held.
+func (p *process) elapsed() time.Duration {
+	if p.startedAt.IsZero() {
+		return 0
+	}
+	end := p.endedAt
+	if end.IsZero() {
+		end = time.Now()
+	}
+	return max(0, end.Sub(p.startedAt))
+}
+func (p *process) finalResources() *ResourceUsage {
+	if p.finalUsage == nil {
+		return nil
+	}
+	usage := *p.finalUsage
+	if elapsed := p.elapsed().Seconds(); elapsed > 0 {
+		usage.CPUPercent = usage.CPUSeconds / elapsed * 100
+	}
+	return &usage
 }

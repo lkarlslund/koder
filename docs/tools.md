@@ -151,6 +151,41 @@ Before adding a callable name:
 Do not remove a legacy handler until persisted transcripts no longer need it or a
 storage migration has converted every call and result safely.
 
+## Exec inventory and resource usage
+
+`exec_session action=list` lists running Koder-managed commands. Use
+`scope=session` to include sibling chats. Entries include their description,
+owner chat, host PID, working directory, UTC start time, elapsed wall time, consumed
+CPU time, lifetime-average CPU percentage, process count, and summed resident
+memory. `action=status` includes the same timing and resource fields.
+
+On Linux, live resources are sampled from /proc for the command's process tree,
+including waited-for child CPU time. A CPU average of 100% means one core;
+multi-threaded work can exceed 100%. This is a lifetime average, not a current
+utilization sample. Memory sums RSS and can double-count shared pages. Sampling
+is best effort; unsupported or inaccessible metrics are reported as unavailable.
+Completed commands retain final OS-reported CPU time when available.
+
+Before every Koder model request, a live session-wide inventory is appended
+after history. It is not stored in the transcript, does not modify the system
+prompt/cache prefix, and is regenerated after compaction. It includes up to 16
+jobs ranked by average CPU usage and a bounded text payload; use the list action for the full inventory.
+An empty output stream does not mean a job has stopped.
+
+Starting an identical command in the same working directory while it is already
+running in this session is rejected, including simultaneous starts from sibling
+chats. The error identifies the existing exec session and owner. Inspect and
+reuse the existing job, or stop it before replacing it. For an intentional
+concurrent copy, pass `allow_duplicate=true` to `exec_command`. This compares
+command text and working directory, not semantic equivalence; changed commands
+and separate working directories are not automatically blocked.
+
+Only the owning chat can directly inspect or terminate an exec session.
+Coordinate with its owner when a session-wide listing shows sibling work.
+Keep jobs attached to their exec session: detached/reparented processes, remote
+processes, and native external-agent jobs are outside this process-tree inventory.
+This does not impose CPU quotas or automatically kill expensive work.
+
 ## Exec Notifications
 
 An exec session that is still running when `exec_command` returns reports to

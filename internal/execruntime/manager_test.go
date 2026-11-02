@@ -446,3 +446,58 @@ func TestManagerSubscribeCancelIsConcurrentSafe(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestDuplicateStartsAreAtomicAcrossChats(t *testing.T) {
+	mgr := NewManager()
+	ctx := context.Background()
+	req := StartRequest{SessionID: "duplicate-session", ChatID: "first", Command: "read value", Workdir: t.TempDir(), YieldTime: time.Millisecond}
+	t.Cleanup(func() { _, _ = mgr.Cleanup(ctx, CleanupRequest{SessionID: req.SessionID, Scope: ScopeSession}) })
+	var wg sync.WaitGroup
+	results := make(chan error, 2)
+	for _, chatID := range []string{"first", "second"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			copy := req
+			copy.ChatID = chatID
+			_, err := mgr.Start(ctx, copy)
+			results <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+	successes, blocked := 0, 0
+	for err := range results {
+		if err == nil {
+			successes++
+		} else if strings.Contains(err.Error(), "identical command is already running") {
+			blocked++
+		} else {
+			t.Fatal(err)
+		}
+	}
+	if successes != 1 || blocked != 1 {
+		t.Fatalf("started=%d blocked=%d", successes, blocked)
+	}
+	req.AllowDuplicate = true
+	if _, err := mgr.Start(ctx, req); err != nil {
+		t.Fatalf("intentional duplicate: %v", err)
+	}
+	snaps, err := mgr.List(ctx, ListRequest{SessionID: req.SessionID, Scope: ScopeSession})
+	if err != nil || len(snaps) != 2 {
+		t.Fatalf("list=%#v %v", snaps, err)
+	}
+	for _, snap := range snaps {
+		if snap.PID <= 0 || snap.StartedAt.IsZero() || snap.Elapsed <= 0 {
+			t.Fatalf("missing timing or pid: %#v", snap)
+		}
+	}
+}
+
+func TestExecElapsedStopsAtExit(t *testing.T) {
+	started := time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)
+	p := &process{startedAt: started, endedAt: started.Add(3 * time.Second), state: StateCompleted}
+	if snap := p.snapshot(1); snap.Elapsed != 3*time.Second {
+		t.Fatalf("elapsed=%s", snap.Elapsed)
+	}
+}

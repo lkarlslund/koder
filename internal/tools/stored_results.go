@@ -6,10 +6,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/textutil"
@@ -80,6 +82,11 @@ type BashStoredResult struct {
 }
 
 type ExecStoredResult struct {
+	PID       int                        `json:"pid,omitempty"`
+	StartedAt string                     `json:"started_at,omitempty"`
+	ElapsedMS int64                      `json:"elapsed_ms,omitempty"`
+	Resources *execruntime.ResourceUsage `json:"resources,omitempty"`
+
 	ProcessID   string `json:"process_id"`
 	Command     string `json:"command"`
 	Description string `json:"description,omitempty"`
@@ -105,6 +112,14 @@ type ExecStoredResult struct {
 }
 
 type ExecListStoredItem struct {
+	PID         int                        `json:"pid,omitempty"`
+	StartedAt   string                     `json:"started_at,omitempty"`
+	ElapsedMS   int64                      `json:"elapsed_ms,omitempty"`
+	Resources   *execruntime.ResourceUsage `json:"resources,omitempty"`
+	ChatID      id.ID                      `json:"chat_id,omitempty"`
+	Description string                     `json:"description,omitempty"`
+	Workdir     string                     `json:"workdir,omitempty"`
+
 	ProcessID string `json:"process_id"`
 	Command   string `json:"command"`
 	State     string `json:"state"`
@@ -670,6 +685,10 @@ func compactExecStoredResult(result ExecStoredResult, limits CompactFormatLimits
 	if state != "" {
 		lines = append(lines, "state: "+state)
 	}
+	if result.Description != "" {
+		lines = append(lines, "description: "+result.Description)
+	}
+	lines = append(lines, execResourceLines(result.PID, result.StartedAt, result.ElapsedMS, result.Resources)...)
 	if result.ExitCode != nil {
 		lines = append(lines, fmt.Sprintf("exit_code: %d", *result.ExitCode))
 	}
@@ -1285,9 +1304,19 @@ func formatExecStoredResult(result ExecStoredResult) string {
 	if id := strings.TrimSpace(result.ProcessID); id != "" {
 		lines = append(lines, "process_id: "+id)
 	}
+	if command := strings.TrimSpace(result.Command); command != "" {
+		lines = append(lines, "command: "+command)
+	}
+	if workdir := strings.TrimSpace(result.Workdir); workdir != "" {
+		lines = append(lines, "workdir: "+workdir)
+	}
 	if state != "" {
 		lines = append(lines, "state: "+state)
 	}
+	if result.Description != "" {
+		lines = append(lines, "description: "+result.Description)
+	}
+	lines = append(lines, execResourceLines(result.PID, result.StartedAt, result.ElapsedMS, result.Resources)...)
 	if result.ExitCode != nil {
 		lines = append(lines, fmt.Sprintf("exit_code: %d", *result.ExitCode))
 	}
@@ -1334,6 +1363,18 @@ func formatExecListStoredResult(result ExecListStoredResult) string {
 			line += fmt.Sprintf(" (exit %d)", *item.ExitCode)
 		}
 		lines = append(lines, strings.TrimSpace(line))
+		if item.Description != "" {
+			lines = append(lines, "  description: "+item.Description)
+		}
+		if item.ChatID != "" {
+			lines = append(lines, "  chat_id: "+string(item.ChatID))
+		}
+		if item.Workdir != "" {
+			lines = append(lines, "  workdir: "+item.Workdir)
+		}
+		for _, detail := range execResourceLines(item.PID, item.StartedAt, item.ElapsedMS, item.Resources) {
+			lines = append(lines, "  "+detail)
+		}
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
@@ -1762,4 +1803,23 @@ func parseReadStoredLine(raw string) (int, string, bool) {
 		}
 	}
 	return 0, "", false
+}
+
+func execResourceLines(pid int, started string, elapsedMS int64, usage *execruntime.ResourceUsage) []string {
+	var lines []string
+	if pid > 0 {
+		lines = append(lines, fmt.Sprintf("pid: %d", pid))
+	}
+	if started != "" {
+		lines = append(lines, "started_at: "+started, "elapsed: "+(time.Duration(elapsedMS)*time.Millisecond).Round(time.Millisecond).String())
+	}
+	if usage != nil {
+		lines = append(lines, fmt.Sprintf("cpu_time: %s; cpu_average: %.1f%% (100%% = one core)", (time.Duration(usage.CPUSeconds*float64(time.Second))).Round(time.Millisecond), usage.CPUPercent))
+		if usage.Processes > 0 {
+			lines = append(lines, fmt.Sprintf("rss: %.1f MiB; processes: %d (process tree, best effort; shared pages may repeat)", float64(usage.RSSBytes)/(1024*1024), usage.Processes))
+		}
+	} else if started != "" || pid > 0 {
+		lines = append(lines, "cpu/memory: unavailable")
+	}
+	return lines
 }
