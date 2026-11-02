@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/lkarlslund/koder/internal/browserapi"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
@@ -26,4 +27,16 @@ func (e *Engine) deliverExecNotification(n execruntime.Notification) {
 		source = domain.UserMessageSourceMonitor
 	}
 	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Source: source, Text: n.Text})
+}
+
+func (e *Engine) deliverBrowserIdleNotification(chat browserapi.Chat, text string) {
+	if e == nil || e.registry == nil {
+		return
+	}
+	rt, err := e.registry.Chat(context.Background(), chat.SessionID, chat.ChatID)
+	if err != nil {
+		slog.Warn("deliver browser idle notification", "chat_id", chat.ChatID, "error", err)
+		return
+	}
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Source: domain.UserMessageSourceMonitor, Text: text})
 }

@@ -84,7 +84,9 @@ type downloadState struct {
 }
 
 type Manager struct {
-	mu sync.Mutex
+	idleBrowsers map[id.ID]*idleBrowser
+	idleNotifier func(browserapi.Chat, string)
+	mu           sync.Mutex
 
 	cfg        config.Browser
 	deciders   DeciderResolver
@@ -268,6 +270,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.state, m.lastErr = stateRunning, ""
 	close(m.startWait)
 	m.startWait = nil
+	m.clearBrowserIdleLocked()
 	m.tabs = map[string]*ownedTab{}
 	m.selected = map[id.ID]string{}
 	m.downloads = map[string]*downloadState{}
@@ -287,6 +290,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 	browserCtx, stop, allocStop := m.browserCtx, m.stop, m.allocStop
 	m.stop, m.allocStop = nil, nil
 	m.browserCtx, m.allocCtx = nil, nil
+	m.clearBrowserIdleLocked()
 	m.tabs = map[string]*ownedTab{}
 	m.selected = map[id.ID]string{}
 	m.downloads = map[string]*downloadState{}
@@ -482,6 +486,7 @@ func (m *Manager) NewTab(ctx context.Context, chat browserapi.Chat, rawURL strin
 	m.monitorTab(tab)
 	m.mu.Lock()
 	m.tabs[tab.id] = tab
+	m.browserActivityLocked(chat)
 	m.mu.Unlock()
 	if err := m.activateTab(ctx, tab); err != nil {
 		return browserapi.Tab{}, fmt.Errorf("activate new browser tab: %w", err)
@@ -516,6 +521,7 @@ func (m *Manager) ClaimTab(ctx context.Context, chat browserapi.Chat, tabID stri
 		return browserapi.Tab{}, err
 	}
 	tab.owner = chat
+	m.browserActivityLocked(chat)
 	tab.dataMu.Lock()
 	tab.console = nil
 	tab.requests = map[string]*requestState{}
@@ -1253,9 +1259,12 @@ func (m *Manager) Screenshot(ctx context.Context, chat browserapi.Chat, locator 
 func (m *Manager) ScreenshotTab(ctx context.Context, chat browserapi.Chat, tabID, format string, quality int) (browserapi.Binary, error) {
 	// A preview is a read-only observation. It must not wait behind navigation,
 	// interaction, or attachment of unrelated discovered targets.
-	tab, err := m.ownedTab(chat, strings.TrimSpace(tabID))
-	if err != nil {
-		return browserapi.Binary{}, err
+	m.mu.Lock()
+	tab := m.tabs[strings.TrimSpace(tabID)]
+	owned := tab != nil && chat.ChatID != "" && tab.owner.ChatID == chat.ChatID
+	m.mu.Unlock()
+	if !owned {
+		return browserapi.Binary{}, errors.New("browser tab not found or is owned by another chat")
 	}
 	if !tab.previewMu.TryLock() {
 		return browserapi.Binary{}, errors.New("preview capture is busy; retry shortly")
@@ -1516,6 +1525,7 @@ func (m *Manager) ownedTab(chat browserapi.Chat, tabID string) (*ownedTab, error
 	if tab == nil || tab.owner.ChatID != chat.ChatID || chat.ChatID == "" {
 		return nil, errors.New("browser tab not found or is owned by another chat")
 	}
+	m.browserActivityLocked(tab.owner)
 	return tab, nil
 }
 
@@ -1829,6 +1839,7 @@ func (m *Manager) removeTab(tab *ownedTab) {
 
 func (m *Manager) removeTabLocked(tab *ownedTab) {
 	delete(m.tabs, tab.id)
+	m.stopIdleIfNoTabsLocked(tab.owner.ChatID)
 	for downloadID, download := range m.downloads {
 		if download.tabID == tab.id {
 			delete(m.downloads, downloadID)
@@ -1863,6 +1874,7 @@ func (m *Manager) watchBrowser(browserCtx context.Context) {
 	allocStop := m.allocStop
 	m.browserCtx, m.allocCtx = nil, nil
 	m.stop, m.allocStop = nil, nil
+	m.clearBrowserIdleLocked()
 	m.tabs = map[string]*ownedTab{}
 	m.selected = map[id.ID]string{}
 	m.downloads = map[string]*downloadState{}
@@ -1923,6 +1935,7 @@ func (m *Manager) invalidateUnhealthyBrowser(parent, browserCtx context.Context,
 	}
 	m.browserCtx, m.allocCtx = nil, nil
 	m.stop, m.allocStop = nil, nil
+	m.clearBrowserIdleLocked()
 	m.tabs = map[string]*ownedTab{}
 	m.selected = map[id.ID]string{}
 	m.downloads = map[string]*downloadState{}

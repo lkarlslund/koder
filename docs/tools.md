@@ -164,6 +164,17 @@ RPC queue. Closing or switching previews aborts the old request; late replies
 cannot replace the new preview. Refresh failures clear the previous image and timestamp and show an explicit error; a stale capture is never presented as the refresh result.
 Normal agent screenshot operations still synchronize with tab interactions.
 
+## Idle browser reminders
+
+Chats retaining browser tabs receive one informational reminder after 5, 15,
+and 30 minutes without browser use, then at 1, 2, 4, 8, and 24 hours, and daily
+thereafter. Using a tab resets the schedule. Passive UI previews, tab listing,
+and page network traffic do not reset it. Reminders identify owned tab IDs and
+invite the agent to close tabs it has finished with; they never close tabs
+automatically. A busy tab operation defers the notice. Closing the last owned
+tab, chat cleanup, or browser shutdown cancels pending reminders. Notices use
+the existing monitor notification queue, rather than per-turn prompt injection.
+
 ## Exec inventory and resource usage
 
 `exec_session action=list` lists running Koder-managed commands. Use

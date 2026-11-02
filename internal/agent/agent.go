@@ -130,6 +130,7 @@ func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManage
 		retryPause:    modelruntime.DefaultRetryPause,
 	}
 	e.browser = browser.NewManager(cfg.Browser, cfg.StateDir())
+	e.browser.SetIdleNotifier(e.deliverBrowserIdleNotification)
 	e.browser.SetDeciderResolver(e.resolveBrowserDecider)
 	e.browser.SetExtractorResolver(e.resolveBrowserExtractor)
 	e.codex = codexdriver.New(codexdriver.NewSandboxProcessFactory(codexdriver.SandboxProcessConfig{
