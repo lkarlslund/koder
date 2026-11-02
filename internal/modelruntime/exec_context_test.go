@@ -2,7 +2,6 @@ package modelruntime
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +12,7 @@ import (
 	"github.com/lkarlslund/koder/internal/toolruntime"
 )
 
-func TestRunningExecInventoryIsLiveAndDoesNotMutateHistory(t *testing.T) {
+func TestRunningExecDoesNotInjectInventoryIntoModelRequests(t *testing.T) {
 	ctx := context.Background()
 	manager := execruntime.NewManager()
 	tr := toolruntime.New(toolruntime.Config{Exec: manager})
@@ -30,8 +29,8 @@ func TestRunningExecInventoryIsLiveAndDoesNotMutateHistory(t *testing.T) {
 	history := make([]provider.Message, 1, 8)
 	history[0] = provider.Message{Role: provider.RoleUser, Content: "Compacted history"}
 	request := runtime.ChatRequest(session, chat, history, false)
-	if len(request.Messages) != 2 || !strings.Contains(request.Messages[1].Content, started.ProcessID) || !strings.Contains(request.Messages[1].Content, "Expensive proof already started") {
-		t.Fatalf("missing live inventory: %#v", request.Messages)
+	if len(request.Messages) != 1 || request.Messages[0].Content != history[0].Content {
+		t.Fatalf("running work injected unsolicited context: %#v", request.Messages)
 	}
 	if history[0].Content != "Compacted history" || history[:cap(history)][1].Content != "" {
 		t.Fatal("request inventory mutated caller history")

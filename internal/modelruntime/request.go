@@ -1,11 +1,9 @@
 package modelruntime
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -61,11 +59,6 @@ func (r *Runtime) ChatRequest(session domain.Session, chat domain.Chat, messages
 		}
 		if len(req.Tools) > 0 {
 			req.ToolChoice = "auto"
-		}
-	}
-	if r.tools != nil {
-		if inventory := r.tools.RunningExecContext(context.Background(), session, chat); inventory != "" {
-			req.Messages = append(slices.Clone(messages), provider.Message{Role: provider.RoleUser, Content: inventory})
 		}
 	}
 	return req

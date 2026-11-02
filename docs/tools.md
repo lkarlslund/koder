@@ -179,11 +179,9 @@ utilization sample. Memory sums RSS and can double-count shared pages. Sampling
 is best effort; unsupported or inaccessible metrics are reported as unavailable.
 Completed commands retain final OS-reported CPU time when available.
 
-Before every Koder model request, a live session-wide inventory is appended
-after history. It is not stored in the transcript, does not modify the system
-prompt/cache prefix, and is regenerated after compaction. It includes up to 16
-jobs ranked by average CPU usage and a bounded text payload; use the list action for the full inventory.
-An empty output stream does not mean a job has stopped.
+Exec inventories are available on demand through `exec_session list`, including
+`scope=session` for sibling jobs. They are not automatically injected into model
+requests. An empty output stream does not mean a job has stopped.
 
 Starting an identical command in the same working directory while it is already
 running in this session is rejected, including simultaneous starts from sibling
