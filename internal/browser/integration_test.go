@@ -313,6 +313,34 @@ func TestChromiumIntegration(t *testing.T) {
 	if selectorErr == nil || !strings.Contains(selectorErr.Error(), `{"target":"css=section button","occurrence":1}`) || !strings.Contains(selectorErr.Error(), `{"target":"css=section button","occurrence":2}`) {
 		t.Fatalf("selector ambiguity omitted complete locator alternatives: %v", selectorErr)
 	}
+	for _, detail := range []string{`context: "Alpha panel"`, `context: "Beta panel"`, " at ("} {
+		if !strings.Contains(selectorErr.Error(), detail) {
+			t.Fatalf("ambiguity omitted distinguishing context %q: %v", detail, selectorErr)
+		}
+	}
+	if _, err := m.Evaluate(t.Context(), chat, `(()=>{const section=document.createElement('section');section.id='ambiguous-icons';section.setAttribute('aria-label','Technology filters');section.innerHTML='<ul><li>Allowed<ul><li><span>Cloudflare</span><i class="bn" onclick="document.querySelector(&quot;output&quot;).textContent=&quot;allowed&quot;">must not have</i></li></ul></li><li>Excluded<ul><li><span>Cloudflare</span><i class="bn" onclick="document.querySelector(&quot;output&quot;).textContent=&quot;excluded&quot;">must not have</i></li></ul></li></ul>';document.body.appendChild(section)})()`); err != nil {
+		t.Fatal(err)
+	}
+	iconLocator := browserapi.Locator{Selector: "xpath=//section[@id='ambiguous-icons']//i", Within: "Cloudflare"}
+	iconErr := m.Interact(t.Context(), chat, "click", iconLocator, "")
+	if iconErr == nil {
+		t.Fatal("ambiguous icons clicked without a choice")
+	}
+	for _, detail := range []string{"Allowed", "Excluded", `"within":"Cloudflare"`, `"occurrence":2`} {
+		if !strings.Contains(iconErr.Error(), detail) {
+			t.Fatalf("icon ambiguity missing %q: %v", detail, iconErr)
+		}
+	}
+	iconLocator.Occurrence = 2
+	if err := m.Interact(t.Context(), chat, "click", iconLocator, ""); err != nil {
+		t.Fatal(err)
+	}
+	if value, err := m.Evaluate(t.Context(), chat, `document.querySelector('output').textContent`); err != nil || value != `"excluded"` {
+		t.Fatalf("explicit icon choice: %s %v", value, err)
+	}
+	if _, err := m.Evaluate(t.Context(), chat, `document.querySelector('#ambiguous-icons').remove()`); err != nil {
+		t.Fatal(err)
+	}
 	if err := m.Interact(t.Context(), chat, "click", browserapi.Locator{Target: "Same person"}, ""); err != nil {
 		t.Fatalf("simple semantic target did not choose the first textual control: %v", err)
 	}

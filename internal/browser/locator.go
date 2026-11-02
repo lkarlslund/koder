@@ -155,16 +155,29 @@ const resolve=(cfg,action)=>{
     if(first.width*first.height>second.width*second.height)candidates=[ranked[0]];
   }
   if(candidates.length===1)return candidates[0];
+  const context=el=>{
+    const parts=[];
+    for(let parent=el.parentElement;parent&&parent!==document.body&&parts.length<3;parent=parent.parentElement){
+      if(!parent.matches('li,tr,article,section,form,dialog,fieldset,[role="row"],[role="listitem"],[aria-label]'))continue;
+      const clone=parent.cloneNode(true);
+      for(const nested of clone.querySelectorAll('ul,ol,table'))nested.remove();
+      const text=norm(labelledBy(parent)||parent.getAttribute('aria-label')||clone.innerText||clone.textContent).slice(0,160);
+      if(text&&parts[parts.length-1]!==text)parts.push(text);
+    }
+    return parts.reverse().join(' > ');
+  };
   const describe=el=>{
     const r=role(el)||el.tagName.toLowerCase();
     const n=name(el);
 		const rect=el.getBoundingClientRect();
 		const size=rect.width>0&&rect.height>0?' '+Math.round(rect.width)+'x'+Math.round(rect.height):'';
-    return r+(n?' "'+n.slice(0,120)+'"':'')+size;
+    const detail=context(el);
+    return r+(n?' '+JSON.stringify(n.slice(0,120)):'')+size+' at ('+Math.round(rect.x)+','+Math.round(rect.y)+')'+(detail?' | context: '+JSON.stringify(detail):'');
   };
 	const suggestedLocator=el=>{
 		if(cfg.selector){
 			const locator={target:cfg.selector.startsWith('xpath=')?cfg.selector:'css='+cfg.selector};
+			if(cfg.within)locator.within=cfg.within;
 			if(candidates.length>1)locator.occurrence=candidates.indexOf(el)+1;
 			return JSON.stringify(locator);
 		}
@@ -180,5 +193,5 @@ const resolve=(cfg,action)=>{
   const requested=cfg.selector?'selector "'+cfg.selector+'"':'target "'+cfg.target+'"'+(cfg.role?' with role "'+cfg.role+'"':'');
   if(candidates.length===0)throw new Error('Browser '+requested+' was not found in the current DOM');
 	const alternatives=candidates.slice(0,5).map((el,index)=>(index+1)+'. '+describe(el)+' -> '+suggestedLocator(el)).join('; ');
-	throw new Error('Browser '+requested+' is ambiguous; matched '+candidates.length+' elements. Copy exactly one complete argument set into the next call without omitting or changing fields: '+alternatives+(candidates.length>5?'; ...':'')+'.');
+	throw new Error('Browser '+requested+' is ambiguous; matched '+candidates.length+' elements. Choose the intended element using its context and position, then retry with its locator or narrow the target/within scope. Do not choose an occurrence arbitrarily: '+alternatives+(candidates.length>5?'; ...':'')+'.');
 };`
