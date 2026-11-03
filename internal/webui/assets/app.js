@@ -530,12 +530,58 @@
     }
     function toolStatusBadgeClassName(tool) {
       const status = normalizedToolStatus(tool);
+      const exitCode = String(toolExitCode(tool));
+      if (status === 'done' && exitCode !== '' && exitCode !== '0') return 'tool-status-badge-error';
       if (status === 'done') return 'tool-status-badge-done';
       if (status === 'running') return 'tool-status-badge-running';
       if (status === 'awaiting_approval' || status === 'awaiting_input') return 'tool-status-badge-awaiting';
       if (status === 'errored' || status === 'error' || status === 'failed' || status === 'denied') return 'tool-status-badge-error';
       if (status === 'canceled' || status === 'cancelled') return 'tool-status-badge-canceled';
       return 'tool-status-badge-pending';
+    }
+    // toolLineBadgeText is the status shown on a tool's one-line row: nothing
+    // for a plain success, so only running, failed or waiting tools stand out.
+    function toolLineBadgeText(tool) {
+      const status = normalizedToolStatus(tool);
+      const exitCode = String(toolExitCode(tool));
+      if (status === 'done' && (exitCode === '' || exitCode === '0')) return '';
+      return toolStatusBadgeText(tool);
+    }
+    // toolLineDetailText is a short fact after the title, such as the size of an edit.
+    function toolLineDetailText(tool) {
+      if (String((tool && tool.tool) || '') !== 'file_edit') return '';
+      const data = toolData(tool);
+      const diff = firstValue(data, ['diff', 'Diff']) || firstValue((tool && tool.result) || {}, ['diff', 'Diff']);
+      let added = 0, removed = 0;
+      for (const line of splitLines(diff)) {
+        if (line.startsWith('+') && !line.startsWith('+++')) added++;
+        else if (line.startsWith('-') && !line.startsWith('---')) removed++;
+      }
+      return added || removed ? '+' + added + ' \u2212' + removed : '';
+    }
+    // toolShowsInline reports whether a tool's result is for the user to see in
+    // the transcript (images, media, offered files). Other results are in the
+    // tool inspector.
+    function toolShowsInline(tool) {
+      const kind = String((tool && tool.tool) || '');
+      if (['view_image', 'view_pdf', 'show_media', 'show_image', 'offer_file', 'browser_screenshot', 'browser_image'].includes(kind)) return true;
+      if (kind === 'present') return true;
+      if (kind === 'browser_capture') return ['screenshot', 'image'].includes(toolAction(tool));
+      return false;
+    }
+    // toolArgRows lists a tool's arguments for the inspector, long values in full.
+    function toolArgRows(tool) {
+      const rows = [];
+      let args = toolArgs(tool);
+      if (String((tool && tool.tool) || '') === 'mcp') {
+        const call = mcpCallDetails(tool);
+        args = {server: call.server, tool: call.name, ...call.args};
+      }
+      for (const [key, value] of Object.entries(args)) {
+        if (value === undefined || value === null || value === '') continue;
+        rows.push({label: key.replaceAll('_', ' '), value: typeof value === 'string' ? value : toolPreviewValue(value)});
+      }
+      return rows;
     }
     function isBareExitStatus(text) {
       return /^bash failed:\s*exit status\s+-?\d+\s*$/i.test(String(text || '').trim());
@@ -875,8 +921,14 @@
       if (end) return 'through line ' + end;
       return '';
     }
+    // fileName is the last part of a path. Tool rows name files by it; the
+    // inspector shows the whole path.
+    function fileName(path) {
+      return String(path || '').split('/').filter(Boolean).pop() || '';
+    }
     function readTitle(path, args, data) {
-      const base = path ? 'Read ' + path : 'Read';
+      const name = fileName(path);
+      const base = name ? 'Read ' + name : 'Read';
       const range = readRangeLabel(args, data);
       return range ? base + ', ' + range : base;
     }
@@ -925,16 +977,13 @@
       const description = firstValue(data, ['description', 'Description']) || firstValue(args, ['description']) || firstValue(data, ['comment', 'Comment']) || firstValue(args, ['comment']);
       switch (kind) {
         case 'file_read': return readTitle(path, args, data);
-        case 'file_write': return path ? 'Write ' + path : 'Write file';
-        case 'file_edit': return path ? 'Edit ' + path : 'Edit file';
+        case 'file_write': return path ? 'Write ' + fileName(path) : 'Write file';
+        case 'file_edit': return path ? 'Edit ' + fileName(path) : 'Edit file';
         case 'bash': {
           if ((toolStatus(tool) === 'done' || toolStatus(tool) === 'errored') && command) return 'Ran ' + command;
           return 'Run command';
         }
-        case 'exec_command': {
-          const label = description || compactCommandLabel(command);
-          return label ? 'Start exec ' + label : 'Start exec';
-        }
+        case 'exec_command': return description || compactCommandLabel(command) || 'Exec';
         case 'exec_session': return actionLabel(toolAction(tool)) + ' exec session';
         case 'exec_status': return 'Exec status';
         case 'exec_list': return 'Exec sessions';
@@ -978,35 +1027,6 @@
         case 'memory': return ['Memory', toolAction(tool), firstValue(args, ['scope']), firstValue(args, ['name'])].filter(Boolean).join(' ');
         default: return kind || 'Tool';
       }
-    }
-    function toolPreviewText(tool) {
-      const args = toolArgs(tool);
-      if (String((tool && tool.tool) || '') === 'mcp') {
-        const call = mcpCallDetails(tool);
-        const values = call.server ? ['server=' + call.server] : [];
-        for (const [key, value] of Object.entries(call.args)) {
-          if (value !== undefined && value !== '') values.push(key + '=' + toolPreviewValue(value));
-        }
-        return values.join('  ');
-      }
-      if (String((tool && tool.tool) || '') === 'memory') return String(firstValue(args, ['query', 'id']) || '');
-      if (String((tool && tool.tool) || '') === 'file_read') return '';
-      if (String((tool && tool.tool) || '') === 'bash' && (toolStatus(tool) === 'done' || toolStatus(tool) === 'errored')) return '';
-      if (String((tool && tool.tool) || '') === 'chat_send') return chatSendMessage(args);
-      if (String((tool && tool.tool) || '') === 'chats' && ['queue', 'steer', 'interrupt'].includes(toolAction(tool))) return chatSendMessage(args);
-      const execCommand = String((tool && tool.tool) || '') === 'exec_command';
-      if (execCommand && (args.description || args.comment)) return '';
-      const values = [];
-      if (args.command) values.push(compactCommandLabel(args.command));
-      // exec_command's title already shows cmd when there is no description.
-      if (args.cmd && !execCommand) values.push(compactCommandLabel(args.cmd));
-      if (args.process_id) values.push('process_id=' + args.process_id);
-      const timeout = timeoutLabel(args.timeout_ms || args.yield_time_ms);
-      if (timeout) values.push((args.yield_time_ms ? 'wait=' : 'timeout=') + timeout);
-      for (const key of ['path', 'pattern', 'query', 'url', 'include']) {
-        if (args[key]) values.push(key + '=' + args[key]);
-      }
-      return values.slice(0, 2).join('  ');
     }
     function execResultLines(data, fallback) {
       const output = firstValue(data, ['output', 'Output']);
@@ -1191,7 +1211,7 @@ function timeoutLabel(value) {
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary', mcpTesting: false, mcpSaving: false,
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
         userInputModal: {batchKey: '', index: 0, answers: {}, busy: false, error: ''},
-        toolCommandModal: {open: false, command: '', subtitle: '', meta: [], output: ''},
+        toolInspector: {open: false, icon: '', title: '', subtitle: '', badge: '', badgeClass: '', meta: [], command: '', output: '', resultHTML: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
 		browserStatus: {state: 'unknown', owned_tabs: 0}, browserStatusTimer: null, browserTabs: [], browserTabsLoading: false, activityNow: Date.now(), activityTimer: null, revealTick: 0, revealExpired: 0, talkChatID: '', workspacePollTimer: null, scheduledJobs: {sessions: {}, chats: {}}, filterMenuOpen: '', cronJobModal: {open: false, jobID: ''},
@@ -4237,7 +4257,6 @@ function timeoutLabel(value) {
           return 'bi-wrench-adjustable';
         },
         toolTitle(tool) { return toolTitleText(tool); },
-        toolPreview(tool) { return toolPreviewText(tool); },
         toolStatusBadge(tool) { return toolStatusBadgeText(tool); },
         toolStatusBadgeClass(tool) { return toolStatusBadgeClassName(tool); },
         toolCallID(tool) { return tool?.tool_call_id || tool?.ToolCallID || ''; },
@@ -4282,21 +4301,50 @@ function timeoutLabel(value) {
           }
           return rows;
         },
-        openToolCommandModal(tool) {
-          const command = this.toolCommandText(tool);
-          if (!command) return;
+        toolLineBadge(tool) { return toolLineBadgeText(tool); },
+        toolLineDetail(tool) { return toolLineDetailText(tool); },
+        toolShowsInline(tool) { return toolShowsInline(tool); },
+        // openToolInspector shows everything about one tool call: its
+        // arguments, the exact command and the whole output or result.
+        openToolInspector(tool, item) {
+          if (!tool) return;
+          const kind = String(tool.tool || '');
           const args = toolArgs(tool);
-          const description = String(firstValue(args, ['description']) || firstValue(toolData(tool), ['description', 'Description']) || firstValue(args, ['comment']) || firstValue(toolData(tool), ['comment', 'Comment']) || '').trim();
-          this.toolCommandModal = {
+          const data = toolData(tool);
+          const description = String(firstValue(args, ['description']) || firstValue(data, ['description', 'Description']) || firstValue(args, ['comment']) || firstValue(data, ['comment', 'Comment']) || '').trim();
+          const command = this.toolCommandInspectable(tool) ? this.toolCommandText(tool) : '';
+          const meta = [{label: 'tool', value: kind || 'tool'}];
+          const time = item ? this.formatItemTime(item) : '';
+          if (time) meta.push({label: 'time', value: time});
+          if (command) {
+            meta.push(...this.toolCommandMeta(tool));
+          } else {
+            meta.push(...toolArgRows(tool));
+          }
+          let resultHTML = '';
+          if (!command) {
+            if (tool.result) resultHTML += renderToolResult(tool);
+            if (tool.error) resultHTML += renderToolError(tool);
+          }
+          this.toolInspector = {
             open: true,
+            icon: this.toolIcon(kind),
+            title: toolTitleText(tool),
+            subtitle: command && description ? '' : (description && description !== toolTitleText(tool) ? description : ''),
+            badge: toolStatusBadgeText(tool),
+            badgeClass: toolStatusBadgeClassName(tool),
+            meta,
             command,
-            subtitle: description || this.toolCallID(tool) || 'Exact command',
-            meta: this.toolCommandMeta(tool),
-            output: String(firstValue(toolData(tool), ['output', 'Output']) || toolResultText(tool) || toolErrorText(tool) || '').trim(),
+            output: command ? String(firstValue(data, ['output', 'Output']) || toolResultText(tool) || toolErrorText(tool) || '').trim() : '',
+            resultHTML,
           };
         },
-        closeToolCommandModal() {
-          this.toolCommandModal = {open: false, command: '', subtitle: '', meta: [], output: ''};
+        closeToolInspector() {
+          this.toolInspector = {open: false, icon: '', title: '', subtitle: '', badge: '', badgeClass: '', meta: [], command: '', output: '', resultHTML: ''};
+        },
+        // The inspector shows the whole result, so it opens the folded lines.
+        expandToolInspectorResult(el) {
+          el.querySelectorAll('details.tool-result-omitted-details').forEach(details => { details.open = true; });
         },
         toolApprovalPending(tool) {
           return this.toolCallID(tool) && toolStatus(tool) === 'awaiting_approval';
@@ -4318,7 +4366,6 @@ function timeoutLabel(value) {
         toolProgressCurrent(tool) {
           return String(tool?.progress?.current || '').trim();
         },
-        toolErrorHTML(tool) { return renderToolError(tool); },
         execProcessID(process) { return process?.process_id || process?.ProcessID || ''; },
         execProcessCommand(process) { return process?.command || process?.Command || ''; },
         execProcessState(process) { return String(process?.state || process?.State || '').toLowerCase(); },

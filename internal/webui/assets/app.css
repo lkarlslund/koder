@@ -294,7 +294,24 @@
     .diagram-stream-placeholder { display: inline-flex; align-items: center; min-height: 2rem; margin: .35rem 0 .75rem; padding: .25rem .55rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; color: var(--bs-secondary-color); background: var(--bs-secondary-bg); font-size: .86rem; }
     .mermaid-hidden-source { display: none; }
     .markdown-body blockquote { border-left: 3px solid var(--bs-border-color); color: var(--bs-secondary-color); padding-left: .75rem; margin: .75rem 0; }
-    .tool { padding-left: 0; }
+    .tool { padding-left: 0; margin-top: .1rem; }
+    .markdown-body + template + .tool { margin-top: .5rem; }
+    .tool-line { display: flex; align-items: center; gap: .45rem; min-width: 0; max-width: 100%; width: fit-content; margin-left: -.4rem; padding: .12rem .4rem; border-radius: .3rem; color: var(--bs-secondary-color); font-size: .9rem; line-height: 1.4; cursor: pointer; }
+    .tool-line:hover, .tool-line:focus-visible { background: var(--bs-tertiary-bg); color: var(--bs-body-color); outline: none; }
+    .tool-line:focus-visible { box-shadow: 0 0 0 2px rgba(var(--bs-primary-rgb), .45); }
+    .tool-line-icon, .tool-line-detail, .tool-line .badge, .tool-line .tool-cancel-button { flex: 0 0 auto; }
+    .tool-line-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tool-line-detail { font-family: var(--bs-font-monospace); font-size: .78rem; }
+    .tool-command-meta-value { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .tool-inspector .tool-command-output-body { max-height: none; }
+    .tool-inspector { max-width: calc(100vw - 2rem); }
+    .tool-inspector > header > div { flex: 1 1 auto; min-width: 0; }
+    .tool-inspector > header > div > div { min-width: 0; }
+    .tool-inspector-title { min-width: 0; overflow-wrap: anywhere; }
+    .tool-inspector > header .badge, .tool-inspector > header .bi { flex: 0 0 auto; }
+    .tool-inspector-result .tool-result-omitted-details > summary { display: none; }
+    .tool-inspector-result .tool-result-expanded { margin-left: 0; padding-left: 0; border-left: 0; }
+    .tool-inspector-result .tool-result-line, .tool-inspector-result .tool-diff-line { white-space: pre-wrap; overflow-wrap: anywhere; }
     .tool-result { border: 1px solid var(--bs-border-color); border-radius: .45rem; overflow: hidden; background: var(--bs-body-bg); }
     .tool-result-header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .35rem .55rem; background: var(--bs-secondary-bg); border-bottom: 1px solid var(--bs-border-color); font-size: .82rem; font-weight: 600; }
     .tool-result-body { padding: .45rem .55rem; font-family: var(--bs-font-monospace); font-size: .82rem; line-height: 1.35; overflow: hidden; }
@@ -319,8 +336,6 @@
     .tool-diff-add { background: rgba(var(--bs-success-rgb), .18); color: var(--bs-success-text-emphasis); }
     .tool-diff-del { background: rgba(var(--bs-danger-rgb), .18); color: var(--bs-danger-text-emphasis); }
     .tool-diff-empty { color: var(--bs-secondary-color); }
-    .tool-command-button { display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem; padding: 0; border: 1px solid var(--bs-border-color); border-radius: .25rem; background: var(--bs-body-bg); color: var(--bs-secondary-color); font-size: .78rem; line-height: 1; }
-    .tool-command-button:hover, .tool-command-button:focus-visible { color: var(--bs-body-color); background: var(--bs-secondary-bg); }
     .tool-cancel-button { display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem; padding: 0; border: 1px solid transparent; border-radius: .25rem; background: transparent; color: var(--bs-danger-text-emphasis); font-size: .82rem; line-height: 1; }
     .tool-cancel-button:hover, .tool-cancel-button:focus-visible { border-color: var(--bs-danger-border-subtle); background: var(--bs-danger-bg-subtle); color: var(--bs-danger); }
     .tool-command-modal { width: min(92vw, 840px); max-height: min(86vh, 720px); display: flex; flex-direction: column; }

@@ -151,18 +151,14 @@
               </div>
               <div class="markdown-body" x-effect="renderTimelineMarkdownElement($el, item, item.content?.text || '', itemMarkdownOptions(item))"></div>
               <template x-for="tool in item.content?.tools || []" :key="tool.tool_call_id">
-                <div class="tool mt-3">
-                  <div class="turn-header tool-header">
-                    <div class="turn-header-title">
-                      <i class="bi bi-wrench-adjustable"></i>
-                      <span x-text="toolTitle(tool)"></span>
-                      <span class="badge tool-status-badge" :class="toolStatusBadgeClass(tool)" x-text="toolStatusBadge(tool)"></span>
-                      <button type="button" class="tool-cancel-button" x-show="toolCancelable(tool)" title="Cancel running tool" aria-label="Cancel running tool" @click.stop="cancelTool(tool)"><i class="bi bi-stop-fill"></i></button>
-                      <button type="button" class="tool-command-button" x-show="toolCommandInspectable(tool)" title="Show exact command" @click.stop="openToolCommandModal(tool)"><i class="bi bi-terminal"></i></button>
-                    </div>
-                    <time class="turn-timestamp" :datetime="itemTimestamp(item)" x-text="formatItemTime(item)"></time>
+                <div class="tool">
+                  <div class="tool-line" role="button" tabindex="0" :title="'Inspect ' + toolTitle(tool)" @click="openToolInspector(tool, item)" @keydown.enter.prevent="openToolInspector(tool, item)" @keydown.space.prevent="openToolInspector(tool, item)">
+                    <i class="bi tool-line-icon" :class="toolIcon(tool.tool)" aria-hidden="true"></i>
+                    <span class="tool-line-title" x-text="toolTitle(tool)"></span>
+                    <span class="tool-line-detail" x-show="toolLineDetail(tool)" x-text="toolLineDetail(tool)"></span>
+                    <span class="badge tool-status-badge" :class="toolStatusBadgeClass(tool)" x-show="toolLineBadge(tool)" x-text="toolLineBadge(tool)"></span>
+                    <button type="button" class="tool-cancel-button" x-show="toolCancelable(tool)" title="Cancel running tool" aria-label="Cancel running tool" @click.stop="cancelTool(tool)" @keydown.stop><i class="bi bi-stop-fill"></i></button>
                   </div>
-                  <div class="tool-preview small text-secondary text-truncate" x-show="toolPreview(tool)" x-text="toolPreview(tool)" :title="toolPreview(tool)"></div>
                   <div class="btn-group btn-group-sm mt-2" x-show="toolApprovalPending(tool)">
                     <button type="button" class="btn btn-success" @click="rpc('approve', {tool_call_id: toolCallID(tool)})"><i class="bi bi-check-lg"></i> Approve</button>
                     <button type="button" class="btn btn-outline-danger" @click="rpc('deny', {tool_call_id: toolCallID(tool)})"><i class="bi bi-x-lg"></i> Deny</button>
@@ -176,8 +172,7 @@
                       <div class="tool-progress-current" x-show="toolProgressCurrent(tool)"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span x-text="toolProgressCurrent(tool)"></span></div>
                     </div>
                   </template>
-                  <template x-if="tool.result && toolResultHTML(tool)"><div class="tool-result mt-2" x-html="toolResultHTML(tool)"></div></template>
-                  <template x-if="tool.error && toolErrorHTML(tool)"><div class="tool-result mt-2" x-html="toolErrorHTML(tool)"></div></template>
+                  <template x-if="toolShowsInline(tool) && tool.result && toolResultHTML(tool)"><div class="tool-result mt-2" x-html="toolResultHTML(tool)"></div></template>
                 </div>
               </template>
             </div>
@@ -816,30 +811,39 @@
     </section>
   </div>
 
-  <div class="modal-backdrop-lite" x-show="toolCommandModal.open" x-transition @click.self="closeToolCommandModal()" @keydown.escape.window="closeToolCommandModal()" style="display: none;">
-    <section class="tool-command-modal bg-body border rounded shadow">
+  <div class="modal-backdrop-lite" x-show="toolInspector.open" x-transition @click.self="closeToolInspector()" @keydown.escape.window="closeToolInspector()" style="display: none;">
+    <section class="tool-command-modal tool-inspector bg-body border rounded shadow" role="dialog" aria-modal="true" aria-label="Tool call">
       <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
         <div class="min-w-0">
-          <div class="fw-semibold"><i class="bi bi-terminal me-1"></i> Exec command</div>
-          <div class="small text-secondary text-truncate" x-text="toolCommandModal.subtitle"></div>
+          <div class="fw-semibold d-flex align-items-center gap-2 min-w-0">
+            <i class="bi" :class="toolInspector.icon" aria-hidden="true"></i>
+            <span class="tool-inspector-title" x-text="toolInspector.title"></span>
+            <span class="badge tool-status-badge" :class="toolInspector.badgeClass" x-show="toolInspector.badge" x-text="toolInspector.badge"></span>
+          </div>
+          <div class="small text-secondary text-truncate" x-show="toolInspector.subtitle" x-text="toolInspector.subtitle"></div>
         </div>
-        <button type="button" class="btn btn-sm btn-outline-secondary" title="Close" @click="closeToolCommandModal()"><i class="bi bi-x-lg"></i></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" title="Close" @click="closeToolInspector()"><i class="bi bi-x-lg"></i></button>
       </header>
       <div class="tool-command-modal-body">
-        <div class="tool-command-meta" x-show="toolCommandModal.meta.length > 0">
-          <template x-for="row in toolCommandModal.meta" :key="row.label">
+        <div class="tool-command-meta" x-show="toolInspector.meta.length > 0">
+          <template x-for="(row, index) in toolInspector.meta" :key="index">
             <div class="tool-command-meta-row">
               <span class="text-secondary" x-text="row.label"></span>
-              <span class="font-monospace" x-text="row.value"></span>
+              <span class="font-monospace tool-command-meta-value" x-text="row.value"></span>
             </div>
           </template>
         </div>
-        <pre class="tool-command-full" x-text="toolCommandModal.command"></pre>
-        <template x-if="toolCommandModal.output">
+        <template x-if="toolInspector.command">
+          <pre class="tool-command-full" x-text="toolInspector.command"></pre>
+        </template>
+        <template x-if="toolInspector.output">
           <section class="tool-command-output">
             <div class="tool-result-header">Output</div>
-            <pre class="tool-command-output-body" x-text="toolCommandModal.output"></pre>
+            <pre class="tool-command-output-body" x-text="toolInspector.output"></pre>
           </section>
+        </template>
+        <template x-if="toolInspector.resultHTML">
+          <div class="tool-result tool-inspector-result" x-html="toolInspector.resultHTML" x-effect="toolInspector.resultHTML; $nextTick(() => expandToolInspectorResult($el))"></div>
         </template>
       </div>
     </section>

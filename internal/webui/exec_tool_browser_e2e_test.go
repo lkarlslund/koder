@@ -58,8 +58,8 @@ func TestExecToolOutputExpansionAndWaitInspection(t *testing.T) {
 			const described = {tool: 'exec_command', args: {cmd: 'pwd', description: 'Show working directory', comment: 'Old label'}};
             const descriptionTitle = app.toolTitle(described);
             const legacyTitle = app.toolTitle({tool: 'exec_command', result: {data: {command: 'pwd', comment: 'Historical label'}}});
-            app.openToolCommandModal(described);
-            const descriptionSubtitle = app.toolCommandModal.subtitle;
+            app.openToolInspector(described);
+            const descriptionSubtitle = app.toolInspector.title;
             const host = document.createElement('div');
 			host.innerHTML = app.toolResultHTML({
 				tool: 'exec_command',
@@ -81,7 +81,7 @@ func TestExecToolOutputExpansionAndWaitInspection(t *testing.T) {
 			const waitHost = document.createElement('div');
 			waitHost.innerHTML = app.toolResultHTML(waitTool);
 			const waitInspectable = app.toolCommandInspectable(waitTool);
-			app.openToolCommandModal(waitTool);
+			app.openToolInspector(waitTool);
 
 			const mcpHost = document.createElement('div');
 			mcpHost.innerHTML = app.toolResultHTML({
@@ -109,8 +109,8 @@ func TestExecToolOutputExpansionAndWaitInspection(t *testing.T) {
 				expandedText: details?.querySelector('.tool-result-expanded')?.textContent || '',
 				waitSummary: waitHost.querySelector('.tool-result-omitted-details summary')?.textContent || '',
 				waitInspectable,
-				inspectedCommand: app.toolCommandModal.command,
-				inspectedProcess: app.toolCommandModal.meta.find(row => row.label === 'process id')?.value || '',
+				inspectedCommand: app.toolInspector.command,
+				inspectedProcess: app.toolInspector.meta.find(row => row.label === 'process id')?.value || '',
 				mcpSummary: mcpDetails?.querySelector('summary')?.textContent || '',
 				mcpExpanded: mcpDetails?.open === true,
 				mcpCopied,
@@ -122,7 +122,7 @@ func TestExecToolOutputExpansionAndWaitInspection(t *testing.T) {
 		t.Fatalf("exercise exec tool rendering: %v", err)
 	}
 
-	if result.DescriptionTitle != "Start exec Show working directory" || result.LegacyTitle != "Start exec Historical label" || result.DescriptionSubtitle != "Show working directory" {
+	if result.DescriptionTitle != "Show working directory" || result.LegacyTitle != "Historical label" || result.DescriptionSubtitle != "Show working directory" {
 		t.Fatalf("description rendering: %#v", result)
 	}
 	if result.Summary != "... 3 lines omitted ..." || !result.Expanded {

@@ -2248,10 +2248,10 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected assistant turns to render")
 	}
 	if !strings.Contains(fullPage, `<i class="bi bi-robot"></i><span class="turn-source-label">agent</span>`) ||
-		!strings.Contains(fullPage, `class="turn-header tool-header"`) ||
-		!strings.Contains(fullPage, `<i class="bi bi-wrench-adjustable"></i>`) ||
+		!strings.Contains(fullPage, `class="tool-line" role="button"`) ||
+		!strings.Contains(fullPage, `:class="toolIcon(tool.tool)"`) ||
 		!strings.Contains(fullPage, `class="turn-source-qualifier" x-show="lintFiles(item.content || {})"`) {
-		t.Fatalf("expected user, assistant, and tool sections to share icon-title-timestamp headers")
+		t.Fatalf("expected user and assistant headers and one-line tool rows")
 	}
 	if !strings.Contains(fullPage, `marked.parse(source)`) || !strings.Contains(fullPage, `DOMPurify.sanitize`) || !strings.Contains(fullPage, `hljs.highlight`) {
 		t.Fatalf("expected browser markdown renderer to parse, sanitize, and syntax-highlight")
@@ -2297,8 +2297,7 @@ func TestIndexServesHTML(t *testing.T) {
 	for _, mcpRenderer := range []string{
 		`function mcpCallDetails(tool)`,
 		`return call.name + ' · ' + call.action`,
-		`for (const [key, value] of Object.entries(call.args))`,
-		`return values.join('  ')`,
+		`args = {server: call.server, tool: call.name, ...call.args}`,
 		`if (kind === 'mcp') return renderCompactBlock(toolTitleText(tool), toolResultText(tool))`,
 	} {
 		if !strings.Contains(fullPage, mcpRenderer) {
@@ -2317,14 +2316,13 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `function chatSendMessage(args)`) ||
 		!strings.Contains(fullPage, `case 'chat_send': return 'Message chat '`) ||
-		!strings.Contains(fullPage, `if (String((tool && tool.tool) || '') === 'chat_send') return chatSendMessage(args)`) ||
 		!strings.Contains(fullPage, `if (kind === 'chat_send') return renderCompactBlock('Sent message', chatSendMessage(args) || toolResultText(tool))`) {
 		t.Fatalf("expected chat_send to render the sent message instead of the chat status result")
 	}
-	if !strings.Contains(fullPage, `toolErrorHTML(tool)`) || !strings.Contains(fullPage, `function renderToolError(tool)`) || !strings.Contains(fullPage, `toolStatusBadge(tool)`) || !strings.Contains(fullPage, `toolStatusBadgeClass(tool)`) {
+	if !strings.Contains(fullPage, `if (tool.error) resultHTML += renderToolError(tool)`) || !strings.Contains(fullPage, `function renderToolError(tool)`) || !strings.Contains(fullPage, `toolStatusBadge(tool)`) || !strings.Contains(fullPage, `toolStatusBadgeClass(tool)`) {
 		t.Fatalf("expected tool errors to render through the compact per-tool formatter")
 	}
-	if !strings.Contains(fullPage, `class="tool-preview small text-secondary text-truncate"`) ||
+	if !strings.Contains(fullPage, `.tool-line-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }`) ||
 		!strings.Contains(fullPage, `.tool-result-line { min-height: 1.35em; overflow: hidden; text-overflow: ellipsis; white-space: pre; }`) ||
 		!strings.Contains(fullPage, `.tool-diff-line { display: grid; grid-template-columns: 3.25rem 3.25rem minmax(0, 1fr);`) ||
 		!strings.Contains(fullPage, `.tool-diff-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }`) ||
@@ -2383,13 +2381,8 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `tool-status-badge-error`) {
 		t.Fatalf("expected colorful tool status badges with done wording")
 	}
-	if !strings.Contains(fullPage, `if (args.command) values.push(compactCommandLabel(args.command))`) ||
-		!strings.Contains(fullPage, `if (args.cmd && !execCommand) values.push(compactCommandLabel(args.cmd))`) ||
-		!strings.Contains(fullPage, `if (args.process_id) values.push('process_id=' + args.process_id)`) ||
-		!strings.Contains(fullPage, `(args.yield_time_ms ? 'wait=' : 'timeout=') + timeout`) ||
-		!strings.Contains(fullPage, `function compactCommandLabel(command)`) ||
-		!strings.Contains(fullPage, `const label = description || compactCommandLabel(command)`) ||
-		!strings.Contains(fullPage, `if (execCommand && (args.description || args.comment)) return ''`) ||
+	if !strings.Contains(fullPage, `function compactCommandLabel(command)`) ||
+		!strings.Contains(fullPage, `case 'exec_command': return description || compactCommandLabel(command) || 'Exec'`) ||
 		!strings.Contains(fullPage, `if (command) lines.push('command: ' + command)`) ||
 		!strings.Contains(fullPage, `if (timeout) lines.push('timeout: ' + timeout)`) ||
 		!strings.Contains(fullPage, `function execResultLines(data, fallback)`) ||
@@ -2397,18 +2390,18 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `function renderExecStartResult(data)`) ||
 		!strings.Contains(fullPage, `toolCommandInspectable(tool)`) ||
 		!strings.Contains(fullPage, `(kind === 'exec_command' || kind.startsWith('exec_'))`) ||
-		!strings.Contains(fullPage, `openToolCommandModal(tool)`) ||
+		!strings.Contains(fullPage, `openToolInspector(tool, item)`) ||
 		!strings.Contains(fullPage, `tool-command-modal`) ||
 		!strings.Contains(fullPage, `toolCommandText(tool)`) ||
 		!strings.Contains(fullPage, `add('exit code', firstValue(data, ['exit_code', 'ExitCode']))`) ||
-		!strings.Contains(fullPage, `toolCommandModal.output`) ||
+		!strings.Contains(fullPage, `toolInspector.output`) ||
 		!strings.Contains(fullPage, `tool-command-output`) ||
 		!strings.Contains(fullPage, `renderCompactLines(lines, 1, 0, 1, true)`) {
 		t.Fatalf("expected command preview and exec result helpers")
 	}
 	if !strings.Contains(fullPage, `tool-result-body-mono`) ||
 		!strings.Contains(fullPage, `return renderExecStartResult(data)`) ||
-		!strings.Contains(fullPage, `tool.result && toolResultHTML(tool)`) ||
+		!strings.Contains(fullPage, `toolShowsInline(tool) && tool.result && toolResultHTML(tool)`) ||
 		!strings.Contains(fullPage, `renderCompactBlock('Result', execResultLines(data, toolResultText(tool)), 'tool-result-body-mono', true)`) {
 		t.Fatalf("expected exec output to render with monospace result styling")
 	}
@@ -2518,8 +2511,7 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `function readRangeLabel(args, data)`) ||
 		!strings.Contains(fullPage, `if (!requestedStart && !requestedEnd) return ''`) ||
-		!strings.Contains(fullPage, `case 'file_read': return readTitle(path, args, data)`) ||
-		!strings.Contains(fullPage, `String((tool && tool.tool) || '') === 'file_read') return ''`) {
+		!strings.Contains(fullPage, `case 'file_read': return readTitle(path, args, data)`) {
 		t.Fatalf("expected read tool rendering to show a single title line with requested line ranges")
 	}
 	if !strings.Contains(fullPage, `x-for="item in renderedTimeline()"`) || !strings.Contains(fullPage, `:key="item.id || item.ID"`) {
