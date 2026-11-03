@@ -379,8 +379,8 @@
       if (value instanceof Blob) return value.size;
       return 0;
     }
-    const timelinePageSize = 10;
-    const timelineMemoryWindowSize = 30;
+    const timelinePageSize = 30;
+    const timelineMemoryWindowSize = 120;
     const timelineCachedChatLimit = 12;
     const timelineStore = new Map();
     function renderMarkdown(text, options = {}) {
@@ -707,6 +707,7 @@
         rows.push({label: match[1].replaceAll('_', ' '), value: match[2]});
       }
       const output = lines.slice(i).join('\n');
+      const lastOutputLine = lines.slice(i).map(line => line.trim()).filter(Boolean).pop() || '';
       const event = String(fields.event || '').replace(/^exec session /, '').replace(/ \(informational\)$/, '');
       const state = String(fields.state || '');
       let badge = '';
@@ -723,7 +724,8 @@
       }
       return {
         title: fields.description || fields.command || fields.process_id || 'Exec session',
-        detail: [fields.process_id, event, fields.runtime].filter(Boolean).join(' \u00b7 '),
+        // Output notices carry progress lines; the latest line says more than the word "output".
+        detail: [fields.process_id, event === 'output' && lastOutputLine ? lastOutputLine : event, fields.runtime].filter(Boolean).join(' \u00b7 '),
         badge, badgeClass,
         fields: rows.filter(row => !['event', 'description'].includes(row.label)),
         output: output || text,
@@ -2379,8 +2381,10 @@ function timeoutLabel(value) {
           const pageHasNewer = !!(page.has_newer || page.HasNewer);
           const currentHasMore = !!(current.TimelineHasMore || current.timeline_has_more);
           const currentHasNewer = !!(current.TimelineHasNewer || current.timeline_has_newer);
-          const hasMore = options.append ? (currentHasMore || pageHasMore || removedHead) : pageHasMore;
-          const hasNewer = options.prepend ? (currentHasNewer || pageHasNewer || existing.length + items.length > timeline.length) : pageHasNewer;
+          // A prepended page's "newer" items, and an appended page's "older"
+          // items, are the ones already loaded; only trimming drops them.
+          const hasMore = options.append ? (currentHasMore || removedHead) : pageHasMore;
+          const hasNewer = options.prepend ? (currentHasNewer || existing.length + items.length > timeline.length) : pageHasNewer;
           const next = {
             ...current,
             TimelineHasMore: hasMore,

@@ -42,6 +42,7 @@ func TestExecNoticesShowAsOneLine(t *testing.T) {
 		{id: 'n2', kind: 'user', created_at: '2026-11-03T13:16:07Z', content: {source: 'exec', text: 'event: exec session ended\nprocess_id: exec_43\ncommand: go test ./...\nstate: completed\nexit_code: 1\nruntime: 9s\noutput:\nFAIL'}},
 		{id: 'n3', kind: 'user', created_at: '2026-11-03T13:16:08Z', content: {source: 'exec', text: 'event: exec session still running (informational)\nprocess_id: exec_2\ndescription: Start the service again\nruntime: 30m0s\nThe process remains running.'}},
 		{id: 'n4', kind: 'user', created_at: '2026-11-03T13:16:09Z', content: {source: 'exec', text: 'Koder was restarted. The following running processes owned by this chat were terminated during shutdown:\nPrevious runtime recorded at: 2026-11-03T13:22:14Z\n- exec_19 \u2014 Restart serve\n  command: serve\nThese are old exec IDs.'}},
+		{id: 'n6', kind: 'user', created_at: '2026-11-03T13:16:09Z', content: {source: 'monitor', text: 'event: exec session output\nprocess_id: exec_569\ndescription: Download DMR extract into workspace tmp with per-minute progress lines\noutput:\nsize=88M\nsize=119M\n'}},
 		{id: 'n5', kind: 'user', created_at: '2026-11-03T13:16:10Z', content: {source: 'memory', text: 'Memory changed since the memory index in your instructions was written.'}}
 	]`
 	setup := fmt.Sprintf(`(() => {
@@ -67,7 +68,7 @@ func TestExecNoticesShowAsOneLine(t *testing.T) {
 		chromedp.WaitReady(`.transcript`, chromedp.ByQuery),
 		chromedp.Poll(`!!document.documentElement._x_dataStack?.[0]?.toolResultHTML`, nil),
 		chromedp.Evaluate(setup, nil),
-		chromedp.Poll(`[...document.querySelectorAll('.exec-notice-line')].filter(el => el.offsetParent).length === 4`, nil),
+		chromedp.Poll(`[...document.querySelectorAll('.exec-notice-line')].filter(el => el.offsetParent).length === 5`, nil),
 		chromedp.Evaluate(`(async () => {
 			const visible = el => !!el && !!el.offsetParent;
 			const text = el => visible(el) ? el.textContent.trim() : '';
@@ -99,6 +100,7 @@ func TestExecNoticesShowAsOneLine(t *testing.T) {
 		{Title: "go test ./...", Detail: "exec_43 \u00b7 ended \u00b7 9s", Badge: "exit 1 (error)"},
 		{Title: "Start the service again", Detail: "exec_2 \u00b7 still running \u00b7 30m0s", Badge: "running"},
 		{Title: "Koder restarted: 1 process stopped", Badge: "stopped (error)"},
+		{Title: "Download DMR extract into workspace tmp with per-minute progress lines", Detail: "exec_569 \u00b7 size=119M"},
 	}
 	if len(got.Rows) != len(want) {
 		t.Fatalf("rows = %+v", got.Rows)

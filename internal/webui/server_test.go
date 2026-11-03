@@ -2465,8 +2465,8 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `renderedTimeline()`) ||
 		!strings.Contains(fullPage, `timelineRenderWindowBounds(timeline`) ||
 		!strings.Contains(fullPage, `render_window_start: renderWindow.start`) ||
-		!strings.Contains(fullPage, `const timelinePageSize = 10`) ||
-		!strings.Contains(fullPage, `const timelineMemoryWindowSize = 30`) ||
+		!strings.Contains(fullPage, `const timelinePageSize = 30`) ||
+		!strings.Contains(fullPage, `const timelineMemoryWindowSize = 120`) ||
 		!strings.Contains(fullPage, `const timelineCachedChatLimit = 12`) ||
 		!strings.Contains(fullPage, `loadNewerTimeline()`) ||
 		!strings.Contains(fullPage, `const timelineStore = new Map()`) ||

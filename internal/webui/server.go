@@ -51,7 +51,7 @@ import (
 const defaultOpenDelay = 5 * time.Second
 const assetHashPlaceholder = "__KODER_ASSET_HASH__"
 const indexAssetPath = "assets/index.html"
-const defaultTimelinePageSize = 10
+const defaultTimelinePageSize = 30
 
 //go:embed assets
 var webAssets embed.FS
