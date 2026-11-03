@@ -538,17 +538,61 @@ func (r *Runtime) memoryInstructions(session domain.Session, chat domain.Chat) s
 	}
 	r.memoryMu.Lock()
 	defer r.memoryMu.Unlock()
-	if text, ok := r.memoryIndex[chat.ID]; ok && chat.ID != "" {
-		return text
+	if known, ok := r.memoryIndex[chat.ID]; ok && chat.ID != "" {
+		return known.index
 	}
-	text := store.Instructions(sessionProjectRoot(session))
+	root := sessionProjectRoot(session)
+	generation := store.Generation()
+	text := store.Instructions(root)
 	if chat.ID != "" {
 		if r.memoryIndex == nil {
-			r.memoryIndex = map[id.ID]string{}
+			r.memoryIndex = map[id.ID]*chatMemory{}
 		}
-		r.memoryIndex[chat.ID] = text
+		r.memoryIndex[chat.ID] = &chatMemory{index: text, known: store.Snapshot(root), generation: generation}
 	}
 	return text
+}
+
+// MemoryChangeNotice describes how memory changed since the chat last
+// heard: added, deleted or updated memories, by another chat or by hand.
+// The chat's instructions keep their memory index, so the prompt cache
+// stays valid; the notice goes at the end of the conversation instead. It
+// is empty when nothing changed or the chat has no memory index yet.
+func (r *Runtime) MemoryChangeNotice(session domain.Session, chat domain.Chat) string {
+	if r == nil || r.tools == nil || chat.ID == "" {
+		return ""
+	}
+	store := r.tools.Memory()
+	if store == nil {
+		return ""
+	}
+	r.memoryMu.Lock()
+	defer r.memoryMu.Unlock()
+	known, ok := r.memoryIndex[chat.ID]
+	if !ok {
+		return ""
+	}
+	generation := store.Generation()
+	if store.Watching() && generation == known.generation {
+		return ""
+	}
+	session.ProjectRoot = chat.WorkingDirectory(session)
+	now := store.Snapshot(sessionProjectRoot(session))
+	notice := store.ChangeNotice(known.known, now, string(chat.ID))
+	known.known, known.generation = now, generation
+	return notice
+}
+
+// ForgetMemoryIndex drops a chat's kept memory index, so its next request
+// carries the current one. Compaction calls it: the request after a
+// compaction starts a new prompt anyway.
+func (r *Runtime) ForgetMemoryIndex(chatID id.ID) {
+	if r == nil {
+		return
+	}
+	r.memoryMu.Lock()
+	defer r.memoryMu.Unlock()
+	delete(r.memoryIndex, chatID)
 }
 
 func CompactedHistoryMessage(summary string) provider.Message {

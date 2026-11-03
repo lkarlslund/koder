@@ -12,6 +12,7 @@ import (
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
+	"github.com/lkarlslund/koder/internal/memory"
 	"github.com/lkarlslund/koder/internal/modeloverlay"
 	"github.com/lkarlslund/koder/internal/provider"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
@@ -60,19 +61,28 @@ type Runtime struct {
 	envMu            sync.Mutex
 	envCache         map[string]string
 	memoryMu         sync.Mutex
-	memoryIndex      map[id.ID]string
+	memoryIndex      map[id.ID]*chatMemory
+}
+
+// chatMemory is what a chat has been told about memory: the index in its
+// instructions, kept so the prompt cache stays valid, and the state of
+// memory since then, including changes it has been notified of.
+type chatMemory struct {
+	index      string
+	known      memory.Snapshot
+	generation uint64
 }
 
 const (
 	// A failed model request is retried this many times, waiting
 	// baseRetryDelay, doubling up to maxRetryDelay, unless the server's
 	// Retry-After asks for longer (up to maxRetryAfter).
-	maxModelRetries = 10
-	baseRetryDelay  = 2 * time.Second
-	maxRetryDelay   = 30 * time.Second
-	maxRetryAfter   = 5 * time.Minute
-	cavemanThinkingMaxBytes   = 4 * 1024
-	cavemanThinkingMaxTokens  = 256
+	maxModelRetries          = 10
+	baseRetryDelay           = 2 * time.Second
+	maxRetryDelay            = 30 * time.Second
+	maxRetryAfter            = 5 * time.Minute
+	cavemanThinkingMaxBytes  = 4 * 1024
+	cavemanThinkingMaxTokens = 256
 )
 
 func New(cfg Config) *Runtime {

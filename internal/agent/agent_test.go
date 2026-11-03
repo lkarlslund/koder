@@ -35,6 +35,7 @@ import (
 	"github.com/lkarlslund/koder/internal/environment"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/mcp"
+	"github.com/lkarlslund/koder/internal/memory"
 	"github.com/lkarlslund/koder/internal/modelruntime"
 	"github.com/lkarlslund/koder/internal/modeltest"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
@@ -7924,5 +7925,94 @@ func TestAutoCompactionAppendsToTheChatsOwnRequest(t *testing.T) {
 	}
 	if final := requests[len(requests)-1]; !strings.Contains(final, "compact summary") || strings.Contains(final, "earlier answer") {
 		t.Fatalf("request after compaction should use the summary:\n%s", final)
+	}
+}
+
+// A chat keeps the memory index it started with, so its prompt stays cached,
+// and hears about memories another chat or the user changed through a
+// memory notification at the end of the conversation, once.
+func TestRunningChatHearsAboutMemoryChangedElsewhere(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), "question") {
+			mu.Lock()
+			requests = append(requests, string(body))
+			mu.Unlock()
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	engine := New(cfg, st, nil)
+	memories := engine.Memory()
+	if _, err := memories.Create(memory.Memory{Scope: memory.ScopeGlobal, Name: "time-zone", Description: "Danish local time for scheduling", Content: "CET"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+
+	runLivePrompt(t, engine, session, chat, "first question")
+	// Another chat rewrites the memory between this chat's turns.
+	updated, err := memories.Update(memory.Memory{Scope: memory.ScopeGlobal, Name: "time-zone", Description: "Europe/Copenhagen time zone", Content: "CET"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	memories.RecordWriter("another-chat", updated, "", false)
+	runLivePrompt(t, engine, session, chat, "second question")
+	runLivePrompt(t, engine, session, chat, "third question")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requests) != 3 {
+		t.Fatalf("got %d chat requests, want 3", len(requests))
+	}
+	type request struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	var first, second, third request
+	for i, target := range []*request{&first, &second, &third} {
+		if err := json.Unmarshal([]byte(requests[i]), target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if first.Messages[0].Role != "system" || !strings.Contains(first.Messages[0].Content, "time-zone: Danish local time for scheduling") {
+		t.Fatalf("first system message lacks the memory index:\n%s", first.Messages[0].Content)
+	}
+	if second.Messages[0].Content != first.Messages[0].Content || third.Messages[0].Content != first.Messages[0].Content {
+		t.Fatal("the system message changed; the provider's cached prompt is lost")
+	}
+	notices := func(req request) int {
+		n := 0
+		for _, msg := range req.Messages {
+			if strings.Contains(msg.Content, "updated global memory time-zone, now: Europe/Copenhagen time zone") {
+				if !strings.Contains(msg.Content, `<notification source="memory">`) {
+					t.Fatalf("memory change is not framed as a Koder notification:\n%s", msg.Content)
+				}
+				n++
+			}
+		}
+		return n
+	}
+	if notices(first) != 0 || notices(second) != 1 || notices(third) != 1 {
+		t.Fatalf("memory notifications per request = %d, %d, %d; want 0, 1, 1 (told once, then kept in history)", notices(first), notices(second), notices(third))
 	}
 }

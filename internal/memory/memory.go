@@ -16,6 +16,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -56,6 +58,11 @@ type Memory struct {
 type Store struct {
 	globalDir   string
 	projectsDir string
+
+	generation atomic.Uint64
+	watching   atomic.Bool
+	mu         sync.Mutex
+	writers    map[string]memoryWriter // by file path: the chat that last wrote it
 }
 
 // NewStore keeps global memory in configDir/memory, beside the config file
@@ -168,6 +175,7 @@ func (s *Store) Delete(scope Scope, projectRoot, name string) error {
 	if err := os.Remove(filepath.Join(dir, name+".md")); err != nil {
 		return fmt.Errorf("delete %s memory %q: %w", scope, name, err)
 	}
+	s.generation.Add(1)
 	return nil
 }
 
@@ -205,6 +213,7 @@ func (s *Store) write(memory Memory, projectRoot string) (Memory, error) {
 		_ = os.Remove(temp)
 		return Memory{}, fmt.Errorf("write %s memory %q: %w", memory.Scope, memory.Name, err)
 	}
+	s.generation.Add(1)
 	return s.read(memory.Scope, dir, memory.Name)
 }
 

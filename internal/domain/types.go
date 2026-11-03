@@ -799,12 +799,14 @@ const (
 	UserMessageSourceAutoResume    = "auto_resume"
 	UserMessageSourceSubchat       = "subchat"
 	// Notifications: exec session exits, exec session output in lines mode,
-	// a child chat reporting to its parent, and a scheduled cron job coming
-	// due. They are not user input.
+	// a child chat reporting to its parent, a scheduled cron job coming due,
+	// and memory changed by another chat or by hand since the chat's memory
+	// index was written. They are not user input.
 	UserMessageSourceExec            = "exec"
 	UserMessageSourceMonitor         = "monitor"
 	UserMessageSourceChildReport     = "child_report"
 	UserMessageSourceCron            = "cron"
+	UserMessageSourceMemory          = "memory"
 	UserMessageSourceTurnInstruction = "turn_instruction"
 	UserMessageSourceVoice           = "voice"
 	// UserMessageSourcePhone is a message typed in the phone app's text mode.
@@ -828,7 +830,7 @@ type QueuedInput struct {
 // itself rather than from the user.
 func IsNotificationSource(source string) bool {
 	switch strings.TrimSpace(source) {
-	case UserMessageSourceExec, UserMessageSourceMonitor, UserMessageSourceChildReport, UserMessageSourceCron:
+	case UserMessageSourceExec, UserMessageSourceMonitor, UserMessageSourceChildReport, UserMessageSourceCron, UserMessageSourceMemory:
 		return true
 	default:
 		return false

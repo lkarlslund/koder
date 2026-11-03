@@ -94,6 +94,7 @@ func (tool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
 		if err != nil {
 			return tools.Result{}, err
 		}
+		store.RecordWriter(string(opts.Runtime.ChatID), created, root, false)
 		return result(fmt.Sprintf("Created %s memory %s: %s", created.Scope, created.Name, created.Description)), nil
 	}
 	existing, err := find(store, scope, root, args["name"])
@@ -114,11 +115,13 @@ func (tool) Call(_ context.Context, opts tools.Options) (tools.Result, error) {
 		if err != nil {
 			return tools.Result{}, err
 		}
+		store.RecordWriter(string(opts.Runtime.ChatID), updated, root, false)
 		return result(fmt.Sprintf("Updated %s memory %s: %s", updated.Scope, updated.Name, updated.Description)), nil
 	default:
 		if err := store.Delete(existing.Scope, root, existing.Name); err != nil {
 			return tools.Result{}, err
 		}
+		store.RecordWriter(string(opts.Runtime.ChatID), existing, root, true)
 		return result(fmt.Sprintf("Deleted %s memory %s", existing.Scope, existing.Name)), nil
 	}
 }

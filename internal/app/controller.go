@@ -876,6 +876,7 @@ func (c *Controller) Start(ctx context.Context, mode StartupMode, projectRoot st
 		c.broadcast("scheduled_jobs", c.scheduledJobCounts(context.Background()))
 	})
 	c.agent.StartCron()
+	c.agent.StartMemoryWatch()
 	return nil
 }
 

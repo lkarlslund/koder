@@ -66,6 +66,7 @@ type Engine struct {
 	registry     *sessionpkg.Registry
 	cron         *cron.Scheduler
 	stopCron     context.CancelFunc
+	stopMemory   context.CancelFunc
 	retryPause   func(context.Context, time.Duration, func(time.Duration)) error
 }
 
@@ -92,6 +93,23 @@ func memoryConfigDir(cfg config.Config) string {
 		return cfg.StateDir()
 	}
 	return filepath.Dir(cfg.Path())
+}
+
+// StartMemoryWatch follows the memory folders until Shutdown, so running
+// chats hear about memories other chats or the user changed without
+// re-reading every memory before each model step. Only the server calls it.
+func (e *Engine) StartMemoryWatch() {
+	store := e.Memory()
+	if store == nil || e.stopMemory != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := store.Watch(ctx); err != nil {
+		cancel()
+		slog.Warn("memory folder watch unavailable; checking memory before each model step", "error", err)
+		return
+	}
+	e.stopMemory = cancel
 }
 
 // Memory returns the notes the model keeps across chats.
@@ -914,6 +932,9 @@ func (e *Engine) compactChat(ctx context.Context, session domain.Session, rt *ch
 	if err := rt.ResetContextAndTokenUsage(ctx); err != nil {
 		return err
 	}
+	// The next request starts a new prompt, so it can carry the current
+	// memory index instead of the one kept since the chat started.
+	e.ForgetMemoryIndex(chat.ID)
 	emit(out, domain.Event{Kind: domain.EventKindStatus, Text: "Session compacted", Item: compactionItem, Meta: map[string]string{"refresh": "details", "compaction": "completed"}})
 	return nil
 }

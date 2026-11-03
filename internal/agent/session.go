@@ -313,6 +313,9 @@ func (e *Engine) Shutdown(ctx context.Context, reason chat.CancelReason) error {
 	if e.stopCron != nil {
 		e.stopCron()
 	}
+	if e.stopMemory != nil {
+		e.stopMemory()
+	}
 	var browserErr error
 	if e.browser != nil {
 		browserErr = e.browser.Stop(ctx)

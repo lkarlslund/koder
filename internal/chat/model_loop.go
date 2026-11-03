@@ -29,6 +29,33 @@ type modelTurnLoop struct {
 	ephemeralInstructions    []provider.InstructionBlock
 }
 
+// MemoryNotifier is a model runtime that tells chats when memory changed
+// since their memory index was written.
+type MemoryNotifier interface {
+	MemoryChangeNotice(domain.Session, domain.Chat) string
+}
+
+// noteMemoryChanges adds a memory notification to the chat before a model
+// step when another chat, or the user by hand, changed memory since the chat
+// last heard. It goes at the end of the conversation, so the chat's
+// instructions and the provider's cached prompt stay as they are.
+func (l *modelTurnLoop) noteMemoryChanges(ctx context.Context, rt *Chat, session domain.Session, chat domain.Chat, out chan<- domain.Event) error {
+	notifier, ok := l.model.(MemoryNotifier)
+	if !ok {
+		return nil
+	}
+	text := notifier.MemoryChangeNotice(session, chat)
+	if text == "" {
+		return nil
+	}
+	item, err := rt.AppendUserMessage(ctx, domain.UserMessage{Text: text, Source: domain.UserMessageSourceMemory})
+	if err != nil {
+		return err
+	}
+	out <- domain.Event{Kind: domain.EventKindStatus, Text: "Memory changed", Item: item}
+	return nil
+}
+
 func (l *modelTurnLoop) maxSteps() int {
 	return l.model.MaxToolLoopSteps()
 }
@@ -61,6 +88,9 @@ func (l *modelTurnLoop) step(ctx context.Context, rt *Chat, step int, turnInstru
 		return TurnStepResult{}, err
 	}
 	if err := rt.MaterializeTurnInstructions(ctx, turnInstructions, out); err != nil {
+		return TurnStepResult{}, err
+	}
+	if err := l.noteMemoryChanges(ctx, rt, session, chat, out); err != nil {
 		return TurnStepResult{}, err
 	}
 	turnRequest, err := rt.BuildTurnRequest()

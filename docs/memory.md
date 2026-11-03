@@ -27,8 +27,17 @@ with its first line as the description.
 
 Every chat's instructions include the memory index: each memory's name and
 description, per scope, and how full the scope is. The index is read once per
-chat and then kept, so memories written during a chat do not change its
-instructions and the provider's prompt cache stays valid.
+chat, and again after each compaction, and kept in between, so the chat's
+instructions do not change and the provider's prompt cache stays valid.
+
+When memory changes while a chat runs, because another chat used the memory
+tool or someone edited a file by hand, the chat is told before its next model
+step. A memory notification at the end of the conversation lists the added,
+deleted and updated memories (description changes, or "updated the content"
+when only the text changed). It is told once, and a chat is not told about
+changes it made itself. The server watches the memory folders, so this costs
+nothing until something changes; without the watch, memory is re-read before
+each model step.
 
 The `memory` tool reads and changes memories:
 
