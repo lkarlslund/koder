@@ -2916,7 +2916,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `.context-meter-fill.context-danger`) {
 		t.Fatalf("expected active chat context to render as a progress meter")
 	}
-	if !strings.Contains(fullPage, `thinkingLabel(item.content.reasoning)`) ||
+	if !strings.Contains(fullPage, `thinkingLabel(step.content.reasoning)`) ||
 		!strings.Contains(fullPage, `class="turn-header assistant-header"`) ||
 		!strings.Contains(fullPage, `class="reasoning assistant-reasoning"`) ||
 		!strings.Contains(fullPage, `.assistant-header .turn-header-title { flex: 1 1 auto; align-items: flex-start; }`) ||
@@ -2925,8 +2925,8 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `'thinking (' + tokens + ' tokens)'`) ||
 		!strings.Contains(fullPage, `cavemanThinkingSuffix(reasoning)`) ||
 		!strings.Contains(fullPage, `caveman available (' + tokens + ' tokens)'`) ||
-		!strings.Contains(fullPage, `hasCavemanReasoning(item.content.reasoning)`) ||
-		!strings.Contains(fullPage, `reasoningDisplayText(item)`) {
+		!strings.Contains(fullPage, `hasCavemanReasoning(step.content.reasoning)`) ||
+		!strings.Contains(fullPage, `reasoningDisplayText(step)`) {
 		t.Fatalf("expected reasoning summary to render live token count and optional caveman view")
 	}
 	if !strings.Contains(fullPage, `toolApprovalPending(tool)`) || !strings.Contains(fullPage, `rpc('approve', {tool_call_id: toolCallID(tool)})`) || !strings.Contains(fullPage, `rpc('deny', {tool_call_id: toolCallID(tool)})`) {

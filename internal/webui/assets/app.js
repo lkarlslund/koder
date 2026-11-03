@@ -1111,6 +1111,8 @@ document.addEventListener('alpine:init', () => {
 });
 // A row that drops out of a revealed list stays this long, folding shut.
 const revealLeaveMS = 240;
+// timelineIndexCache maps a rendered timeline to each item's index in it.
+const timelineIndexCache = new WeakMap();
 const revealLists = new Map();
 
 function timeoutLabel(value) {
@@ -1211,6 +1213,7 @@ function timeoutLabel(value) {
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary', mcpTesting: false, mcpSaving: false,
         timelineAction: {open: false, mode: '', itemID: '', itemLabel: '', forkTitle: '', busy: false, error: ''},
         userInputModal: {batchKey: '', index: 0, answers: {}, busy: false, error: ''},
+        turnDetails: {open: false, itemID: ''},
         toolInspector: {open: false, icon: '', title: '', subtitle: '', badge: '', badgeClass: '', meta: [], command: '', output: '', resultHTML: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
@@ -3251,6 +3254,51 @@ function timeoutLabel(value) {
             generationRate: this.performanceField(performance, 'GenerationTokensPerSecond', 'generation_tokens_per_second'),
             generated: this.performanceField(performance, 'GeneratedTokens', 'generated_tokens'),
           };
+        },
+        // timelineIndexOf finds an item's place in the rendered timeline.
+        timelineIndexOf(item) {
+          const list = this.renderedTimeline();
+          const id = this.timelineItemID(item);
+          if (!Array.isArray(list) || !id) return -1;
+          let index = timelineIndexCache.get(list);
+          if (!index || index.size !== list.length || this.timelineItemID(list[index.get(id)]) !== id) {
+            index = new Map(list.map((entry, i) => [this.timelineItemID(entry), i]));
+            timelineIndexCache.set(list, index);
+          }
+          return index.has(id) ? index.get(id) : -1;
+        },
+        // An agent turn is a run of assistant items with nothing between them.
+        // Only its first item shows the agent header; the rest continue it.
+        assistantRunStart(item) {
+          const i = this.timelineIndexOf(item);
+          if (i <= 0) return true;
+          return this.renderedTimeline()[i - 1]?.kind !== 'assistant';
+        },
+        assistantRunItems(item) {
+          const list = this.renderedTimeline();
+          const i = this.timelineIndexOf(item);
+          if (i < 0) return item ? [item] : [];
+          const run = [];
+          for (let j = i; j < list.length && list[j]?.kind === 'assistant'; j++) run.push(list[j]);
+          return run;
+        },
+        openTurnDetails(item) {
+          this.turnDetails = {open: true, itemID: this.timelineItemID(item)};
+        },
+        closeTurnDetails() {
+          this.turnDetails = {open: false, itemID: ''};
+        },
+        turnDetailsItems() {
+          if (!this.turnDetails.open) return [];
+          const item = this.renderedTimeline().find(entry => this.timelineItemID(entry) === this.turnDetails.itemID);
+          return item ? this.assistantRunItems(item) : [];
+        },
+        // turnStepSummary names one step in the turn popup: its first line of
+        // text, or the tools it called.
+        turnStepSummary(step) {
+          const text = String(step?.content?.text || '').trim().split('\n')[0];
+          if (text) return text.length > 120 ? text.slice(0, 119) + '\u2026' : text;
+          return (step?.content?.tools || []).map(tool => toolTitleText(tool)).join(' \u00b7 ');
         },
         assistantPerformanceLabel(item) {
           const values = this.assistantPerformanceValues(item);

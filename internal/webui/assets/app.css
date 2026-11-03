@@ -380,7 +380,20 @@
     .image-lightbox-svg { width: min(90vw, 1180px); max-width: 100%; max-height: calc(94vh - 7rem); overflow: visible; pointer-events: none; }
     .image-lightbox-svg svg { display: block; width: auto; max-width: 100%; height: auto; max-height: calc(94vh - 7rem); background: var(--bs-body-bg); }
     .reasoning { color: var(--bs-secondary-color); }
-    .assistant-header { align-items: flex-start; }
+    .assistant-header { align-items: center; }
+    .turn-details-button { display: inline-flex; align-items: center; gap: .35rem; padding: .1rem .3rem; margin-left: -.3rem; border: 0; border-radius: .3rem; background: transparent; color: inherit; font: inherit; }
+    .turn-details-button:hover, .turn-details-button:focus-visible { background: var(--bs-tertiary-bg); outline: none; }
+    .turn-details-button:focus-visible { box-shadow: 0 0 0 2px rgba(var(--bs-primary-rgb), .45); }
+    .transcript-turn-continued { margin-top: -1.4rem; }
+    .transcript-turn-continued .markdown-body:not(:empty) { padding-top: .6rem; }
+    .markdown-body:empty + template + .tool { margin-top: .1rem; }
+    .turn-detail-step { display: grid; gap: .3rem; padding-bottom: .6rem; border-bottom: 1px solid var(--bs-border-color); }
+    .turn-detail-step:last-child { padding-bottom: 0; border-bottom: 0; }
+    .turn-detail-head { display: flex; align-items: baseline; gap: .6rem; min-width: 0; }
+    .turn-detail-summary { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .turn-detail-actions { flex: 0 0 auto; display: inline-flex; gap: .15rem; }
+    .turn-performance-detail { color: var(--bs-secondary-color); font-family: var(--bs-font-monospace); font-size: .78rem; white-space: pre-line; }
+    .turn-details-modal .assistant-reasoning { font-size: .88rem; }
     .assistant-header .turn-header-title { flex: 1 1 auto; align-items: flex-start; }
     .assistant-reasoning { min-width: 0; flex: 1 1 auto; font-weight: 400; }
     .assistant-reasoning > summary { width: max-content; max-width: 100%; cursor: pointer; white-space: nowrap; }
@@ -671,6 +684,7 @@
       .sidebar.mobile-open { transform: translateX(0); }
       .transcript { padding: .75rem .75rem .5rem !important; }
       .transcript-turn { margin-bottom: 1rem !important; }
+      .transcript-turn-continued { margin-top: -.9rem; }
       .turn-header { gap: .45rem; }
       .turn-header-actions { gap: .12rem; }
       .turn-performance { font-size: .62rem; padding-inline: .22rem; }
