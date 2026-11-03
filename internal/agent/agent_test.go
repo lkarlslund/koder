@@ -537,7 +537,7 @@ func compactTestChat(t *testing.T, engine *Engine, session domain.Session, chatR
 	if err != nil {
 		return err
 	}
-	return engine.compactChat(context.Background(), session, rt, client, trigger, instructions, out)
+	return engine.compactChat(context.Background(), session, rt, client, trigger, instructions, nil, out)
 }
 
 func waitForToolStatus(t *testing.T, st *store.Store, chatID id.ID, toolCallID string, want domain.ToolStatus) bool {
@@ -4483,6 +4483,11 @@ func TestRunPromptAutoCompactsKnownOverLimitAfterPauseNotice(t *testing.T) {
 	if !strings.Contains(requests[0], "Summarize this coding session so another agent can continue it with minimal loss.") {
 		t.Fatalf("expected first request to compact, got %s", requests[0])
 	}
+	// 850 of 1000 tokens used leaves no room to append the summary request to
+	// the chat's own request, so the separate compaction request is used.
+	if strings.Contains(requests[0], sharedCompactionPreamble) {
+		t.Fatalf("expected the separate compaction request when the window has no room, got %s", requests[0])
+	}
 	if !strings.Contains(requests[1], "compact summary") {
 		t.Fatalf("expected second request to use compacted summary, got %s", requests[1])
 	}
@@ -5156,8 +5161,10 @@ func TestCompactSessionAddsManualInstructionsToPrompt(t *testing.T) {
 		!strings.Contains(requestBody, "focus on your list of directives") {
 		t.Fatalf("expected manual compaction instructions in request, got %s", requestBody)
 	}
-	if strings.Contains(requestBody, `"tools"`) || strings.Contains(requestBody, `"tool_choice"`) {
-		t.Fatalf("expected compaction request to omit tools, got %s", requestBody)
+	// The summary is asked for at the end of the chat's own request, tools
+	// and all, so the provider's cached prompt is reused.
+	if !strings.Contains(requestBody, `"tools"`) || !strings.Contains(requestBody, sharedCompactionPreamble) {
+		t.Fatalf("expected the chat's own request with Koder's compaction request appended, got %s", requestBody)
 	}
 }
 
@@ -5224,8 +5231,10 @@ func TestCompactSessionUsesSingleRequestWithPreservedToolTail(t *testing.T) {
 	if !strings.Contains(requestBodies[0], "early-history-marker") {
 		t.Fatalf("expected compaction request to include older prefix, got %s", requestBodies[0])
 	}
-	if strings.Contains(requestBodies[0], "late-tail-marker") {
-		t.Fatalf("expected retained current tail to be left out of compaction request, got %s", requestBodies[0])
+	// The request is the chat's own, so it includes the tail kept after the
+	// summary; only the stored boundary decides what is kept.
+	if !strings.Contains(requestBodies[0], "late-tail-marker") {
+		t.Fatalf("expected the chat's whole request, retained tail included, got %s", requestBodies[0])
 	}
 
 	timeline, err := testTimelineForChat(context.Background(), st, chat.ID)
@@ -5731,7 +5740,7 @@ func TestCompactSessionMarksCanceledCompactionFailed(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- engine.compactChat(ctx, session, rt, client, "manual", "", nil)
+		errCh <- engine.compactChat(ctx, session, rt, client, "manual", "", nil, nil)
 	}()
 	<-requestStarted
 	cancel()
@@ -7709,6 +7718,10 @@ func TestCompactionRunsAsTemporaryChatLikeANormalTurn(t *testing.T) {
 	cfg.Defaults.ProviderID = "test"
 	cfg.Defaults.ModelID = "test-model"
 	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 32768})
+	// A separate compaction model cannot share the chat's cached prompt.
+	cfg.Compaction.ProviderID = "test"
+	cfg.Compaction.ModelID = "summary-model"
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "summary-model", ContextWindow: 32768})
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -7805,5 +7818,111 @@ func TestCompactSessionRetriesACustomServerWithThinkingOff(t *testing.T) {
 	}
 	if len(requestBodies) != 2 || strings.Contains(requestBodies[0], "enable_thinking") {
 		t.Fatalf("expected a thinking request, then one with thinking off; got %d requests", len(requestBodies))
+	}
+}
+
+// When the chat's own model compacts in the middle of a turn, the summary is
+// asked for at the end of the request the turn would have sent next: same
+// tools, same messages, one message from Koder appended. The provider has
+// that prompt cached from the previous step, so only the new message is
+// processed.
+func TestAutoCompactionAppendsToTheChatsOwnRequest(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		requests = append(requests, string(body))
+		n := len(requests)
+		mu.Unlock()
+		switch {
+		case strings.Contains(string(body), sharedCompactionPreamble):
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"compact summary"}}],"usage":{"prompt_tokens":170010,"total_tokens":170020}}`))
+		case n == 1:
+			// The first step fills the context past the threshold.
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"printf hello\"}"}}]}}],"usage":{"prompt_tokens":170000,"total_tokens":170001}}`))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Compaction.AutoAtPercent = 80
+	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
+	cfg.Defaults.ProviderID = "test"
+	cfg.Defaults.ModelID = "test-model"
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 200000})
+	cfg.Permissions.Profiles["default"] = config.PermissionProfile{
+		Rules: []config.PermissionRule{{Tool: domain.ToolKindBash, Pattern: "*", Action: accesssettings.PermissionModeAllow}},
+	}
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	engine := New(cfg, st, nil)
+	session, err := modeltest.CreateSession(context.Background(), st, "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setSessionPermissionProfile(context.Background(), st, session.ID, "default"); err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	appendUserTimelineItem(t, st, chat.ID, "earlier work")
+	appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: "earlier answer"})
+
+	runLivePrompt(t, engine, session, chat, "say hello")
+
+	mu.Lock()
+	defer mu.Unlock()
+	type request struct {
+		Messages []json.RawMessage `json:"messages"`
+		Tools    json.RawMessage   `json:"tools"`
+	}
+	decode := func(body string) request {
+		t.Helper()
+		var req request
+		if err := json.Unmarshal([]byte(body), &req); err != nil {
+			t.Fatal(err)
+		}
+		return req
+	}
+	compactAt := -1
+	for idx, body := range requests {
+		if strings.Contains(body, sharedCompactionPreamble) {
+			compactAt = idx
+			break
+		}
+	}
+	if compactAt != 1 {
+		t.Fatalf("compaction request index = %d, want 1 (right after the first step); %d requests", compactAt, len(requests))
+	}
+	first, compaction := decode(requests[0]), decode(requests[1])
+	if len(first.Tools) == 0 || string(first.Tools) != string(compaction.Tools) {
+		t.Fatalf("compaction tools differ from the turn's:\n%s\n%s", first.Tools, compaction.Tools)
+	}
+	// The previous step's messages, then its tool call and result, then
+	// Koder's request: nothing before it is changed.
+	if len(compaction.Messages) != len(first.Messages)+3 {
+		t.Fatalf("compaction request has %d messages, want %d", len(compaction.Messages), len(first.Messages)+3)
+	}
+	for idx, msg := range first.Messages {
+		if string(msg) != string(compaction.Messages[idx]) {
+			t.Fatalf("message %d differs:\n%s\n%s", idx, msg, compaction.Messages[idx])
+		}
+	}
+	if last := string(compaction.Messages[len(compaction.Messages)-1]); !strings.Contains(last, `"role":"user"`) || !strings.Contains(last, "Summarize this coding session") {
+		t.Fatalf("last compaction message = %s", last)
+	}
+	if final := requests[len(requests)-1]; !strings.Contains(final, "compact summary") || strings.Contains(final, "earlier answer") {
+		t.Fatalf("request after compaction should use the summary:\n%s", final)
 	}
 }

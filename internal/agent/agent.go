@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -105,7 +107,23 @@ const (
 	// hidden reasoning, so compaction requests deliberately do not set one.
 	compactionMaxBytes                = 64 * 1024
 	compactionReductionCheckMinTokens = 32 * 1024
+	// compactionSummaryRoom is the context the summary needs, reasoning
+	// included, when it is asked for at the end of the chat's own request.
+	compactionSummaryRoom = 16 * 1024
+	// compactionSharedAttempts is how often the summary is asked for at the
+	// end of the chat's own request. Each try costs only its reply, since the
+	// prompt is cached; some models now and then stop after a few words of
+	// reasoning.
+	compactionSharedAttempts = 3
 )
+
+// sharedCompactionPreamble marks the summary request appended to the chat's
+// own request as Koder's, not the user's.
+const sharedCompactionPreamble = "[Koder context compaction request. This message is from Koder, not the user. Tools are disabled for this reply.]"
+
+// errSharedCompactionUnusable means the summary could not be had from the
+// chat's own request, and the separate compaction request should be tried.
+var errSharedCompactionUnusable = errors.New("shared compaction request unusable")
 
 func New(cfg config.Config, st *store.Store, debug *debugsrv.Recorder, mcpManagers ...*mcp.Manager) *Engine {
 	var mcpManager *mcp.Manager
@@ -390,7 +408,7 @@ func (e *Engine) CompactChat(ctx context.Context, rt *chatpkg.Chat, instructions
 	if out != nil {
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Compacting session..."}
 	}
-	if err := e.compactChat(ctx, session, rt, client, "manual", instructions, out); err != nil {
+	if err := e.compactChat(ctx, session, rt, client, "manual", instructions, nil, out); err != nil {
 		return err
 	}
 	if out != nil {
@@ -779,7 +797,7 @@ func (e *Engine) autoCompactAtTurnBoundary(ctx context.Context, session domain.S
 	if out != nil {
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at %d%% known context used", used)}
 	}
-	if err := e.compactChat(ctx, session, rt, client, "auto", "", out); err != nil {
+	if err := e.compactChat(ctx, session, rt, client, "auto", "", messages, out); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -811,14 +829,22 @@ func contextUsagePercent(tokens, contextWindow int) (int, bool) {
 	return min(100, (tokens*100)/contextWindow), true
 }
 
-// compactChat summarizes a chat's history in a temporary chat on the
-// compaction model and records the summary as a compaction item.
+// compactChat summarizes a chat's history and records the summary as a
+// compaction item.
 //
-// The temporary chat is an ordinary chat that exists only for this request:
-// no ID, backend, tools, or stored data. Its history is the chat's timeline up
-// to the cut point, rendered exactly as for a normal turn (earlier compaction
-// summaries included), and the compaction prompt is its user message.
-func (e *Engine) compactChat(ctx context.Context, session domain.Session, rt *chatpkg.Chat, client *provider.Client, trigger, instructions string, out chan<- domain.Event) error {
+// When the chat's own model does the compaction, the summary is asked for at
+// the end of the chat's own next request: the same system prompt, tools and
+// messages, plus one message from Koder. The provider has that prompt cached
+// from the previous step, so only the new message is processed. next is that
+// request's messages when the caller has them; otherwise they are rendered
+// from the timeline.
+//
+// Otherwise, or when that does not work, the summary comes from a temporary
+// chat on the compaction model: no ID, backend, tools, or stored data. Its
+// history is the chat's timeline up to the cut point, rendered as for a
+// normal turn (earlier compaction summaries included), and the compaction
+// prompt is its user message. That request is processed from scratch.
+func (e *Engine) compactChat(ctx context.Context, session domain.Session, rt *chatpkg.Chat, client *provider.Client, trigger, instructions string, next []provider.Message, out chan<- domain.Event) error {
 	if rt == nil {
 		return fmt.Errorf("chat runtime is required")
 	}
@@ -863,7 +889,13 @@ func (e *Engine) compactChat(ctx context.Context, session domain.Session, rt *ch
 	}
 	emit(out, domain.Event{Kind: domain.EventKindStatus, Text: "Compacting session...", Item: compactionItem, Meta: map[string]string{"refresh": "details", "compaction": "started"}})
 
-	summary, perf, err := e.summarizeInTemporaryChat(ctx, session, tempChat, tempClient, req, out)
+	summary, perf, err := "", domain.ModelPerformance{}, errSharedCompactionUnusable
+	if shared, ok := e.sharedCompactionRequest(ctx, session, chat, timeline, tempChat, tempClient == client, next, instructions); ok {
+		summary, perf, err = e.summarizeInSharedRequest(ctx, session, chat, client, shared, out)
+	}
+	if errors.Is(err, errSharedCompactionUnusable) {
+		summary, perf, err = e.summarizeInTemporaryChat(ctx, session, tempChat, tempClient, req, out)
+	}
 	if perf.HasAny() {
 		performance = &perf
 	}
@@ -909,6 +941,73 @@ func (e *Engine) compactionChat(chat domain.Chat, client *provider.Client) (doma
 		return domain.Chat{}, nil, fmt.Errorf("create compaction provider %q: %w", compaction.Model.ProviderID, err)
 	}
 	return temp, compactionClient, nil
+}
+
+// sharedCompactionRequest returns the chat's own next request with the
+// summary request appended, when the chat's own model and client do the
+// compaction and the context window has room for the summary. next is the
+// next request's messages, or nil to render them from timeline.
+func (e *Engine) sharedCompactionRequest(ctx context.Context, session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, tempChat domain.Chat, sameClient bool, next []provider.Message, instructions string) (provider.ChatRequest, bool) {
+	if !sameClient || tempChat.ProviderID != chat.ProviderID || tempChat.ModelID != chat.ModelID {
+		return provider.ChatRequest{}, false
+	}
+	if next == nil {
+		messages, err := e.BuildConversationForTurn(ctx, chatpkg.TurnRequest{Session: session, Chat: chat, Timeline: timeline})
+		if err != nil {
+			return provider.ChatRequest{}, false
+		}
+		next = messages
+	}
+	messages := append(slices.Clip(next), provider.Message{
+		Role:    provider.RoleUser,
+		Content: sharedCompactionPreamble + "\n\n" + e.compactPromptWithInstructions(instructions),
+	})
+	req := e.ChatRequest(session, chat, messages, e.ProviderStreamingEnabled(chat))
+	if model, err := e.settings.Model(chat); err == nil && model.ContextWindow > 0 {
+		used := 0
+		if chat.ContextTokensKnown {
+			used = chat.LastKnownContextTokens
+		}
+		if payload, err := json.Marshal(req.Messages); err == nil {
+			used = max(used, len(payload)/4)
+		}
+		if model.ContextWindow-used < compactionSummaryRoom {
+			return provider.ChatRequest{}, false
+		}
+	}
+	return req, true
+}
+
+// summarizeInSharedRequest sends the chat's own request with the summary
+// request appended. A reply that calls a tool or stays in reasoning is asked
+// for again, with thinking off where the server allows, which costs only the
+// reply since the prompt is cached. It returns errSharedCompactionUnusable
+// when the separate compaction request should be tried instead.
+func (e *Engine) summarizeInSharedRequest(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (string, domain.ModelPerformance, error) {
+	var perf domain.ModelPerformance
+	for range compactionSharedAttempts {
+		resp, err := e.completeWithCompactionProgress(ctx, session, chat, client, req, out)
+		if err != nil {
+			if provider.IsContextWindowExceeded(err) {
+				return "", perf, errSharedCompactionUnusable
+			}
+			return "", perf, err
+		}
+		perf = resp.Performance
+		summary := strings.TrimSpace(resp.Text)
+		if summary != "" && len(resp.ToolCalls) == 0 {
+			return summary, perf, nil
+		}
+		text := "Compaction reply held no summary; asking again"
+		if len(resp.ToolCalls) > 0 {
+			text = "Compaction reply called a tool; asking again"
+		} else if next, ok := client.WithoutThinking(req); ok {
+			// Turning thinking off changes only the end of the prompt.
+			req, text = next, "Compaction model only thought; asking again without thinking"
+		}
+		emit(out, domain.Event{Kind: domain.EventKindStatus, Text: text, Meta: map[string]string{"compaction": "progress"}})
+	}
+	return "", perf, errSharedCompactionUnusable
 }
 
 // buildCompactionRequestForTimeline builds the temporary chat's request: the

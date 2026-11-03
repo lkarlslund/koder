@@ -122,6 +122,8 @@ model_id = "qwen3-coder"
 context_window = 32768
 ```
 
+When the chat's own model compacts, Koder asks for the summary at the end of the chat's own request, so a provider with prompt caching (such as `llama.cpp`) processes only the new message instead of the whole history. A separate compaction model, or a context with less than 16K tokens free, uses a separate summary request that is processed from scratch.
+
 Detected models are read-only. If a model needs special request settings, create a custom model from it and edit the JSON request options in the model dialog. Koder can use separate models for chat, compaction, thinking helpers, and TTS when that is useful.
 
 ## How It Works

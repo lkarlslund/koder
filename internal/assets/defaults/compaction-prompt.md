@@ -1,6 +1,6 @@
 Summarize this coding session so another agent can continue it with minimal loss.
 
-Return only the summary text. Do not call tools.
+Write the summary as your visible reply, not inside your reasoning. Return only the summary text, and do not call tools.
 
 Use this structure:
 ## Goal
