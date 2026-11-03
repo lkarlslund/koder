@@ -170,8 +170,10 @@ Tracked exec jobs belong to one Koder process and do not survive a service
 restart. Koder keeps a private, atomic inventory of running jobs and clears
 completed jobs from it. On restart, each affected chat receives a one-time,
 persisted notification before interrupted chats resume, listing its old process
-IDs, descriptions, commands, working directories, and start times. Idle owners
-see the explanation on their next turn too. Old exec IDs must not be treated as
+IDs, descriptions, commands, working directories, and start times. A chat
+whose turn was interrupted reads it when that turn resumes. An idle chat gets it
+the way it gets an exec session's end: the notice starts a turn, so the model can
+restart work that is still needed. Old exec IDs must not be treated as
 live handles after a restart; inspect current jobs before starting replacements.
 
 An orderly shutdown explicitly stops tracked jobs and confirms that fact in the
