@@ -95,10 +95,18 @@
         </button>
       </div>
       <template x-for="item in renderedTimeline()" :key="item.id || item.ID">
-        <section class="transcript-turn mb-4" :class="{'transcript-turn-continued': item.kind === 'assistant' && !assistantRunStart(item)}" :data-timeline-item-id="timelineItemID(item)">
+        <section class="transcript-turn mb-4" :class="{'transcript-turn-continued': item.kind === 'assistant' && !assistantRunStart(item), 'transcript-turn-compact': item.kind === 'user' && !!execNotice(item)}" :data-timeline-item-id="timelineItemID(item)">
           <template x-if="item.kind === 'user'">
             <div class="turn user-turn">
-              <div class="turn-header">
+              <template x-if="execNotice(item)">
+                <div class="tool-line exec-notice-line" role="button" tabindex="0" :title="'Inspect ' + execNotice(item).title" @click="openNoticeInspector(item)" @keydown.enter.prevent="openNoticeInspector(item)" @keydown.space.prevent="openNoticeInspector(item)">
+                  <i class="bi tool-line-icon" :class="userMessageIcon(item)" aria-hidden="true"></i>
+                  <span class="tool-line-title" x-text="execNotice(item).title"></span>
+                  <span class="tool-line-detail" x-show="execNotice(item).detail" x-text="execNotice(item).detail"></span>
+                  <span class="badge tool-status-badge" :class="execNotice(item).badgeClass" x-show="execNotice(item).badge" x-text="execNotice(item).badge"></span>
+                </div>
+              </template>
+              <div class="turn-header" x-show="!execNotice(item)">
                 <div class="turn-header-title">
                   <i class="bi" :class="userMessageIcon(item)"></i>
                   <span class="turn-source-label" x-text="userMessageIsNotification(item) ? 'koder' : 'user'"></span>
@@ -120,7 +128,9 @@
                   </template>
                 </div>
               </template>
-              <pre class="notification-message-text" x-show="userMessageIsNotification(item)" x-text="item.content?.text || ''"></pre>
+              <template x-if="userMessageIsNotification(item) && !execNotice(item)">
+                <pre class="notification-message-text" x-text="item.content?.text || ''"></pre>
+              </template>
               <div class="markdown-body user-markdown-body" x-show="!userMessageIsNotification(item)">
                 <span class="user-message-text" x-html="userMessageIsNotification(item) ? '' : timelineMarkdownHTML(item, item.content?.text || '')"></span>
               </div>

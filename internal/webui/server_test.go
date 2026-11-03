@@ -2229,7 +2229,7 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `x-text="userMessageIsNotification(item) ? 'koder' : 'user'"`) ||
 		!strings.Contains(fullPage, `class="turn-source-qualifier" x-show="userMessageSourceQualifier(item)"`) ||
 		!strings.Contains(fullPage, `class="user-message-text" x-html="userMessageIsNotification(item) ? '' : timelineMarkdownHTML(item, item.content?.text || '')"`) ||
-		!strings.Contains(fullPage, `<pre class="notification-message-text" x-show="userMessageIsNotification(item)"`) ||
+		!strings.Contains(fullPage, `<template x-if="userMessageIsNotification(item) && !execNotice(item)">`) ||
 		!strings.Contains(fullPage, `case 'child_report': return 'child report'`) ||
 		!strings.Contains(fullPage, `case 'auto_generated': return 'auto-generated'`) {
 		t.Fatalf("expected user turns to render icon/source headers and message text")

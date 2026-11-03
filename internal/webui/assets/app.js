@@ -682,6 +682,53 @@
     function userMessageIsNotificationSource(item) {
       return ['exec', 'monitor', 'child_report', 'cron', 'memory'].includes(userMessageSourceValue(item));
     }
+    // execNotice reads an exec or monitor notification, which is written for
+    // the model, into the parts its one-line row and the inspector show.
+    function execNotice(item) {
+      if (!['exec', 'monitor'].includes(userMessageSourceValue(item))) return null;
+      const text = String(firstValue(userMessageContent(item), ['text', 'Text']) || '');
+      if (text.startsWith('Koder was restarted')) {
+        const count = splitLines(text).filter(line => /^- exec_/.test(line)).length;
+        const stopped = text.includes('were terminated during shutdown');
+        return {
+          title: 'Koder restarted: ' + count + (count === 1 ? ' process ' : ' processes ') + (stopped ? 'stopped' : 'lost'),
+          detail: '', badge: stopped ? 'stopped' : 'lost', badgeClass: 'tool-status-badge-error', fields: [], output: text,
+        };
+      }
+      const lines = splitLines(text);
+      const fields = {};
+      const rows = [];
+      let i = 0;
+      for (; i < lines.length; i++) {
+        if (lines[i] === 'output:') { i++; break; }
+        const match = lines[i].match(/^([a-z_]+): (.*)$/);
+        if (!match) break;
+        fields[match[1]] = match[2];
+        rows.push({label: match[1].replaceAll('_', ' '), value: match[2]});
+      }
+      const output = lines.slice(i).join('\n');
+      const event = String(fields.event || '').replace(/^exec session /, '').replace(/ \(informational\)$/, '');
+      const state = String(fields.state || '');
+      let badge = '';
+      let badgeClass = '';
+      if (fields.exit_code !== undefined && fields.exit_code !== '0') {
+        badge = 'exit ' + fields.exit_code;
+        badgeClass = 'tool-status-badge-error';
+      } else if (state && !state.startsWith('completed')) {
+        badge = state;
+        badgeClass = 'tool-status-badge-error';
+      } else if (event === 'still running') {
+        badge = 'running';
+        badgeClass = 'tool-status-badge-running';
+      }
+      return {
+        title: fields.description || fields.command || fields.process_id || 'Exec session',
+        detail: [fields.process_id, event, fields.runtime].filter(Boolean).join(' \u00b7 '),
+        badge, badgeClass,
+        fields: rows.filter(row => !['event', 'description'].includes(row.label)),
+        output: output || text,
+      };
+    }
     function userMessageSourceQualifierText(item) {
       const label = userMessageSourceLabelText(item);
       return label === 'user' ? '' : label;
@@ -3376,6 +3423,19 @@ function timeoutLabel(value) {
         userMessageSourceQualifier(item) { return userMessageSourceQualifierText(item); },
         userMessageIcon(item) { return userMessageIconClass(item); },
         userMessageIsNotification(item) { return userMessageIsNotificationSource(item); },
+        execNotice(item) { return execNotice(item); },
+        // openNoticeInspector shows an exec notification in full.
+        openNoticeInspector(item) {
+          const notice = execNotice(item);
+          if (!notice) return;
+          const time = this.formatItemTime(item);
+          this.toolInspector = {
+            open: true, icon: 'bi-terminal', title: notice.title, subtitle: notice.detail,
+            badge: notice.badge, badgeClass: notice.badgeClass,
+            meta: [...(time ? [{label: 'time', value: time}] : []), ...notice.fields],
+            command: '', output: notice.output, resultHTML: '',
+          };
+        },
         // activeRetry is the wait before the active chat retries a failed model
         // request, while there is one.
         activeRetry() {
