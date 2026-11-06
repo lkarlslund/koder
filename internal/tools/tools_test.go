@@ -443,7 +443,7 @@ func TestWebSearchWholeFloatStringLimitIsAccepted(t *testing.T) {
 		Args: map[string]string{
 			"query":       "golang",
 			"description": "Find Go documentation",
-			"limit": "4.00000",
+			"limit":       "4.00000",
 		},
 	})
 	if err != nil {
