@@ -23,15 +23,16 @@ func TestCronToolCreatesListsAndDeletes(t *testing.T) {
 	scheduler := cron.NewScheduler(st, nil)
 	runtime := tools.Runtime{SessionID: "s1", ChatID: "c1", Services: RuntimeService(scheduler)}
 
-	created, err := call(t, runtime, map[string]string{"action": "create", "schedule": "7 * * * *", "prompt": "Check the build queue"})
-	if err != nil || !strings.HasPrefix(created.Output, "Scheduled recurring job ") || !strings.Contains(created.Output, "It expires") {
+	created, err := call(t, runtime, map[string]string{"action": "create", "schedule": "7 * * * *", "prompt": "Check the build queue", "description": "Check the build queue hourly"})
+	if err != nil || !strings.HasPrefix(created.Output, "Scheduled recurring job ") || !strings.Contains(created.Output, "It expires") || created.Meta["description"] != "Check the build queue hourly" {
 		t.Fatalf("create = %q, %v", created.Output, err)
 	}
-	if _, err := call(t, runtime, map[string]string{"action": "create", "schedule": "17 9 1 1 *", "prompt": "Happy new year", "recurring": "false"}); err != nil {
+	if _, err := call(t, runtime, map[string]string{"action": "create", "schedule": "17 9 1 1 *", "prompt": "Happy new year", "description": "Say happy new year", "recurring": "false"}); err != nil {
 		t.Fatal(err)
 	}
 	listed, err := call(t, runtime, map[string]string{"action": "list"})
-	if err != nil || listed.Meta["job_count"] != "2" || !strings.Contains(listed.Output, "recurring (7 * * * *)") || !strings.Contains(listed.Output, "one-shot (17 9 1 1 *)") {
+	if err != nil || listed.Meta["job_count"] != "2" || !strings.Contains(listed.Output, "recurring (7 * * * *)") || !strings.Contains(listed.Output, "one-shot (17 9 1 1 *)") ||
+		!strings.Contains(listed.Output, "Check the build queue hourly") {
 		t.Fatalf("list = %q, %v", listed.Output, err)
 	}
 	other := runtime
@@ -48,7 +49,8 @@ func TestCronToolRejectsBadArguments(t *testing.T) {
 	for _, args := range []map[string]string{
 		{"action": "create", "prompt": "x"},
 		{"action": "create", "schedule": "5m"},
-		{"action": "create", "schedule": "5m", "prompt": "x", "recurring": "sometimes"},
+		{"action": "create", "schedule": "5m", "prompt": "x", "description": "x", "recurring": "sometimes"},
+		{"action": "create", "schedule": "5m", "prompt": "x"},
 		{"action": "delete"},
 		{"action": "pause"},
 	} {

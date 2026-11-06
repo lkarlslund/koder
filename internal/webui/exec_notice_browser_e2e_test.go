@@ -43,6 +43,8 @@ func TestExecNoticesShowAsOneLine(t *testing.T) {
 		{id: 'n3', kind: 'user', created_at: '2026-11-03T13:16:08Z', content: {source: 'exec', text: 'event: exec session still running (informational)\nprocess_id: exec_2\ndescription: Start the service again\nruntime: 30m0s\nThe process remains running.'}},
 		{id: 'n4', kind: 'user', created_at: '2026-11-03T13:16:09Z', content: {source: 'exec', text: 'Koder was restarted. The following running processes owned by this chat were terminated during shutdown:\nPrevious runtime recorded at: 2026-11-03T13:22:14Z\n- exec_19 \u2014 Restart serve\n  command: serve\nThese are old exec IDs.'}},
 		{id: 'n6', kind: 'user', created_at: '2026-11-03T13:16:09Z', content: {source: 'monitor', text: 'event: exec session output\nprocess_id: exec_569\ndescription: Download DMR extract into workspace tmp with per-minute progress lines\noutput:\nsize=88M\nsize=119M\n'}},
+		{id: 'n7', kind: 'user', created_at: '2026-11-03T13:16:09Z', content: {source: 'cron', text: 'Recurring cron job 384c4ef8 "Watch the Web Tech Stack service" (*/5 * * * *), which this chat scheduled with the cron tool, is due. Carry out its prompt:\n\nWatchdog for the service on port 8777.'}},
+		{id: 'n8', kind: 'user', created_at: '2026-11-03T13:16:09Z', content: {source: 'cron', text: 'One-shot cron job 06f359c1 (20 16 * * *) was due at Tue 2026-11-03 16:20 CET while Koder was not running. It has been deleted without running. Do not carry it out unless the user asks. Its prompt was:\n\nVerify the extractor.'}},
 		{id: 'n5', kind: 'user', created_at: '2026-11-03T13:16:10Z', content: {source: 'memory', text: 'Memory changed since the memory index in your instructions was written.'}}
 	]`
 	setup := fmt.Sprintf(`(() => {
@@ -68,7 +70,7 @@ func TestExecNoticesShowAsOneLine(t *testing.T) {
 		chromedp.WaitReady(`.transcript`, chromedp.ByQuery),
 		chromedp.Poll(`!!document.documentElement._x_dataStack?.[0]?.toolResultHTML`, nil),
 		chromedp.Evaluate(setup, nil),
-		chromedp.Poll(`[...document.querySelectorAll('.exec-notice-line')].filter(el => el.offsetParent).length === 5`, nil),
+		chromedp.Poll(`[...document.querySelectorAll('.exec-notice-line')].filter(el => el.offsetParent).length === 7`, nil),
 		chromedp.Evaluate(`(async () => {
 			const visible = el => !!el && !!el.offsetParent;
 			const text = el => visible(el) ? el.textContent.trim() : '';
@@ -101,6 +103,8 @@ func TestExecNoticesShowAsOneLine(t *testing.T) {
 		{Title: "Start the service again", Detail: "exec_2 \u00b7 still running \u00b7 30m0s", Badge: "running"},
 		{Title: "Koder restarted: 1 process stopped", Badge: "stopped (error)"},
 		{Title: "Download DMR extract into workspace tmp with per-minute progress lines", Detail: "exec_569 \u00b7 size=119M"},
+		{Title: "Watch the Web Tech Stack service", Detail: "384c4ef8 \u00b7 recurring \u00b7 */5 * * * *"},
+		{Title: "Missed scheduled job 06f359c1", Detail: "06f359c1 \u00b7 one-shot \u00b7 20 16 * * *", Badge: "missed (error)"},
 	}
 	if len(got.Rows) != len(want) {
 		t.Fatalf("rows = %+v", got.Rows)

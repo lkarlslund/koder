@@ -120,7 +120,7 @@ func TestAgentTurnStepsShareOneHeaderWithDetailsPopup(t *testing.T) {
 	wantSteps := []string{
 		"Baseline saved. Deploying the new version.",
 		"Trigger reload and report deploy state",
-		"Wait exec session",
+		"Wait for exec_1",
 		"The new version is deployed and the drain is queued.",
 	}
 	if strings.Join(got.Steps, "\n") != strings.Join(wantSteps, "\n") {

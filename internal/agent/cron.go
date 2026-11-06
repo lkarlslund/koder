@@ -92,12 +92,20 @@ func chatIsOpen(chats []domain.Chat, job cron.Job) bool {
 
 func cronJobText(job cron.Job, delivery cron.Delivery) string {
 	if delivery == cron.Missed {
-		return fmt.Sprintf("One-shot cron job %s (%s) was due at %s while Koder was not running. It has been deleted without running. Do not carry it out unless the user asks. Its prompt was:\n\n%s",
-			job.ID, job.Cron, job.NextRunAt.Local().Format("Mon 2006-01-02 15:04 MST"), job.Prompt)
+		label := ""
+		if job.Description != "" {
+			label = fmt.Sprintf(" %q", job.Description)
+		}
+		return fmt.Sprintf("One-shot cron job %s%s (%s) was due at %s while Koder was not running. It has been deleted without running. Do not carry it out unless the user asks. Its prompt was:\n\n%s",
+			job.ID, label, job.Cron, job.NextRunAt.Local().Format("Mon 2006-01-02 15:04 MST"), job.Prompt)
 	}
 	kind := "One-shot"
 	if job.Recurring {
 		kind = "Recurring"
 	}
-	return fmt.Sprintf("%s cron job %s (%s), which this chat scheduled with the cron tool, is due. Carry out its prompt:\n\n%s", kind, job.ID, job.Cron, strings.TrimSpace(job.Prompt))
+	label := ""
+	if job.Description != "" {
+		label = fmt.Sprintf(" %q", job.Description)
+	}
+	return fmt.Sprintf("%s cron job %s%s (%s), which this chat scheduled with the cron tool, is due. Carry out its prompt:\n\n%s", kind, job.ID, label, job.Cron, strings.TrimSpace(job.Prompt))
 }

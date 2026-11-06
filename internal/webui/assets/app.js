@@ -545,6 +545,8 @@
       const status = normalizedToolStatus(tool);
       const exitCode = String(toolExitCode(tool));
       if (status === 'done' && (exitCode === '' || exitCode === '0')) return '';
+      // A command stopped on request ends with a signal; that is the expected result.
+      if (status === 'done' && String((tool && tool.tool) || '') === 'exec_session' && toolAction(tool) === 'terminate') return '';
       return toolStatusBadgeText(tool);
     }
     // toolLineDetailText is a short fact after the title, such as the size of an edit.
@@ -684,9 +686,27 @@
     }
     // execNotice reads an exec or monitor notification, which is written for
     // the model, into the parts its one-line row and the inspector show.
+    // cronNotice reads the message a due or missed cron job leaves in its chat.
+    function cronNotice(text) {
+      const match = text.match(/^(One-shot|Recurring) cron job (\S+)(?: ("(?:[^"\\]|\\.)*"))? \(([^)]*)\)(, which this chat scheduled with the cron tool, is due| was due at [^]*? while Koder was not running)/);
+      if (!match) return null;
+      let label = '';
+      try { label = match[3] ? JSON.parse(match[3]) : ''; } catch (_) { label = ''; }
+      const missed = !match[5].startsWith(',');
+      const prompt = text.includes('\n\n') ? text.slice(text.indexOf('\n\n') + 2) : text;
+      return {
+        title: label || (missed ? 'Missed scheduled job ' : 'Scheduled job ') + match[2],
+        detail: [match[2], match[1].toLowerCase(), match[4]].join(' \u00b7 '),
+        badge: missed ? 'missed' : '', badgeClass: missed ? 'tool-status-badge-error' : '',
+        fields: [{label: 'job id', value: match[2]}, {label: 'schedule', value: match[1] + ' \u00b7 ' + match[4]}],
+        output: prompt,
+      };
+    }
     function execNotice(item) {
-      if (!['exec', 'monitor'].includes(userMessageSourceValue(item))) return null;
+      const source = userMessageSourceValue(item);
       const text = String(firstValue(userMessageContent(item), ['text', 'Text']) || '');
+      if (source === 'cron') return cronNotice(text);
+      if (!['exec', 'monitor'].includes(source)) return null;
       if (text.startsWith('Koder was restarted')) {
         const count = splitLines(text).filter(line => /^- exec_/.test(line)).length;
         const stopped = text.includes('were terminated during shutdown');
@@ -1017,13 +1037,94 @@
       const max = 96;
       return text.length > max ? text.slice(0, max - 1) + '…' : text;
     }
-    function toolTitleText(tool) {
+    function quoted(value) {
+      const text = String(value || '').replace(/\s+/g, ' ').trim();
+      return text ? '“' + text + '”' : '';
+    }
+    function urlLabel(value) {
+      const text = String(value || '').trim();
+      try {
+        const url = new URL(text);
+        return url.host + (url.pathname === '/' ? '' : url.pathname) + url.search + url.hash;
+      } catch (_) { return text; }
+    }
+    function humanToolName(kind) {
+      const text = String(kind || '').replaceAll('_', ' ').trim();
+      return text ? text.charAt(0).toUpperCase() + text.slice(1) : 'Tool';
+    }
+    function jsonArrayLength(value) {
+      if (Array.isArray(value)) return value.length;
+      try { const parsed = JSON.parse(String(value || '')); return Array.isArray(parsed) ? parsed.length : 0; } catch (_) { return 0; }
+    }
+    function firstQuestion(value) {
+      try {
+        const parsed = Array.isArray(value) ? value : JSON.parse(String(value || '[]'));
+        return String(parsed?.[0]?.question || '').trim();
+      } catch (_) { return ''; }
+    }
+    function browserTitle(kind, action, args) {
+      const target = quoted(firstValue(args, ['target', 'query', 'text']));
+      switch (kind) {
+        case 'browser_tabs':
+          if (action === 'create') return firstValue(args, ['url']) ? 'Open tab ' + urlLabel(firstValue(args, ['url'])) : 'Open tab';
+          if (action === 'list') return 'List browser tabs';
+          if (action === 'select') return 'Switch browser tab';
+          if (action === 'close') return 'Close browser tab';
+          break;
+        case 'browser_navigation':
+          if (action === 'goto') return 'Go to ' + urlLabel(firstValue(args, ['url']));
+          if (action === 'reload') return 'Reload page';
+          if (action === 'back') return 'Go back';
+          if (action === 'forward') return 'Go forward';
+          break;
+        case 'browser_page':
+          if (action === 'snapshot') return 'Read page';
+          if (action === 'find') return target ? 'Find ' + target + ' on page' : 'Find on page';
+          if (action === 'wait') return target ? 'Wait for ' + target : 'Wait for page';
+          break;
+        case 'browser_interact':
+          if (action === 'navigate') return 'Go to ' + urlLabel(firstValue(args, ['url']));
+          if (action === 'press') return 'Press ' + (firstValue(args, ['key']) || 'key');
+          if (action === 'type' || action === 'fill') return target ? (action === 'type' ? 'Type into ' : 'Fill ') + target : actionLabel(action) + ' field';
+          if (action === 'select') return firstValue(args, ['value']) ? 'Choose ' + quoted(firstValue(args, ['value'])) + (target ? ' in ' + target : '') : 'Choose option';
+          if (action === 'scroll') return 'Scroll page';
+          if (action === 'upload') return 'Upload file';
+          if (action) return actionLabel(action) + (target ? ' ' + target : '');
+          break;
+        case 'browser_capture':
+          if (action === 'screenshot') return 'Take screenshot';
+          if (action === 'pdf') return 'Save page as PDF';
+          if (action === 'image') return 'Save image';
+          break;
+        case 'browser_network':
+          if (action === 'list') return 'List network requests';
+          if (action === 'get_request') return 'Inspect network request';
+          if (action === 'get_response_body') return firstValue(args, ['save_to_file']) ? 'Save response body to ' + fileName(firstValue(args, ['save_to_file'])) : 'Read response body';
+          break;
+        case 'browser_downloads':
+          if (action === 'list') return 'List downloads';
+          return 'Get download';
+        case 'browser_download': return 'Save download';
+        case 'browser_console': return 'Read browser console';
+        case 'browser_evaluate': return 'Run script in page';
+        case 'browser_status': return 'Check browser';
+        case 'browser_task': return firstValue(args, ['goal']) ? 'Browser task: ' + String(firstValue(args, ['goal'])).replace(/\s+/g, ' ').trim() : 'Browser task';
+      }
+      return [actionLabel(action), humanToolName(kind)].filter(Boolean).join(' ');
+    }
+    // toolTitleText names a tool call in plain words: what it did, and to
+    // what. names resolves IDs to labels: execLabel(process id), chatName(chat
+    // id) and cronLabel(job id).
+    function toolTitleText(tool, names = {}) {
       const kind = String((tool && tool.tool) || '');
       const data = toolData(tool);
       const args = toolArgs(tool);
+      const action = toolAction(tool);
       const path = firstValue(data, ['path', 'Path']) || firstValue(args, ['path']);
       const command = firstValue(data, ['command', 'Command']) || firstValue(args, ['command', 'cmd']);
       const description = firstValue(data, ['description', 'Description']) || firstValue(args, ['description']) || firstValue(data, ['comment', 'Comment']) || firstValue(args, ['comment']);
+      const chatName = id => (names.chatName && names.chatName(id)) || 'chat';
+      if (kind.startsWith('browser_')) return browserTitle(kind, action, args);
       switch (kind) {
         case 'file_read': return readTitle(path, args, data);
         case 'file_write': return path ? 'Write ' + fileName(path) : 'Write file';
@@ -1033,48 +1134,137 @@
           return 'Run command';
         }
         case 'exec_command': return description || compactCommandLabel(command) || 'Exec';
-        case 'exec_session': return actionLabel(toolAction(tool)) + ' exec session';
-        case 'exec_status': return 'Exec status';
-        case 'exec_list': return 'Exec sessions';
-        case 'exec_write_stdin': return 'Write exec stdin';
-        case 'exec_resize': return 'Resize exec';
-        case 'exec_terminate': return 'Terminate exec';
-        case 'exec_cleanup_background': return 'Clean exec sessions';
-        case 'file_grep': return 'Search ' + (firstValue(data, ['pattern', 'Pattern']) || firstValue(args, ['pattern']));
-        case 'file_glob': return 'Glob ' + (firstValue(data, ['pattern', 'Pattern']) || firstValue(args, ['pattern']));
-        case 'web_fetch': return 'Fetch ' + (firstValue(data, ['url', 'URL']) || firstValue(args, ['url']));
-        case 'web_search': return description || 'Search web ' + (firstValue(data, ['query', 'Query']) || firstValue(args, ['query']));
-		case 'show_media': return path ? 'Show media ' + path : 'Show media';
-		case 'show_image': return path ? 'Show image ' + path : 'Show image';
-		case 'offer_file': return path ? 'Offer file ' + path : 'Offer file';
+        case 'exec_session': {
+          const id = firstValue(args, ['process_id']) || firstValue(data, ['process_id', 'ProcessID']);
+          const known = description || (names.execLabel && names.execLabel(id));
+          const label = known ? quoted(known) : (id || 'command');
+          switch (action) {
+            case 'wait': return 'Wait for ' + label;
+            case 'status': return 'Check ' + label;
+            case 'terminate': return 'Stop ' + label;
+            case 'send_input': return 'Send input to ' + label;
+            case 'resize': return 'Resize ' + label;
+            case 'list': return 'List running commands';
+            case 'cleanup': return 'Clean up finished commands';
+          }
+          return actionLabel(action) + ' ' + label;
+        }
+        case 'exec_status': return 'Check command';
+        case 'exec_list': return 'List running commands';
+        case 'exec_write_stdin': return 'Send input to command';
+        case 'exec_resize': return 'Resize command';
+        case 'exec_terminate': return 'Stop command';
+        case 'exec_cleanup': return 'Clean up finished commands';
+        case 'file_grep': return 'Search files for ' + quoted(firstValue(data, ['pattern', 'Pattern']) || firstValue(args, ['pattern']));
+        case 'file_glob': return 'Find files ' + (firstValue(data, ['pattern', 'Pattern']) || firstValue(args, ['pattern']));
+        case 'code_search': {
+          const query = quoted(firstValue(args, ['query']));
+          if (action === 'workspace_symbol') return 'Find symbol ' + query;
+          if (action === 'document_symbols') return 'List symbols in ' + fileName(path);
+          if (action === 'definition') return 'Find definition in ' + fileName(path);
+          if (action === 'references') return 'Find references in ' + fileName(path);
+          if (action === 'languages') return 'List code languages';
+          return 'Search code ' + query;
+        }
+        case 'lint': return path ? 'Check ' + fileName(path) : 'Check code';
+        case 'web_fetch': return 'Fetch ' + urlLabel(firstValue(data, ['url', 'URL']) || firstValue(args, ['url']));
+        case 'web_search': return description || 'Search web for ' + quoted(firstValue(data, ['query', 'Query']) || firstValue(args, ['query']));
+        case 'view_image': return path ? 'View ' + fileName(path) : 'View image';
+        case 'view_pdf': {
+          const page = firstValue(args, ['page', 'pages']);
+          return (path ? 'View ' + fileName(path) : 'View PDF') + (page ? ', page ' + page : '');
+        }
+        case 'show_media': return path ? 'Show ' + fileName(path) : 'Show media';
+        case 'show_image': return path ? 'Show image ' + path : 'Show image';
+        case 'offer_file': return path ? 'Offer ' + fileName(path) : 'Offer file';
         case 'present': {
-          const action = toolAction(tool) || 'content';
-          if (action === 'media') return path ? 'Show media ' + path : 'Show media';
-          if (action === 'file') return path ? 'Offer file ' + path : 'Offer file';
-          return firstValue(args, ['title']) ? 'Present ' + firstValue(args, ['title']) : 'Present content';
+          const title = firstValue(args, ['title']);
+          if (action === 'media') return title ? 'Show ' + title : (path ? 'Show ' + fileName(path) : 'Show media');
+          if (action === 'file') return 'Offer ' + (title || fileName(path) || 'file');
+          return title ? 'Present ' + title : 'Present content';
         }
         case 'chats': {
-          const action = toolAction(tool);
-          if (['queue', 'steer', 'interrupt'].includes(action)) return actionLabel(action) + ' chat ' + (firstValue(args, ['chat_id', 'ChatID']) || '');
-          return actionLabel(action) + ' chat';
+          const id = firstValue(args, ['chat_id', 'ChatID']);
+          switch (action) {
+            case 'start': return 'Start chat' + (firstValue(args, ['title']) ? ' ' + quoted(firstValue(args, ['title'])) : '');
+            case 'list': return 'List chats';
+            case 'steer': return 'Steer ' + chatName(id);
+            case 'queue': return 'Send message to ' + chatName(id);
+            case 'interrupt': return 'Interrupt ' + chatName(id);
+            case 'cancel': return 'Cancel ' + chatName(id);
+            case 'archive': return 'Archive ' + chatName(id);
+            case 'rename': return 'Rename ' + chatName(id);
+            case 'status': return 'Check ' + chatName(id);
+          }
+          return [actionLabel(action), 'chat'].filter(Boolean).join(' ');
         }
-        case 'milestones': return actionLabel(toolAction(tool)) + ' milestone';
-        case 'tasks': return actionLabel(toolAction(tool)) + ' task';
+        case 'chat_send': return 'Send message to ' + chatName(firstValue(args, ['chat_id', 'ChatID']));
+        case 'chat_status': {
+          const summary = String(firstValue(args, ['summary']) || '').replace(/\s+/g, ' ').trim();
+          return summary ? 'Report progress: ' + summary : 'Report progress';
+        }
+        case 'sessions': return [actionLabel(action), 'session'].filter(Boolean).join(' ');
+        case 'milestones': {
+          const key = firstValue(args, ['milestone_key']);
+          switch (action) {
+            case 'create': return 'Add milestone ' + quoted(firstValue(args, ['title']));
+            case 'list': return 'List milestones';
+            case 'update': return 'Update milestone ' + (quoted(firstValue(args, ['title'])) || key);
+            case 'set_dependency': return 'Make ' + key + ' wait for ' + firstValue(args, ['depends_on_key']);
+            case 'archive': return 'Archive milestone ' + key;
+            case 'delete': return 'Delete milestone ' + key;
+          }
+          return [actionLabel(action), 'milestone', key].filter(Boolean).join(' ');
+        }
+        case 'tasks': {
+          const key = firstValue(args, ['task_key']);
+          switch (action) {
+            case 'create': {
+              const count = jsonArrayLength(firstValue(args, ['items']));
+              return count === 1 ? 'Add 1 task' : count ? 'Add ' + count + ' tasks' : 'Add tasks';
+            }
+            case 'list': return 'List tasks';
+            case 'update': return firstValue(args, ['status']) ? 'Mark ' + key + ' ' + String(firstValue(args, ['status'])).replaceAll('_', ' ') : 'Update ' + key;
+            case 'fetch_next': return 'Take the next task';
+            case 'archive': return 'Archive ' + key;
+            case 'delete': return 'Delete ' + key;
+          }
+          return [actionLabel(action), 'task', key].filter(Boolean).join(' ');
+        }
+        case 'memory': {
+          const name = firstValue(args, ['name']);
+          switch (action) {
+            case 'list': return 'List memories';
+            case 'get': return 'Recall ' + name;
+            case 'create': return name ? 'Remember ' + name : 'Remember';
+            case 'remember': return 'Remember ' + quoted(String(firstValue(args, ['content']) || '').split(/[.\n]/)[0]);
+            case 'update': return 'Update memory ' + name;
+            case 'delete': return 'Forget ' + name;
+          }
+          return ['Memory', action, name].filter(Boolean).join(' ');
+        }
+        case 'cron': {
+          const id = firstValue(args, ['id']);
+          if (action === 'create') return 'Schedule ' + (description ? quoted(description) : 'job') + (firstValue(args, ['schedule']) ? ' (' + firstValue(args, ['schedule']) + ')' : '');
+          if (action === 'delete') {
+            const label = names.cronLabel && names.cronLabel(id);
+            return 'Cancel scheduled job ' + (label ? quoted(label) : id);
+          }
+          if (action === 'list') return 'List scheduled jobs';
+          return 'Scheduled jobs';
+        }
+        case 'request_user_input': {
+          const question = firstQuestion(firstValue(args, ['questions']));
+          return question ? 'Ask you: ' + question : 'Ask you';
+        }
+        case 'skill': return 'Load skill ' + (firstValue(args, ['name']) || '');
         case 'mcp': {
           const call = mcpCallDetails(tool);
-          if (call.name && call.action) return call.name + ' · ' + call.action;
-          return call.name || 'MCP tool';
+          const name = call.name.replaceAll('_', ' ');
+          if (name && call.action) return actionLabel(call.action) + ' ' + name;
+          return name ? humanToolName(name) : 'MCP tool';
         }
-        case 'browser_tabs':
-        case 'browser_navigation':
-        case 'browser_page':
-        case 'browser_interact':
-        case 'browser_capture':
-        case 'browser_network':
-        case 'browser_downloads': return actionLabel(toolAction(tool)) + ' ' + kind.replaceAll('_', ' ');
-        case 'chat_send': return 'Message chat ' + (firstValue(args, ['chat_id', 'ChatID']) || '');
-        case 'memory': return ['Memory', toolAction(tool), firstValue(args, ['scope']), firstValue(args, ['name'])].filter(Boolean).join(' ');
-        default: return kind || 'Tool';
+        default: return [actionLabel(action), humanToolName(kind)].filter(Boolean).join(' ');
       }
     }
     function execResultLines(data, fallback) {
@@ -3152,7 +3342,7 @@ function timeoutLabel(value) {
           const next = Date.parse(job?.next_run_at || '');
           return {
             key: 'job:' + job.id, kind: 'job', ref: job,
-            icon: job?.recurring ? 'bi-arrow-repeat' : 'bi-alarm', title: job?.prompt || job?.id || 'Scheduled prompt',
+            icon: job?.recurring ? 'bi-arrow-repeat' : 'bi-alarm', title: job?.description || job?.prompt || job?.id || 'Scheduled prompt',
             subtitle: (job?.recurring ? 'Repeats · ' : 'Once · ') + this.cronJobNextRun(job),
             time: isNaN(next) ? '' : 'in ' + activityDuration(Math.max(0, next - now)), timeTitle: 'Next run',
             status: {icon: 'bi-clock', cls: 'text-secondary', label: job?.recurring ? 'Recurring' : 'One-shot'},
@@ -3349,7 +3539,7 @@ function timeoutLabel(value) {
         turnStepSummary(step) {
           const text = String(step?.content?.text || '').trim().split('\n')[0];
           if (text) return text.length > 120 ? text.slice(0, 119) + '\u2026' : text;
-          return (step?.content?.tools || []).map(tool => toolTitleText(tool)).join(' \u00b7 ');
+          return (step?.content?.tools || []).map(tool => this.toolTitle(tool)).join(' \u00b7 ');
         },
         assistantPerformanceLabel(item) {
           const values = this.assistantPerformanceValues(item);
@@ -3434,7 +3624,7 @@ function timeoutLabel(value) {
           if (!notice) return;
           const time = this.formatItemTime(item);
           this.toolInspector = {
-            open: true, icon: 'bi-terminal', title: notice.title, subtitle: notice.detail,
+            open: true, icon: userMessageIconClass(item), title: notice.title, subtitle: notice.detail,
             badge: notice.badge, badgeClass: notice.badgeClass,
             meta: [...(time ? [{label: 'time', value: time}] : []), ...notice.fields],
             command: '', output: notice.output, resultHTML: '',
@@ -4366,9 +4556,49 @@ function timeoutLabel(value) {
 		  if (String(kind || '').startsWith('browser_')) return 'bi-window';
 		  if (kind === 'chats') return 'bi-chat-left-text';
 		  if (kind === 'milestones' || kind === 'tasks') return 'bi-list-check';
+          if (kind === 'chat_send' || kind === 'chat_status') return 'bi-chat-left-text';
+          if (kind === 'cron') return 'bi-alarm';
+          if (kind === 'memory') return 'bi-journal-bookmark';
+          if (kind === 'code_search' || kind === 'lint') return 'bi-code-slash';
+          if (kind === 'skill') return 'bi-book';
+          if (kind === 'mcp') return 'bi-plug';
           return 'bi-wrench-adjustable';
         },
-        toolTitle(tool) { return toolTitleText(tool); },
+        toolTitle(tool) { return toolTitleText(tool, this.toolTitleNames()); },
+        // toolTitleNames resolves the IDs in tool calls to names the user knows.
+        toolTitleNames() {
+          return {
+            execLabel: id => {
+              if (!id) return '';
+              const process = this.allExecProcesses().find(p => (p.process_id || p.ProcessID) === id);
+              if (process && (process.label || process.Label)) return process.label || process.Label;
+              for (const item of this.timeline()) {
+                for (const call of item?.content?.tools || []) {
+                  if (call.tool !== 'exec_command') continue;
+                  const data = toolData(call);
+                  if (firstValue(data, ['process_id', 'ProcessID']) === id) return firstValue(data, ['description', 'Description']) || firstValue(toolArgs(call), ['description']) || '';
+                }
+              }
+              return '';
+            },
+            chatName: id => {
+              const chat = this.chatByID(id);
+              return chat ? quoted(this.chatTitle(chat)) : '';
+            },
+            cronLabel: id => {
+              if (!id) return '';
+              const job = this.cronJobs().find(j => (j.id || j.ID) === id);
+              if (job && (job.description || job.Description)) return job.description || job.Description;
+              for (const item of this.timeline()) {
+                for (const call of item?.content?.tools || []) {
+                  if (call.tool !== 'cron' || toolAction(call) !== 'create') continue;
+                  if (String(toolResultText(call) || '').includes(' job ' + id + ' ')) return firstValue(toolArgs(call), ['description']) || '';
+                }
+              }
+              return '';
+            },
+          };
+        },
         toolStatusBadge(tool) { return toolStatusBadgeText(tool); },
         toolStatusBadgeClass(tool) { return toolStatusBadgeClassName(tool); },
         toolCallID(tool) { return tool?.tool_call_id || tool?.ToolCallID || ''; },
@@ -4441,8 +4671,8 @@ function timeoutLabel(value) {
           this.toolInspector = {
             open: true,
             icon: this.toolIcon(kind),
-            title: toolTitleText(tool),
-            subtitle: command && description ? '' : (description && description !== toolTitleText(tool) ? description : ''),
+            title: this.toolTitle(tool),
+            subtitle: command && description ? '' : (description && description !== this.toolTitle(tool) ? description : ''),
             badge: toolStatusBadgeText(tool),
             badgeClass: toolStatusBadgeClassName(tool),
             meta,

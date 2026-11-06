@@ -18,7 +18,7 @@ func TestSidebarListsFilterAndMarkScheduledChats(t *testing.T) {
 	workdir := t.TempDir()
 	ctrl, _, st := newTestControllerAndEngine(t, workdir)
 	state := selectedTestState(t, ctrl)
-	if _, err := cron.NewScheduler(st, nil).Create(context.Background(), state.Session.ID, state.ActiveChatID, "0 9 * * *", "Check the build", true); err != nil {
+	if _, err := cron.NewScheduler(st, nil).Create(context.Background(), state.Session.ID, state.ActiveChatID, "0 9 * * *", "Check the build", "Check the build every morning", true); err != nil {
 		t.Fatalf("create cron job: %v", err)
 	}
 

@@ -56,6 +56,8 @@ a final run. A one-shot job that came due while Koder was not running is not
 run; the chat is told it was missed. A recurring job skips the runs it missed.
 Jobs of a deleted or archived chat are dropped when they come due. A chat sees
 and deletes only its own jobs, at most 20 of them.
+Each job has a one-sentence description, which the transcript, the activity
+list and the due notice show in place of the prompt.
 
 `web_search` runs through the providers in `internal/websearch`: Exa, Brave,
 Tavily, Parallel, Perplexity, Serper, You.com, Firecrawl, Linkup, Mojeek, Jina,

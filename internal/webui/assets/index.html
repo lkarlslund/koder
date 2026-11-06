@@ -754,7 +754,7 @@
     <section class="tool-command-modal bg-body border rounded shadow" role="dialog" aria-modal="true" aria-label="Scheduled prompt">
       <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
         <div class="min-w-0">
-          <div class="fw-semibold"><i class="bi me-1" :class="cronJobModalJob()?.recurring ? 'bi-arrow-repeat' : 'bi-alarm'"></i> Scheduled prompt</div>
+          <div class="fw-semibold"><i class="bi me-1" :class="cronJobModalJob()?.recurring ? 'bi-arrow-repeat' : 'bi-alarm'"></i> <span x-text="cronJobModalJob()?.description || 'Scheduled prompt'"></span></div>
           <div class="small text-secondary text-truncate" x-text="cronJobModalJob() ? 'Next run ' + cronJobNextRun(cronJobModalJob()) : 'This job has run or been deleted'"></div>
         </div>
         <div class="d-flex align-items-center gap-2">

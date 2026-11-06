@@ -32,7 +32,7 @@ func TestCronJobReachesItsChatAsANotification(t *testing.T) {
 
 	// The cron tool reaches the engine's scheduler.
 	evt, err := engine.handleModelToolCall(ctx, session, chat, tools.Request{Tool: tools.Cron, Args: map[string]string{
-		"action": "create", "schedule": "7 * * * *", "prompt": "Check the build queue",
+		"action": "create", "schedule": "7 * * * *", "prompt": "Check the build queue", "description": "Watch the build queue",
 	}})
 	if err != nil || !strings.Contains(evt.Text, "Scheduled recurring job") {
 		t.Fatalf("create = %#v, %v", evt, err)
@@ -58,12 +58,12 @@ func TestCronJobReachesItsChatAsANotification(t *testing.T) {
 		snapshot := rt.Snapshot()
 		found := false
 		for _, item := range snapshot.Timeline {
-			if user, ok := item.Content.(domain.UserMessage); ok && user.Source == domain.UserMessageSourceCron && strings.Contains(user.Text, "Check the build queue") {
+			if user, ok := item.Content.(domain.UserMessage); ok && user.Source == domain.UserMessageSourceCron && strings.Contains(user.Text, "Check the build queue") && strings.Contains(user.Text, `"Watch the build queue"`) {
 				found = true
 			}
 		}
 		for _, queued := range snapshot.Chat.QueuedInputs {
-			if queued.Origin == domain.QueuedInputOriginCron {
+			if queued.Origin == domain.QueuedInputOriginCron && strings.Contains(queued.Text, `"Watch the build queue"`) {
 				found = true
 			}
 		}

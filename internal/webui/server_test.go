@@ -2296,7 +2296,7 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	for _, mcpRenderer := range []string{
 		`function mcpCallDetails(tool)`,
-		`return call.name + ' · ' + call.action`,
+		`if (name && call.action) return actionLabel(call.action) + ' ' + name`,
 		`args = {server: call.server, tool: call.name, ...call.args}`,
 		`if (kind === 'mcp') return renderCompactBlock(toolTitleText(tool), toolResultText(tool))`,
 	} {
@@ -2315,7 +2315,7 @@ func TestIndexServesHTML(t *testing.T) {
 		}
 	}
 	if !strings.Contains(fullPage, `function chatSendMessage(args)`) ||
-		!strings.Contains(fullPage, `case 'chat_send': return 'Message chat '`) ||
+		!strings.Contains(fullPage, `case 'chat_send': return 'Send message to '`) ||
 		!strings.Contains(fullPage, `if (kind === 'chat_send') return renderCompactBlock('Sent message', chatSendMessage(args) || toolResultText(tool))`) {
 		t.Fatalf("expected chat_send to render the sent message instead of the chat status result")
 	}

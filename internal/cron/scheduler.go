@@ -46,10 +46,12 @@ type Job struct {
 	SessionID id.ID  `json:"session_id"`
 	ChatID    id.ID  `json:"chat_id"`
 	// Cron is the 5-field schedule in the server's local time.
-	Cron      string    `json:"cron"`
-	Prompt    string    `json:"prompt"`
-	Recurring bool      `json:"recurring"`
-	CreatedAt time.Time `json:"created_at"`
+	Cron   string `json:"cron"`
+	Prompt string `json:"prompt"`
+	// Description says in one sentence, for the user, what the job does.
+	Description string    `json:"description,omitempty"`
+	Recurring   bool      `json:"recurring"`
+	CreatedAt   time.Time `json:"created_at"`
 	// NextRunAt is when the job runs next, its fixed offset included.
 	NextRunAt   time.Time `json:"next_run_at"`
 	LastFiredAt time.Time `json:"last_fired_at,omitzero"`
@@ -139,8 +141,8 @@ func NewScheduler(st *store.Store, deliver Deliver) *Scheduler {
 }
 
 // Create schedules prompt in a chat. spec is a cron expression or an
-// interval such as 5m.
-func (s *Scheduler) Create(ctx context.Context, sessionID, chatID id.ID, spec, prompt string, recurring bool) (Job, error) {
+// interval such as 5m; description labels the job for the user.
+func (s *Scheduler) Create(ctx context.Context, sessionID, chatID id.ID, spec, prompt, description string, recurring bool) (Job, error) {
 	if sessionID == "" || chatID == "" {
 		return Job{}, errors.New("cron jobs need a persisted chat")
 	}
@@ -155,14 +157,14 @@ func (s *Scheduler) Create(ctx context.Context, sessionID, chatID id.ID, spec, p
 	if err != nil {
 		return Job{}, err
 	}
-	job, err := s.create(ctx, sessionID, chatID, expr, prompt, recurring)
+	job, err := s.create(ctx, sessionID, chatID, expr, prompt, strings.TrimSpace(description), recurring)
 	if err == nil {
 		s.changed()
 	}
 	return job, err
 }
 
-func (s *Scheduler) create(ctx context.Context, sessionID, chatID id.ID, expr, prompt string, recurring bool) (Job, error) {
+func (s *Scheduler) create(ctx context.Context, sessionID, chatID id.ID, expr, prompt, description string, recurring bool) (Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	existing, err := s.listLocked(ctx, chatID)
@@ -173,7 +175,7 @@ func (s *Scheduler) create(ctx context.Context, sessionID, chatID id.ID, expr, p
 		return Job{}, fmt.Errorf("this chat already has %d cron jobs; delete one first", len(existing))
 	}
 	now := s.now()
-	job := Job{ID: newJobID(), SessionID: sessionID, ChatID: chatID, Cron: expr, Prompt: prompt, Recurring: recurring, CreatedAt: now.UTC()}
+	job := Job{ID: newJobID(), SessionID: sessionID, ChatID: chatID, Cron: expr, Prompt: prompt, Description: description, Recurring: recurring, CreatedAt: now.UTC()}
 	next, ok := s.nextRun(job, now)
 	if !ok {
 		return Job{}, fmt.Errorf("cron expression %q matches no time in the next %d years", expr, searchYears)

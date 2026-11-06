@@ -21,7 +21,7 @@ const serviceKey = "cron"
 // Control schedules, lists and deletes a chat's jobs; *cron.Scheduler
 // implements it.
 type Control interface {
-	Create(ctx context.Context, sessionID, chatID id.ID, spec, prompt string, recurring bool) (cron.Job, error)
+	Create(ctx context.Context, sessionID, chatID id.ID, spec, prompt, description string, recurring bool) (cron.Job, error)
 	List(ctx context.Context, chatID id.ID) ([]cron.Job, error)
 	Delete(ctx context.Context, chatID id.ID, jobID string) (cron.Job, error)
 }
@@ -38,6 +38,7 @@ const parameters = `{"type":"object","properties":{` +
 	`"action":{"type":"string","enum":["create","list","delete"],"description":"create schedules a prompt; list shows this chat's jobs; delete cancels one."},` +
 	`"schedule":{"type":"string","description":"For create: a 5-field cron expression in the server's local time (minute hour day-of-month month day-of-week), e.g. \"3 9 * * 1-5\", or an interval: 5m, 2h or 1d."},` +
 	`"prompt":{"type":"string","description":"For create: the prompt to run in this chat when the job comes due. Write it so it makes sense on its own when it arrives later."},` +
+	`"description":{"type":"string","description":"For create, required: one short sentence for the user saying what the job does, such as \"Check the import queue every morning\"."},` +
 	`"recurring":{"type":"boolean","description":"For create: true (the default) runs on every match of the schedule; false runs once at the first match and then deletes the job."},` +
 	`"id":{"type":"string","description":"For delete: the job ID from create or list."}` +
 	`},"required":["action"],"additionalProperties":false}`
@@ -55,6 +56,7 @@ func init() {
 			"Each job runs at a fixed offset: a recurring job up to 10% of its period late (at most 15 minutes), a one-shot job on :00 or :30 up to 90 seconds early; tell the user the next run time the result gives, not the minute in the expression. " +
 			"Recurring jobs expire after 7 days: they run once more and are deleted; mention this when scheduling one. " +
 			"A one-shot job that came due while Koder was not running is not run; the chat is told it was missed. " +
+			"Give each new job a description: one short sentence for the user, shown instead of the prompt. " +
 			"Jobs survive restarts. To react the moment a command's output changes, watch it with an exec session instead; cron runs on the clock.",
 		Parameters:  parameters,
 		ExposeToLLM: true,
@@ -70,6 +72,9 @@ func (tool) Preview(req tools.Request) string {
 	args := req.Args
 	switch args["action"] {
 	case "create":
+		if args["description"] != "" {
+			return args["description"]
+		}
 		return strings.TrimSpace(args["schedule"] + ": " + textutil.Ellipsize(strings.Join(strings.Fields(args["prompt"]), " "), 80))
 	case "delete":
 		return "delete " + args["id"]
@@ -85,8 +90,9 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	case "create":
 		out["schedule"] = strings.Join(strings.Fields(args["schedule"]), " ")
 		out["prompt"] = strings.TrimSpace(args["prompt"])
-		if out["schedule"] == "" || out["prompt"] == "" {
-			return nil, errors.New("create needs a schedule and a prompt")
+		out["description"] = tools.NormalizeDescription(args["description"])
+		if out["schedule"] == "" || out["prompt"] == "" || out["description"] == "" {
+			return nil, errors.New("create needs a schedule, a prompt and a description")
 		}
 		out["recurring"] = "true"
 		if raw := strings.TrimSpace(args["recurring"]); raw != "" {
@@ -118,7 +124,7 @@ func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) 
 	}
 	switch args["action"] {
 	case "create":
-		job, err := control.Create(ctx, runtime.SessionID, runtime.ChatID, args["schedule"], args["prompt"], args["recurring"] == "true")
+		job, err := control.Create(ctx, runtime.SessionID, runtime.ChatID, args["schedule"], args["prompt"], args["description"], args["recurring"] == "true")
 		if err != nil {
 			return tools.Result{}, err
 		}
@@ -139,7 +145,7 @@ func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) 
 }
 
 func result(job cron.Job, text string) tools.Result {
-	return tools.Result{Output: text, Meta: map[string]string{"job_id": job.ID, "cron": job.Cron}}
+	return tools.Result{Output: text, Meta: map[string]string{"job_id": job.ID, "cron": job.Cron, "description": job.Description}}
 }
 
 func createdText(job cron.Job) string {
@@ -161,7 +167,11 @@ func listText(jobs []cron.Job) string {
 		if job.Recurring {
 			kind = "recurring"
 		}
-		fmt.Fprintf(&b, "- %s %s (%s), next run %s: %s\n", job.ID, kind, job.Cron, when(job.NextRunAt), textutil.Ellipsize(strings.Join(strings.Fields(job.Prompt), " "), 200))
+		label := job.Description
+		if label == "" {
+			label = textutil.Ellipsize(strings.Join(strings.Fields(job.Prompt), " "), 200)
+		}
+		fmt.Fprintf(&b, "- %s %s (%s), next run %s: %s\n", job.ID, kind, job.Cron, when(job.NextRunAt), label)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

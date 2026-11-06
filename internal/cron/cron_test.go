@@ -87,11 +87,11 @@ func TestSchedulerRunsOneShotOnceAndRecurringAgain(t *testing.T) {
 		got = append(got, delivered{job, d})
 		return nil
 	})
-	once, err := s.Create(ctx, "s1", "c1", "17 10 30 10 *", "check the deploy", false)
+	once, err := s.Create(ctx, "s1", "c1", "17 10 30 10 *", "check the deploy", "test job", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	every, err := s.Create(ctx, "s1", "c1", "1h", "look at the queue", true)
+	every, err := s.Create(ctx, "s1", "c1", "1h", "look at the queue", "test job", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,8 +130,8 @@ func TestSchedulerReportsMissedOneShotAndSkipsMissedRecurring(t *testing.T) {
 		got = append(got, delivered{job, d})
 		return nil
 	})
-	once, _ := s.Create(ctx, "s1", "c1", "17 10 30 10 *", "check the deploy", false)
-	every, _ := s.Create(ctx, "s1", "c1", "17 * * * *", "look at the queue", true)
+	once, _ := s.Create(ctx, "s1", "c1", "17 10 30 10 *", "check the deploy", "test job", false)
+	every, _ := s.Create(ctx, "s1", "c1", "17 * * * *", "look at the queue", "test job", true)
 	c.now = at(t, "2026-10-30 13:00") // Koder was down for hours
 	s.tick(ctx)
 	if len(got) != 1 || got[0].job.ID != once.ID || got[0].delivery != Missed {
@@ -152,7 +152,7 @@ func TestSchedulerDropsJobsOfGoneChatsAndExpiresRecurring(t *testing.T) {
 		}
 		return nil
 	})
-	job, _ := s.Create(ctx, "s1", "c1", "1d", "summarize the day", true)
+	job, _ := s.Create(ctx, "s1", "c1", "1d", "summarize the day", "test job", true)
 	c.now = job.NextRunAt.Add(RecurringMaxAge)
 	// Line the clock up with a run, a week on.
 	next, _ := s.nextRun(job, c.now.Add(-24*time.Hour))
@@ -167,7 +167,7 @@ func TestSchedulerDropsJobsOfGoneChatsAndExpiresRecurring(t *testing.T) {
 	}
 
 	gone = true
-	if _, err := s.Create(ctx, "s1", "c1", "* * * * *", "ping", true); err != nil {
+	if _, err := s.Create(ctx, "s1", "c1", "* * * * *", "ping", "test job", true); err != nil {
 		t.Fatal(err)
 	}
 	c.now = c.now.Add(2 * time.Minute)
@@ -181,7 +181,7 @@ func TestSchedulerDropsJobsOfGoneChatsAndExpiresRecurring(t *testing.T) {
 func TestSchedulerKeepsChatsApart(t *testing.T) {
 	ctx := context.Background()
 	s, _ := newTestScheduler(t, at(t, "2026-10-30 10:00"), func(Job, Delivery) error { return nil })
-	job, _ := s.Create(ctx, "s1", "c1", "5m", "ping", true)
+	job, _ := s.Create(ctx, "s1", "c1", "5m", "ping", "test job", true)
 	if _, err := s.Delete(ctx, "c2", job.ID); err == nil {
 		t.Fatal("another chat deleted the job")
 	}
@@ -191,15 +191,15 @@ func TestSchedulerKeepsChatsApart(t *testing.T) {
 	if _, err := s.Delete(ctx, "c1", job.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Create(ctx, "s1", "c1", "5m", strings.Repeat("x", MaxPromptBytes+1), true); err == nil {
+	if _, err := s.Create(ctx, "s1", "c1", "5m", strings.Repeat("x", MaxPromptBytes+1), "test job", true); err == nil {
 		t.Fatal("oversized prompt accepted")
 	}
 	for range MaxJobsPerChat {
-		if _, err := s.Create(ctx, "s1", "c1", "5m", "ping", true); err != nil {
+		if _, err := s.Create(ctx, "s1", "c1", "5m", "ping", "test job", true); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.Create(ctx, "s1", "c1", "5m", "ping", true); err == nil || !strings.Contains(err.Error(), "delete one") {
+	if _, err := s.Create(ctx, "s1", "c1", "5m", "ping", "test job", true); err == nil || !strings.Contains(err.Error(), "delete one") {
 		t.Fatalf("over the limit: %v", err)
 	}
 }
@@ -211,14 +211,14 @@ func TestSchedulerCountsJobsAndReportsChanges(t *testing.T) {
 	s, c := newTestScheduler(t, at(t, "2026-10-30 10:00"), func(Job, Delivery) error { return nil })
 	changes := 0
 	s.OnChange(func() { changes++ })
-	once, err := s.Create(ctx, "s1", "c1", "17 10 30 10 *", "check the deploy", false)
+	once, err := s.Create(ctx, "s1", "c1", "17 10 30 10 *", "check the deploy", "test job", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Create(ctx, "s1", "c2", "1h", "look at the queue", true); err != nil {
+	if _, err := s.Create(ctx, "s1", "c2", "1h", "look at the queue", "test job", true); err != nil {
 		t.Fatal(err)
 	}
-	every, err := s.Create(ctx, "s2", "c3", "1h", "tidy up", true)
+	every, err := s.Create(ctx, "s2", "c3", "1h", "tidy up", "test job", true)
 	if err != nil {
 		t.Fatal(err)
 	}
