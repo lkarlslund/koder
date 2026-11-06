@@ -334,6 +334,7 @@ type WebSearchStoredItem struct {
 }
 
 type WebSearchStoredResult struct {
+	Description    string                `json:"description,omitempty"`
 	Query          string                `json:"query"`
 	AllowedDomains string                `json:"allowed_domains,omitempty"`
 	BlockedDomains string                `json:"blocked_domains,omitempty"`

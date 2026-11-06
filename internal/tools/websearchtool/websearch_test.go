@@ -40,6 +40,7 @@ func TestWebSearchDomainFilteringAndURLNormalization(t *testing.T) {
 		Tool: domain.ToolKindWebSearch,
 		Args: map[string]string{
 			"query":           "example docs 2026",
+			"description":     "Find the example docs",
 			"limit":           "3.00000",
 			"allowed_domains": "docs.example.com",
 			"blocked_domains": "other.example.net",
@@ -90,7 +91,7 @@ func TestWebSearchFallsBackToTheNextProvider(t *testing.T) {
 		{Provider: exa, Settings: websearch.Settings{APIKey: "k", BaseURL: failing.URL}},
 		{Provider: tavily, Settings: websearch.Settings{APIKey: "k", BaseURL: working.URL}},
 	}}
-	req, err := tools.Normalize(tools.Request{Tool: domain.ToolKindWebSearch, Args: map[string]string{"query": "go docs"}})
+	req, err := tools.Normalize(tools.Request{Tool: domain.ToolKindWebSearch, Args: map[string]string{"query": "go docs", "description": "Find the Go docs"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,5 +115,23 @@ func TestWebSearchFallsBackToTheNextProvider(t *testing.T) {
 	runtime.WebSearch = []websearch.Backend{}
 	if _, err := (tool{}).Call(context.Background(), tools.Options{Runtime: runtime, Request: req}); err == nil || !strings.Contains(err.Error(), "Settings > Search") {
 		t.Fatalf("no providers: %v", err)
+	}
+}
+
+// A search needs a description the user can read, as exec_command does; the
+// transcript shows it instead of the raw query.
+func TestWebSearchRequiresADescriptionAndPreviewsIt(t *testing.T) {
+	if _, err := tools.Normalize(tools.Request{Tool: domain.ToolKindWebSearch, Args: map[string]string{"query": "go docs", "description": "  "}}); err == nil {
+		t.Fatal("a blank description was accepted")
+	}
+	req, err := tools.Normalize(tools.Request{Tool: domain.ToolKindWebSearch, Args: map[string]string{"query": "go docs", "description": "Find the   Go\n docs"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Args["description"]; got != "Find the Go docs" {
+		t.Fatalf("description = %q", got)
+	}
+	if got := (tool{}).Preview(req); got != "Find the Go docs" {
+		t.Fatalf("preview = %q", got)
 	}
 }

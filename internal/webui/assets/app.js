@@ -1042,8 +1042,8 @@
         case 'exec_cleanup_background': return 'Clean exec sessions';
         case 'file_grep': return 'Search ' + (firstValue(data, ['pattern', 'Pattern']) || firstValue(args, ['pattern']));
         case 'file_glob': return 'Glob ' + (firstValue(data, ['pattern', 'Pattern']) || firstValue(args, ['pattern']));
-        case 'webfetch': return 'Fetch ' + (firstValue(data, ['url', 'URL']) || firstValue(args, ['url']));
-        case 'websearch': return 'Search web ' + (firstValue(data, ['query', 'Query']) || firstValue(args, ['query']));
+        case 'web_fetch': return 'Fetch ' + (firstValue(data, ['url', 'URL']) || firstValue(args, ['url']));
+        case 'web_search': return description || 'Search web ' + (firstValue(data, ['query', 'Query']) || firstValue(args, ['query']));
 		case 'show_media': return path ? 'Show media ' + path : 'Show media';
 		case 'show_image': return path ? 'Show image ' + path : 'Show image';
 		case 'offer_file': return path ? 'Offer file ' + path : 'Offer file';
@@ -1212,8 +1212,8 @@ function timeoutLabel(value) {
         const diagnostics = firstValue(data, ['diagnostics', 'Diagnostics']) || toolResultText(tool);
         return renderCompactBlock(title, diagnostics || 'No diagnostics', 'tool-result-body-mono');
       }
-      if (kind === 'webfetch') return renderCompactBlock(firstValue(data, ['final_url', 'FinalURL', 'url', 'URL']) || 'Fetched page', firstValue(data, ['body', 'Body']) || toolResultText(tool));
-      if (kind === 'websearch') {
+      if (kind === 'web_fetch') return renderCompactBlock(firstValue(data, ['final_url', 'FinalURL', 'url', 'URL']) || 'Fetched page', firstValue(data, ['body', 'Body']) || toolResultText(tool));
+      if (kind === 'web_search') {
         const items = data.items || data.Items || [];
         return renderCompactBlock('Search results', items.length ? items.map((item, idx) => (idx + 1) + '. ' + (item.title || item.Title || item.url || item.URL || '')) : toolResultText(tool));
       }
@@ -4356,8 +4356,8 @@ function timeoutLabel(value) {
           if (kind === 'request_user_input') return 'bi-question-circle';
           if (kind === 'file_read' || kind === 'file_write' || kind === 'file_edit') return 'bi-file-earmark-code';
           if (kind === 'bash' || String(kind || '').startsWith('exec_')) return 'bi-terminal';
-          if (kind === 'file_grep' || kind === 'file_glob' || kind === 'websearch') return 'bi-search';
-          if (kind === 'webfetch') return 'bi-globe';
+          if (kind === 'file_grep' || kind === 'file_glob' || kind === 'web_search') return 'bi-search';
+          if (kind === 'web_fetch') return 'bi-globe';
 		  if (kind === 'show_media') return 'bi-play-btn';
 		  if (kind === 'view_image' || kind === 'show_image') return 'bi-image';
 		  if (kind === 'view_pdf') return 'bi-file-earmark-pdf';

@@ -395,3 +395,11 @@ func resolveExistingPath(abs string) (resolved string, exists bool, err error) {
 	}
 	return resolved, true, nil
 }
+
+// NormalizeDescription cleans a tool call's user-facing description: one
+// line, single spaces, at most 160 characters.
+func NormalizeDescription(value string) string {
+	description := strings.Join(strings.Fields(value), " ")
+	const maxDescriptionRunes = 160
+	return textutil.TruncateRunes(description, maxDescriptionRunes)
+}

@@ -20,8 +20,8 @@ func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Search web",
 		Description: "Search the public web for current or external information.",
-		Usage:       "Search the public web for current or external information beyond the local workspace. Use this to discover relevant pages, news, docs, or references when you do not already know the URL. Use webfetch once you know the page you want to read. Prefer specific queries, and include the current year when looking for recent information. Do not use this for local repository search; use file_grep or file_glob instead. allowed_domains and blocked_domains are optional comma-separated domain lists. recency (day, week, month or year) limits results to recently published pages.",
-		Parameters:  `{"type":"object","properties":{"query":{"type":"string","description":"Search query"},"limit":{"type":"integer","description":"Optional maximum result count"},"allowed_domains":{"type":"string","description":"Optional comma-separated domains to include, such as example.com,docs.example.com"},"blocked_domains":{"type":"string","description":"Optional comma-separated domains to exclude"},"recency":{"type":"string","enum":["day","week","month","year"],"description":"Optional: only pages published within this period"}},"required":["query"],"additionalProperties":false}`,
+		Usage:       "Search the public web for current or external information beyond the local workspace. Use this to discover relevant pages, news, docs, or references when you do not already know the URL. Use webfetch once you know the page you want to read. Provide a required description saying what you are looking for and why, in words the user would use. Prefer specific queries, and include the current year when looking for recent information. Do not use this for local repository search; use file_grep or file_glob instead. allowed_domains and blocked_domains are optional comma-separated domain lists. recency (day, week, month or year) limits results to recently published pages.",
+		Parameters:  `{"type":"object","properties":{"query":{"type":"string","description":"Search query"},"description":{"type":"string","minLength":1,"description":"Required short user-facing description of what this search is looking for. Use one concise sentence."},"limit":{"type":"integer","description":"Optional maximum result count"},"allowed_domains":{"type":"string","description":"Optional comma-separated domains to include, such as example.com,docs.example.com"},"blocked_domains":{"type":"string","description":"Optional comma-separated domains to exclude"},"recency":{"type":"string","enum":["day","week","month","year"],"description":"Optional: only pages published within this period"}},"required":["query","description"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 }
@@ -33,7 +33,11 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	if query == "" {
 		return nil, errors.New("query is empty")
 	}
-	out := map[string]string{"query": query}
+	description := tools.NormalizeDescription(args["description"])
+	if description == "" {
+		return nil, errors.New("description is required and must not be blank")
+	}
+	out := map[string]string{"query": query, "description": description}
 	if limit := strings.TrimSpace(args["limit"]); limit != "" {
 		value, err := tools.ParseFlexibleInt(limit)
 		if err != nil || value <= 0 {
@@ -56,7 +60,12 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	}
 	return out, nil
 }
-func (tool) Preview(req tools.Request) string { return req.Args["query"] }
+func (tool) Preview(req tools.Request) string {
+	if description := strings.TrimSpace(req.Args["description"]); description != "" {
+		return description
+	}
+	return req.Args["query"]
+}
 func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {
 	runtime, req := opts.Runtime, opts.Request
 	query := websearch.Query{
@@ -106,6 +115,7 @@ func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) 
 func searchResult(req tools.Request, provider websearch.Provider, results []websearch.Result, failures []string) tools.Result {
 	meta := map[string]string{
 		"query":           req.Args["query"],
+		"description":     req.Args["description"],
 		"allowed_domains": req.Args["allowed_domains"],
 		"blocked_domains": req.Args["blocked_domains"],
 		"recency":         req.Args["recency"],
@@ -113,6 +123,7 @@ func searchResult(req tools.Request, provider websearch.Provider, results []webs
 		"results":         strconv.Itoa(len(results)),
 	}
 	stored := tools.WebSearchStoredResult{
+		Description:    req.Args["description"],
 		Query:          req.Args["query"],
 		AllowedDomains: req.Args["allowed_domains"],
 		BlockedDomains: req.Args["blocked_domains"],

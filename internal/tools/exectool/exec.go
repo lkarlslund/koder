@@ -119,7 +119,7 @@ func (commandTool) NormalizeArgs(args map[string]string) (map[string]string, err
 		return nil, errors.New("cmd is empty")
 	}
 	out := map[string]string{"cmd": cmd}
-	description := normalizeDescription(args["description"])
+	description := tools.NormalizeDescription(args["description"])
 	if description == "" {
 		return nil, errors.New("description is required and must not be blank")
 	}
@@ -329,7 +329,7 @@ func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 		YieldTime:      durationArg(req.Args, "yield_time_ms", defaultYieldTime),
 		PreviewBytes:   outputLimit(runtime, req),
 		AccessSettings: settings,
-		Label:          normalizeDescription(req.Args["description"]),
+		Label:          tools.NormalizeDescription(req.Args["description"]),
 		Notify:         notify,
 	})
 	if err != nil {
@@ -364,16 +364,6 @@ func (commandTool) Call(ctx context.Context, opts tools.Options) (tools.Result, 
 		Meta:   meta,
 		Stored: stored,
 	}, nil
-}
-
-func normalizeDescription(value string) string {
-	description := strings.TrimSpace(value)
-	if description == "" {
-		return ""
-	}
-	description = strings.Join(strings.Fields(description), " ")
-	const maxDescriptionRunes = 160
-	return textutil.TruncateRunes(description, maxDescriptionRunes)
 }
 
 func (statusTool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) {

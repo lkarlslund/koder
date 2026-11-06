@@ -67,6 +67,9 @@ providers and holds their API keys (stored in `config.toml` under `[search]`,
 never sent back to the browser) or base URLs. The tool asks the first enabled
 provider and falls back to the next when one fails. DuckDuckGo needs no setup
 and is on by default; SearXNG needs only a base URL; the rest need an API key.
+Like `exec_command`, a search takes a required `description`, one sentence
+for the user saying what the search looks for; the transcript shows it as the
+row title instead of the raw query.
 
 Some operations intentionally remain first-class tools:
 

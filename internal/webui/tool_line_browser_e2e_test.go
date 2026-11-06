@@ -56,7 +56,10 @@ func TestToolCallsShowAsOneLineWithInspector(t *testing.T) {
 				args: {cmd: 'sleep 100', description: 'Wait for the drain'}},
 			{tool_call_id: 'c6', tool: 'show_image', status: 'done',
 				args: {path: '/work/shot.png'},
-				result: {data: {path: '/work/shot.png', url: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', mime_type: 'image/gif'}}}
+				result: {data: {path: '/work/shot.png', url: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', mime_type: 'image/gif'}}},
+			{tool_call_id: 'c7', tool: 'web_search', status: 'done',
+				args: {query: 'dmr udtræk download 2026', description: 'Find where the DMR extract is published'},
+				result: {data: {query: 'dmr udtræk download 2026', items: []}}}
 		]}
 	}]`
 
@@ -85,7 +88,7 @@ func TestToolCallsShowAsOneLineWithInspector(t *testing.T) {
 		chromedp.WaitReady(`.transcript`, chromedp.ByQuery),
 		chromedp.Poll(`!!document.documentElement._x_dataStack?.[0]?.toolResultHTML`, nil),
 		chromedp.Evaluate(setup, nil),
-		chromedp.Poll(`[...document.querySelectorAll('.tool-line')].filter(el => el.offsetParent).length === 6`, nil),
+		chromedp.Poll(`[...document.querySelectorAll('.tool-line')].filter(el => el.offsetParent).length === 7`, nil),
 		chromedp.Evaluate(`(async () => {
 			const app = document.documentElement._x_dataStack[0];
 			const visible = el => !!el && !!el.offsetParent;
@@ -141,6 +144,7 @@ func TestToolCallsShowAsOneLineWithInspector(t *testing.T) {
 		{Title: "Edit serve.go", Detail: "+2 −1"},
 		{Title: "Wait for the drain", Badge: "running"},
 		{Title: "Show image /work/shot.png", Inline: true},
+		{Title: "Find where the DMR extract is published"},
 	}
 	if len(got.Rows) != len(want) {
 		t.Fatalf("rows = %+v", got.Rows)

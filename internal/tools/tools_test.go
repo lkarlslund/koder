@@ -441,7 +441,8 @@ func TestWebSearchWholeFloatStringLimitIsAccepted(t *testing.T) {
 	req, err := tools.Normalize(tools.Request{
 		Tool: domain.ToolKindWebSearch,
 		Args: map[string]string{
-			"query": "golang",
+			"query":       "golang",
+			"description": "Find Go documentation",
 			"limit": "4.00000",
 		},
 	})
