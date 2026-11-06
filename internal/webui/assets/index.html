@@ -360,7 +360,7 @@
 				  <i class="bi bi-mic-fill" x-show="chatTypeIcon(chat) === 'bi-mic-fill'"></i>
 				  <i class="bi bi-archive" x-show="chatTypeIcon(chat) === 'bi-archive'"></i>
                   <span class="text-truncate chat-title" x-text="chatTitle(chat)"></span>
-                  <span class="scheduled-badge" x-show="chatScheduledCount(chat) > 0" :title="scheduledCountTitle(chatScheduledCount(chat), 'chat')" data-scheduled-chat><i class="bi bi-clock"></i><span x-text="chatScheduledCount(chat)"></span></span>
+                  <span class="running-badge" x-show="chatRunningCount(chat) > 0" :title="runningCountTitle(chatRunningCount(chat), 'chat')" data-running-chat><i class="bi bi-terminal"></i><span x-text="chatRunningCount(chat)"></span></span><span class="scheduled-badge" x-show="chatScheduledCount(chat) > 0" :title="scheduledCountTitle(chatScheduledCount(chat), 'chat')" data-scheduled-chat><i class="bi bi-clock"></i><span x-text="chatScheduledCount(chat)"></span></span>
 				  <button type="button" class="btn btn-sm p-0 border-0 bg-transparent chat-title-edit" title="Rename chat" x-show="workspaceSessionMode()" @click.stop="renameChat(chat)" @pointerdown.stop @mousedown.stop draggable="false">
                     <i class="bi bi-pencil"></i>
                   </button>
@@ -1215,19 +1215,19 @@
             <button type="button" class="btn btn-link text-start p-0 flex-grow-1 text-decoration-none" :class="sessionID(session) === activeSessionID() ? 'text-white' : 'text-body'" @click="switchSession(sessionID(session), $event)" @auxclick.stop.prevent="switchSession(sessionID(session), $event)">
               <template x-if="isQuickSession(session)">
                 <span>
-                  <span class="fw-semibold"><i class="bi bi-lightning-charge me-1"></i><span x-text="sessionTitle(session)"></span><span class="scheduled-badge ms-2" x-show="sessionScheduledCount(session) > 0" :title="scheduledCountTitle(sessionScheduledCount(session), 'session')" data-scheduled-session><i class="bi bi-clock"></i><span x-text="sessionScheduledCount(session)"></span></span></span>
+                  <span class="fw-semibold"><i class="bi bi-lightning-charge me-1"></i><span x-text="sessionTitle(session)"></span><span class="running-badge ms-2" x-show="sessionRunningCount(session) > 0" :title="runningCountTitle(sessionRunningCount(session), 'session')" data-running-session><i class="bi bi-terminal"></i><span x-text="sessionRunningCount(session)"></span></span><span class="scheduled-badge ms-2" x-show="sessionScheduledCount(session) > 0" :title="scheduledCountTitle(sessionScheduledCount(session), 'session')" data-scheduled-session><i class="bi bi-clock"></i><span x-text="sessionScheduledCount(session)"></span></span></span>
                   <span class="d-block small opacity-75" x-text="session.LastMessage || session.last_message || 'Standalone Quick Chat'"></span>
                 </span>
               </template>
               <template x-if="isVoiceSession(session)">
                 <span>
-                  <span class="fw-semibold"><i class="bi bi-telephone-fill me-1"></i><span x-text="sessionTitle(session)"></span><span class="scheduled-badge ms-2" x-show="sessionScheduledCount(session) > 0" :title="scheduledCountTitle(sessionScheduledCount(session), 'session')" data-scheduled-session><i class="bi bi-clock"></i><span x-text="sessionScheduledCount(session)"></span></span></span>
+                  <span class="fw-semibold"><i class="bi bi-telephone-fill me-1"></i><span x-text="sessionTitle(session)"></span><span class="running-badge ms-2" x-show="sessionRunningCount(session) > 0" :title="runningCountTitle(sessionRunningCount(session), 'session')" data-running-session><i class="bi bi-terminal"></i><span x-text="sessionRunningCount(session)"></span></span><span class="scheduled-badge ms-2" x-show="sessionScheduledCount(session) > 0" :title="scheduledCountTitle(sessionScheduledCount(session), 'session')" data-scheduled-session><i class="bi bi-clock"></i><span x-text="sessionScheduledCount(session)"></span></span></span>
                   <span class="d-block small opacity-75" x-text="session.LastMessage || session.last_message || 'Voice coordination chat'"></span>
                 </span>
               </template>
               <template x-if="!isQuickSession(session) && !isVoiceSession(session)">
                 <span>
-  				<span class="fw-semibold"><i class="bi me-1" :class="isVoiceSession(session) ? 'bi-telephone-fill' : 'bi-folder'"></i><span x-text="sessionTitle(session)"></span><span class="scheduled-badge ms-2" x-show="sessionScheduledCount(session) > 0" :title="scheduledCountTitle(sessionScheduledCount(session), 'session')" data-scheduled-session><i class="bi bi-clock"></i><span x-text="sessionScheduledCount(session)"></span></span></span>
+  				<span class="fw-semibold"><i class="bi me-1" :class="isVoiceSession(session) ? 'bi-telephone-fill' : 'bi-folder'"></i><span x-text="sessionTitle(session)"></span><span class="running-badge ms-2" x-show="sessionRunningCount(session) > 0" :title="runningCountTitle(sessionRunningCount(session), 'session')" data-running-session><i class="bi bi-terminal"></i><span x-text="sessionRunningCount(session)"></span></span><span class="scheduled-badge ms-2" x-show="sessionScheduledCount(session) > 0" :title="scheduledCountTitle(sessionScheduledCount(session), 'session')" data-scheduled-session><i class="bi bi-clock"></i><span x-text="sessionScheduledCount(session)"></span></span></span>
   				<span class="d-block small opacity-75 text-truncate" x-text="isVoiceSession(session) ? 'Voice coordination chat' : sessionProjectRoot(session)"></span>
                   <span class="d-block small opacity-75">
                     <template x-if="session.LastMessage || session.last_message"><span x-text="session.LastMessage || session.last_message"></span></template>

@@ -53,6 +53,9 @@
     .list-filter-count { min-width: 1.3rem; padding: 0 .3rem; border-radius: 999px; background: var(--bs-secondary-bg); color: var(--bs-secondary-color); text-align: center; font-size: .7rem; font-variant-numeric: tabular-nums; }
     /* Marks a session or chat that has cron jobs, so it can be found later. */
     .scheduled-badge { display: inline-flex; align-items: center; gap: .2rem; padding: 0 .35rem; border-radius: 999px; font-size: .7rem; font-weight: 600; line-height: 1.35; vertical-align: middle; background: var(--bs-warning-bg-subtle); color: var(--bs-warning-text-emphasis); white-space: nowrap; }
+    .running-badge { display: inline-flex; align-items: center; gap: .2rem; padding: 0 .35rem; border-radius: 999px; font-size: .7rem; font-weight: 600; line-height: 1.35; vertical-align: middle; background: var(--bs-info-bg-subtle); color: var(--bs-info-text-emphasis); white-space: nowrap; }
+    .running-badge + .scheduled-badge { margin-left: .25rem; }
+    .active .running-badge, .chat-list-item.active .running-badge,
     .active .scheduled-badge, .chat-list-item.active .scheduled-badge { background: rgba(255, 255, 255, .2); color: #fff; }
     /* The sidebar's activity list: things live in the chat right now, each
        a row of type icon, description, runtime and status, opening details. */

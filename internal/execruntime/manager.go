@@ -220,6 +220,7 @@ type Manager struct {
 	processes     map[string]*process
 	subscribers   map[id.ID]map[chan Event]struct{}
 	notifier      func(Notification)
+	onRunning     func()
 }
 
 type process struct {
@@ -444,6 +445,7 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 		_ = terminateProcess(p)
 		return Snapshot{}, fmt.Errorf("persist running exec inventory: %w", err)
 	}
+	m.runningChanged()
 	go m.reportJobAge(p)
 	if p.timeout > 0 {
 		go m.enforceTimeout(p, p.timeout)
@@ -519,6 +521,44 @@ func (m *Manager) List(_ context.Context, req ListRequest) ([]Snapshot, error) {
 		return snaps[i].StartedAt.Before(snaps[j].StartedAt)
 	})
 	return snaps, nil
+}
+
+// Counts is how many processes are running in each session and chat.
+type Counts struct {
+	Sessions map[id.ID]int `json:"sessions"`
+	Chats    map[id.ID]int `json:"chats"`
+}
+
+// RunningCounts counts the running processes per session and chat, so the
+// session and chat lists can show where work is still going on.
+func (m *Manager) RunningCounts() Counts {
+	counts := Counts{Sessions: map[id.ID]int{}, Chats: map[id.ID]int{}}
+	_, jobs := m.runningJobs()
+	for _, job := range jobs {
+		if job.SessionID != "" {
+			counts.Sessions[job.SessionID]++
+		}
+		if job.ChatID != "" {
+			counts.Chats[job.ChatID]++
+		}
+	}
+	return counts
+}
+
+// OnRunningChange sets a function called after a process starts or ends.
+func (m *Manager) OnRunningChange(fn func()) {
+	m.mu.Lock()
+	m.onRunning = fn
+	m.mu.Unlock()
+}
+
+func (m *Manager) runningChanged() {
+	m.mu.RLock()
+	fn := m.onRunning
+	m.mu.RUnlock()
+	if fn != nil {
+		fn()
+	}
 }
 
 // Running counts the processes still running in any session.
@@ -700,6 +740,7 @@ func (m *Manager) waitForExit(p *process) {
 	if err := m.recordRunningJobs(); err != nil {
 		slog.Error("persist completed exec inventory", "process_id", p.processID, "error", err)
 	}
+	m.runningChanged()
 	m.reportExitIfDue(p)
 	close(p.settled)
 }

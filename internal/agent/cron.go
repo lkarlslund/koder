@@ -8,6 +8,7 @@ import (
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/cron"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/id"
 	"github.com/lkarlslund/koder/internal/store"
 )
@@ -37,6 +38,24 @@ func (e *Engine) CronJobCounts(ctx context.Context) (cron.Counts, error) {
 		return cron.Counts{}, fmt.Errorf("cron is unavailable")
 	}
 	return e.cron.Counts(ctx)
+}
+
+// RunningProcessCounts returns how many exec processes run in each session
+// and chat.
+func (e *Engine) RunningProcessCounts() execruntime.Counts {
+	if e == nil || e.toolsRuntime == nil || e.toolsRuntime.ExecManager() == nil {
+		return execruntime.Counts{Sessions: map[id.ID]int{}, Chats: map[id.ID]int{}}
+	}
+	return e.toolsRuntime.ExecManager().RunningCounts()
+}
+
+// OnRunningProcessChange sets a function called after an exec process starts
+// or ends.
+func (e *Engine) OnRunningProcessChange(fn func()) {
+	if e == nil || e.toolsRuntime == nil || e.toolsRuntime.ExecManager() == nil {
+		return
+	}
+	e.toolsRuntime.ExecManager().OnRunningChange(fn)
 }
 
 // OnCronChange sets a function called after a cron job is added or removed.

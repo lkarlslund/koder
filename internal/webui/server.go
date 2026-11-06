@@ -1888,16 +1888,17 @@ func (s *Server) welcomeState(ctx context.Context, message string) app.State {
 	}
 	state := s.controller.State()
 	return app.State{
-		Sessions:      sessionState.Sessions,
-		QuickChats:    sessionState.QuickChats,
-		Theme:         state.Theme,
-		TTS:           state.TTS,
-		ProjectRoot:   firstNonEmpty(sessionState.ProjectRoot, state.ProjectRoot),
-		Build:         state.Build,
-		RestartNeeded: state.RestartNeeded,
-		RestartBuild:  state.RestartBuild,
-		ScheduledJobs: sessionState.ScheduledJobs,
-		Error:         strings.TrimSpace(message),
+		Sessions:         sessionState.Sessions,
+		QuickChats:       sessionState.QuickChats,
+		Theme:            state.Theme,
+		TTS:              state.TTS,
+		ProjectRoot:      firstNonEmpty(sessionState.ProjectRoot, state.ProjectRoot),
+		Build:            state.Build,
+		RestartNeeded:    state.RestartNeeded,
+		RestartBuild:     state.RestartBuild,
+		ScheduledJobs:    sessionState.ScheduledJobs,
+		RunningProcesses: sessionState.RunningProcesses,
+		Error:            strings.TrimSpace(message),
 	}
 }
 

@@ -2,21 +2,25 @@ package webui
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/chromedp/chromedp"
 
 	"github.com/lkarlslund/koder/internal/cron"
+	"github.com/lkarlslund/koder/internal/execruntime"
 )
 
 // The chat list's status filter is a dropdown beside its heading, chats and
-// sessions with cron jobs carry a badge, and the git section stays out of a
+// sessions with cron jobs or running commands carry a badge, and the git section stays out of a
 // session that is not in a git repository.
 func TestSidebarListsFilterAndMarkScheduledChats(t *testing.T) {
 	chromium := chromiumForTest(t)
 	workdir := t.TempDir()
-	ctrl, _, st := newTestControllerAndEngine(t, workdir)
+	ctrl, engine, st := newTestControllerAndEngine(t, workdir)
 	state := selectedTestState(t, ctrl)
 	if _, err := cron.NewScheduler(st, nil).Create(context.Background(), state.Session.ID, state.ActiveChatID, "0 9 * * *", "Check the build", "Check the build every morning", true); err != nil {
 		t.Fatalf("create cron job: %v", err)
@@ -95,5 +99,57 @@ func TestSidebarListsFilterAndMarkScheduledChats(t *testing.T) {
 	}
 	if sessionBadge != "1" {
 		t.Fatalf("session badge = %q", sessionBadge)
+	}
+
+	// A running command marks its chat and its session in the picker, and
+	// the marks go away when it ends.
+	started, err := engine.ExecManager().Start(context.Background(), execruntime.StartRequest{
+		SessionID: state.Session.ID, ChatID: state.ActiveChatID, Command: "sleep 30", Label: "Serve the site",
+		Workdir: workdir, YieldTime: time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var running struct{ Session, Chat, SessionTitle string }
+	if err := chromedp.Run(browserCtx,
+		chromedp.Poll(`!!document.querySelector('[data-running-session]')?.offsetParent && !!document.querySelector('[data-running-chat]')`, nil, chromedp.WithPollingTimeout(10*time.Second)),
+		chromedp.Evaluate(`({
+			Session: document.querySelector('[data-running-session]').textContent.trim(),
+			Chat: document.querySelector('[data-running-chat]').textContent.trim(),
+			SessionTitle: document.querySelector('[data-running-session]').title,
+		})`, &running),
+	); err != nil {
+		t.Fatalf("running badges: %v", err)
+	}
+	if running.Session != "1" || running.Chat != "1" || running.SessionTitle != "A command is running in this session" {
+		t.Fatalf("running badges = %+v", running)
+	}
+	if _, err := engine.ExecManager().Terminate(context.Background(), execruntime.TerminateRequest{SessionID: state.Session.ID, ChatID: state.ActiveChatID, ProcessID: started.ProcessID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := chromedp.Run(browserCtx,
+		chromedp.Poll(`!document.querySelector('[data-running-session]')?.offsetParent && !document.querySelector('[data-running-chat]')?.offsetParent`, nil, chromedp.WithPollingTimeout(10*time.Second)),
+	); err != nil {
+		t.Fatalf("running badges stayed after the command ended: %v", err)
+	}
+	if dir := os.Getenv("KODER_UI_SHOTS"); dir != "" {
+		if _, err := engine.ExecManager().Start(context.Background(), execruntime.StartRequest{
+			SessionID: state.Session.ID, ChatID: state.ActiveChatID, Command: "sleep 30", Label: "Serve again",
+			Workdir: workdir, YieldTime: time.Millisecond, AllowDuplicate: true,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		for _, width := range []int64{1440, 820, 420} {
+			var shot []byte
+			if err := chromedp.Run(browserCtx,
+				chromedp.EmulateViewport(width, 900),
+				chromedp.Poll(`!!document.querySelector('[data-running-session]')?.offsetParent`, nil, chromedp.WithPollingTimeout(10*time.Second)),
+				chromedp.Sleep(200*time.Millisecond),
+				chromedp.CaptureScreenshot(&shot),
+			); err != nil {
+				t.Fatal(err)
+			}
+			_ = os.WriteFile(filepath.Join(dir, fmt.Sprintf("picker-running-%d.png", width)), shot, 0o644)
+		}
 	}
 }

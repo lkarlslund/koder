@@ -77,7 +77,9 @@ type State struct {
 	// ScheduledJobs counts cron jobs per session and chat, so the session
 	// and chat lists can show which ones will run on their own.
 	ScheduledJobs cron.Counts `json:"scheduled_jobs"`
-	Error         string      `json:"error,omitempty"`
+	// RunningProcesses counts running exec processes per session and chat.
+	RunningProcesses execruntime.Counts `json:"running_processes"`
+	Error            string             `json:"error,omitempty"`
 }
 
 // Selection identifies the browser client's selected session/chat.
@@ -546,6 +548,8 @@ type SessionState struct {
 	Sessions      []domain.Session `json:"sessions"`
 	QuickChats    []domain.Session `json:"quick_chats"`
 	ScheduledJobs cron.Counts      `json:"scheduled_jobs"`
+	// RunningProcesses counts running exec processes per session and chat.
+	RunningProcesses execruntime.Counts `json:"running_processes"`
 }
 
 type ChatBackendState struct {
@@ -875,6 +879,9 @@ func (c *Controller) Start(ctx context.Context, mode StartupMode, projectRoot st
 	c.agent.OnCronChange(func() {
 		c.broadcast("scheduled_jobs", c.scheduledJobCounts(context.Background()))
 	})
+	c.agent.OnRunningProcessChange(func() {
+		c.broadcast("running_processes", c.runningProcessCounts())
+	})
 	c.agent.StartCron()
 	c.agent.StartMemoryWatch()
 	return nil
@@ -891,6 +898,14 @@ func (c *Controller) scheduledJobCounts(ctx context.Context) cron.Counts {
 		return cron.Counts{Sessions: map[id.ID]int{}, Chats: map[id.ID]int{}}
 	}
 	return counts
+}
+
+// runningProcessCounts is how many exec processes run in each session and chat.
+func (c *Controller) runningProcessCounts() execruntime.Counts {
+	if c == nil || c.agent == nil {
+		return execruntime.Counts{Sessions: map[id.ID]int{}, Chats: map[id.ID]int{}}
+	}
+	return c.agent.RunningProcessCounts()
 }
 
 // State returns process-wide browser app metadata. It never includes a selected
@@ -913,6 +928,7 @@ func (c *Controller) State() State {
 		base.Sessions = sessionState.Sessions
 		base.QuickChats = sessionState.QuickChats
 		base.ScheduledJobs = sessionState.ScheduledJobs
+		base.RunningProcesses = sessionState.RunningProcesses
 	}
 	return base
 }
@@ -979,6 +995,7 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection)
 	if sessions, err := c.workspaceSessions(ctx); err == nil {
 		base.Sessions, base.QuickChats = splitSessions(sessions, false)
 		base.ScheduledJobs = c.scheduledJobCounts(ctx)
+		base.RunningProcesses = c.runningProcessCounts()
 	} else if len(base.Sessions) == 0 {
 		return State{}, err
 	}
@@ -1025,30 +1042,31 @@ func (c *Controller) stateForSelection(ctx context.Context, selection Selection)
 		workspaceStatus = workspaceSnapshot.Status
 	}
 	return State{
-		Session:        session,
-		Sessions:       base.Sessions,
-		QuickChats:     base.QuickChats,
-		Chats:          slices.Clone(ownerSnapshot.Chats),
-		ChatStatuses:   chatStatusesForChats(ownerSnapshot.Chats, statuses),
-		ActiveChatID:   chatRecord.ID,
-		Access:         c.accessStateForSession(session),
-		Snapshot:       snapshot,
-		Snapshots:      snapshots,
-		Milestones:     ownerSnapshot.Plan,
-		Tasks:          slices.Clone(ownerSnapshot.Tasks),
-		TasksByKey:     cloneTasksByKey(ownerSnapshot.TasksByKey),
-		Workspace:      workspaceStatus,
-		ContextWindow:  c.contextWindowForChat(chatRecord),
-		ModelInfo:      c.modelInfoForChat(chatRecord),
-		Theme:          base.Theme,
-		TTS:            base.TTS,
-		ProjectRoot:    chatRecord.WorkingDirectory(session),
-		Build:          base.Build,
-		RestartNeeded:  base.RestartNeeded,
-		RestartBuild:   base.RestartBuild,
-		SettingsHealth: base.SettingsHealth,
-		ScheduledJobs:  base.ScheduledJobs,
-		Error:          base.Error,
+		Session:          session,
+		Sessions:         base.Sessions,
+		QuickChats:       base.QuickChats,
+		Chats:            slices.Clone(ownerSnapshot.Chats),
+		ChatStatuses:     chatStatusesForChats(ownerSnapshot.Chats, statuses),
+		ActiveChatID:     chatRecord.ID,
+		Access:           c.accessStateForSession(session),
+		Snapshot:         snapshot,
+		Snapshots:        snapshots,
+		Milestones:       ownerSnapshot.Plan,
+		Tasks:            slices.Clone(ownerSnapshot.Tasks),
+		TasksByKey:       cloneTasksByKey(ownerSnapshot.TasksByKey),
+		Workspace:        workspaceStatus,
+		ContextWindow:    c.contextWindowForChat(chatRecord),
+		ModelInfo:        c.modelInfoForChat(chatRecord),
+		Theme:            base.Theme,
+		TTS:              base.TTS,
+		ProjectRoot:      chatRecord.WorkingDirectory(session),
+		Build:            base.Build,
+		RestartNeeded:    base.RestartNeeded,
+		RestartBuild:     base.RestartBuild,
+		SettingsHealth:   base.SettingsHealth,
+		ScheduledJobs:    base.ScheduledJobs,
+		RunningProcesses: base.RunningProcesses,
+		Error:            base.Error,
 	}, nil
 }
 
@@ -2002,7 +2020,7 @@ func (c *Controller) Sessions(ctx context.Context) (SessionState, error) {
 	projectRoot := c.projectRoot
 	c.mu.RUnlock()
 	regular, quick := splitSessions(sessions, false)
-	return SessionState{ProjectRoot: projectRoot, Sessions: regular, QuickChats: quick, ScheduledJobs: c.scheduledJobCounts(ctx)}, nil
+	return SessionState{ProjectRoot: projectRoot, Sessions: regular, QuickChats: quick, ScheduledJobs: c.scheduledJobCounts(ctx), RunningProcesses: c.runningProcessCounts()}, nil
 }
 
 // ManageableSessions returns workspace sessions including archived entries so
@@ -2016,7 +2034,7 @@ func (c *Controller) ManageableSessions(ctx context.Context) (SessionState, erro
 	projectRoot := c.projectRoot
 	c.mu.RUnlock()
 	regular, quick := splitSessions(sessions, true)
-	return SessionState{ProjectRoot: projectRoot, Sessions: regular, QuickChats: quick, ScheduledJobs: c.scheduledJobCounts(ctx)}, nil
+	return SessionState{ProjectRoot: projectRoot, Sessions: regular, QuickChats: quick, ScheduledJobs: c.scheduledJobCounts(ctx), RunningProcesses: c.runningProcessCounts()}, nil
 }
 
 // CreateSession creates a new session without changing controller selection.
