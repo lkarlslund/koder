@@ -243,6 +243,11 @@
       resizingTree: false,
       childrenByPath: {},
       expanded: {},
+      watchSocket: null,
+      watchRetry: 0,
+      watchConnected: false,
+      watchSentKey: '',
+      watchedPaths: [],
       imageLightbox: {open: false, kind: 'svg', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
 
       init() {
@@ -254,6 +259,7 @@
           const path = this.pathFromURL();
           if (path) this.openPathFromURL(path);
         });
+        this.connectWatch();
         window.addEventListener('popstate', () => {
           const path = this.pathFromURL();
           if (path) {
@@ -411,6 +417,105 @@
       nodeIcon(node) {
         if (!node.dir) return 'bi-file-earmark-text';
         return this.expanded[node.path || ''] ? 'bi-folder2-open' : 'bi-folder';
+      },
+
+      // The page keeps the open folders and the open file current by watching
+      // them over the websocket. After a reconnect it reloads everything,
+      // since changes made while it was away were not reported.
+      connectWatch() {
+        if (!this.sessionID || !window.WebSocket) return;
+        const socket = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+        this.watchSocket = socket;
+        socket.addEventListener('open', () => {
+          if (this.watchSocket !== socket) return;
+          const reconnected = this.watchConnected;
+          this.watchConnected = true;
+          this.watchRetry = 0;
+          this.watchSentKey = '';
+          if (reconnected) this.applyFilesChanged({session_id: this.sessionID, dirs: this.watchedDirs(), paths: this.file?.path ? [this.file.path] : []});
+          else this.syncWatch();
+        });
+        socket.addEventListener('message', event => {
+          let message = null;
+          try { message = JSON.parse(event.data); } catch (_) { return; }
+          if (message?.type === 'files_changed') this.applyFilesChanged(message.payload || {});
+          else if (String(message?.id || '').startsWith('watch-')) {
+            if (message.ok) this.watchedPaths = message.result?.paths || [];
+            else console.warn('watch_files:', message.error);
+          }
+        });
+        socket.addEventListener('close', () => {
+          if (this.watchSocket !== socket) return;
+          this.watchSocket = null;
+          const delay = Math.min(30000, 1000 * 2 ** this.watchRetry++);
+          setTimeout(() => this.connectWatch(), delay);
+        });
+      },
+
+      // watchedDirs lists the folders whose entries the tree shows.
+      watchedDirs() {
+        const dirs = [];
+        const walk = parent => {
+          if (!this.childrenByPath[parent]) return;
+          dirs.push(parent);
+          for (const child of this.childrenByPath[parent]) {
+            if (child.dir && this.expanded[child.path || '']) walk(child.path || '');
+          }
+        };
+        walk('');
+        // Keep the open file current even when its folder is collapsed.
+        const fileDir = this.file?.path ? this.parentPath(this.file.path) : null;
+        if (fileDir !== null && !dirs.includes(fileDir)) dirs.push(fileDir);
+        return dirs.slice(0, 256);
+      },
+
+      syncWatch() {
+        const socket = this.watchSocket;
+        if (!socket || socket.readyState !== WebSocket.OPEN) return;
+        const paths = this.watchedDirs();
+        const key = paths.join('\n');
+        if (key === this.watchSentKey) return;
+        this.watchSentKey = key;
+        socket.send(JSON.stringify({id: 'watch-' + Date.now(), method: 'watch_files', params: {session_id: this.sessionID, chat_id: this.chatID, paths}}));
+      },
+
+      async applyFilesChanged(change) {
+        if (change.session_id && change.session_id !== this.sessionID) return;
+        const shown = new Set(this.watchedDirs());
+        for (const dir of change.dirs || []) {
+          if (shown.has(dir)) await this.loadTree(dir, {quiet: true});
+        }
+        // Forget open folders that were removed or renamed.
+        for (const key of Object.keys(this.childrenByPath)) {
+          if (key && !(this.childrenByPath[this.parentPath(key)] || []).some(child => child.dir && child.path === key)) {
+            delete this.childrenByPath[key];
+            delete this.expanded[key];
+          }
+        }
+        // Upload into the nearest folder that still exists.
+        while (this.currentDir && !(this.childrenByPath[this.parentPath(this.currentDir)] || []).some(child => child.dir && child.path === this.currentDir)) {
+          this.currentDir = this.parentPath(this.currentDir);
+        }
+        await this.followOpenFile(change.paths || []);
+        // Folders may have been removed and created again, which drops
+        // their watch on the server; send the list again.
+        this.watchSentKey = '';
+        this.syncWatch();
+      },
+
+      // followOpenFile reloads the open file when a change names it or when
+      // its folder listing disagrees with what is shown, which also covers
+      // events missed while its folder was being recreated.
+      async followOpenFile(paths) {
+        const file = this.file;
+        if (!file?.path) return;
+        const dir = this.parentPath(file.path);
+        const parentListsDir = dir === '' || (this.childrenByPath[this.parentPath(dir)] || []).some(entry => entry.dir && entry.path === dir);
+        if (!this.childrenByPath[dir] && parentListsDir) await this.loadTree(dir, {quiet: true});
+        const entry = (this.childrenByPath[dir] || []).find(item => !item.dir && item.path === file.path);
+        if (paths.includes(file.path) || !entry || this.fileError || entry.modified !== file.modified || entry.size !== file.size) {
+          await this.loadFile(file.path, {reload: true});
+        }
       },
 
       visibleNodes() {
@@ -586,7 +691,9 @@
         if (node.dir) {
           const key = node.path || '';
           this.expanded[key] = !this.expanded[key];
-          if (this.expanded[key] && !this.childrenByPath[key]) await this.loadTree(key);
+          // A folder closed earlier was not watched, so reload it.
+          if (this.expanded[key]) await this.loadTree(key, {quiet: !!this.childrenByPath[key]});
+          this.syncWatch();
           return;
         }
         await this.loadFile(node.path);
@@ -609,10 +716,14 @@
         }
       },
 
-      async loadTree(path) {
+      // loadTree with quiet set shows no spinner and, if the folder is
+      // gone, drops it from the tree instead of reporting an error.
+      async loadTree(path, options = {}) {
         if (!this.sessionID) return;
-        this.treeLoading = true;
-        this.treeError = '';
+        if (!options.quiet) {
+          this.treeLoading = true;
+          this.treeError = '';
+        }
         try {
           const response = await fetch(this.fileAPIURL('tree', path || ''), {cache: 'no-store'});
           if (!response.ok) throw new Error(await response.text() || 'tree load failed');
@@ -620,14 +731,22 @@
           this.projectRoot = data.project_root || this.projectRoot;
           this.childrenByPath[data.path || ''] = Array.isArray(data.entries) ? data.entries : [];
         } catch (err) {
-          this.treeError = err.message || String(err);
+          if (!options.quiet) this.treeError = err.message || String(err);
+          else if (path) {
+            delete this.childrenByPath[path];
+            delete this.expanded[path];
+          }
         } finally {
-          this.treeLoading = false;
+          if (!options.quiet) this.treeLoading = false;
+          this.syncWatch();
         }
       },
 
+      // loadFile with reload set refreshes the open file in place: no
+      // spinner, and the view mode and scroll position stay.
       async loadFile(path, options = {}) {
         if (!this.sessionID || !path) return;
+        if (options.reload) return this.reloadFile(path);
         const request = ++this.fileRequest;
         this.selectedPath = path;
         this.selectedNode = {path, name: path.split('/').pop(), dir: false};
@@ -648,6 +767,28 @@
           if (request === this.fileRequest) this.fileError = err.message || String(err);
         } finally {
           if (request === this.fileRequest) this.fileLoading = false;
+          this.syncWatch();
+        }
+      },
+
+      async reloadFile(path) {
+        const request = ++this.fileRequest;
+        try {
+          const response = await fetch(this.fileAPIURL('read', path), {cache: 'no-store'});
+          if (request !== this.fileRequest) return;
+          if (response.status === 404) {
+            this.fileError = 'This file was deleted or moved.';
+            return;
+          }
+          if (!response.ok) return;
+          const file = await response.json();
+          if (request !== this.fileRequest) return;
+          const mode = this.viewMode;
+          this.file = file;
+          this.fileError = '';
+          if (file.markdown) this.viewMode = mode;
+        } catch (_) {
+          // Keep showing the last version; the next change tries again.
         }
       },
 

@@ -35,6 +35,10 @@ Open a session's file browser to manage files on the machine running Koder:
   file or folder. Deletion requires confirmation and is permanent; deleting a
   folder removes its contents too.
 
+The tree and the open file follow changes on disk, such as files an agent
+writes, without a manual refresh. Only the folders open in the tree are
+watched, up to 256 of them.
+
 Uploads and moves never overwrite existing names. Failed uploads are cleaned
 up without publishing partial files. Operations stay inside the session's
 project folder and use the server account's filesystem permissions; these are

@@ -655,6 +655,14 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	done := make(chan struct{})
 	var writeMu sync.Mutex
 	var baselineMu sync.RWMutex
+	// The file browser page watches the folders it shows over this connection.
+	fileWatch := newFileWatch(func(msg filesChanged) {
+		size, err := writeJSON(ctx, conn, &writeMu, map[string]any{"type": "files_changed", "payload": msg})
+		if err == nil {
+			s.recordWebSocketWrite(clientID, "files_changed", size)
+		}
+	})
+	defer fileWatch.Close()
 	baselineEstablished := false
 	go func() {
 		defer close(done)
@@ -748,7 +756,12 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
-		result, err := s.handleRPC(ctx, clientID, req.Method, req.Params)
+		var result any
+		if req.Method == "watch_files" {
+			result, err = s.handleWatchFiles(ctx, fileWatch, req.Params)
+		} else {
+			result, err = s.handleRPC(ctx, clientID, req.Method, req.Params)
+		}
 		if err == nil {
 			s.updateClientSelectionFromResult(clientID, result)
 		}

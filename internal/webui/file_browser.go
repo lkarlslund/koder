@@ -3,7 +3,9 @@ package webui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"mime"
 	"net/http"
 	"os"
@@ -576,7 +578,7 @@ func writeFileBrowserJSON(w http.ResponseWriter, r *http.Request, value any) {
 
 func writeFileBrowserError(w http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		status = http.StatusNotFound
 	}
 	http.Error(w, err.Error(), status)
