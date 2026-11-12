@@ -460,6 +460,15 @@ func readFileTreeEntries(dir, rel string) ([]fileTreeEntry, bool, error) {
 func looksBinary(data []byte) bool {
 	if len(data) > fileBrowserBinaryPreview {
 		data = data[:fileBrowserBinaryPreview]
+		// The cut can split a multi-byte character; drop its first bytes.
+		for i := 1; i < utf8.UTFMax && i <= len(data); i++ {
+			if utf8.RuneStart(data[len(data)-i]) {
+				if !utf8.FullRune(data[len(data)-i:]) {
+					data = data[:len(data)-i]
+				}
+				break
+			}
+		}
 	}
 	if len(data) == 0 {
 		return false
