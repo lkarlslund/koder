@@ -215,7 +215,32 @@
     return hash ? message + '\nNear: ' + hash : message;
   }
 
+  const followModes = ['off', 'file', 'files'];
+
+  // remember keeps a bounded map, dropping the entry used least recently.
+  function remember(map, key, value) {
+    map.delete(key);
+    map.set(key, value);
+    if (map.size > 50) map.delete(map.keys().next().value);
+  }
+
+  function compareEntries(a, b) {
+    if (!!a.dir !== !!b.dir) return a.dir ? -1 : 1;
+    const x = String(a.name || '').toLowerCase();
+    const y = String(b.name || '').toLowerCase();
+    return x < y ? -1 : x > y ? 1 : 0;
+  }
+
   window.koderFilesApp = function () {
+    // File text as it was when change tracking started (baselines), and as
+    // the page last showed it (shown). They live outside Alpine's state,
+    // since large strings need no reactivity; changeEpoch marks updates.
+    const baselines = new Map();
+    const shown = new Map();
+    let latestFrom = null; // {path, content}: the version before the latest edit
+    const pendingRPC = new Map();
+    let rpcSeq = 0;
+    const previewCache = {};
     return {
       sessionID: '',
       chatID: '',
@@ -246,8 +271,13 @@
       watchSocket: null,
       watchRetry: 0,
       watchConnected: false,
-      watchSentKey: '',
+      watchSentKey: null,
       watchedPaths: [],
+      followMode: followModes.includes(readFileBrowserPreference('fileFollowMode', 'off')) ? readFileBrowserPreference('fileFollowMode', 'off') : 'off',
+      showChanges: readFileBrowserPreference('fileShowChanges', 'true') !== 'false',
+      treeMarks: {},
+      removedEntries: {},
+      changeEpoch: 0,
       imageLightbox: {open: false, kind: 'svg', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
 
       init() {
@@ -431,7 +461,7 @@
           const reconnected = this.watchConnected;
           this.watchConnected = true;
           this.watchRetry = 0;
-          this.watchSentKey = '';
+          this.watchSentKey = null;
           if (reconnected) this.applyFilesChanged({session_id: this.sessionID, dirs: this.watchedDirs(), paths: this.file?.path ? [this.file.path] : []});
           else this.syncWatch();
         });
@@ -439,14 +469,16 @@
           let message = null;
           try { message = JSON.parse(event.data); } catch (_) { return; }
           if (message?.type === 'files_changed') this.applyFilesChanged(message.payload || {});
-          else if (String(message?.id || '').startsWith('watch-')) {
-            if (message.ok) this.watchedPaths = message.result?.paths || [];
-            else console.warn('watch_files:', message.error);
+          else if (message && pendingRPC.has(message.id)) {
+            pendingRPC.get(message.id)(message);
+            pendingRPC.delete(message.id);
           }
         });
         socket.addEventListener('close', () => {
           if (this.watchSocket !== socket) return;
           this.watchSocket = null;
+          for (const resolve of pendingRPC.values()) resolve(null);
+          pendingRPC.clear();
           const delay = Math.min(30000, 1000 * 2 ** this.watchRetry++);
           setTimeout(() => this.connectWatch(), delay);
         });
@@ -473,10 +505,128 @@
         const socket = this.watchSocket;
         if (!socket || socket.readyState !== WebSocket.OPEN) return;
         const paths = this.watchedDirs();
-        const key = paths.join('\n');
+        const key = JSON.stringify(paths);
         if (key === this.watchSentKey) return;
         this.watchSentKey = key;
-        socket.send(JSON.stringify({id: 'watch-' + Date.now(), method: 'watch_files', params: {session_id: this.sessionID, chat_id: this.chatID, paths}}));
+        this.watchRPC('watch_files', {session_id: this.sessionID, chat_id: this.chatID, paths}).then(reply => {
+          if (reply?.ok) this.watchedPaths = reply.result?.paths || [];
+          else if (reply) console.warn('watch_files:', reply.error);
+        });
+      },
+
+      // watchRPC sends a request over the watch connection and resolves with
+      // the reply, or with null when the connection is not open.
+      watchRPC(method, params) {
+        const socket = this.watchSocket;
+        if (!socket || socket.readyState !== WebSocket.OPEN) return Promise.resolve(null);
+        const id = 'files-' + (++rpcSeq);
+        return new Promise(resolve => {
+          pendingRPC.set(id, resolve);
+          socket.send(JSON.stringify({id, method, params}));
+        });
+      },
+
+      setFollowMode(mode) {
+        this.followMode = followModes.includes(mode) ? mode : 'off';
+        writeFileBrowserPreference('fileFollowMode', this.followMode);
+      },
+
+      toggleChanges() {
+        this.showChanges = !this.showChanges;
+        writeFileBrowserPreference('fileShowChanges', this.showChanges);
+      },
+
+      hasChanges() {
+        void this.changeEpoch;
+        if (Object.keys(this.treeMarks).length) return true;
+        const path = this.file?.path;
+        return !!path && baselines.has(path) && baselines.get(path) !== this.file.content;
+      },
+
+      // clearChanges drops every change mark and tracks changes from now.
+      async clearChanges() {
+        this.treeMarks = {};
+        this.removedEntries = {};
+        baselines.clear();
+        latestFrom = null;
+        if (this.file?.path && typeof this.file.content === 'string') baselines.set(this.file.path, this.file.content);
+        this.changeEpoch++;
+        await this.watchRPC('reset_file_baselines', {});
+      },
+
+      // ensureBaseline fetches the version a file's marks compare against:
+      // the server's copy from when its folder was first watched, or, when
+      // the server has none, the version the page first showed.
+      async ensureBaseline(path, content) {
+        if (baselines.has(path)) return;
+        const reply = await this.watchRPC('file_baseline', {session_id: this.sessionID, path});
+        if (baselines.has(path)) return;
+        remember(baselines, path, reply?.ok && reply.result?.known ? reply.result.content : content);
+        this.changeEpoch++;
+      },
+
+      noteTreeChanges(dir, before, after) {
+        const old = new Map(before.map(entry => [entry.path, entry]));
+        const now = new Set(after.map(entry => entry.path));
+        let ghosts = this.removedEntries[dir] || [];
+        for (const entry of after) {
+          const previous = old.get(entry.path);
+          if (!previous) {
+            this.treeMarks[entry.path] = this.treeMarks[entry.path] === 'removed' ? 'modified' : 'added';
+            ghosts = ghosts.filter(ghost => ghost.path !== entry.path);
+          } else if (!entry.dir && (previous.modified !== entry.modified || previous.size !== entry.size) && this.treeMarks[entry.path] !== 'added') {
+            this.treeMarks[entry.path] = 'modified';
+          }
+        }
+        for (const entry of before) {
+          if (now.has(entry.path)) continue;
+          if (this.treeMarks[entry.path] === 'added') {
+            delete this.treeMarks[entry.path]; // came and went: nothing to show
+          } else {
+            this.treeMarks[entry.path] = 'removed';
+            ghosts = ghosts.filter(ghost => ghost.path !== entry.path).concat({...entry, ghost: true});
+          }
+        }
+        if (ghosts.length) this.removedEntries[dir] = ghosts;
+        else delete this.removedEntries[dir];
+      },
+
+      nodeClasses(node) {
+        const classes = [];
+        if (this.selectedNode?.path === node.path && !node.ghost) classes.push('active');
+        if (node.dir && !node.ghost && this.dropTarget === node.path) classes.push('drop-target');
+        const mark = this.treeMarks[node.path];
+        if (this.showChanges && mark && (mark === 'removed') === !!node.ghost) classes.push('change-' + mark);
+        return classes.join(' ');
+      },
+
+      listedFile(path) {
+        return (this.childrenByPath[this.parentPath(path)] || []).some(entry => !entry.dir && entry.path === path);
+      },
+
+      scrollToLatestChange() {
+        this.$nextTick(() => requestAnimationFrame(() => {
+          const target = document.querySelector('.file-browser-main [data-latest-change]');
+          if (target) target.scrollIntoView({block: 'center', behavior: 'smooth'});
+        }));
+      },
+
+      // followFile opens a file that just changed and scrolls to the change.
+      async followFile(path) {
+        let before = shown.get(path);
+        if (before === undefined) {
+          const reply = await this.watchRPC('file_baseline', {session_id: this.sessionID, path});
+          if (reply?.ok && reply.result?.known) {
+            before = reply.result.content;
+            if (!baselines.has(path)) remember(baselines, path, before);
+          }
+        }
+        await this.expandParents(path);
+        await this.loadFile(path, {replaceURL: true});
+        if (this.file?.path !== path) return;
+        latestFrom = before !== undefined && before !== this.file.content ? {path, content: before} : null;
+        this.changeEpoch++;
+        this.scrollToLatestChange();
       },
 
       async applyFilesChanged(change) {
@@ -496,10 +646,14 @@
         while (this.currentDir && !(this.childrenByPath[this.parentPath(this.currentDir)] || []).some(child => child.dir && child.path === this.currentDir)) {
           this.currentDir = this.parentPath(this.currentDir);
         }
+        if (this.followMode === 'files') {
+          const target = (change.paths || []).slice().reverse().find(path => this.listedFile(path));
+          if (target && target !== this.file?.path) await this.followFile(target);
+        }
         await this.followOpenFile(change.paths || []);
         // Folders may have been removed and created again, which drops
         // their watch on the server; send the list again.
-        this.watchSentKey = '';
+        this.watchSentKey = null;
         this.syncWatch();
       },
 
@@ -521,9 +675,11 @@
       visibleNodes() {
         const output = [];
         const append = (parent, depth) => {
-          (this.childrenByPath[parent] || []).forEach(child => {
+          let children = this.childrenByPath[parent] || [];
+          if (this.showChanges && this.removedEntries[parent]?.length) children = children.concat(this.removedEntries[parent]).sort(compareEntries);
+          children.forEach(child => {
             output.push({...child, depth});
-            if (child.dir && this.expanded[child.path || '']) append(child.path || '', depth + 1);
+            if (child.dir && !child.ghost && this.expanded[child.path || '']) append(child.path || '', depth + 1);
           });
         };
         append('', 0);
@@ -685,7 +841,7 @@
       },
 
       async openNode(node) {
-        if (!node || this.mutationBusy) return;
+        if (!node || node.ghost || this.mutationBusy) return;
         this.selectedNode = node;
         this.currentDir = node.dir ? node.path : this.parentPath(node.path);
         if (node.dir) {
@@ -729,7 +885,10 @@
           if (!response.ok) throw new Error(await response.text() || 'tree load failed');
           const data = await response.json();
           this.projectRoot = data.project_root || this.projectRoot;
-          this.childrenByPath[data.path || ''] = Array.isArray(data.entries) ? data.entries : [];
+          const key = data.path || '';
+          const entries = Array.isArray(data.entries) ? data.entries : [];
+          if (options.quiet && this.childrenByPath[key]) this.noteTreeChanges(key, this.childrenByPath[key], entries);
+          this.childrenByPath[key] = entries;
         } catch (err) {
           if (!options.quiet) this.treeError = err.message || String(err);
           else if (path) {
@@ -747,6 +906,7 @@
       async loadFile(path, options = {}) {
         if (!this.sessionID || !path) return;
         if (options.reload) return this.reloadFile(path);
+        latestFrom = null;
         const request = ++this.fileRequest;
         this.selectedPath = path;
         this.selectedNode = {path, name: path.split('/').pop(), dir: false};
@@ -763,6 +923,10 @@
           this.file = file;
           this.projectRoot = this.file.project_root || this.projectRoot;
           this.viewMode = this.file.markdown ? 'preview' : 'source';
+          if (typeof file.content === 'string') {
+            remember(shown, path, file.content);
+            this.ensureBaseline(path, file.content);
+          }
         } catch (err) {
           if (request === this.fileRequest) this.fileError = err.message || String(err);
         } finally {
@@ -783,10 +947,18 @@
           if (!response.ok) return;
           const file = await response.json();
           if (request !== this.fileRequest) return;
+          const before = this.file?.path === path && !this.fileError ? this.file.content : shown.get(path);
           const mode = this.viewMode;
           this.file = file;
           this.fileError = '';
           if (file.markdown) this.viewMode = mode;
+          if (typeof file.content !== 'string') return;
+          remember(shown, path, file.content);
+          if (typeof before === 'string' && before !== file.content) {
+            latestFrom = {path, content: before};
+            this.changeEpoch++;
+            if (this.followMode !== 'off') this.scrollToLatestChange();
+          }
         } catch (_) {
           // Keep showing the last version; the next change tries again.
         }
@@ -807,6 +979,37 @@
 
       imagePreviewURL() {
         return this.file?.path ? this.rawFileURL(this.file.path) : '';
+      },
+
+      // previewHTML is the rendered Markdown with change marks, and with the
+      // latest edit tagged so following can scroll to it.
+      previewHTML() {
+        const file = this.file;
+        void this.changeEpoch;
+        const marks = this.showChanges;
+        const content = file?.content || '';
+        const base = marks ? baselines.get(file.path) : undefined;
+        const before = latestFrom?.path === file.path ? latestFrom.content : null;
+        const html = this.markdownHTML(content, file.path);
+        if ((base === undefined || base === content) && before == null) return html;
+        const cache = previewCache;
+        if (cache.html === html && cache.base === base && cache.before === before && cache.marks === marks) return cache.out;
+        const out = window.KoderFileChanges.decoratePreview(html, {
+          baseHTML: base === undefined ? null : this.markdownHTML(base, file.path),
+          prevHTML: before == null ? null : this.markdownHTML(before, file.path),
+          marks,
+        });
+        Object.assign(cache, {html, base, before, marks, out});
+        return out;
+      },
+
+      sourceHTML() {
+        const file = this.file;
+        void this.changeEpoch;
+        const marks = this.showChanges;
+        const base = marks ? baselines.get(file.path) : undefined;
+        const before = latestFrom?.path === file.path ? latestFrom.content : null;
+        return window.KoderFileChanges.decorateSource(file.content || '', this.highlightedContent(), {baseText: base ?? null, prevText: before, marks});
       },
 
       highlightedContent() {

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" x-data="koderFilesApp()" x-init="init()" data-bs-theme="dark">
+<html lang="en" x-data="koderFilesApp()" data-bs-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -22,6 +22,7 @@
   <link href="/assets/file_browser.css" rel="stylesheet">
   <script>window.KODER_ASSET_HASH = "__KODER_ASSET_HASH__";</script>
   <script defer src="/assets/markdown_runtime.js"></script>
+  <script defer src="/assets/file_changes.js"></script>
   <script defer src="/assets/file_browser.js"></script>
   <script defer src="/assets/vendor/alpine/cdn.min.js"></script>
 </head>
@@ -46,6 +47,16 @@
       <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="mutationBusy || !selectedNode" @click="beginFileDialog('move')" data-file-move><i class="bi bi-arrows-move"></i> Rename / move</button>
       <button type="button" class="btn btn-sm btn-outline-danger" :disabled="mutationBusy || !selectedNode" @click="beginFileDialog('delete')" data-file-delete><i class="bi bi-trash"></i> Delete</button>
       <span class="small text-secondary text-truncate" :title="currentDir || 'Project root'" x-text="'Upload to: ' + (currentDir || 'Project root')"></span>
+      <div class="file-browser-change-controls ms-auto d-flex align-items-center gap-2">
+        <label class="small text-secondary" for="file-follow-mode">Follow</label>
+        <select id="file-follow-mode" class="form-select form-select-sm" :value="followMode" @change="setFollowMode($event.target.value)" data-file-follow title="Where to go when files change on disk">
+          <option value="off">Off</option>
+          <option value="file">Edits in this file</option>
+          <option value="files">Edited files</option>
+        </select>
+        <button type="button" class="btn btn-sm" :class="showChanges ? 'btn-secondary' : 'btn-outline-secondary'" :aria-pressed="showChanges" @click="toggleChanges()" data-file-changes title="Mark what changed since you opened this page"><i class="bi bi-file-diff"></i> Changes</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!hasChanges()" @click="clearChanges()" data-file-clear-changes title="Clear the change marks and track changes from now"><i class="bi bi-eraser"></i> Clear</button>
+      </div>
     </div>
     <div class="file-browser-operation-status px-3 py-2 small border-bottom" role="status" aria-live="polite" x-show="mutationStatus || mutationError" style="display:none">
       <span class="spinner-border spinner-border-sm me-2" x-show="mutationBusy"></span>
@@ -57,7 +68,7 @@
       <aside class="file-browser-tree-pane" @dragover="fileDragOver($event, currentDir)" @drop="dropFiles($event, currentDir)">
         <div class="file-browser-tree-header">
           <span class="small text-secondary">Files</span>
-          <span class="spinner-border spinner-border-sm text-secondary" x-show="treeLoading" style="display: none;"></span>
+          <span class="spinner-border spinner-border-sm text-secondary" hidden :hidden="!treeLoading"></span>
         </div>
         <template x-if="treeError">
           <div class="alert alert-danger m-2 py-2 small" x-text="treeError"></div>
@@ -66,10 +77,11 @@
           <button type="button" class="file-browser-node file-browser-root" :class="{active: !selectedNode, 'drop-target': dropTarget === ''}" @click="selectRoot()" @dragover="fileDragOver($event, '')" @drop="dropFiles($event, '')" data-file-root title="Select project root; drop files here to upload or move to root">
             <i class="bi bi-folder2"></i><span>Project root</span>
           </button>
-          <template x-for="node in visibleNodes()" :key="node.path || '/'">
-            <button type="button" class="file-browser-node" :class="{active: selectedNode?.path === node.path, 'drop-target': node.dir && dropTarget === node.path}" :style="nodeIndent(node.depth)" @click="openNode(node)" role="treeitem"
-              :data-file-path="node.path" :aria-selected="selectedNode?.path === node.path" :aria-expanded="node.dir ? !!expanded[node.path] : null" :title="node.path"
-              :draggable="!mutationBusy" @dragstart="startFileDrag($event, node)" @dragend="dragPath = null; dropTarget = null"
+          <template x-for="node in visibleNodes()" :key="(node.ghost ? 'removed:' : '') + (node.path || '/')">
+            <button type="button" class="file-browser-node" :class="nodeClasses(node)" :style="nodeIndent(node.depth)" @click="openNode(node)" role="treeitem"
+              :data-file-path="node.ghost ? null : node.path" :data-file-removed="node.ghost ? node.path : null" :aria-disabled="node.ghost ? 'true' : null"
+              :aria-selected="selectedNode?.path === node.path" :aria-expanded="node.dir && !node.ghost ? !!expanded[node.path] : null" :title="node.ghost ? node.path + ' (removed)' : node.path"
+              :draggable="!mutationBusy && !node.ghost" @dragstart="startFileDrag($event, node)" @dragend="dragPath = null; dropTarget = null"
               @dragover="fileDragOver($event, node.dir ? node.path : parentPath(node.path))" @drop="dropFiles($event, node.dir ? node.path : parentPath(node.path))"
               @dragleave="if (!$el.contains($event.relatedTarget)) dropTarget = null">
               <i class="bi" :class="nodeIcon(node)"></i>
@@ -148,11 +160,11 @@
             </template>
 
             <template x-if="file.markdown && viewMode === 'preview' && !file.binary && !file.too_large && !isImageFile()">
-              <article class="markdown-body file-browser-markdown" x-html="markdownHTML(file.content, file.path)" x-effect="renderDiagrams($el, file.path)"></article>
+              <article class="markdown-body file-browser-markdown" x-html="previewHTML()" x-effect="renderDiagrams($el, file.path)"></article>
             </template>
 
             <template x-if="(!file.markdown || viewMode === 'source') && !file.binary && !file.too_large && !isImageFile()">
-              <pre class="file-browser-code"><code class="hljs" x-html="highlightedContent()"></code></pre>
+              <pre class="file-browser-code"><code class="hljs" x-html="sourceHTML()"></code></pre>
             </template>
           </section>
         </template>

@@ -294,3 +294,26 @@ details.obsidian-callout > summary { cursor: pointer; }
 .obsidian-callout:is([data-callout="warning"], [data-callout="caution"], [data-callout="attention"], [data-callout="question"], [data-callout="help"], [data-callout="faq"]) { --callout-rgb: var(--bs-warning-rgb); }
 .obsidian-callout:is([data-callout="danger"], [data-callout="error"], [data-callout="bug"], [data-callout="failure"], [data-callout="fail"], [data-callout="missing"]) { --callout-rgb: var(--bs-danger-rgb); }
 .obsidian-callout:is([data-callout="quote"], [data-callout="cite"], [data-callout="example"]) { --callout-rgb: var(--bs-secondary-rgb); }
+
+/* Change marks: what changed on disk since the page started tracking. */
+.file-browser-change-controls select { width: auto; }
+.file-browser-node.change-added { color: var(--bs-success-text-emphasis); }
+.file-browser-node.change-modified { color: var(--bs-warning-text-emphasis); }
+.file-browser-node.change-removed { color: var(--bs-danger-text-emphasis); text-decoration: line-through; opacity: .75; cursor: default; }
+.file-browser-markdown ins.change-ins { text-decoration: none; color: inherit; background: rgba(var(--bs-success-rgb), .28); border-radius: 2px; }
+.file-browser-markdown del.change-del { margin-right: .2em; color: var(--bs-danger-text-emphasis); text-decoration: line-through; background: rgba(var(--bs-danger-rgb), .18); border-radius: 2px; user-select: none; }
+.file-browser-markdown > .change-added,
+.file-browser-markdown > .change-removed,
+.file-browser-markdown > .change-edited { position: relative; }
+.file-browser-markdown > .change-added::before,
+.file-browser-markdown > .change-removed::before,
+.file-browser-markdown > .change-edited::before { content: ""; position: absolute; left: -.65rem; top: 0; bottom: 0; width: 3px; border-radius: 2px; }
+.file-browser-markdown > .change-added { background: rgba(var(--bs-success-rgb), .08); }
+.file-browser-markdown > .change-added::before { background: var(--bs-success); }
+.file-browser-markdown > .change-edited::before { background: var(--bs-warning); }
+.file-browser-markdown > .change-removed { background: rgba(var(--bs-danger-rgb), .08); opacity: .7; text-decoration: line-through; text-decoration-color: var(--bs-danger); user-select: none; }
+.file-browser-markdown > .change-removed::before { background: var(--bs-danger); }
+.file-browser-code code { display: inline-block; min-width: 100%; }
+.file-browser-code .code-line { display: block; min-height: 1lh; }
+.file-browser-code .code-line.change-added { background: rgba(var(--bs-success-rgb), .2); }
+.file-browser-code .code-line.change-removed { background: rgba(var(--bs-danger-rgb), .2); text-decoration: line-through; opacity: .75; user-select: none; }

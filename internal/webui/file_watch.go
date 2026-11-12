@@ -40,6 +40,7 @@ type watchFilesResult struct {
 
 // filesChanged lists the watched folders whose entries changed and the
 // files and folders the changes touched, relative to the project root.
+// Paths are in the order they last changed, the most recent last.
 type filesChanged struct {
 	SessionID id.ID    `json:"session_id"`
 	Dirs      []string `json:"dirs"`
@@ -56,7 +57,9 @@ type fileWatch struct {
 	sessionID id.ID
 	dirs      map[string]string // absolute path -> path relative to root
 	dirty     map[string]struct{}
-	paths     map[string]struct{}
+	paths     map[string]int // path -> order of its latest change
+	seq       int
+	base      fileBaselines
 	timer     *time.Timer
 	lastSent  time.Time
 	closed    bool
@@ -106,10 +109,13 @@ func (w *fileWatch) set(sessionID id.ID, dirs map[string]string) error {
 	if w.closed {
 		return errors.New("connection closed")
 	}
-	if w.watcher != nil && w.sessionID != sessionID {
-		_ = w.watcher.Close()
-		w.watcher = nil
+	if w.sessionID != sessionID {
+		if w.watcher != nil {
+			_ = w.watcher.Close()
+			w.watcher = nil
+		}
 		w.dirs = nil
+		w.base = fileBaselines{}
 	}
 	if w.watcher == nil {
 		if len(dirs) == 0 {
@@ -139,6 +145,7 @@ func (w *fileWatch) set(sessionID id.ID, dirs map[string]string) error {
 			return fmt.Errorf("watch %s: %w", rel, err)
 		}
 		w.dirs[full] = rel
+		w.base.record(full, rel)
 	}
 	return nil
 }
@@ -196,11 +203,12 @@ func (w *fileWatch) noteAll(watcher *fsnotify.Watcher) {
 func (w *fileWatch) mark(dir, path string) {
 	if w.dirty == nil {
 		w.dirty = map[string]struct{}{}
-		w.paths = map[string]struct{}{}
+		w.paths = map[string]int{}
 	}
 	w.dirty[dir] = struct{}{}
 	if path != "" {
-		w.paths[path] = struct{}{}
+		w.seq++
+		w.paths[path] = w.seq
 	}
 	if w.timer != nil {
 		return
@@ -219,7 +227,9 @@ func (w *fileWatch) flush() {
 		w.mu.Unlock()
 		return
 	}
-	msg := filesChanged{SessionID: w.sessionID, Dirs: sortedKeys(w.dirty), Paths: sortedKeys(w.paths)}
+	paths := slices.Collect(maps.Keys(w.paths))
+	slices.SortFunc(paths, func(a, b string) int { return w.paths[a] - w.paths[b] })
+	msg := filesChanged{SessionID: w.sessionID, Dirs: slices.Sorted(maps.Keys(w.dirty)), Paths: paths}
 	w.dirty, w.paths = nil, nil
 	w.lastSent = time.Now()
 	w.mu.Unlock()
@@ -238,8 +248,4 @@ func (w *fileWatch) Close() {
 		_ = w.watcher.Close()
 		w.watcher = nil
 	}
-}
-
-func sortedKeys(set map[string]struct{}) []string {
-	return slices.Sorted(maps.Keys(set))
 }

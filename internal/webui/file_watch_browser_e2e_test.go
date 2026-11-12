@@ -63,6 +63,11 @@ func TestFileBrowserFollowsDiskChanges(t *testing.T) {
 		return chromedp.Poll(fmt.Sprintf(`!document.querySelector('[data-file-path=%q]')`, path), nil)
 	}
 
+	// With no folder open, the project root alone is watched.
+	run("root only", chromedp.Navigate(srv.URL()+"/s/"+string(state.Session.ID)+"/files"), watching(""))
+	write("root-only.txt", "x")
+	run("root change shows", shown("root-only.txt"))
+
 	run("open note",
 		chromedp.Navigate(srv.URL()+"/s/"+string(state.Session.ID)+"/files?path=docs/note.md"),
 		chromedp.Poll(`document.querySelector('.file-browser-markdown')?.textContent.includes('First version')`, nil),

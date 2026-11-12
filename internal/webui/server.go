@@ -757,9 +757,14 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		var result any
-		if req.Method == "watch_files" {
+		switch req.Method {
+		case "watch_files":
 			result, err = s.handleWatchFiles(ctx, fileWatch, req.Params)
-		} else {
+		case "file_baseline":
+			result, err = fileWatch.handleBaseline(req.Params)
+		case "reset_file_baselines":
+			result, err = fileWatch.resetBaselines()
+		default:
 			result, err = s.handleRPC(ctx, clientID, req.Method, req.Params)
 		}
 		if err == nil {

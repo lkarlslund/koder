@@ -39,6 +39,17 @@ The tree and the open file follow changes on disk, such as files an agent
 writes, without a manual refresh. Only the folders open in the tree are
 watched, up to 256 of them.
 
+**Changes** marks what changed since the page started watching: inserted
+words in green and deleted words struck through in red, added and removed
+paragraphs and source lines, and new, changed and removed entries in the
+tree. **Clear** starts over from the current state. **Follow** picks where
+the view goes when a file changes: *Off* stays put, *Edits in this file*
+scrolls to each edit in the open file, and *Edited files* opens whichever
+watched file changed last and scrolls to the edit. To show changes in files
+you have not opened yet, the server keeps the text of each watched folder's
+files from when the page started watching it (up to 1 MB per file and 32 MB
+per page).
+
 Uploads and moves never overwrite existing names. Failed uploads are cleaned
 up without publishing partial files. Operations stay inside the session's
 project folder and use the server account's filesystem permissions; these are
