@@ -53,7 +53,7 @@ func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Present on companion screen",
 		Description: "Deliberately show visual material separately from the spoken response.",
-		Usage:       "Use when the user asks to see something, or when visual detail is useful. Supported inputs are (1) card: a JSON object, never a quoted JSON string, with version 1 and blocks; or (2) content plus mime_type: text/plain, text/markdown, application/json, or application/vnd.koder.presentation+json. Markdown is rendered. Card blocks are text {text,style}, image {uri,title,alt}, key_value {items:[{key,value}]}, list {items:[{title,detail}]}, progress {label,value,max,detail}, action {label,uri}, and file {name,uri,mime_type,detail}. A text block uses text, not title. Then give a short plain conversational final response that refers to it; do not copy the presentation into that response.",
+		Usage:       "Use when the user asks to see something, or when visual detail is useful. Supported inputs are (1) card: a JSON object, never a quoted JSON string, with version 1 and blocks; or (2) content plus mime_type: text/plain, text/markdown (the default), application/json, or application/vnd.koder.presentation+json. Markdown is rendered. Card blocks are text {text,style}, image {uri,title,alt}, key_value {items:[{key,value}]}, list {items:[{title,detail}]}, progress {label,value,max,detail}, action {label,uri}, and file {name,uri,mime_type,detail}. A text block uses text, not title. Then give a short plain conversational final response that refers to it; do not copy the presentation into that response.",
 		Parameters:  parameters,
 		ExposeToLLM: true,
 		Legacy:      true,
@@ -102,6 +102,9 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 		return out, nil
 	}
 	mimeType := strings.TrimSpace(strings.ToLower(args["mime_type"]))
+	if mimeType == "" {
+		mimeType = "text/markdown" // the usual content; models often leave it out
+	}
 	content := strings.TrimSpace(args["content"])
 	if content == "" {
 		return nil, errors.New("presentation content is required")

@@ -176,3 +176,13 @@ func TestPresentRejectsUnsupportedOrOversizedContent(t *testing.T) {
 		t.Fatal("expected size rejection")
 	}
 }
+
+func TestPresentContentDefaultsToMarkdown(t *testing.T) {
+	args, err := (tool{}).NormalizeArgs(map[string]string{"content": "### Probe\n\n![a](x.jpg =40x40)"})
+	if err != nil {
+		t.Fatalf("content without mime_type: %v", err)
+	}
+	if args["mime_type"] != "text/markdown" {
+		t.Fatalf("mime_type = %q, want text/markdown", args["mime_type"])
+	}
+}
