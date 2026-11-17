@@ -121,8 +121,13 @@
               <template x-if="(item.content?.attachments || []).length > 0">
                 <div class="attachment-strip mb-2">
                   <template x-for="attachment in item.content.attachments || []" :key="attachment.id || attachment.ID || attachment.path || attachment.Path">
-                    <span class="attachment-chip">
-                      <i class="bi" :class="attachmentIcon(attachment)"></i>
+                    <span class="attachment-chip" :class="{'attachment-chip-image': !!attachmentThumbURL(attachment, currentSessionID())}">
+                      <template x-if="attachmentThumbURL(attachment, currentSessionID())">
+                        <button type="button" class="attachment-thumb" :data-lightbox-src="attachmentThumbURL(attachment, currentSessionID())" :data-lightbox-title="attachmentName(attachment)" data-lightbox-meta="Drag to pan, pinch, wheel or buttons to zoom" :title="'Open ' + attachmentName(attachment)">
+                          <img :src="attachmentThumbURL(attachment, currentSessionID())" :alt="attachmentName(attachment)" loading="lazy">
+                        </button>
+                      </template>
+                      <i class="bi" :class="attachmentIcon(attachment)" x-show="!attachmentThumbURL(attachment, currentSessionID())"></i>
                       <span class="text-truncate" x-text="attachmentName(attachment)"></span>
                     </span>
                   </template>
@@ -549,8 +554,11 @@
       </div>
       <div class="composer-attachments mb-2" x-show="composerAttachments.length > 0" style="display: none;">
         <template x-for="attachment in composerAttachments" :key="attachment.id || attachment.ID">
-          <span class="attachment-chip">
-            <i class="bi" :class="attachmentIcon(attachment)"></i>
+          <span class="attachment-chip" :class="{'attachment-chip-image': !!attachmentThumbURL(attachment)}">
+            <template x-if="attachmentThumbURL(attachment)">
+              <span class="attachment-thumb"><img :src="attachmentThumbURL(attachment)" :alt="attachmentName(attachment)"></span>
+            </template>
+            <i class="bi" :class="attachmentIcon(attachment)" x-show="!attachmentThumbURL(attachment)"></i>
             <span class="text-truncate" x-text="attachmentName(attachment)"></span>
             <button type="button" class="btn btn-sm btn-link p-0 ms-1" title="Remove attachment" @click="removeComposerAttachment(attachment)"><i class="bi bi-x-lg"></i></button>
           </span>

@@ -220,6 +220,10 @@
     .queue-actions { flex: 0 0 auto; }
     .queue-actions .btn { padding: .12rem .42rem; line-height: 1.2; }
     .composer-attachments, .attachment-strip { display: flex; flex-wrap: wrap; gap: .35rem; min-width: 0; }
+    .attachment-chip-image { padding: .2rem .45rem .2rem .2rem; }
+    .attachment-thumb { flex: none; display: block; width: 3rem; height: 3rem; padding: 0; border: 0; border-radius: .25rem; overflow: hidden; background: var(--bs-secondary-bg); cursor: zoom-in; }
+    span.attachment-thumb { cursor: default; }
+    .attachment-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
     .attachment-chip { display: inline-flex; align-items: center; gap: .35rem; max-width: min(18rem, 100%); padding: .14rem .45rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-tertiary-bg); font-size: .82rem; line-height: 1.2; }
     .composer-menu { max-height: min(50vh, 36rem); overflow: auto; overscroll-behavior: contain; }
     .transcript-turn { width: 100%; max-width: none; }

@@ -342,6 +342,9 @@
     // relative paths are in the active chat's checkout, and absolute paths
     // anywhere on the machine. The app sets it once it starts.
     let markdownImageContext = () => ({});
+    // composerPreviews holds a local URL for each pasted image while it is
+    // a draft: drafts are not served, and the pasted file is at hand.
+    const composerPreviews = new Map();
     function markdownImageContextKey() {
       const context = markdownImageContext();
       return (context.sessionID || '') + '/' + (context.chatID || '');
@@ -4881,6 +4884,22 @@ function timeoutLabel(value) {
         compactionStatusClass(item) { return compactionStatusClassName(item); },
         compactionTrigger(item) { return compactionTrigger(item); },
         attachmentName(attachment) { return attachment?.name || attachment?.Name || 'image'; },
+        // attachmentThumbURL is where an image attachment's thumbnail loads
+        // from: the pasted file while it is a draft, the session once sent.
+        attachmentThumbURL(attachment, sessionID = '') {
+          const mime = String(attachment?.mime || attachment?.MIME || '').toLowerCase();
+          const id = String(attachment?.id || attachment?.ID || '');
+          if (!mime.startsWith('image/') || !id) return '';
+          if (composerPreviews.has(id)) return composerPreviews.get(id);
+          return sessionID ? '/api/attachments/session/' + encodeURIComponent(sessionID) + '/' + encodeURIComponent(id) : '';
+        },
+        releaseComposerPreviews(attachments) {
+          for (const attachment of attachments || []) {
+            const id = String(attachment?.id || attachment?.ID || '');
+            if (composerPreviews.has(id)) URL.revokeObjectURL(composerPreviews.get(id));
+            composerPreviews.delete(id);
+          }
+        },
         attachmentIcon(attachment) {
           const mime = String(attachment?.mime || attachment?.MIME || '').toLowerCase();
           if (mime.startsWith('image/')) return 'bi-image';
@@ -4920,19 +4939,25 @@ function timeoutLabel(value) {
         uploadComposerImage(file) {
           const form = new FormData();
           form.append('image', file, file.name || 'clipboard.png');
+          const preview = URL.createObjectURL(file);
           fetch('/api/attachments/clipboard-image', {method: 'POST', body: form})
             .then(resp => {
               if (!resp.ok) return resp.text().then(text => { throw new Error(text || resp.statusText); });
               return resp.json();
             })
             .then(draft => {
+              composerPreviews.set(String(draft?.id || draft?.ID || ''), preview);
               this.composerAttachments = [...this.composerAttachments, draft];
               this.showToast('Attached ' + this.attachmentName(draft));
             })
-            .catch(err => this.showToast(err.message || 'image paste failed'));
+            .catch(err => {
+              URL.revokeObjectURL(preview);
+              this.showToast(err.message || 'image paste failed');
+            });
         },
         removeComposerAttachment(attachment) {
           const id = attachment?.id || attachment?.ID;
+          this.releaseComposerPreviews([attachment]);
           this.composerAttachments = this.composerAttachments.filter(item => (item.id || item.ID) !== id);
         },
         queueItemID(item) { return item?.ID || item?.id || ''; },
@@ -5195,7 +5220,7 @@ function timeoutLabel(value) {
           this.$nextTick(() => this.resizeComposer());
           const steer = options.steer ?? this.composerDefaultSteer;
           this.rpc('send_prompt', {text, attachments, steer: !!steer})
-            .then(() => { this.preserveComposerDraftDuringSend = false; this.clearComposerDraftStorage(); })
+            .then(() => { this.preserveComposerDraftDuringSend = false; this.clearComposerDraftStorage(); this.releaseComposerPreviews(attachments); })
             .catch(() => { this.preserveComposerDraftDuringSend = false; this.draft = text; this.composerAttachments = attachments; });
         },
         handleSlash(text) {
