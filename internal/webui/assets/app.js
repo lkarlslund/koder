@@ -1465,7 +1465,7 @@ function timeoutLabel(value) {
         toolInspector: {open: false, icon: '', title: '', subtitle: '', badge: '', badgeClass: '', meta: [], command: '', output: '', resultHTML: ''},
         imageLightbox: {open: false, kind: 'image', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-		browserStatus: {state: 'unknown', owned_tabs: 0}, browserStatusTimer: null, browserTabs: [], browserTabsLoading: false, activityNow: Date.now(), activityTimer: null, revealTick: 0, revealExpired: 0, talkChatID: '', workspacePollTimer: null, scheduledJobs: {sessions: {}, chats: {}}, runningProcesses: {sessions: {}, chats: {}}, filterMenuOpen: '', cronJobModal: {open: false, jobID: ''},
+		browserStatus: {state: 'unknown', owned_tabs: 0}, browserStatusTimer: null, browserStatusLoading: false, browserStatusStale: false, browserTabs: [], browserTabsLoading: false, activityNow: Date.now(), activityTimer: null, revealTick: 0, revealExpired: 0, talkChatID: '', workspacePollTimer: null, scheduledJobs: {sessions: {}, chats: {}}, runningProcesses: {sessions: {}, chats: {}}, filterMenuOpen: '', cronJobModal: {open: false, jobID: ''},
 		browserPreview: {open: false, tab: null, rate: Number(readPreference('browserPreviewRate', '2')), src: '', loading: false, error: '', lastUpdated: '', timer: null, generation: 0},
 		browserVoice: {open: false, active: false, state: 'idle', detail: '', transcript: '', response: '', level: 0, muted: false, error: '', mode: readPreference('browserVoiceMode', 'ptt'), pttHeld: false}, browserVoiceClient: null,
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
@@ -2069,6 +2069,7 @@ function timeoutLabel(value) {
           if (msg.type === 'git_delta') this.applyGitDelta(msg.payload);
           if (msg.type === 'scheduled_jobs') this.applyScheduledJobs(msg.payload);
           if (msg.type === 'running_processes') this.applyRunningProcesses(msg.payload);
+          if (msg.type === 'browser_tabs') this.refreshBrowserStatus();
           if (msg.type === 'theme') { this.theme = msg.payload.theme || 'auto'; writePreference('theme', this.theme); this.applyTheme(); }
         },
         applyStateDelta(delta) {
@@ -6886,12 +6887,21 @@ function timeoutLabel(value) {
 		  return status.error || details.join(' · ') || 'Chrome/Chromium is auto-detected when needed.';
 		},
 		browserStatusTitle() { return 'Browser: ' + String(this.browserStatus?.state || 'unknown') + (this.browserStatus?.owned_tabs ? '\n' + this.browserStatus.owned_tabs + ' owned tab(s)' : ''); },
+		// refreshBrowserStatus reads the browser's state and this chat's tabs.
+		// A call made while one is running runs again after it, so a change
+		// reported mid-request is not lost until the next poll.
 		refreshBrowserStatus() {
 		  if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+		  if (this.browserStatusLoading) { this.browserStatusStale = true; return; }
+		  this.browserStatusLoading = true;
+		  this.browserStatusStale = false;
 		  this.rpc('browser_action', {action: 'status'}).then(status => {
 			this.browserStatus = status || this.browserStatus;
-			this.loadBrowserTabs();
-		  }).catch(() => {});
+			return this.loadBrowserTabs();
+		  }).catch(() => {}).finally(() => {
+			this.browserStatusLoading = false;
+			if (this.browserStatusStale) this.refreshBrowserStatus();
+		  });
 		},
 		browserOwnedTabs() { return (this.browserTabs || []).filter(tab => !!tab?.owned); },
 		// loadBrowserTabs fetches this chat's tabs while it owns any, so they show in the activity list.
@@ -6899,7 +6909,7 @@ function timeoutLabel(value) {
 		  if (this.browserStatus?.state !== 'running' || !(this.browserStatus?.owned_tabs > 0)) { this.browserTabs = []; return; }
 		  if (this.browserTabsLoading || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 		  this.browserTabsLoading = true;
-		  this.rpc('browser_tabs', {}).then(result => {
+		  return this.rpc('browser_tabs', {}).then(result => {
 			this.browserStatus = result?.status || this.browserStatus;
 			this.browserTabs = Array.isArray(result?.tabs) ? result.tabs : [];
 		  }).catch(() => {}).finally(() => { this.browserTabsLoading = false; });

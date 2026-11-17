@@ -58,6 +58,15 @@ func (e *Engine) OnRunningProcessChange(fn func()) {
 	e.toolsRuntime.ExecManager().OnRunningChange(fn)
 }
 
+// OnBrowserTabsChange sets a function called shortly after browser tabs
+// open, close, are claimed or selected, or load a page.
+func (e *Engine) OnBrowserTabsChange(fn func()) {
+	if e == nil || e.browser == nil {
+		return
+	}
+	e.browser.OnTabsChange(fn)
+}
+
 // OnCronChange sets a function called after a cron job is added or removed.
 func (e *Engine) OnCronChange(fn func()) {
 	if e == nil || e.cron == nil {

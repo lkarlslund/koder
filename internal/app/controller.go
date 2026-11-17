@@ -882,6 +882,10 @@ func (c *Controller) Start(ctx context.Context, mode StartupMode, projectRoot st
 	c.agent.OnRunningProcessChange(func() {
 		c.broadcast("running_processes", c.runningProcessCounts())
 	})
+	// Pages refetch their chat's tabs on this, so a tab shows while it loads.
+	c.agent.OnBrowserTabsChange(func() {
+		c.broadcast("browser_tabs", struct{}{})
+	})
 	c.agent.StartCron()
 	c.agent.StartMemoryWatch()
 	return nil

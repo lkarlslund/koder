@@ -84,6 +84,7 @@ type downloadState struct {
 }
 
 type Manager struct {
+	changes      tabChanges
 	idleBrowsers map[id.ID]*idleBrowser
 	idleNotifier func(browserapi.Chat, string)
 	mu           sync.Mutex
@@ -296,6 +297,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 	m.downloads = map[string]*downloadState{}
 	m.state, m.lastErr = stateStopped, ""
 	m.mu.Unlock()
+	m.tabsChanged()
 	var closeErr error
 	var preferenceErr error
 	if browserCtx != nil {
@@ -415,14 +417,8 @@ func (m *Manager) NewTab(ctx context.Context, chat browserapi.Chat, rawURL strin
 		url = "about:blank"
 	}
 	if !wasRunning {
-		if url != "about:blank" {
-			bootstrapCtx, cancel := m.operationContext(ctx, m.browserContext())
-			err := chromedp.Run(bootstrapCtx, chromedp.Navigate(url), page.BringToFront())
-			cancel()
-			if err != nil {
-				return browserapi.Tab{}, fmt.Errorf("navigate initial browser tab: %w", err)
-			}
-		}
+		// Use the blank tab Chrome starts with. Claim it before loading the
+		// page, so the chat lists it while the page loads, as any new tab.
 		listed, err := m.Tabs(ctx, chat)
 		if err != nil {
 			return browserapi.Tab{}, err
@@ -431,25 +427,23 @@ func (m *Manager) NewTab(ctx context.Context, chat browserapi.Chat, rawURL strin
 		sort.SliceStable(listed, func(i, j int) bool {
 			return listed[i].ID == preferredID && listed[j].ID != preferredID
 		})
-		for _, wantedURL := range []string{url, "about:blank"} {
-			for _, candidate := range listed {
-				if !candidate.Unowned || !browserURLsEqual(candidate.URL, wantedURL) {
-					continue
-				}
-				claimed, claimErr := m.ClaimTab(ctx, chat, candidate.ID)
-				if claimErr != nil {
-					continue
-				}
-				result := claimed
-				if !browserURLsEqual(candidate.URL, url) {
-					result, err = m.Navigate(ctx, chat, url, "load")
-					if err != nil {
-						return browserapi.Tab{}, err
-					}
-				}
-				m.cleanupStartupTabs(ctx, chat, result.ID, result.URL)
-				return result, nil
+		for _, candidate := range listed {
+			if !candidate.Unowned || !browserURLsEqual(candidate.URL, "about:blank") {
+				continue
 			}
+			claimed, claimErr := m.ClaimTab(ctx, chat, candidate.ID)
+			if claimErr != nil {
+				continue
+			}
+			result := claimed
+			if url != "about:blank" {
+				result, err = m.Navigate(ctx, chat, url, "load")
+				if err != nil {
+					return browserapi.Tab{}, err
+				}
+			}
+			m.cleanupStartupTabs(ctx, chat, result.ID, result.URL)
+			return result, nil
 		}
 	}
 	m.mu.Lock()
@@ -488,6 +482,7 @@ func (m *Manager) NewTab(ctx context.Context, chat browserapi.Chat, rawURL strin
 	m.tabs[tab.id] = tab
 	m.browserActivityLocked(chat)
 	m.mu.Unlock()
+	m.tabsChanged()
 	if err := m.activateTab(ctx, tab); err != nil {
 		return browserapi.Tab{}, fmt.Errorf("activate new browser tab: %w", err)
 	}
@@ -522,6 +517,7 @@ func (m *Manager) ClaimTab(ctx context.Context, chat browserapi.Chat, tabID stri
 	}
 	tab.owner = chat
 	m.browserActivityLocked(chat)
+	m.tabsChanged()
 	tab.dataMu.Lock()
 	tab.console = nil
 	tab.requests = map[string]*requestState{}
@@ -557,6 +553,7 @@ func (m *Manager) SelectTab(ctx context.Context, chat browserapi.Chat, tabID str
 	m.mu.Lock()
 	m.selected[chat.ChatID] = tab.id
 	m.mu.Unlock()
+	m.tabsChanged()
 	return m.tabInfo(ctx, chat, tab)
 }
 
@@ -621,6 +618,7 @@ func (m *Manager) discardTab(tabID string) {
 }
 
 func (m *Manager) Navigate(ctx context.Context, chat browserapi.Chat, rawURL, wait string) (browserapi.Tab, error) {
+	defer m.tabsChanged() // the page's title and URL changed
 	tab, tabCtx, err := m.ownedSelected(ctx, chat)
 	if errors.Is(err, errNoSelectedTab) {
 		// Navigating with no tab yet opens one at the URL instead of failing.
@@ -686,6 +684,7 @@ func (m *Manager) restoreNavigation(tabCtx context.Context, entry *page.Navigati
 }
 
 func (m *Manager) History(ctx context.Context, chat browserapi.Chat, direction string) (browserapi.Tab, error) {
+	defer m.tabsChanged()
 	tab, tabCtx, err := m.ownedSelected(ctx, chat)
 	if err != nil {
 		return browserapi.Tab{}, err
@@ -1555,6 +1554,7 @@ func (m *Manager) syncTargets(infos []*target.Info) []*ownedTab {
 		tab := &ownedTab{id: newOpaqueID("tab"), targetID: info.TargetID, owner: owner, openedAt: time.Now(), ctx: ctx, cancel: cancel, requests: map[string]*requestState{}}
 		m.tabs[tab.id] = tab
 		added = append(added, tab)
+		m.tabsChanged()
 		if owner.ChatID != "" && m.selected[owner.ChatID] == "" {
 			m.selected[owner.ChatID] = tab.id
 		}
@@ -1839,6 +1839,7 @@ func (m *Manager) removeTab(tab *ownedTab) {
 
 func (m *Manager) removeTabLocked(tab *ownedTab) {
 	delete(m.tabs, tab.id)
+	m.tabsChanged()
 	m.stopIdleIfNoTabsLocked(tab.owner.ChatID)
 	for downloadID, download := range m.downloads {
 		if download.tabID == tab.id {
