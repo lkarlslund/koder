@@ -176,6 +176,16 @@ func TestFileBrowserMarksChangesAndFollowsEdits(t *testing.T) {
 		chromedp.Poll(`![...document.querySelectorAll('.change-del')].some(el => el.textContent.includes('three'))`, nil),
 	)
 
+	// A file created since watching started is new in the tree; its text is
+	// not marked as inserted line by line.
+	write("docs/fresh.md", "# Fresh\n\nAll of this is new.\n")
+	run("a new file opens without marks",
+		chromedp.Poll(app+`.file?.path === 'docs/fresh.md' && document.querySelector('.file-browser-markdown')?.textContent.includes('All of this is new')`, nil),
+		chromedp.Sleep(300*time.Millisecond),
+		none(`.file-browser-markdown .change-added, .file-browser-markdown .change-ins`),
+		chromedp.WaitVisible(`[data-file-path="docs/fresh.md"].change-added`, chromedp.ByQuery),
+	)
+
 	run("follow mode is remembered",
 		chromedp.Reload(),
 		chromedp.Poll(`document.querySelector('#file-follow-mode')?.value === 'files'`, nil),

@@ -60,21 +60,21 @@ func (b *fileBaselines) record(full, rel string) {
 	}
 }
 
-// lookup returns a file's recorded text. A file in a recorded folder with no
-// entry did not exist then, so its baseline is empty. Known is false when
-// nothing was recorded for it.
-func (b *fileBaselines) lookup(rel string) (content string, known bool) {
+// lookup returns a file's recorded text. Known is false when nothing was
+// recorded for it; existed is false for a file in a recorded folder that
+// was not there when it was recorded.
+func (b *fileBaselines) lookup(rel string) (content string, known, existed bool) {
 	if text, ok := b.content[rel]; ok {
-		return text, true
+		return text, true, true
 	}
 	if b.skipped[rel] {
-		return "", false
+		return "", false, true
 	}
 	parent := path.Dir(rel)
 	if parent == "." {
 		parent = ""
 	}
-	return "", b.dirs[parent]
+	return "", b.dirs[parent], false
 }
 
 type fileBaselineParams struct {
@@ -85,6 +85,7 @@ type fileBaselineParams struct {
 type fileBaselineResult struct {
 	Path    string `json:"path"`
 	Known   bool   `json:"known"`
+	Existed bool   `json:"existed"`
 	Content string `json:"content"`
 }
 
@@ -102,8 +103,8 @@ func (w *fileWatch) handleBaseline(raw json.RawMessage) (any, error) {
 	if params.SessionID != w.sessionID {
 		return fileBaselineResult{Path: rel}, nil
 	}
-	content, known := w.base.lookup(rel)
-	return fileBaselineResult{Path: rel, Known: known, Content: content}, nil
+	content, known, existed := w.base.lookup(rel)
+	return fileBaselineResult{Path: rel, Known: known, Existed: existed, Content: content}, nil
 }
 
 // resetBaselines records the watched folders again, as they are now.

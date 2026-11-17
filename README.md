@@ -50,6 +50,14 @@ you have not opened yet, the server keeps the text of each watched folder's
 files from when the page started watching it (up to 1 MB per file and 32 MB
 per page).
 
+Markdown images, in the file browser and in chat, can be sized three ways:
+`<img src="photo.jpg" width="86">`, `![alt](photo.jpg =40x40)` (Typora;
+`=40x` and `=x40` set one side), and `![alt](photo.jpg){width=40}`
+(Pandoc; `height=`, `%` and `em` work too). Relative paths are read from
+the file's folder, or from the chat's project in chat. Absolute paths
+inside the project load from it; other absolute paths and `file://` URLs
+load any image on the machine.
+
 Uploads and moves never overwrite existing names. Failed uploads are cleaned
 up without publishing partial files. Operations stay inside the session's
 project folder and use the server account's filesystem permissions; these are

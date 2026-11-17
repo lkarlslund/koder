@@ -1,4 +1,4 @@
-    const {escapeHTML, sanitizeHTML, sanitizeMermaidSVG, highlightMarkdownCode, renderMermaidPlaceholders, renderMermaidDiagrams, fillKnownMermaidDiagrams} = window.KoderMarkdownRuntime;
+    const {escapeHTML, sanitizeHTML, sanitizeMermaidSVG, highlightMarkdownCode, renderMermaidPlaceholders, renderMermaidDiagrams, fillKnownMermaidDiagrams, rewriteImageSources} = window.KoderMarkdownRuntime;
     function sanitizeDiagramSVG(html) {
       if (!window.DOMPurify) return html;
       return DOMPurify.sanitize(html, {
@@ -338,8 +338,16 @@
     }
     const markdownCache = new Map();
     const timelineMarkdownCache = new Map();
+    // markdownImageContext says where image paths in chat Markdown point:
+    // relative paths are in the active chat's checkout, and absolute paths
+    // anywhere on the machine. The app sets it once it starts.
+    let markdownImageContext = () => ({});
+    function markdownImageContextKey() {
+      const context = markdownImageContext();
+      return (context.sessionID || '') + '/' + (context.chatID || '');
+    }
     function markdownCacheKey(source, options) {
-      return (options.deferDiagrams ? 'defer' : 'full') + ':' + source;
+      return (options.deferDiagrams ? 'defer' : 'full') + ':' + markdownImageContextKey() + ':' + source;
     }
     function markdownOptionsKey(options) {
       return (options.deferDiagrams ? 'defer' : 'full') + ':' + (options.incremental ? 'incremental' : 'static');
@@ -358,7 +366,7 @@
     function timelineMarkdownCacheKey(item, options) {
       const id = String(item?.id || item?.ID || '').trim();
       if (!id) return '';
-      return id + ':' + markdownOptionsKey(options || {});
+      return id + ':' + markdownImageContextKey() + ':' + markdownOptionsKey(options || {});
     }
     function renderTimelineMarkdown(item, text, options = {}) {
       const source = String(text || '');
@@ -391,6 +399,7 @@
         marked.setOptions({gfm: true, breaks: false});
         let html = marked.parse(source);
         html = sanitizeHTML(html);
+        html = rewriteImageSources(html, markdownImageContext());
         html = renderMermaidPlaceholders(html, {streaming: !!options.deferDiagrams, partialLast: endsInsideMermaidFence(source)});
         html = renderMathInHTML(html);
         html = highlightMarkdownCode(html);
@@ -1464,6 +1473,17 @@ function timeoutLabel(value) {
 		chatCreator: {open: false, loading: false, busy: false, error: '', backends: [], draft: {isolation: '', title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}},
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptScrollOperation: 0, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptEnhancementObserver: null, transcriptEnhancementFrame: 0, transcriptEnhanceTimer: null, transcriptDOMUpdateScheduled: false, transcriptDOMUpdateCallbacks: [], scrollRestoreSeq: 0, timelineLoading: {}, timelineRepairing: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, composerDefaultSteer: readPreference('composerDefaultSend', 'steer') === 'steer', reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
+          markdownImageContext = () => {
+            const sessionID = this.currentSessionID();
+            const chatID = String(this.activeChatID() || '');
+            const query = chatID ? '&chat=' + encodeURIComponent(chatID) : '';
+            return {
+              sessionID,
+              chatID,
+              projectRoot: this.activeCheckoutRoot(),
+              fileURL: sessionID ? path => '/api/sessions/' + encodeURIComponent(sessionID) + '/files/raw?path=' + encodeURIComponent(path) + query : null,
+            };
+          };
           this.initializeRouteHydration();
           this.syncBrowserTabActivity();
           this.clampSidebarRatio();

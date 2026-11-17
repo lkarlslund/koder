@@ -317,3 +317,7 @@ details.obsidian-callout > summary { cursor: pointer; }
 .file-browser-code .code-line { display: block; min-height: 1lh; }
 .file-browser-code .code-line.change-added { background: rgba(var(--bs-success-rgb), .2); }
 .file-browser-code .code-line.change-removed { background: rgba(var(--bs-danger-rgb), .2); text-decoration: line-through; opacity: .75; user-select: none; }
+
+/* An image with a size is laid out like text, so small pictures can sit in
+   a line or a table cell; unsized images keep their own block. */
+.file-browser-markdown img.markdown-sized-image { display: inline-block; vertical-align: middle; margin: .15rem; }

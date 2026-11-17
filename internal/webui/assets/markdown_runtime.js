@@ -287,7 +287,172 @@
     }
   }
 
+  // Image sizes. Markdown itself has none; these are the two common
+  // extensions: ![alt](src =WxH) from Typora and markdown-it-imsize (=40x,
+  // =x40 and =40 too), and ![alt](src){width=40 height=30} from Pandoc.
+  // Raw <img width="40"> works as in HTML.
+  const imageLink = String.raw`!\[((?:\\[\s\S]|[^\\\]])*)\]\(\s*(<[^>\n]*>|[^\s()]+)(?:\s+("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'))?`;
+  const sizeToken = String.raw`(\d+(?:\.\d+)?(?:px|%|em|rem|vw)?)`;
+  const typoraImage = new RegExp('^' + imageLink + String.raw`\s+=` + sizeToken + '?(?:x' + sizeToken + String.raw`?)?\s*\)`);
+  const pandocImage = new RegExp('^' + imageLink + String.raw`\s*\)\{([^{}\n]*)\}`);
+
+  function unescapeMarkdown(text) {
+    return String(text || '').replace(/\\([!-/:-@[-`{-~])/g, '$1');
+  }
+
+  function sizedImageToken(raw, alt, src, title, width, height, classes) {
+    if (!width && !height) return undefined;
+    return {
+      type: 'sizedImage',
+      raw,
+      alt: unescapeMarkdown(alt),
+      src: unescapeMarkdown(String(src).replace(/^<|>$/g, '')),
+      title: title ? unescapeMarkdown(title.slice(1, -1)) : '',
+      width: width || '',
+      height: height || '',
+      classes: classes || [],
+    };
+  }
+
+  // sizeAttribute writes a plain or px length as an attribute and any other
+  // unit as a style, since width="50%" is not valid on img.
+  function sizeAttribute(name, value) {
+    if (!value) return '';
+    const plain = /^(\d+(?:\.\d+)?)(px)?$/.exec(value);
+    return plain ? ' ' + name + '="' + plain[1] + '"' : ' style="' + name + ':' + escapeHTML(value) + '"';
+  }
+
+  const sizedImageExtension = {
+    name: 'sizedImage',
+    level: 'inline',
+    start(src) {
+      const at = src.indexOf('![');
+      return at < 0 ? undefined : at;
+    },
+    tokenizer(src) {
+      let match = typoraImage.exec(src);
+      if (match) return sizedImageToken(match[0], match[1], match[2], match[3], match[4], match[5]);
+      match = pandocImage.exec(src);
+      if (!match) return undefined;
+      let width = '';
+      let height = '';
+      const classes = [];
+      for (const part of match[4].matchAll(/\.([\w-]+)|([\w-]+)=("[^"]*"|'[^']*'|[^\s}]+)/g)) {
+        if (part[1]) classes.push(part[1]);
+        const value = String(part[3] || '').replace(/^["']|["']$/g, '');
+        if (part[2] === 'width') width = value;
+        if (part[2] === 'height') height = value;
+      }
+      return sizedImageToken(match[0], match[1], match[2], match[3], width, height, classes);
+    },
+    renderer(token) {
+      const width = sizeAttribute('width', token.width);
+      const height = sizeAttribute('height', token.height);
+      // Two style attributes would collide; merge them.
+      const styles = [width, height].filter(attr => attr.startsWith(' style=')).map(attr => attr.slice(8, -1));
+      const attrs = [width, height].filter(attr => !attr.startsWith(' style=')).join('') + (styles.length ? ' style="' + styles.join(';') + '"' : '');
+      return '<img src="' + escapeHTML(token.src) + '" alt="' + escapeHTML(token.alt) + '"' +
+        (token.title ? ' title="' + escapeHTML(token.title) + '"' : '') + attrs +
+        (token.classes.length ? ' class="' + escapeHTML(token.classes.join(' ')) + '"' : '') + '>';
+    },
+  };
+  if (window.marked?.use) marked.use({extensions: [sizedImageExtension]});
+
+  function normalizePath(parts) {
+    const stack = [];
+    for (const part of parts) {
+      if (!part || part === '.') continue;
+      if (part === '..') {
+        if (!stack.length) return null;
+        stack.pop();
+      } else {
+        stack.push(part);
+      }
+    }
+    return stack.join('/');
+  }
+
+  // resolveImageSource maps an image src to a URL the page can load, and
+  // the file it shows. Links with a scheme (https:, data:) stay as they are.
+  // Paths inside the project load through context.fileURL; other absolute
+  // paths and file:// URLs load through /api/show-image, which serves image
+  // files only. Relative paths are relative to context.basePath's folder.
+  function resolveImageSource(src, context = {}) {
+    let value = String(src || '').trim();
+    if (!value || value.startsWith('#') || value.startsWith('//')) return null;
+    if (/^file:\/\//i.test(value)) value = value.replace(/^file:\/\/(localhost)?/i, '');
+    else if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return null;
+    value = value.split('#')[0].split('?')[0].replace(/\\/g, '/');
+    try { value = decodeURIComponent(value); } catch (_) {}
+    if (!value) return null;
+    const root = String(context.projectRoot || '').replace(/\/+$/, '');
+    const fileURL = context.fileURL;
+    const showImage = path => ({url: '/api/show-image?path=' + encodeURIComponent(path), path});
+    if (value.startsWith('/')) {
+      if (root && fileURL && value.startsWith(root + '/')) {
+        const rel = normalizePath(value.slice(root.length + 1).split('/'));
+        if (rel) return {url: fileURL(rel), path: rel};
+      }
+      if (fileURL && context.isRootRelative?.(value)) {
+        const rel = normalizePath(value.split('/'));
+        if (rel) return {url: fileURL(rel), path: rel};
+      }
+      return showImage(value);
+    }
+    const base = String(context.basePath || '').replace(/\\/g, '/');
+    const dir = base.includes('/') ? base.slice(0, base.lastIndexOf('/')) : '';
+    const rel = normalizePath((dir ? dir + '/' + value : value).split('/'));
+    if (rel !== null && rel !== '' && fileURL) return {url: fileURL(rel), path: rel};
+    if (root) {
+      const absolute = normalizePath((root + '/' + (dir ? dir + '/' : '') + value).split('/'));
+      if (absolute) return showImage('/' + absolute);
+    }
+    return null;
+  }
+
+  // sizeImage applies an img's height attribute. Stylesheets give images
+  // height:auto so a width keeps their shape, which also overrides the
+  // height attribute; a height given alone, or with a width, needs a style.
+  function sizeImage(img) {
+    const width = img.getAttribute('width');
+    const height = img.getAttribute('height');
+    if (!height || !/^\d+(?:\.\d+)?$/.test(height)) return;
+    img.style.height = height + 'px';
+    if (width && /^\d+(?:\.\d+)?$/.test(width)) {
+      img.style.width = width + 'px';
+      img.style.objectFit = 'contain';
+    } else {
+      img.style.width = 'auto';
+    }
+  }
+
+  // rewriteImageSources points every img at a URL the page can load and
+  // applies its size. It returns the HTML and calls decorate for extra
+  // attributes each page wants.
+  function rewriteImageSources(html, context = {}, decorate) {
+    if (!html || !html.includes('<img')) return html;
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    template.content.querySelectorAll('img').forEach(img => {
+      const resolved = resolveImageSource(img.getAttribute('src'), context);
+      if (resolved) {
+        img.setAttribute('src', resolved.url);
+        img.setAttribute('data-source-path', resolved.path);
+        img.removeAttribute('srcset');
+        if (!img.getAttribute('title')) img.setAttribute('title', resolved.path);
+      }
+      img.setAttribute('loading', 'lazy');
+      img.setAttribute('decoding', 'async');
+      if (img.hasAttribute('width') || img.hasAttribute('height') || img.style.width || img.style.height) img.classList.add('markdown-sized-image');
+      sizeImage(img);
+      if (decorate) decorate(img, resolved);
+    });
+    return template.innerHTML;
+  }
+
   window.KoderMarkdownRuntime = Object.freeze({
+    resolveImageSource,
+    rewriteImageSources,
     escapeHTML,
     sanitizeHTML,
     sanitizeMermaidSVG,

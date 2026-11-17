@@ -160,7 +160,7 @@
             </template>
 
             <template x-if="file.markdown && viewMode === 'preview' && !file.binary && !file.too_large && !isImageFile()">
-              <article class="markdown-body file-browser-markdown" x-html="previewHTML()" x-effect="renderDiagrams($el, file.path)"></article>
+              <article class="markdown-body file-browser-markdown" x-html="previewHTML()" x-effect="void [file, changeEpoch, showChanges]; $nextTick(() => renderDiagrams($el))"></article>
             </template>
 
             <template x-if="(!file.markdown || viewMode === 'source') && !file.binary && !file.too_large && !isImageFile()">

@@ -1,5 +1,5 @@
 (function () {
-  const {escapeHTML, sanitizeHTML, sanitizeMermaidSVG, highlightMarkdownCode, renderMermaidPlaceholders, renderMermaidDiagrams} = window.KoderMarkdownRuntime;
+  const {escapeHTML, sanitizeHTML, sanitizeMermaidSVG, highlightMarkdownCode, renderMermaidPlaceholders, renderMermaidDiagrams, rewriteImageSources} = window.KoderMarkdownRuntime;
 
   function formatBytes(bytes) {
     const value = Number(bytes) || 0;
@@ -43,22 +43,8 @@
     return stack.join('/');
   }
 
-  function rewriteMarkdownImageSources(html, basePath, rawURLForPath) {
-    const template = document.createElement('template');
-    template.innerHTML = html;
-    template.content.querySelectorAll('img').forEach(img => {
-      const original = img.getAttribute('src') || '';
-      const resolved = resolveMarkdownAssetPath(original, basePath);
-      if (!resolved) return;
-      img.setAttribute('src', rawURLForPath(resolved));
-      img.setAttribute('loading', 'lazy');
-      img.setAttribute('decoding', 'async');
-      img.setAttribute('data-source-path', resolved);
-      img.classList.add('file-browser-markdown-image');
-      img.removeAttribute('srcset');
-      if (!img.getAttribute('title')) img.setAttribute('title', resolved);
-    });
-    return template.innerHTML;
+  function rewriteMarkdownImageSources(html, context) {
+    return rewriteImageSources(html, context, img => img.classList.add('file-browser-markdown-image'));
   }
 
   // Obsidian notes extend Markdown: YAML properties, [[wikilinks]] and
@@ -561,7 +547,9 @@
         if (baselines.has(path)) return;
         const reply = await this.watchRPC('file_baseline', {session_id: this.sessionID, path});
         if (baselines.has(path)) return;
-        remember(baselines, path, reply?.ok && reply.result?.known ? reply.result.content : content);
+        // A file created since watching started has no earlier text; marking
+        // all of it as inserted says nothing the tree does not already say.
+        remember(baselines, path, reply?.ok && reply.result?.known && reply.result.existed ? reply.result.content : content);
         this.changeEpoch++;
       },
 
@@ -617,8 +605,8 @@
         if (before === undefined) {
           const reply = await this.watchRPC('file_baseline', {session_id: this.sessionID, path});
           if (reply?.ok && reply.result?.known) {
-            before = reply.result.content;
-            if (!baselines.has(path)) remember(baselines, path, before);
+            before = reply.result.existed ? reply.result.content : '';
+            if (reply.result.existed && !baselines.has(path)) remember(baselines, path, before);
           }
         }
         await this.expandParents(path);
@@ -1034,7 +1022,14 @@
         marked.setOptions({gfm: true, breaks: !!obsidian && !obsidian.strict_line_breaks});
         let html = marked.parse(obsidianMarkdown(text, this.file?.wikilinks, obsidian));
         html = renderObsidianCallouts(html);
-        html = rewriteMarkdownImageSources(html, filePath || this.file?.path || '', path => this.rawFileURL(path));
+        html = rewriteMarkdownImageSources(html, {
+          basePath: filePath || this.file?.path || '',
+          projectRoot: this.projectRoot,
+          fileURL: path => this.rawFileURL(path),
+          // GitHub reads /docs/x.png from the repository root; an absolute
+          // path whose first folder is in the project root is read that way.
+          isRootRelative: path => (this.childrenByPath[''] || []).some(entry => entry.name === path.split('/')[1]),
+        });
         html = sanitizeHTML(html);
         html = renderMermaidPlaceholders(html);
         html = highlightMarkdownCode(html);
