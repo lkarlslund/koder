@@ -178,4 +178,31 @@ func TestMarkdownImagesLoadAndTakeTheirSize(t *testing.T) {
 	// The chat has no project listing to tell /img/x.png from a path on
 	// disk; agents write absolute paths, so it is read as one there.
 	check("chat", chat, "rooted")
+
+	// A browser "Save image" result stores the path it saved to, relative to
+	// the project; the row shows that file. Absolute paths show too.
+	var saved []renderedImage
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(fmt.Sprintf(`(() => {
+			const app = document.documentElement._x_dataStack[0];
+			const row = path => app.toolResultHTML({tool: 'browser_capture', status: 'done', args: {action: 'image', save_to_file: path},
+				result: {data: {kind: 'browser_capture', session_id: %q, path, summary: 'Saved 1 to ' + path + ' (image/png, 1 bytes)'}}});
+			const box = document.createElement('div');
+			box.id = 'saved';
+			box.style.cssText = 'position:fixed;top:0;left:0;width:900px;background:#000;z-index:9999';
+			box.innerHTML = row('img/x.png') + row(%q);
+			document.body.append(box);
+		})()`, string(state.Session.ID), away), nil),
+		chromedp.Evaluate(measure+`(document.getElementById('saved'))`, &saved, await),
+	); err != nil {
+		t.Fatalf("saved image rows: %v", err)
+	}
+	if len(saved) != 2 {
+		t.Fatalf("saved image rows: %d images, want 2: %+v", len(saved), saved)
+	}
+	for _, img := range saved {
+		if !img.Loaded {
+			t.Errorf("saved image row %q did not load from %s", img.Alt, img.Src)
+		}
+	}
 }

@@ -1,4 +1,4 @@
-    const {escapeHTML, sanitizeHTML, sanitizeMermaidSVG, highlightMarkdownCode, renderMermaidPlaceholders, renderMermaidDiagrams, fillKnownMermaidDiagrams, rewriteImageSources} = window.KoderMarkdownRuntime;
+    const {escapeHTML, sanitizeHTML, sanitizeMermaidSVG, highlightMarkdownCode, renderMermaidPlaceholders, renderMermaidDiagrams, fillKnownMermaidDiagrams, rewriteImageSources, resolveImageSource} = window.KoderMarkdownRuntime;
     function sanitizeDiagramSVG(html) {
       if (!window.DOMPurify) return html;
       return DOMPurify.sanitize(html, {
@@ -873,6 +873,16 @@
       if (text === '') return 'tool-diff-empty';
       return 'tool-diff-context';
     }
+    // localImageURL turns a file path from a tool result into a URL. Tools
+    // store paths relative to the project, which load from the chat's
+    // checkout; absolute paths load through /api/show-image.
+    function localImageURL(path, sessionID) {
+      const context = markdownImageContext();
+      const session = String(sessionID || context.sessionID || '');
+      const query = context.chatID ? '&chat=' + encodeURIComponent(context.chatID) : '';
+      const fileURL = session ? rel => '/api/sessions/' + encodeURIComponent(session) + '/files/raw?path=' + encodeURIComponent(rel) + query : null;
+      return resolveImageSource(path, {...context, fileURL})?.url || '';
+    }
     function imageResultSource(data) {
 	  const attachment = firstValue(data, ['attachment', 'Attachment']);
 	  if (attachment) {
@@ -884,7 +894,7 @@
       const path = firstValue(data, ['path', 'Path']);
       const sourcePath = firstValue(data, ['source_path', 'SourcePath']) || path;
       if (!sourcePath) return {path, sourcePath: '', src: ''};
-      return {path, sourcePath, src: '/api/show-image?path=' + encodeURIComponent(sourcePath)};
+      return {path, sourcePath, src: localImageURL(sourcePath, firstValue(data, ['session_id', 'SessionID']))};
     }
     function mediaResultSource(data) {
 	  const attachment = firstValue(data, ['attachment', 'Attachment']);
@@ -894,7 +904,7 @@
 	  if (attachmentID && sessionID) return {path, src: '/api/attachments/session/' + encodeURIComponent(sessionID) + '/' + encodeURIComponent(attachmentID)};
 	  const mime = firstValue(data, ['mime_type', 'MIMEType']);
 	  const sourcePath = firstValue(data, ['source_path', 'SourcePath']) || path;
-	  return {path, src: sourcePath && String(mime).startsWith('image/') ? '/api/show-image?path=' + encodeURIComponent(sourcePath) : ''};
+	  return {path, src: sourcePath && String(mime).startsWith('image/') ? localImageURL(sourcePath, sessionID) : ''};
     }
     function renderImagePreviewBlock(title, data, fallbackText, compact) {
       const image = imageResultSource(data);
