@@ -1445,7 +1445,7 @@ func applyClaudePreferences(cfg *config.Config, prefs ClaudePreferences) error {
 }
 
 func nativeBrowserPreferencesFromConfig(cfg config.Browser) NativeBrowserPreferences {
-	return NativeBrowserPreferences{Enabled: cfg.Enabled, Executable: cfg.Executable, Headed: cfg.Headed, OperationTimeout: int(cfg.OperationTimeout / time.Second), MaxTabsPerChat: cfg.MaxTabsPerChat, MaxTabsGlobal: cfg.MaxTabsGlobal, TaskEngine: cfg.TaskEngine, TaskDecisionProviderID: cfg.TaskDecisionProviderID, TaskDecisionModelID: cfg.TaskDecisionModelID, TaskMaxSteps: cfg.TaskMaxSteps}
+	return NativeBrowserPreferences{Enabled: cfg.Enabled, Executable: cfg.Executable, Attach: cfg.Attach, Headed: cfg.Headed, OperationTimeout: int(cfg.OperationTimeout / time.Second), MaxTabsPerChat: cfg.MaxTabsPerChat, MaxTabsGlobal: cfg.MaxTabsGlobal, TaskEngine: cfg.TaskEngine, TaskDecisionProviderID: cfg.TaskDecisionProviderID, TaskDecisionModelID: cfg.TaskDecisionModelID, TaskMaxSteps: cfg.TaskMaxSteps}
 }
 
 func nativeBrowserRuntimeState(engine *agent.Engine) browserapi.Status {
@@ -1461,6 +1461,9 @@ func applyNativeBrowserPreferences(cfg *config.Config, prefs NativeBrowserPrefer
 	}
 	if prefs.OperationTimeout < 1 || prefs.OperationTimeout > 120 {
 		return fmt.Errorf("browser operation timeout must be between 1 and 120 seconds")
+	}
+	if attach := strings.TrimSpace(prefs.Attach); attach != "" && attach != "auto" && !slices.ContainsFunc([]string{"http://", "https://", "ws://", "wss://"}, func(scheme string) bool { return strings.HasPrefix(attach, scheme) }) {
+		return fmt.Errorf("browser attach must be auto, or an http:// or ws:// DevTools address")
 	}
 	if prefs.MaxTabsPerChat < 1 || prefs.MaxTabsGlobal < prefs.MaxTabsPerChat {
 		return fmt.Errorf("browser global tab limit must be at least the per-chat limit")
@@ -1485,7 +1488,7 @@ func applyNativeBrowserPreferences(cfg *config.Config, prefs NativeBrowserPrefer
 	if _, ok := cfg.Providers[decisionProviderID]; decisionProviderID != "" && !ok {
 		return fmt.Errorf("browser task decision provider %q is not configured", decisionProviderID)
 	}
-	cfg.Browser = config.Browser{Enabled: prefs.Enabled, Executable: strings.TrimSpace(prefs.Executable), Headed: prefs.Headed, OperationTimeout: time.Duration(prefs.OperationTimeout) * time.Second, MaxTabsPerChat: prefs.MaxTabsPerChat, MaxTabsGlobal: prefs.MaxTabsGlobal, TaskEngine: taskEngine, TaskDecisionProviderID: decisionProviderID, TaskDecisionModelID: decisionModelID, TaskMaxSteps: prefs.TaskMaxSteps, LegacyTaskDecisionURL: cfg.Browser.LegacyTaskDecisionURL}
+	cfg.Browser = config.Browser{Enabled: prefs.Enabled, Executable: strings.TrimSpace(prefs.Executable), Attach: strings.TrimSpace(prefs.Attach), Headed: prefs.Headed, OperationTimeout: time.Duration(prefs.OperationTimeout) * time.Second, MaxTabsPerChat: prefs.MaxTabsPerChat, MaxTabsGlobal: prefs.MaxTabsGlobal, TaskEngine: taskEngine, TaskDecisionProviderID: decisionProviderID, TaskDecisionModelID: decisionModelID, TaskMaxSteps: prefs.TaskMaxSteps, LegacyTaskDecisionURL: cfg.Browser.LegacyTaskDecisionURL}
 	return nil
 }
 

@@ -3390,7 +3390,8 @@ function timeoutLabel(value) {
           try { host = tab?.url ? new URL(tab.url).host : ''; } catch (err) { host = tab?.url || ''; }
           return {
             key: 'tab:' + tab.id, kind: 'tab', ref: tab,
-            icon: 'bi-globe2', title: tab?.title || tab?.url || 'New tab', subtitle: host,
+            // A tab in the user's own Chrome says so: the agent is using their logins.
+            icon: 'bi-globe2', title: tab?.title || tab?.url || 'New tab', subtitle: this.browserStatus?.attached ? 'In your Chrome' + (host ? ' · ' + host : '') : host,
             time: activityDuration(isNaN(opened) ? NaN : now - opened), timeTitle: 'Open for',
             status: tab?.selected ? {icon: 'bi-eye-fill', cls: 'text-primary', label: 'Current tab'} : {icon: 'bi-dot', cls: 'text-secondary', label: 'Background tab'},
           };
@@ -6668,7 +6669,7 @@ function timeoutLabel(value) {
 		  delete this.settings.health;
           if (!this.settings.ui) this.settings.ui = {};
 		  if (!this.settings.ui.tts) this.settings.ui.tts = {enabled: false, provider_id: '', model_id: '', voice: 'alloy', response_format: 'wav', speed: 1, pcm_sample_rate: 24000};
-		  if (!this.settings.browser) this.settings.browser = {enabled: true, executable: '', headed: true, operation_timeout_seconds: 30, max_tabs_per_chat: 8, max_tabs_global: 32, task_engine: 'obscura', task_decision_provider_id: '', task_decision_model_id: '', task_max_steps: 8};
+		  if (!this.settings.browser) this.settings.browser = {enabled: true, executable: '', attach: '', headed: true, operation_timeout_seconds: 30, max_tabs_per_chat: 8, max_tabs_global: 32, task_engine: 'obscura', task_decision_provider_id: '', task_decision_model_id: '', task_max_steps: 8};
 		  if (!this.settings.codex) this.settings.codex = {configured: true, enabled: true, executable: 'codex', home: ''};
 		  if (!this.settings.claude) this.settings.claude = {configured: true, enabled: true, executable: 'claude', config_dir: ''};
 		  if (!this.settings.access) this.settings.access = {settings: this.cloneAccessSettings({}), presets: [], global_mounts: []};
@@ -6951,7 +6952,7 @@ function timeoutLabel(value) {
 		  const details = [status.executable, status.version, status.owned_tabs ? status.owned_tabs + ' tab(s) owned by this chat' : ''].filter(Boolean);
 		  return status.error || details.join(' · ') || 'Chrome/Chromium is auto-detected when needed.';
 		},
-		browserStatusTitle() { return 'Browser: ' + String(this.browserStatus?.state || 'unknown') + (this.browserStatus?.owned_tabs ? '\n' + this.browserStatus.owned_tabs + ' owned tab(s)' : ''); },
+		browserStatusTitle() { return 'Browser: ' + String(this.browserStatus?.state || 'unknown') + (this.browserStatus?.attached ? ' (your Chrome)' : '') + (this.browserStatus?.owned_tabs ? '\n' + this.browserStatus.owned_tabs + ' owned tab(s)' : ''); },
 		// refreshBrowserStatus reads the browser's state and this chat's tabs.
 		// A call made while one is running runs again after it, so a change
 		// reported mid-request is not lost until the next poll.

@@ -390,8 +390,11 @@ type SettingsIssue struct {
 }
 
 type NativeBrowserPreferences struct {
-	Enabled                bool   `json:"enabled"`
-	Executable             string `json:"executable"`
+	Enabled    bool   `json:"enabled"`
+	Executable string `json:"executable"`
+	// Attach is "" for Koder's own Chrome, "auto" to find the user's running
+	// Chrome, or the DevTools address of a running Chrome.
+	Attach                 string `json:"attach"`
 	Headed                 bool   `json:"headed"`
 	OperationTimeout       int    `json:"operation_timeout_seconds"`
 	MaxTabsPerChat         int    `json:"max_tabs_per_chat"`

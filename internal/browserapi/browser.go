@@ -22,6 +22,8 @@ type Status struct {
 	Version    string `json:"version,omitempty"`
 	Error      string `json:"error,omitempty"`
 	OwnedTabs  int    `json:"owned_tabs"`
+	// Attached is set when Koder drives the user's own running Chrome.
+	Attached bool `json:"attached,omitempty"`
 }
 
 type Tab struct {

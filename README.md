@@ -64,6 +64,31 @@ project folder and use the server account's filesystem permissions; these are
 human UI actions, separate from the agent's sandbox permissions. Moves across
 different filesystems are not supported.
 
+## Using Your Own Chrome
+
+By default the browser tools drive a Chrome that Koder starts itself,
+sandboxed with `bwrap` and with a profile of its own. To let the agent use
+the Chrome you are already running, with your logins, choose **Your running
+Chrome** under **Settings → Tools → Browser**, or set it in `config.toml`:
+
+```toml
+[browser]
+attach = "auto"   # or "http://127.0.0.1:9222"
+```
+
+`auto` works with Chrome 144 and newer: allow remote debugging once at
+`chrome://inspect/#remote-debugging`, and Chrome asks you to allow each
+connection Koder makes. An address connects to a Chrome started with
+`--remote-debugging-port`. Koder must run on the same machine as that Chrome
+unless you forward its port.
+
+In your Chrome, Koder opens tabs of its own and uses only those and the
+popups they open. It does not list, read or close your tabs. When Koder
+disconnects (on stop, restart or a settings change) it closes its own tabs
+and leaves Chrome running. Downloads go wherever your Chrome puts them, so
+the browser's download tools see none. The agent acts with your logins on
+every site, so use this for chats you trust.
+
 ## Quick Start
 
 Download the latest Linux x64 or Linux arm64 build from GitHub Releases:

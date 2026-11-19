@@ -89,8 +89,14 @@ type Skills struct {
 }
 
 type Browser struct {
-	Enabled          bool          `toml:"enabled"`
-	Executable       string        `toml:"executable"`
+	Enabled    bool   `toml:"enabled"`
+	Executable string `toml:"executable"`
+	// Attach makes Koder use a Chrome the user already runs instead of
+	// starting its own: "auto" finds it through the DevToolsActivePort file
+	// that Chrome writes when remote debugging is on, and an address such as
+	// http://127.0.0.1:9222 or a ws:// DevTools URL names it. Empty starts
+	// Koder's own sandboxed Chrome.
+	Attach           string        `toml:"attach,omitempty"`
 	Headed           bool          `toml:"headed"`
 	OperationTimeout time.Duration `toml:"operation_timeout"`
 	MaxTabsPerChat   int           `toml:"max_tabs_per_chat"`
@@ -486,6 +492,7 @@ func (c *Config) applyDefaults() {
 		c.MaxChildChats = def.MaxChildChats
 	}
 	c.Browser.Executable = strings.TrimSpace(c.Browser.Executable)
+	c.Browser.Attach = strings.TrimSpace(c.Browser.Attach)
 	c.Browser.TaskEngine = strings.TrimSpace(c.Browser.TaskEngine)
 	if c.Browser.TaskEngine == "" {
 		c.Browser.TaskEngine = def.Browser.TaskEngine

@@ -99,6 +99,9 @@ type Manager struct {
 	startWait  chan struct{}
 	executable string
 	version    string
+	// attached is set while Koder drives the user's own Chrome rather than
+	// one it started.
+	attached   bool
 	allocCtx   context.Context
 	allocStop  context.CancelFunc
 	browserCtx context.Context
@@ -122,8 +125,13 @@ func NewManager(cfg config.Browser, stateDir string) *Manager {
 
 func (m *Manager) UpdateConfig(cfg config.Browser) {
 	m.mu.Lock()
+	switched := m.cfg.Attach != cfg.Attach && m.state == stateRunning
 	m.cfg = cfg
 	m.mu.Unlock()
+	if switched {
+		// The next browser action starts the browser the new setting names.
+		go func() { _ = m.Stop(context.Background()) }()
+	}
 }
 
 // SetDeciderResolver sets how browser tasks find the model that makes their
@@ -152,12 +160,16 @@ func (m *Manager) Status(_ context.Context, chat browserapi.Chat) browserapi.Sta
 		}
 	}
 	executable, version := m.executable, m.version
+	attached := m.attached || (m.state != stateRunning && m.cfg.Attach != "")
+	if attached && executable == "" {
+		executable = attachedExecutable
+	}
 	if executable == "" {
 		if detected, err := detectExecutable(m.cfg.Executable); err == nil {
 			executable, version = detected, browserVersion(context.Background(), detected)
 		}
 	}
-	return browserapi.Status{State: m.state, Executable: executable, Version: version, Error: m.lastErr, OwnedTabs: owned}
+	return browserapi.Status{State: m.state, Executable: executable, Version: version, Error: m.lastErr, OwnedTabs: owned, Attached: attached}
 }
 
 func (m *Manager) Start(ctx context.Context) error {
@@ -190,6 +202,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.lastErr = ""
 	cfg := m.cfg
 	m.mu.Unlock()
+	if cfg.Attach != "" {
+		return m.startAttached(ctx, cfg)
+	}
 
 	executable, err := detectExecutable(cfg.Executable)
 	if err != nil {
@@ -268,6 +283,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.allocCtx, m.allocStop = allocCtx, allocStop
 	m.browserCtx, m.stop = browserCtx, stop
 	m.executable, m.version = executable, version
+	m.attached = false
 	m.state, m.lastErr = stateRunning, ""
 	close(m.startWait)
 	m.startWait = nil
@@ -289,6 +305,12 @@ func (m *Manager) Start(ctx context.Context) error {
 func (m *Manager) Stop(ctx context.Context) error {
 	m.mu.Lock()
 	browserCtx, stop, allocStop := m.browserCtx, m.stop, m.allocStop
+	attached := m.attached
+	m.attached = false
+	var koderTabs []target.ID
+	for _, tab := range m.tabs {
+		koderTabs = append(koderTabs, tab.targetID)
+	}
 	m.stop, m.allocStop = nil, nil
 	m.browserCtx, m.allocCtx = nil, nil
 	m.clearBrowserIdleLocked()
@@ -300,7 +322,13 @@ func (m *Manager) Stop(ctx context.Context) error {
 	m.tabsChanged()
 	var closeErr error
 	var preferenceErr error
-	if browserCtx != nil {
+	// The user's own Chrome is only disconnected from: closing it would
+	// close the user's windows. Koder closes the tabs it opened, so none are
+	// left that a later connection does not know about.
+	if browserCtx != nil && attached {
+		closeAttachedTabs(ctx, browserCtx, koderTabs)
+	}
+	if browserCtx != nil && !attached {
 		timeout := gracefulStopTimeout
 		if deadline, ok := ctx.Deadline(); ok {
 			timeout = min(timeout, max(time.Until(deadline), time.Millisecond))
@@ -1541,6 +1569,11 @@ func (m *Manager) syncTargets(infos []*target.Info) []*ownedTab {
 		if m.tabByTargetLocked(info.TargetID) != nil {
 			continue
 		}
+		// In the user's own Chrome, only tabs Koder opened and the popups
+		// they open are Koder's; the user's tabs are not attached to.
+		if m.attached && m.tabByTargetLocked(info.OpenerID) == nil {
+			continue
+		}
 		owner := browserapi.Chat{}
 		if opener := m.tabByTargetLocked(info.OpenerID); opener != nil {
 			owner = opener.owner
@@ -1881,6 +1914,10 @@ func (m *Manager) watchBrowser(browserCtx context.Context) {
 	m.downloads = map[string]*downloadState{}
 	m.state = stateError
 	m.lastErr = "chrome exited unexpectedly"
+	if m.attached {
+		m.lastErr = "the connection to your Chrome closed"
+	}
+	m.attached = false
 	m.mu.Unlock()
 	if allocStop != nil {
 		allocStop()
