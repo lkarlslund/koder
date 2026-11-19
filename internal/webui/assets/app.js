@@ -1662,9 +1662,28 @@ function timeoutLabel(value) {
         },
         lightboxTransform() {
           const box = this.imageLightbox || {};
-          return 'translate(' + (box.panX || 0) + 'px, ' + (box.panY || 0) + 'px) scale(' + (box.zoom || 1) + ')';
+          const scale = box.baseWidth ? '' : ' scale(' + (box.zoom || 1) + ')';
+          return 'translate(' + (box.panX || 0) + 'px, ' + (box.panY || 0) + 'px)' + scale;
+        },
+        // Zoom sets the image's or diagram's own size from its size at 100%, so
+        // the browser draws SVG from its vectors and images from their pixels at
+        // that size, instead of enlarging a picture of the 100% view.
+        lightboxMediaStyle() {
+          const box = this.imageLightbox || {};
+          if (!box.baseWidth) return {};
+          const zoom = box.zoom || 1;
+          return {width: box.baseWidth * zoom + 'px', height: box.baseHeight * zoom + 'px', maxWidth: 'none', maxHeight: 'none'};
+        },
+        measureLightboxMedia() {
+          const box = this.imageLightbox;
+          if (!box?.open || box.baseWidth) return;
+          const rect = document.querySelector(box.kind === 'svg' ? '.image-lightbox-svg svg' : '.image-lightbox-img')?.getBoundingClientRect();
+          if (!rect?.width || !rect.height) return;
+          box.baseWidth = rect.width / (box.zoom || 1);
+          box.baseHeight = rect.height / (box.zoom || 1);
         },
         zoomLightbox(delta) {
+          this.measureLightboxMedia();
           const current = Number(this.imageLightbox.zoom || 1);
           this.imageLightbox.zoom = this.clampLightboxZoom(current + delta);
         },
@@ -1673,6 +1692,7 @@ function timeoutLabel(value) {
           return Math.max(0.25, Math.min(8, zoom));
         },
         resetLightboxView() {
+          this.imageLightbox.baseWidth = 0; this.imageLightbox.baseHeight = 0;
           this.imageLightbox.zoom = 1; this.imageLightbox.panX = 0; this.imageLightbox.panY = 0; this.imageLightbox.pinchDistance = 0; this.imageLightbox.pinchZoom = 1;
         },
         onLightboxWheel(event) {
@@ -1682,6 +1702,7 @@ function timeoutLabel(value) {
         },
         startLightboxPan(event) {
           if (!this.imageLightbox.open) return;
+          this.measureLightboxMedia();
           event.preventDefault();
           event.currentTarget?.setPointerCapture?.(event.pointerId);
           const pointers = Object.assign({}, this.imageLightbox.pointers || {});

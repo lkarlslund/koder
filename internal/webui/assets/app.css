@@ -380,12 +380,14 @@
 	.browser-preview-updating { position: absolute; top: 1rem; right: 1rem; display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 999px; color: white; background: rgba(0, 0, 0, .65); }
 	.browser-preview-footer { display: flex; justify-content: space-between; gap: 1rem; padding: .45rem .75rem; }
     .image-lightbox-dialog { width: min(96vw, 1280px); max-height: 94vh; display: flex; flex-direction: column; background: var(--bs-body-bg); }
-    .image-lightbox-body { min-height: 0; height: min(78vh, 860px); display: grid; place-items: center; padding: .75rem; overflow: hidden; background: #050505; touch-action: none; cursor: grab; }
-    .image-lightbox-content { transform-origin: center center; will-change: transform; user-select: none; }
+    .image-lightbox-body { min-height: 0; height: min(78vh, 860px); display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; padding: .75rem; overflow: hidden; background: #050505; touch-action: none; cursor: grab; }
+    .image-lightbox-content { transform-origin: center center; user-select: none; }
     .image-lightbox-content.is-dragging { cursor: grabbing; }
     .image-lightbox-img { max-width: min(100%, 1180px); max-height: calc(94vh - 7rem); object-fit: contain; pointer-events: none; }
     .image-lightbox-svg { width: min(90vw, 1180px); max-width: 100%; max-height: calc(94vh - 7rem); overflow: visible; pointer-events: none; }
-    .image-lightbox-svg svg { display: block; width: auto; max-width: 100%; height: auto; max-height: calc(94vh - 7rem); background: var(--bs-body-bg); }
+    .image-lightbox-svg svg { display: block; width: auto; max-width: 100%; height: auto; max-height: calc(94vh - 7rem); margin-inline: auto; background: var(--bs-body-bg); }
+    /* Zoomed: the box has the zoomed size and the diagram fills it; Mermaid's inline max-width would cap it. */
+    .image-lightbox-svg.is-sized svg { width: 100% !important; height: 100% !important; max-width: none !important; max-height: none !important; }
     .reasoning { color: var(--bs-secondary-color); }
     .assistant-header { align-items: center; }
     .turn-details-button { display: inline-flex; align-items: center; gap: .35rem; padding: .1rem .3rem; margin-left: -.3rem; border: 0; border-radius: .3rem; background: transparent; color: inherit; font: inherit; }
@@ -479,7 +481,7 @@
     .model-dialog-body { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); overflow: hidden; }
     .model-list { min-height: 0; overflow: auto; }
     .model-settings-panel { min-width: 0; min-height: 0; overflow: auto; padding: 1rem; }
-    .model-settings-panel .min-w-0 { min-width: 0; }
+    .min-w-0 { min-width: 0; }
     @media (max-width: 860px) {
       .model-dialog-body { grid-template-columns: 1fr; }
       .model-settings-panel { border-left: 0 !important; border-top: 1px solid var(--bs-border-color); }
