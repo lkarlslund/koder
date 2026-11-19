@@ -389,12 +389,11 @@ func (m *Manager) Tabs(ctx context.Context, chat browserapi.Chat) ([]browserapi.
 	defer cancel()
 	listCtx, listCancel := context.WithTimeout(opCtx, tabListTimeout)
 	defer listCancel()
-	var infos []*target.Info
-	err := chromedp.Run(listCtx, chromedp.ActionFunc(func(ctx context.Context) error {
-		var listErr error
-		infos, listErr = target.GetTargets().Do(ctx)
-		return listErr
-	}))
+	executor, err := onBrowser(listCtx, browserCtx)
+	if err != nil {
+		return nil, err
+	}
+	infos, err := target.GetTargets().Do(executor)
 	if err != nil {
 		m.invalidateUnhealthyBrowser(ctx, browserCtx, err)
 		return nil, fmt.Errorf("list browser tabs: %w", err)
@@ -482,12 +481,12 @@ func (m *Manager) NewTab(ctx context.Context, chat browserapi.Chat, rawURL strin
 	browserCtx := m.browserCtx
 	m.mu.Unlock()
 	createCtx, createCancel := m.operationContext(ctx, browserCtx)
-	var targetID target.ID
-	err := chromedp.Run(createCtx, chromedp.ActionFunc(func(ctx context.Context) error {
-		var createErr error
-		targetID, createErr = target.CreateTarget("about:blank").Do(ctx)
-		return createErr
-	}))
+	executor, err := onBrowser(createCtx, browserCtx)
+	if err != nil {
+		createCancel()
+		return browserapi.Tab{}, err
+	}
+	targetID, err := target.CreateTarget("about:blank").Do(executor)
 	createCancel()
 	if err != nil {
 		m.invalidateUnhealthyBrowser(ctx, browserCtx, err)
@@ -692,14 +691,24 @@ func (m *Manager) closeTarget(ctx context.Context, targetID target.ID) error {
 	m.mu.Lock()
 	browserCtx := m.browserCtx
 	m.mu.Unlock()
-	chromedpContext := chromedp.FromContext(browserCtx)
-	if chromedpContext == nil || chromedpContext.Browser == nil {
-		return errors.New("browser is not running")
-	}
 	closeCtx, cancel := context.WithTimeout(ctx, m.timeout())
 	defer cancel()
-	browserExecutor := cdp.WithExecutor(closeCtx, chromedpContext.Browser)
-	return target.CloseTarget(targetID).Do(browserExecutor)
+	executor, err := onBrowser(closeCtx, browserCtx)
+	if err != nil {
+		return err
+	}
+	return target.CloseTarget(targetID).Do(executor)
+}
+
+// onBrowser returns ctx set to run commands on the browser's own session.
+// Browser-wide commands, such as listing and opening tabs, run there rather
+// than in the first tab: in the user's Chrome that tab may be gone.
+func onBrowser(ctx, browserCtx context.Context) (context.Context, error) {
+	c := chromedp.FromContext(browserCtx)
+	if c == nil || c.Browser == nil {
+		return nil, errors.New("browser is not running")
+	}
+	return cdp.WithExecutor(ctx, c.Browser), nil
 }
 
 func (m *Manager) restoreNavigation(tabCtx context.Context, entry *page.NavigationEntry) {
@@ -1832,14 +1841,13 @@ func (m *Manager) activateTab(ctx context.Context, tab *ownedTab) error {
 	m.mu.Lock()
 	browserCtx := m.browserCtx
 	m.mu.Unlock()
-	chromedpContext := chromedp.FromContext(browserCtx)
-	if chromedpContext == nil || chromedpContext.Browser == nil {
-		return errors.New("browser is not running")
-	}
 	opCtx, cancel := m.operationContext(ctx, browserCtx)
 	defer cancel()
-	browserExecutor := cdp.WithExecutor(opCtx, chromedpContext.Browser)
-	if err := target.ActivateTarget(tab.targetID).Do(browserExecutor); err != nil {
+	executor, err := onBrowser(opCtx, browserCtx)
+	if err != nil {
+		return err
+	}
+	if err := target.ActivateTarget(tab.targetID).Do(executor); err != nil {
 		return fmt.Errorf("activate browser target: %w", err)
 	}
 	return nil

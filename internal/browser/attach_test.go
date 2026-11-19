@@ -116,24 +116,37 @@ func TestAttachToRunningChrome(t *testing.T) {
 			t.Fatal("Chrome did not write DevToolsActivePort")
 		}
 	}
-	pages := func() []string {
+	type page struct{ ID, Type, Title, URL string }
+	listPages := func() []page {
 		t.Helper()
 		resp, err := http.Get("http://127.0.0.1:" + port + "/json/list")
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer resp.Body.Close()
-		var targets []struct{ Type, Title, URL string }
+		var targets []page
 		if err := json.NewDecoder(resp.Body).Decode(&targets); err != nil {
 			t.Fatal(err)
 		}
+		return slices.DeleteFunc(targets, func(p page) bool { return p.Type != "page" })
+	}
+	pages := func() []string {
+		t.Helper()
 		var titles []string
-		for _, target := range targets {
-			if target.Type == "page" {
-				titles = append(titles, target.Title)
-			}
+		for _, p := range listPages() {
+			titles = append(titles, p.Title)
 		}
+		slices.Sort(titles)
 		return titles
+	}
+	waitPages := func(want ...string) []string {
+		t.Helper()
+		slices.Sort(want)
+		got := pages()
+		for deadline := time.Now().Add(3 * time.Second); !slices.Equal(got, want) && time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+			got = pages()
+		}
+		return got
 	}
 	for deadline := time.Now().Add(10 * time.Second); !strings.Contains(strings.Join(pages(), "|"), "Users own tab"); time.Sleep(50 * time.Millisecond) {
 		if time.Now().After(deadline) {
@@ -159,6 +172,12 @@ func TestAttachToRunningChrome(t *testing.T) {
 	if tab.Title != "Koder page" {
 		t.Fatalf("new tab = %+v", tab)
 	}
+	// The tab Koder connects through is closed once connected, so the user
+	// sees only the tabs Koder works in.
+	if got := waitPages("Users own tab", "Koder page"); !slices.Equal(got, []string{"Koder page", "Users own tab"}) {
+		t.Errorf("after connecting, Chrome's tabs are %q, want the user's and Koder's page", got)
+	}
+	connection := manager.browserContext()
 	if status := manager.Status(ctx, chat); !status.Attached || status.State != stateRunning || !strings.Contains(status.Version, "Chrome") {
 		t.Fatalf("status = %+v, want attached and running with Chrome's version", status)
 	}
@@ -198,16 +217,36 @@ func TestAttachToRunningChrome(t *testing.T) {
 		}
 	}
 
+	// The user closes Koder's tabs by hand. Koder keeps its connection, so
+	// Chrome does not ask to allow it again, and opens a new tab.
+	for _, p := range listPages() {
+		if strings.HasPrefix(p.Title, "Koder") {
+			resp, err := http.Get("http://127.0.0.1:" + port + "/json/close/" + p.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = resp.Body.Close()
+		}
+	}
+	if got := waitPages("Users own tab"); !slices.Equal(got, []string{"Users own tab"}) {
+		t.Fatalf("closing Koder's tabs by hand left %q", got)
+	}
+	if tab, err := manager.Navigate(ctx, chat, server.URL+"/again", "load"); err != nil || tab.Title != "Koder page" {
+		t.Fatalf("navigate after the user closed Koder's tabs: %+v, %v", tab, err)
+	}
+	if manager.browserContext() != connection {
+		t.Error("Koder reconnected after the user closed its tabs")
+	}
+	if status := manager.Status(ctx, chat); status.State != stateRunning || status.Error != "" {
+		t.Errorf("status after the user closed Koder's tabs = %+v", status)
+	}
+
 	if err := manager.Stop(ctx); err != nil {
 		t.Fatalf("disconnect: %v", err)
 	}
 	// Chrome and the user's tab stay; Koder's tabs close (pages fails if
 	// Chrome has gone).
-	after := pages()
-	for deadline := time.Now().Add(3 * time.Second); !slices.Equal(after, []string{"Users own tab"}) && time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
-		after = pages()
-	}
-	if !slices.Equal(after, []string{"Users own tab"}) {
+	if after := waitPages("Users own tab"); !slices.Equal(after, []string{"Users own tab"}) {
 		t.Errorf("after disconnecting, Chrome's tabs are %q, want only the user's", after)
 	}
 }

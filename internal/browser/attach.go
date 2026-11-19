@@ -122,12 +122,11 @@ func readDevToolsActivePort(path string) (port, browserPath string, err error) {
 // RemoteAllocator, ending the connection never closes the browser: it only
 // closes the websocket. It also makes the first chromedp context attach to a
 // tab of Koder's own; otherwise chromedp attaches it to whichever of the
-// user's tabs it sees first.
+// user's tabs it sees first. startAttached closes that tab once connected.
 //
-// The control tab is hidden, out of the tab strip, where Chrome allows it.
-// Chrome refuses a hidden tab when it would need a new window, as in headless
-// Chrome; Koder then uses an ordinary background tab and closes it when it
-// disconnects.
+// The tab is hidden, out of the tab strip, where Chrome allows it. Chrome
+// refuses a hidden tab when it would need a new window, as in headless
+// Chrome; Koder then uses an ordinary background tab.
 type attachAllocator struct {
 	url string
 	wg  sync.WaitGroup
@@ -219,20 +218,15 @@ func newAttachedContext(url string) (allocCtx context.Context, allocStop context
 	return allocCtx, allocStop, browserCtx, sync.OnceFunc(stop)
 }
 
-// closeAttachedTabs closes Koder's tabs and its control tab in the user's
-// Chrome before Koder disconnects. A hidden control tab would close with the
-// connection anyway.
+// closeAttachedTabs closes Koder's tabs in the user's Chrome before Koder
+// disconnects.
 func closeAttachedTabs(ctx, browserCtx context.Context, tabs []target.ID) {
-	c := chromedp.FromContext(browserCtx)
-	if c == nil || c.Browser == nil {
-		return
-	}
-	if c.Target != nil {
-		tabs = append(tabs, c.Target.TargetID)
-	}
 	closeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	executor := cdp.WithExecutor(closeCtx, c.Browser)
+	executor, err := onBrowser(closeCtx, browserCtx)
+	if err != nil {
+		return
+	}
 	for _, id := range tabs {
 		if err := target.CloseTarget(id).Do(executor); err != nil {
 			slog.Warn("close Koder's tab in the user's Chrome", "target", id, "error", err)
@@ -264,8 +258,9 @@ func (m *Manager) startAttached(ctx context.Context, cfg config.Browser) error {
 	case <-timer.C:
 		err = errors.New("Chrome did not allow the connection in time; click Allow in Chrome's remote debugging dialog")
 	}
+	var executor context.Context
 	if err == nil {
-		err = configureTargetAutoAttach(browserCtx)
+		executor, err = onBrowser(browserCtx, browserCtx)
 	}
 	if err != nil {
 		stop()
@@ -274,11 +269,17 @@ func (m *Manager) startAttached(ctx context.Context, cfg config.Browser) error {
 		m.setError(err)
 		return err
 	}
-	version := ""
-	if c := chromedp.FromContext(browserCtx); c != nil && c.Browser != nil {
-		if _, product, _, _, _, err := cdpbrowser.GetVersion().Do(cdp.WithExecutor(browserCtx, c.Browser)); err == nil {
-			version = product
+	// Koder needed the control tab only to connect; everything else runs on
+	// the browser's session or in tabs it opens. Closing it leaves nothing
+	// for the user to close by mistake.
+	if c := chromedp.FromContext(browserCtx); c.Target != nil {
+		if err := target.CloseTarget(c.Target.TargetID).Do(executor); err != nil {
+			slog.Warn("close Koder's control tab in the user's Chrome", "error", err)
 		}
+	}
+	version := ""
+	if _, product, _, _, _, err := cdpbrowser.GetVersion().Do(executor); err == nil {
+		version = product
 	}
 	m.mu.Lock()
 	m.allocCtx, m.allocStop = allocCtx, allocStop
