@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/config"
@@ -85,7 +86,7 @@ func TestLegacyDecisionURLStaysWhileUnreachable(t *testing.T) {
 	}
 }
 
-func TestTestProviderReportsAuthAndSuggestsName(t *testing.T) {
+func TestTestProviderReportsAuthAndNamesItAfterItsAddress(t *testing.T) {
 	locked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing key", http.StatusUnauthorized)
 	}))
@@ -111,7 +112,9 @@ func TestTestProviderReportsAuthAndSuggestsName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.SuggestedID != "laya" || result.SuggestedName != "laya" || result.BaseURL != open.URL+"/v1" {
+	// A new provider is named after its server's address, not its model.
+	host := strings.TrimPrefix(open.URL, "http://")
+	if result.SuggestedName != host || result.SuggestedID != strings.NewReplacer(".", "-", ":", "-").Replace(host) || result.BaseURL != open.URL+"/v1" {
 		t.Fatalf("result = %+v", result)
 	}
 	if len(result.ModelDetails) != 1 || result.ModelDetails[0].Kinds[0] != "Decisions" {

@@ -269,8 +269,8 @@
         </div>
         <div class="sidebar-info-row">
           <span class="sidebar-label">Model</span>
-          <button type="button" class="btn btn-link model-trigger p-0 text-start text-truncate" :title="activeModelTooltip()" @click="openModelDialog()">
-            <i class="bi bi-cpu me-1 text-secondary"></i><span x-text="activeProvider()"></span> / <span x-text="activeModel()"></span>
+          <button type="button" class="btn btn-link model-trigger p-0 text-start" data-sidebar-model :title="activeModelTooltip()" @click="openModelDialog()">
+            <i class="bi bi-cpu text-secondary"></i><span class="model-trigger-name" x-text="activeModel()"></span><span class="model-trigger-provider" x-show="activeModelInfo().show_provider" x-text="activeProviderLabel()"></span>
           </button>
         </div>
       </div>
@@ -1557,7 +1557,7 @@
                 <div class="settings-list-header">
                   <div>
 					<div class="fw-semibold">Model providers</div>
-                    <div class="small text-secondary" x-text="providerState.default_provider ? providerState.default_provider + ' / ' + (providerState.default_model || '-') : 'No default provider'"></div>
+                    <div class="small text-secondary" x-text="providerState.default_provider ? (providerState.default_model || '-') + ' · ' + ((providerState.providers || []).find(item => item.id === providerState.default_provider)?.name || providerState.default_provider) : 'No default provider'"></div>
                   </div>
                   <button type="button" class="btn btn-sm btn-outline-primary" title="Add provider" aria-label="Add provider" @click="addSettingsItem('providers')"><i class="bi bi-plus-lg"></i></button>
                 </div>
@@ -2011,6 +2011,10 @@
             <div class="settings-field">
               <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-api-key">API key</label><div class="settings-field-help">Optional; only for servers that ask for one.</div></div>
               <div class="settings-field-control"><input id="settings-provider-api-key" class="form-control" type="password" x-model="providerDraft.api_key" @input="providerProbe = null" autocomplete="off"></div>
+            </div>
+            <div class="settings-field" x-show="providerDetected()">
+              <div class="settings-field-label"><label class="settings-field-title" for="settings-provider-name">Name</label><div class="settings-field-help">Shown in model lists.</div></div>
+              <div class="settings-field-control"><input id="settings-provider-name" class="form-control" x-model="providerDraft.name" @input="providerNameEdited = true" :placeholder="providerProbe?.suggested_name || providerDraft.provider_id || ''" autocomplete="off"></div>
             </div>
             <div class="settings-actions">
               <button type="button" class="btn btn-primary" data-provider-test @click="testProvider()" :disabled="providerTesting || providerSaving || !String(providerDraft.base_url || '').trim()">

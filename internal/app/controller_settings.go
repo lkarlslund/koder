@@ -8,12 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/lkarlslund/koder/internal/accesssettings"
 	"github.com/lkarlslund/koder/internal/agent"
@@ -67,7 +69,7 @@ func (c *Controller) probeDraft(ctx context.Context, draft provider.ConnectDraft
 		models = append(models, item.ID)
 		details = append(details, ProviderProbeModel{ID: item.ID, Kinds: providerProbeCapabilities([]domain.Model{item}), ContextWindow: item.ContextWindow})
 	}
-	suggestedID, suggestedName := c.suggestedProviderName(draft.OriginalProviderID, result.Models)
+	suggestedID, suggestedName := c.suggestedProviderName(draft.OriginalProviderID, result.BaseURL)
 	return &result, ProviderProbeResult{
 		BaseURL:                 result.BaseURL,
 		SuggestedID:             suggestedID,
@@ -157,11 +159,13 @@ func providerProbeCapabilities(models []domain.Model) []string {
 	return capabilities
 }
 
-// suggestedProviderName names a new provider after its first model.
-// Existing providers keep their names.
-func (c *Controller) suggestedProviderName(originalID string, models []domain.Model) (string, string) {
-	base := providerIDFromModels(models)
-	if base == "" {
+// suggestedProviderName names a new provider after its server's address,
+// such as "127.0.0.1:8080" or "api.example.com", and makes its ID from that.
+// A saved provider keeps its name.
+func (c *Controller) suggestedProviderName(originalID, baseURL string) (string, string) {
+	name := providerNameFromURL(baseURL)
+	id := providerIDFromName(name)
+	if id == "" {
 		return "", ""
 	}
 	c.mu.RLock()
@@ -169,7 +173,25 @@ func (c *Controller) suggestedProviderName(originalID string, models []domain.Mo
 	if _, exists := c.cfg.Providers[strings.TrimSpace(originalID)]; exists {
 		return "", ""
 	}
-	return provider.UniqueProviderID(base, c.cfg.Providers), models[0].ID
+	return provider.UniqueProviderID(id, c.cfg.Providers), name
+}
+
+// providerNameFromURL is the host and port of a provider's URL.
+func providerNameFromURL(baseURL string) string {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimPrefix(u.Host, "www.")
+}
+
+// providerIDFromName keeps letters and digits and joins the runs between
+// them with dashes: "127.0.0.1:8080" becomes "127-0-0-1-8080".
+func providerIDFromName(name string) string {
+	words := strings.FieldsFunc(strings.ToLower(name), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	return strings.Join(words, "-")
 }
 
 // providerFeatureLabels names the endpoints detection found, for display.
@@ -233,7 +255,7 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 		draft.PromptProgressSupported = probe.PromptProgressSupported
 		draft.PromptProgressCheckedAt = timePointer(probe.PromptProgressCheckedAt)
 		if strings.TrimSpace(catalogDraft.ProviderID) == "" {
-			catalogDraft.ProviderID, catalogDraft.Name = c.suggestedProviderName("", probe.Models)
+			catalogDraft.ProviderID, catalogDraft.Name = c.suggestedProviderName("", probe.BaseURL)
 		}
 	}
 	originalID := strings.TrimSpace(catalogDraft.OriginalProviderID)

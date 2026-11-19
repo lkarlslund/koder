@@ -1468,7 +1468,7 @@ function timeoutLabel(value) {
 		showPhoneBinding: false, phoneBinding: null, phoneBindingLoading: false, phoneBindingError: '', voiceDevices: [], voiceDevicesLoading: false, voiceDevicesError: '',
         showSessions: false, sessionTypeFilters: {sessions: true, chats: true, voice: true}, sessionStatusFilters: {active: true, starred: false, archived: false}, sessionSearchQuery: '', sessionSearchIDs: null, sessionSearchTimer: null, sessionSearchSeq: 0, sessionSearching: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, quickChatCreating: false, showQuickPromotion: false, quickPromotion: {sessionID: '', mode: 'move_to_new_folder', projectRoot: '', discardGeneratedFiles: false, busy: false, error: ''}, folderPicker: {open: false, target: '', path: '', parent: '', folders: [], loading: false, error: ''}, hydratingSession: {active: false, id: '', title: '', error: ''}, switchingChat: {active: false, id: '', title: '', startedAt: 0}, sessionState: {project_root: '', sessions: [], quick_chats: []}, sessionDraft: {id: '', title: '', projectRoot: '', createProjectRoot: false, missingProjectRoot: '', error: ''},
         confirmationDialog: {open: false, title: '', message: '', confirmLabel: 'Confirm', danger: false}, confirmationResolver: null,
-		memoryState: null, memoryEditor: null, memoryStatus: '', providerState: {providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerProbe: null, providerReprobing: {}, providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
+		memoryState: null, memoryEditor: null, memoryStatus: '', providerState: {providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerProbe: null, providerNameEdited: false, providerReprobing: {}, providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
 		showModelDetails: false, modelDetails: null, settingsModelQuery: '', showModelConfigEditor: false, modelConfigDraft: null, modelConfigExtraBodyOpen: false, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
 		settingsSkillQuery: '', showSkillInspector: false, skillInspection: null, skillInspectionLoading: false,
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary', mcpTesting: false, mcpSaving: false,
@@ -3829,6 +3829,12 @@ function timeoutLabel(value) {
         activeProvider() { const info = this.activeModelInfo(); return info.provider_id || info.ProviderID || this.activeSnapshot()?.chat?.provider_id || this.activeSnapshot()?.Chat?.ProviderID || this.activeSnapshot()?.chat?.ProviderID || this.state.snapshot?.Chat?.ProviderID || ''; },
         activeModel() { const info = this.activeModelInfo(); return info.model_id || info.ModelID || this.activeSnapshot()?.chat?.model_id || this.activeSnapshot()?.Chat?.ModelID || this.activeSnapshot()?.chat?.ModelID || this.state.snapshot?.Chat?.ModelID || ''; },
         activeModelInfo() { return this.state.model_info || this.state.ModelInfo || {}; },
+        activeProviderLabel() { return this.activeModelInfo().provider_label || this.activeProvider(); },
+        // The model by name, with its provider only when several are enabled.
+        activeModelLabel() {
+          const model = this.activeModel();
+          return this.activeModelInfo().show_provider && model ? model + ' · ' + this.activeProviderLabel() : model;
+        },
         formatTokens(value) {
           const n = Number(value || 0);
           if (!Number.isFinite(n) || n <= 0) return 'unknown';
@@ -3860,6 +3866,7 @@ function timeoutLabel(value) {
           const known = !!(info.capabilities_known || info.CapabilitiesKnown);
           const source = info.capability_source || info.CapabilitySource || '';
           const lines = [
+            this.activeModel() + ' · ' + this.activeProviderLabel(),
             'Context: ' + this.formatTokens(contextWindow) + ' tokens',
             'Chat: ' + (info.supports_chat === false || info.SupportsChat === false ? 'no' : 'yes'),
             'STT: ' + this.capabilityLabel(info.supports_stt || info.SupportsSTT, known),
@@ -5834,7 +5841,7 @@ function timeoutLabel(value) {
           return this.modelPickerTarget.title || 'Select model';
         },
         modelPickerSubtitle() {
-          if (!this.modelPickerTarget) return this.activeProvider() + ' / ' + this.activeModel();
+          if (!this.modelPickerTarget) return this.activeModelLabel();
           return this.modelPickerTarget.subtitle || 'Settings';
         },
         modelPickerCurrentValue() {
@@ -6531,6 +6538,7 @@ function timeoutLabel(value) {
           this.providerDraft = Object.assign({headers: {}}, draft || {});
           this.providerModelOptions = [];
           this.providerProbe = null;
+          this.providerNameEdited = false;
           this.providerStatus = ''; this.providerStatusKind = 'secondary';
         },
         // An existing provider is already probed; a new one is once Test succeeds.
@@ -6579,7 +6587,8 @@ function timeoutLabel(value) {
             if (this.providerDraft) {
               if (result.base_url) this.providerDraft.base_url = result.base_url;
               if (result.suggested_id) this.providerDraft.provider_id = result.suggested_id;
-              if (result.suggested_name) this.providerDraft.name = result.suggested_name;
+              // A new provider is named after its address until the user names it.
+              if (result.suggested_name && !this.providerNameEdited) this.providerDraft.name = result.suggested_name;
             }
             const count = result.model_count || 0;
             const sample = (result.models || []).slice(0, 4).join(', ');

@@ -161,7 +161,11 @@ type RuntimeHealth = provider.RuntimeHealth
 
 // ModelInfo describes the active model capabilities shown by web clients.
 type ModelInfo struct {
-	ProviderID        string `json:"provider_id"`
+	ProviderID string `json:"provider_id"`
+	// ProviderLabel is the provider's name. ShowProvider says whether to
+	// show it next to the model: only when several providers are enabled.
+	ProviderLabel     string `json:"provider_label,omitempty"`
+	ShowProvider      bool   `json:"show_provider,omitempty"`
 	ModelID           string `json:"model_id"`
 	FollowsDefault    bool   `json:"follows_default,omitempty"`
 	SourceProviderID  string `json:"source_provider_id,omitempty"`
@@ -659,7 +663,7 @@ func (c *Controller) ChatBackends(ctx context.Context) []ChatBackendState {
 				}
 				koder.Models = append(koder.Models, ChatBackendModelOption{
 					ProviderID: model.ProviderID, ID: model.ModelID,
-					Name: model.ProviderLabel + " / " + model.ModelID, Default: model.Default,
+					Name: modelOptionName(cfg, model.ProviderLabel, model.ModelID), Default: model.Default,
 					DefaultReasoningEffort: model.DefaultReasoningEffort,
 					ReasoningEfforts:       append([]string(nil), model.ReasoningEfforts...),
 					InputModalities:        inputModalities,
@@ -2904,6 +2908,8 @@ func (c *Controller) modelInfoForChat(chatRecord domain.Chat) ModelInfo {
 	}
 	info := ModelInfo{
 		ProviderID:       providerID,
+		ProviderLabel:    providerEntryLabel(providerID, cfg.Providers[providerID]),
+		ShowProvider:     enabledProviderCount(cfg) > 1,
 		ModelID:          modelID,
 		SourceProviderID: sourceProviderID,
 		SourceModelID:    sourceModelID,
@@ -2932,6 +2938,26 @@ func (c *Controller) modelInfoForChat(chatRecord domain.Chat) ModelInfo {
 	info.CapabilitiesKnown = enriched.CapabilitiesKnown
 	info.CapabilitySource = strings.TrimSpace(enriched.CapabilitySource)
 	return info
+}
+
+// enabledProviderCount counts the providers chats can use.
+func enabledProviderCount(cfg config.Config) int {
+	count := 0
+	for _, item := range cfg.Providers {
+		if !item.Disabled {
+			count++
+		}
+	}
+	return count
+}
+
+// modelOptionName names a model by itself, and adds its provider only when
+// there is more than one to choose from.
+func modelOptionName(cfg config.Config, providerLabel, modelID string) string {
+	if enabledProviderCount(cfg) > 1 && providerLabel != "" {
+		return modelID + " · " + providerLabel
+	}
+	return modelID
 }
 
 func newestOpenChat(chats []domain.Chat) domain.Chat {
