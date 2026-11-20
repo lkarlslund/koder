@@ -486,7 +486,11 @@ func (m *Manager) NewTab(ctx context.Context, chat browserapi.Chat, rawURL strin
 		createCancel()
 		return browserapi.Tab{}, err
 	}
-	targetID, err := target.CreateTarget("about:blank").Do(executor)
+	create := target.CreateTarget("about:blank")
+	if m.isAttached() {
+		create = create.WithBackground(true)
+	}
+	targetID, err := create.Do(executor)
 	createCancel()
 	if err != nil {
 		m.invalidateUnhealthyBrowser(ctx, browserCtx, err)
@@ -510,7 +514,7 @@ func (m *Manager) NewTab(ctx context.Context, chat browserapi.Chat, rawURL strin
 	m.browserActivityLocked(chat)
 	m.mu.Unlock()
 	m.tabsChanged()
-	if err := m.activateTab(ctx, tab); err != nil {
+	if err := m.frontTab(ctx, tab); err != nil {
 		return browserapi.Tab{}, fmt.Errorf("activate new browser tab: %w", err)
 	}
 	m.mu.Lock()
@@ -560,7 +564,7 @@ func (m *Manager) ClaimTab(ctx context.Context, chat browserapi.Chat, tabID stri
 	if tab.targetID == "" {
 		return browserapi.Tab{ID: tab.id, Owned: true, Selected: true}, nil
 	}
-	if err := m.activateTab(ctx, tab); err != nil {
+	if err := m.frontTab(ctx, tab); err != nil {
 		return browserapi.Tab{}, fmt.Errorf("activate claimed browser tab: %w", err)
 	}
 	m.mu.Lock()
@@ -574,7 +578,7 @@ func (m *Manager) SelectTab(ctx context.Context, chat browserapi.Chat, tabID str
 	if err != nil {
 		return browserapi.Tab{}, err
 	}
-	if err := m.activateTab(ctx, tab); err != nil {
+	if err := m.frontTab(ctx, tab); err != nil {
 		return browserapi.Tab{}, fmt.Errorf("activate selected browser tab: %w", err)
 	}
 	m.mu.Lock()
@@ -1833,6 +1837,22 @@ func (m *Manager) tabInfo(ctx context.Context, chat browserapi.Chat, tab *ownedT
 	selected := m.selected[chat.ChatID] == tab.id
 	m.mu.Unlock()
 	return browserapi.Tab{ID: tab.id, Title: title, URL: rawURL, Owned: true, Selected: selected}, nil
+}
+
+// frontTab brings the tab a chat works in to the front of Koder's own
+// Chrome. In the user's Chrome the tab they are looking at stays in front;
+// Koder's tabs work in the background until the user asks to see one.
+func (m *Manager) frontTab(ctx context.Context, tab *ownedTab) error {
+	if m.isAttached() {
+		return nil
+	}
+	return m.activateTab(ctx, tab)
+}
+
+func (m *Manager) isAttached() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.attached
 }
 
 func (m *Manager) activateTab(ctx context.Context, tab *ownedTab) error {

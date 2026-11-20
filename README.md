@@ -83,7 +83,10 @@ connection Koder makes. An address connects to a Chrome started with
 unless you forward its port.
 
 In your Chrome, Koder opens tabs of its own and uses only those and the
-popups they open. It does not list, read or close your tabs. When Koder
+popups they open. It does not list, read or close your tabs. Its tabs open
+in the background, so the tab you are looking at stays in front; Chrome
+slows timers in background tabs, which can make pages that animate or poll
+slower. When Koder
 disconnects (on stop, restart or a settings change) it closes its own tabs
 and leaves Chrome running. Downloads go wherever your Chrome puts them, so
 the browser's download tools see none. The agent acts with your logins on

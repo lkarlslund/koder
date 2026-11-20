@@ -178,6 +178,13 @@ func TestAttachToRunningChrome(t *testing.T) {
 		t.Errorf("after connecting, Chrome's tabs are %q, want the user's and Koder's page", got)
 	}
 	connection := manager.browserContext()
+	// Koder works in the background: the tab the user looks at stays in front.
+	if state, err := manager.Evaluate(ctx, chat, `document.visibilityState`); err != nil || state != `"hidden"` {
+		t.Errorf("Koder's tab visibility = %s, %v; want hidden, behind the user's tab", state, err)
+	}
+	if shot, err := manager.Screenshot(ctx, chat, browserapi.Locator{}, false, "png", 0); err != nil || len(shot.Data) == 0 {
+		t.Errorf("screenshot of Koder's background tab: %d bytes, %v", len(shot.Data), err)
+	}
 	if status := manager.Status(ctx, chat); !status.Attached || status.State != stateRunning || !strings.Contains(status.Version, "Chrome") {
 		t.Fatalf("status = %+v, want attached and running with Chrome's version", status)
 	}
