@@ -566,7 +566,9 @@ func (s *Server) handleClipboardImage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := websocket.Accept(w, r, nil)
+	// The state sent on connect is JSON of up to several megabytes;
+	// compressed it is about a quarter of that.
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionNoContextTakeover})
 	if err != nil {
 		return
 	}
@@ -2503,9 +2505,22 @@ type rpcResponse struct {
 const (
 	websocketHeartbeatInterval = 15 * time.Second
 	websocketStreamInterval    = 100 * time.Millisecond
-	websocketWriteTimeout      = 5 * time.Second
 	websocketReadLimit         = 1 << 20
 )
+
+// A write must finish within websocketWriteTimeout plus the time the
+// message takes at websocketMinWriteRate. A large state on a slow link,
+// such as a phone or a VPN, needs longer than a small event; with a fixed
+// limit the client reconnected, asked for the state again, and never got
+// it. Tests shorten both.
+var (
+	websocketWriteTimeout       = 5 * time.Second
+	websocketMinWriteRate int64 = 128 << 10 // bytes per second
+)
+
+func websocketWriteDeadline(size int) time.Duration {
+	return websocketWriteTimeout + time.Duration(int64(size)*int64(time.Second)/websocketMinWriteRate)
+}
 
 func decodeParams(raw json.RawMessage, out any) error {
 	if len(raw) == 0 || string(raw) == "null" {
@@ -2586,7 +2601,7 @@ func writeJSONLocked(ctx context.Context, conn *websocket.Conn, value any) (int,
 	if err != nil {
 		return 0, err
 	}
-	writeCtx, cancel := context.WithTimeout(ctx, websocketWriteTimeout)
+	writeCtx, cancel := context.WithTimeout(ctx, websocketWriteDeadline(len(data)))
 	defer cancel()
 	if err := conn.Write(writeCtx, websocket.MessageText, data); err != nil {
 		return 0, err
