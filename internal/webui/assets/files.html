@@ -23,6 +23,7 @@
   <script>window.KODER_ASSET_HASH = "__KODER_ASSET_HASH__";</script>
   <script defer src="/assets/markdown_runtime.js"></script>
   <script defer src="/assets/file_changes.js"></script>
+  <script defer src="/assets/pdf_preview.js"></script>
   <script defer src="/assets/file_browser.js"></script>
   <script defer src="/assets/vendor/alpine/cdn.min.js"></script>
 </head>
@@ -144,6 +145,24 @@
               </div>
             </template>
 
+            <template x-if="isPDFFile()">
+              <div class="file-browser-pdf" x-effect="mountPDF($el)">
+                <div class="file-browser-pdf-toolbar">
+                  <span class="small text-secondary" data-pdf-status x-text="pdfStatus()"></span>
+                  <div class="btn-group btn-group-sm" role="group" aria-label="PDF zoom">
+                    <button type="button" class="btn btn-outline-secondary" data-pdf-zoom-out title="Zoom out" @click="zoomPDF(1 / 1.25)" :disabled="!pdf.pages || pdf.zoom <= KoderPDFPreview.minZoom"><i class="bi bi-zoom-out"></i><span class="visually-hidden">Zoom out</span></button>
+                    <button type="button" class="btn btn-outline-secondary" data-pdf-zoom-fit title="Fit to width" @click="zoomPDF(0)" :disabled="!pdf.pages" x-text="Math.round(pdf.zoom * 100) + '%'"></button>
+                    <button type="button" class="btn btn-outline-secondary" data-pdf-zoom-in title="Zoom in" @click="zoomPDF(1.25)" :disabled="!pdf.pages || pdf.zoom >= KoderPDFPreview.maxZoom"><i class="bi bi-zoom-in"></i><span class="visually-hidden">Zoom in</span></button>
+                  </div>
+                </div>
+                <div class="file-browser-pdf-scroll">
+                  <div class="file-browser-pdf-pages"></div>
+                  <div class="file-browser-empty" x-show="pdf.loading"><span class="spinner-border text-primary"></span><div>Loading PDF</div></div>
+                  <div class="alert alert-danger m-3" x-show="pdf.error" x-text="pdf.error"></div>
+                </div>
+              </div>
+            </template>
+
             <template x-if="file.too_large && !isImageFile()">
               <div class="file-browser-empty">
                 <i class="bi bi-file-earmark-break"></i>
@@ -163,7 +182,7 @@
               <article class="markdown-body file-browser-markdown" x-html="previewHTML()" x-effect="void [file, changeEpoch, showChanges]; $nextTick(() => renderDiagrams($el))"></article>
             </template>
 
-            <template x-if="(!file.markdown || viewMode === 'source') && !file.binary && !file.too_large && !isImageFile()">
+            <template x-if="(!file.markdown || viewMode === 'source') && !file.binary && !file.too_large && !isImageFile() && !isPDFFile()">
               <pre class="file-browser-code"><code class="hljs" x-html="sourceHTML()"></code></pre>
             </template>
           </section>

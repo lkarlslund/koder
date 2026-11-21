@@ -227,6 +227,10 @@
     const pendingRPC = new Map();
     let rpcSeq = 0;
     const previewCache = {};
+    // The PDF viewer lives outside Alpine's reactive state: PDF.js objects
+    // use private fields, which a reactive proxy breaks.
+    let pdfViewer = null;
+    let pdfKey = '';
     return {
       sessionID: '',
       chatID: '',
@@ -264,6 +268,7 @@
       treeMarks: {},
       removedEntries: {},
       changeEpoch: 0,
+      pdf: {loading: false, error: '', pages: 0, page: 0, zoom: 1},
       imageLightbox: {open: false, kind: 'svg', src: '', html: '', title: '', meta: '', zoom: 1, panX: 0, panY: 0, dragging: false, dragX: 0, dragY: 0, pointers: {}, pinchDistance: 0, pinchZoom: 1},
 
       init() {
@@ -285,6 +290,7 @@
             this.selectedPath = '';
             this.selectedNode = null;
             this.currentDir = '';
+            this.closePDF();
             this.file = null;
             this.fileError = '';
             this.fileLoading = false;
@@ -894,6 +900,7 @@
       async loadFile(path, options = {}) {
         if (!this.sessionID || !path) return;
         if (options.reload) return this.reloadFile(path);
+        this.closePDF();
         latestFrom = null;
         const request = ++this.fileRequest;
         this.selectedPath = path;
@@ -963,6 +970,46 @@
       isImageFile() {
         const mime = String(this.file?.mime || '').toLowerCase();
         return Boolean(this.file?.image || mime.startsWith('image/'));
+      },
+
+      isPDFFile() {
+        return Boolean(this.file?.pdf);
+      },
+
+      // mountPDF shows the open PDF in root. A new version of the same file
+      // replaces the old one at the same place and zoom.
+      mountPDF(root) {
+        const file = this.file;
+        if (!file?.pdf || !window.KoderPDFPreview) return;
+        const key = [file.path, file.modified, file.size].join('|');
+        if (pdfViewer && pdfKey === key) return;
+        const keep = pdfViewer && pdfKey.startsWith(file.path + '|') ? {scrollTop: pdfViewer.scrollTop, zoom: pdfViewer.zoom} : {};
+        this.closePDF();
+        pdfKey = key;
+        pdfViewer = window.KoderPDFPreview.mount(root.querySelector('.file-browser-pdf-pages'), root.querySelector('.file-browser-pdf-scroll'), {
+          url: this.rawFileURL(file.path) + '&v=' + encodeURIComponent(file.modified || ''),
+          onState: state => { this.pdf = state; },
+          ...keep,
+        });
+      },
+
+      closePDF() {
+        pdfViewer?.destroy();
+        pdfViewer = null;
+        pdfKey = '';
+      },
+
+      // zoomPDF scales the pages by factor; 0 fits them to the width.
+      zoomPDF(factor) {
+        if (!pdfViewer) return;
+        if (factor === 0) pdfViewer.setZoom(1);
+        else pdfViewer.zoomBy(factor);
+      },
+
+      pdfStatus() {
+        if (this.pdf.loading) return 'Loading PDF';
+        if (!this.pdf.pages) return '';
+        return 'Page ' + this.pdf.page + ' of ' + this.pdf.pages;
       },
 
       imagePreviewURL() {

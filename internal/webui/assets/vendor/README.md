@@ -8,5 +8,6 @@ Vendored browser assets for the web UI.
 - Bootstrap 5.3.3 CSS: https://www.npmjs.com/package/bootstrap, MIT license
 - Bootstrap Icons 1.11.3 CSS and fonts: https://www.npmjs.com/package/bootstrap-icons, MIT license
 - Alpine.js 3.14.8: https://www.npmjs.com/package/alpinejs, MIT license
+- PDF.js 6.5.438 (pdfjs-dist: build, cmaps, standard_fonts, iccs, and the openjpeg, jbig2 and qcms wasm decoders): https://www.npmjs.com/package/pdfjs-dist, Apache-2.0 license
 
 These files are served from /assets/vendor and included in the web UI asset hash.

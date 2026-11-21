@@ -57,8 +57,10 @@ type fileContentResponse struct {
 	Content     string `json:"content,omitempty"`
 	Binary      bool   `json:"binary,omitempty"`
 	Image       bool   `json:"image,omitempty"`
-	TooLarge    bool   `json:"too_large,omitempty"`
-	Markdown    bool   `json:"markdown,omitempty"`
+	// PDF is set for a PDF; the preview reads it from the raw endpoint.
+	PDF      bool `json:"pdf,omitempty"`
+	TooLarge bool `json:"too_large,omitempty"`
+	Markdown bool `json:"markdown,omitempty"`
 	// Wikilinks maps each [[target]] in a Markdown file to the file it opens.
 	Wikilinks map[string]string `json:"wikilinks,omitempty"`
 	// Obsidian is set for a note in an Obsidian vault, with its settings.
@@ -189,7 +191,8 @@ func (s *Server) handleSessionFileRead(w http.ResponseWriter, r *http.Request, s
 	}
 	resp.MIME = mimeType
 	resp.Image = isFileBrowserImageMIME(mimeType)
-	if resp.Image {
+	resp.PDF = isFileBrowserPDFMIME(mimeType)
+	if resp.Image || resp.PDF {
 		writeFileBrowserJSON(w, r, resp)
 		return
 	}
@@ -238,11 +241,12 @@ func (s *Server) handleSessionFileRaw(w http.ResponseWriter, r *http.Request, se
 		return
 	}
 	mimeType := detectOpenFileBrowserMIME(file, rel)
-	if !isFileBrowserImageMIME(mimeType) {
-		http.Error(w, "file is not a supported image", http.StatusBadRequest)
+	if !isFileBrowserImageMIME(mimeType) && !isFileBrowserPDFMIME(mimeType) {
+		http.Error(w, "file is not a supported image or PDF", http.StatusBadRequest)
 		return
 	}
 	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 }
@@ -513,6 +517,10 @@ func detectOpenFileBrowserMIME(file *os.File, rel string) string {
 func isFileBrowserImageMIME(mimeType string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0]))
 	return strings.HasPrefix(normalized, "image/")
+}
+
+func isFileBrowserPDFMIME(mimeType string) bool {
+	return strings.EqualFold(strings.TrimSpace(strings.Split(mimeType, ";")[0]), "application/pdf")
 }
 
 func isMarkdownFile(name string) bool {
