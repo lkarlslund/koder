@@ -326,7 +326,7 @@ func (c *ToolCall) UnmarshalJSON(data []byte) error {
 	tool := ToolKind(strings.TrimSpace(in.Tool))
 	var result *ToolResult
 	if in.Result != nil && tool != "" {
-		result = &ToolResult{Text: in.Result.Text, Diff: in.Result.Diff, Data: json.RawMessage(in.Result.Data), Status: in.Result.Status}
+		result = &ToolResult{Text: in.Result.Text, Diff: storedToolDiff(tool, in.Result.Diff), Data: json.RawMessage(in.Result.Data), Status: in.Result.Status}
 	}
 	status := in.Status
 	approvalID := strings.TrimSpace(in.ApprovalID)
@@ -410,10 +410,21 @@ func (e *ToolExecution) UnmarshalJSON(data []byte) error {
 	tool := ToolKind(strings.TrimSpace(in.Tool))
 	var result *ToolResult
 	if in.Result != nil && tool != "" {
-		result = &ToolResult{Text: in.Result.Text, Diff: in.Result.Diff, Data: json.RawMessage(in.Result.Data), Status: in.Result.Status}
+		result = &ToolResult{Text: in.Result.Text, Diff: storedToolDiff(tool, in.Result.Diff), Data: json.RawMessage(in.Result.Data), Status: in.Result.Status}
 	}
 	*e = ToolExecution{Tool: tool, ToolCallID: in.ToolCallID, Args: in.Args, Result: result, Error: in.Error, StartedAt: in.StartedAt, EndedAt: in.EndedAt}
 	return nil
+}
+
+// storedToolDiff drops the diff that file_edit and file_write results
+// carried before r2195. It was the whole file with the changes marked, so a
+// chat that edits a large file many times grew by a copy of the file per
+// edit, and nothing read it: both tools keep a unified diff in their data.
+func storedToolDiff(tool ToolKind, diff string) string {
+	if tool == ToolKindFileEdit || tool == ToolKindFileWrite {
+		return ""
+	}
+	return diff
 }
 
 // ToolResult stores one completed tool response.

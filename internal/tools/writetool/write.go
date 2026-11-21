@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sergi/go-diff/diffmatchpatch"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
@@ -53,7 +52,7 @@ func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) 
 	if err != nil {
 		return tools.Result{}, err
 	}
-	beforeBytes, readErr := os.ReadFile(abs)
+	_, readErr := os.Stat(abs)
 	mode := os.FileMode(0o644)
 	action := "created"
 	if readErr == nil {
@@ -68,13 +67,10 @@ func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) 
 	if err := tools.WriteTextFile(abs, req.Args["content"], mode); err != nil {
 		return tools.Result{}, err
 	}
-	dmp := diffmatchpatch.New()
-	diffs := dmp.DiffMain(string(beforeBytes), req.Args["content"], false)
 	summary := fmt.Sprintf("%s %s", cases.Title(language.English).String(action), rel)
 	content, truncated := tools.TruncateText(req.Args["content"], tools.DefaultToolOutputLimit)
 	return tools.Result{
-		Output:   summary,
-		DiffText: dmp.DiffPrettyText(diffs),
+		Output: summary,
 		Meta: map[string]string{
 			"path":   rel,
 			"action": action,

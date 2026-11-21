@@ -227,3 +227,23 @@ func TestToolCallUnmarshalAcceptsCurrentFileToolKeys(t *testing.T) {
 		t.Fatalf("unexpected raw tool result data: %#v", decoded)
 	}
 }
+
+// file_edit and file_write results from before r2195 carried the whole
+// file as their diff; loading them drops it. Other tools keep their diff.
+func TestToolCallUnmarshalDropsWholeFileDiffOfFileTools(t *testing.T) {
+	for tool, keep := range map[string]bool{"file_edit": false, "file_write": false, "exec_command": true} {
+		var call ToolCall
+		if err := json.Unmarshal([]byte(`{"tool_call_id":"call_1","tool":"`+tool+`","status":"done","result":{"text":"done","diff":"the whole file","data":{"diff":"--- a\n+++ b\n"},"status":"ok"}}`), &call); err != nil {
+			t.Fatal(err)
+		}
+		if call.Result == nil {
+			t.Fatalf("%s: no result", tool)
+		}
+		if got := call.Result.Diff != ""; got != keep {
+			t.Errorf("%s: diff kept = %v, want %v", tool, got, keep)
+		}
+		if raw, _ := call.Result.Data.(json.RawMessage); !strings.Contains(string(raw), "+++ b") {
+			t.Errorf("%s: the stored data lost its diff: %s", tool, raw)
+		}
+	}
+}

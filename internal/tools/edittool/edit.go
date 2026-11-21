@@ -121,8 +121,6 @@ func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) 
 	if string(verifyBytes) != after {
 		return tools.Result{}, fmt.Errorf("post-write verification failed for %s: on-disk content differs from intended write (wrote %d bytes, read back %d bytes); the edit did not persist as intended", rel, len(after), len(verifyBytes))
 	}
-	dmp := diffmatchpatch.New()
-	diffs := dmp.DiffMain(before, after, false)
 	mode := "replaced 1 occurrence"
 	if replaceAll {
 		mode = fmt.Sprintf("replaced %d occurrences", occurrences)
@@ -130,8 +128,7 @@ func (tool) Call(ctx context.Context, opts tools.Options) (tools.Result, error) 
 	summary := fmt.Sprintf("Edited %s (%s)", rel, mode)
 	hunks, truncated := buildStoredHunksFromRanges(before, match.ranges, match.newString)
 	return tools.Result{
-		Output:   summary,
-		DiffText: dmp.DiffPrettyText(diffs),
+		Output: summary,
 		Meta: map[string]string{
 			"path":         rel,
 			"replace_all":  tools.BoolString(replaceAll),

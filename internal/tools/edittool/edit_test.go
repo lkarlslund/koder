@@ -2,6 +2,7 @@ package edittool
 
 import (
 	"context"
+	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -402,5 +403,34 @@ func TestExecuteEditNoMatchShowsClosestSections(t *testing.T) {
 	msg := err.Error()
 	if !strings.Contains(msg, "Did you mean one of these sections?") || !strings.Contains(msg, "   1| func alpha()") {
 		t.Fatalf("expected closest-section feedback, got %v", err)
+	}
+}
+
+// An edit stores what changed, not the file: a chat that edits a large
+// file many times grew by a copy of the file per edit.
+func TestEditResultStoresTheChangeNotTheFile(t *testing.T) {
+	dir := t.TempDir()
+	content := strings.Repeat("Some line of a long notes file that the agent keeps editing.\n", 4000) + "the end\n"
+	if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req := tools.Request{Tool: "file_edit", ToolCallID: "call_1", Args: map[string]string{"path": "notes.md", "old_string": "the end", "new_string": "the new end"}}
+	result, err := tool{}.Call(context.Background(), tools.Options{Runtime: tools.Runtime{Workdir: dir}, Request: req})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, _, err := tools.BuildToolResult(req, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) > 8<<10 {
+		t.Errorf("the result of a one-line edit to a %d KB file is %d KB", len(content)>>10, len(data)>>10)
+	}
+	if !strings.Contains(string(data), "+the new end") {
+		t.Errorf("the result does not show the change: %s", data)
 	}
 }
