@@ -740,7 +740,8 @@
     @media (max-width: 420px) {
       .topbar-actions .badge { display: none; }
       .topbar-actions .mobile-sidebar-toggle { display: inline-grid; }
-      .topbar-actions .btn[title="Sessions"], .topbar-actions .btn[title="Settings"] { width: 1.9rem; height: 1.9rem; }
+      .topbar-actions { gap: .2rem !important; }
+      .topbar-actions .btn { width: 1.9rem; height: 1.9rem; }
       .turn-header-title { font-size: .84rem; }
       .tool-status-badge { max-width: 5rem; }
       .sidebar { width: min(94vw, 380px); }
