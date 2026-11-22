@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net/url"
 	"os"
@@ -1190,12 +1191,24 @@ func (c *Controller) ensureModelConfig(ctx context.Context, providerID, modelID 
 		}
 	}
 	contextWindow := existing.ContextWindow
-	if provider.SupportsContextWindowDetection(providerCfg) && (!existingOK || contextWindow <= 0 || contextWindow == 32768 || !modelConfigIsCustom(existing)) {
-		if detected, err := provider.DetectContextWindow(ctx, sourceProviderID, providerCfg, sourceModelID, nil); err == nil && detected > 0 {
+	detecting := provider.SupportsContextWindowDetection(providerCfg) && (!existingOK || contextWindow <= 0 || contextWindow == 32768 || !modelConfigIsCustom(existing))
+	if detecting {
+		detected, err := provider.DetectContextWindow(ctx, sourceProviderID, providerCfg, sourceModelID, nil)
+		switch {
+		case err != nil:
+			slog.Warn("model context window detection failed", "provider", sourceProviderID, "model", sourceModelID, "error", err)
+		case detected > 0:
 			contextWindow = detected
+		default:
+			slog.Warn("model context window not reported by provider", "provider", sourceProviderID, "model", sourceModelID)
 		}
 	}
 	if contextWindow <= 0 {
+		if detecting {
+			// Unknown: store nothing, so the next use asks again instead of
+			// keeping the fallback as if the provider had said so.
+			return
+		}
 		contextWindow = 32768
 	}
 	preset := strings.TrimSpace(existing.ModelPreset)

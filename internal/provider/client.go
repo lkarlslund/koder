@@ -793,9 +793,12 @@ func (c *Client) Props(ctx context.Context, modelID string) (props propsResponse
 	return props, err
 }
 
+// DetectContextWindow asks the provider for a model's context window. It
+// returns 0 when the provider does not say, so a guess is never mistaken for
+// a measurement.
 func DetectContextWindow(ctx context.Context, providerID string, cfg config.Provider, modelID string, recorder *debugsrv.Recorder) (int, error) {
 	if !SupportsContextWindowDetection(cfg) {
-		return 32768, nil
+		return 0, nil
 	}
 	client, err := New(providerID, cfg, recorder)
 	if err != nil {
@@ -805,10 +808,7 @@ func DetectContextWindow(ctx context.Context, providerID string, cfg config.Prov
 	if err != nil {
 		return 0, err
 	}
-	if model.ContextWindow > 0 {
-		return model.ContextWindow, nil
-	}
-	return 32768, nil
+	return max(model.ContextWindow, 0), nil
 }
 
 func SupportsContextWindowDetection(cfg config.Provider) bool {

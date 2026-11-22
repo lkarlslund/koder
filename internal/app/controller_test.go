@@ -1818,6 +1818,57 @@ func TestControllerSetModelRefreshesDetectedContextWindow(t *testing.T) {
 	}
 }
 
+// A model whose server does not report a context window is not stored with
+// the fallback as if it had been detected: the next use asks again, and
+// picks up the size once the server reports it.
+func TestControllerSetModelDoesNotStoreUnreportedContextWindow(t *testing.T) {
+	var reported atomic.Bool
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		if reported.Load() {
+			_, _ = w.Write([]byte(`{"data":[{"id":"base"},{"id":"late-model","context_length":131072}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"base"},{"id":"late-model"}]}`))
+	}))
+	defer modelServer.Close()
+
+	ctrl, _ := newTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {Kind: provider.ProviderKindCompatible, BaseURL: modelServer.URL + "/v1", Timeout: time.Second},
+		}
+		cfg.Defaults.ProviderID = "test"
+		cfg.Defaults.ModelID = "base"
+		cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "base", ContextWindow: 65536})
+	})
+	ctx := context.Background()
+	selection := controllerSelection(ctrl)
+	if err := ctrl.SetModelForSelection(ctx, selection, "test", "late-model"); err != nil {
+		t.Fatalf("set model: %v", err)
+	}
+	ctrl.mu.RLock()
+	stored, ok := ctrl.cfg.ModelConfig("test", "late-model")
+	ctrl.mu.RUnlock()
+	if ok {
+		t.Fatalf("stored %+v for a model whose context window is unknown", stored)
+	}
+
+	reported.Store(true)
+	if err := ctrl.SetModelForSelection(ctx, selection, "test", "late-model"); err != nil {
+		t.Fatalf("set model again: %v", err)
+	}
+	state, err := ctrl.StateForSelection(ctx, selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.ContextWindow != 131072 {
+		t.Fatalf("context window = %d, want the reported 131072", state.ContextWindow)
+	}
+}
+
 func TestControllerStartDetectsActiveModelContextWindow(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

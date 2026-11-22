@@ -528,7 +528,7 @@ func TestDetectContextWindowFallsBackToPropsWhenModelListLacksContext(t *testing
 	}
 }
 
-func TestDetectContextWindowFallsBackWhenCompatibleEndpointHasNoProps(t *testing.T) {
+func TestDetectContextWindowIsUnknownWhenCompatibleEndpointHasNoProps(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}))
@@ -542,8 +542,8 @@ func TestDetectContextWindowFallsBackWhenCompatibleEndpointHasNoProps(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != 32768 {
-		t.Fatalf("unexpected fallback context window: %d", got)
+	if got != 0 {
+		t.Fatalf("context window = %d, want 0: the server did not report one", got)
 	}
 }
 
