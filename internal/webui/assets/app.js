@@ -1484,7 +1484,7 @@ function timeoutLabel(value) {
 		voicePresence: {occupied: false, owned_by_browser: false, device_kind: '', started_at: ''}, voicePresenceTimer: null, newChatMenuOpen: false, newChatMenuPosition: {top: '0px', right: '0px'},
 		worktreeManager: {open: false, busy: false, error: '', items: []},
 		chatCreator: {open: false, loading: false, busy: false, error: '', backends: [], draft: {isolation: '', title: 'Chat', backend: 'koder', workflow_role: 'orchestrator', interaction_mode: 'text', provider_id: '', model_id: '', permission_profile: '', milestone_key: '', task_ref: '', tool_states: {}}},
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptScrollOperation: 0, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptEnhancementObserver: null, transcriptEnhancementFrame: 0, transcriptEnhanceTimer: null, transcriptDOMUpdateScheduled: false, transcriptDOMUpdateCallbacks: [], scrollRestoreSeq: 0, timelineLoading: {}, timelineRepairing: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, composerDefaultSteer: readPreference('composerDefaultSend', 'steer') === 'steer', reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, mobileSidebarOpen: false, sidebarSwipe: null, topbarMenuOpen: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, transcriptProgrammaticScroll: false, transcriptScrollOperation: 0, transcriptUserScrollActive: false, transcriptUserScrollTimer: null, transcriptLastItemObserver: null, transcriptObservedLastItemID: '', transcriptObservedLastItemElement: null, transcriptObservedLastItemHeight: 0, transcriptEnhancementObserver: null, transcriptEnhancementFrame: 0, transcriptEnhanceTimer: null, transcriptDOMUpdateScheduled: false, transcriptDOMUpdateCallbacks: [], scrollRestoreSeq: 0, timelineLoading: {}, timelineRepairing: {}, expandedMilestones: {}, hiddenMilestoneStatuses: readHiddenMilestoneStatuses(), showArchivedPlanning: readPreference('showArchivedPlanning', 'false') === 'true', hiddenChatStatuses: readHiddenChatStatuses(), ttsSettings: {}, ttsTestText: 'Koder TTS test.', ttsTestBusy: false, ttsAudio: null, execProcessModal: {open: false, processID: ''}, cleanupDialog: {open: false, busy: false, error: '', statuses: {idle: true, completed: true, cancelled: true, error: true}}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, composerSendMenuOpen: false, composerDefaultSteer: readPreference('composerDefaultSend', 'steer') === 'steer', reasoningViews: {}, restartRequestPending: false, restartAcknowledged: false, restartHardRequested: false, restartAgeTick: Date.now(), restartAgeTimer: null, allowSessionURLSync: false, error: '', toast: '', toastTimer: null,
         init() {
           markdownImageContext = () => {
             const sessionID = this.currentSessionID();
@@ -1505,7 +1505,7 @@ function timeoutLabel(value) {
           this.$watch('composerAttachments', () => this.writeComposerDraft());
           this.connect();
 		  this.voicePresenceTimer = setInterval(() => this.refreshVoiceChatPresence(), 2000);
-          window.addEventListener('resize', () => { this.resizeComposer(); if (!this.isMobileLayout()) this.mobileSidebarOpen = false; this.reportClientStateSoon(); });
+          window.addEventListener('resize', () => { this.resizeComposer(); if (!this.isMobileLayout()) { this.mobileSidebarOpen = false; this.topbarMenuOpen = false; } this.reportClientStateSoon(); });
           window.addEventListener('online', () => this.connectNow());
           window.addEventListener('focus', () => { this.connectNow(); this.reportClientStateSoon(); this.clearTabAttention(); });
           window.addEventListener('blur', () => this.reportClientStateSoon());
@@ -1538,6 +1538,11 @@ function timeoutLabel(value) {
         handleGlobalKeydown(event) {
           if (!event || event.defaultPrevented || event.isComposing) return;
           if (event.key === 'Escape') {
+            if (this.topbarMenuOpen) {
+              event.preventDefault();
+              this.closeTopbarMenu();
+              return;
+            }
             if (this.mobileSidebarOpen) {
               event.preventDefault();
               this.closeMobileSidebar();
@@ -1779,7 +1784,37 @@ function timeoutLabel(value) {
         appShellStyle() { return '--sidebar-width: ' + this.sidebarWidth() + 'px;'; },
         isMobileLayout() { return (window.innerWidth || 0) <= 900; },
         openMobileSidebar() { this.mobileSidebarOpen = true; this.reportClientStateSoon(); },
-        closeMobileSidebar() { this.mobileSidebarOpen = false; this.reportClientStateSoon(); },
+        closeMobileSidebar() { this.mobileSidebarOpen = false; this.sidebarSwipe = null; this.reportClientStateSoon(); },
+        // A swipe to the right on the open sidebar closes it, as the
+        // panel slides in from the right edge. The panel follows the
+        // finger; a vertical drag scrolls it instead.
+        sidebarTouchStart(ev) {
+          if (!this.mobileSidebarOpen || ev.touches.length !== 1) return;
+          const t = ev.touches[0];
+          this.sidebarSwipe = {x: t.clientX, y: t.clientY, dx: 0, horizontal: null};
+        },
+        sidebarTouchMove(ev) {
+          const swipe = this.sidebarSwipe;
+          if (!swipe || ev.touches.length !== 1) return;
+          const t = ev.touches[0];
+          const dx = t.clientX - swipe.x, dy = t.clientY - swipe.y;
+          if (swipe.horizontal === null && Math.hypot(dx, dy) > 8) swipe.horizontal = Math.abs(dx) > Math.abs(dy) * 1.2;
+          if (!swipe.horizontal) return;
+          swipe.dx = Math.max(0, dx);
+          ev.currentTarget.style.transition = 'none';
+          ev.currentTarget.style.transform = `translateX(${swipe.dx}px)`;
+        },
+        sidebarTouchEnd(ev) {
+          const swipe = this.sidebarSwipe;
+          this.sidebarSwipe = null;
+          if (!swipe?.horizontal) return;
+          const el = ev.currentTarget;
+          el.style.transition = '';
+          el.style.transform = '';
+          if (swipe.dx > Math.min(90, el.offsetWidth / 3)) this.closeMobileSidebar();
+        },
+        toggleTopbarMenu() { this.topbarMenuOpen = !this.topbarMenuOpen; },
+        closeTopbarMenu() { this.topbarMenuOpen = false; },
         sidebarWidth() {
           const width = window.innerWidth || 1440;
           return Math.round(Math.max(280, Math.min(640, width * this.sidebarRatio)));

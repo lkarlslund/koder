@@ -2735,7 +2735,6 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected sidebar facts to render as compact single-line label/value rows")
 	}
 	if !strings.Contains(fullPage, `mobile-sidebar-toggle`) ||
-		!strings.Contains(fullPage, `mobile-sidebar-fab`) ||
 		!strings.Contains(fullPage, `mobileSidebarOpen`) ||
 		!strings.Contains(fullPage, `mobile-sidebar-backdrop`) ||
 		!strings.Contains(fullPage, `.sidebar.mobile-open`) ||

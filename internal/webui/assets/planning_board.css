@@ -12,8 +12,18 @@ body {
 
 .planning-board-topbar {
   flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: .5rem;
   min-height: 3rem;
   border-bottom: 1px solid var(--bs-border-color);
+}
+
+.planning-board-topbar > :first-child {
+  min-width: 0;
+}
+
+.planning-board-topbar > :last-child {
+  flex: 0 0 auto;
 }
 
 .planning-board-main {

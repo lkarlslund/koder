@@ -238,6 +238,9 @@
       treeLoading: false,
       treeError: '',
       selectedPath: '',
+      // On a phone the tree and the open file take turns on screen; this
+      // shows the tree while a file is open.
+      phoneTree: false,
       selectedNode: null,
       currentDir: '',
       mutationBusy: false,
@@ -906,6 +909,7 @@
         this.selectedPath = path;
         this.selectedNode = {path, name: path.split('/').pop(), dir: false};
         this.currentDir = this.parentPath(path);
+        this.phoneTree = false;
         this.fileLoading = true;
         this.fileError = '';
         this.file = null;

@@ -34,9 +34,14 @@
     .topbar-actions { flex: 0 0 auto; }
     .koder-logo { display: inline-block; width: 1.25rem; height: 1.25rem; flex: 0 0 1.25rem; vertical-align: text-bottom; }
     .topbar-workspace { max-width: min(34vw, 34rem); }
-    .mobile-sidebar-toggle, .mobile-sidebar-fab, .mobile-sidebar-header, .mobile-sidebar-backdrop { display: none; }
+    .mobile-sidebar-toggle, .mobile-sidebar-header, .mobile-sidebar-backdrop { display: none; }
+    .topbar-more { display: none; position: relative; }
+    .topbar-more > .btn { position: relative; }
+    .topbar-more-dot { position: absolute; top: -.25rem; right: -.25rem; width: .6rem; height: .6rem; border-radius: 50%; background: var(--bs-danger); border: 2px solid var(--bs-tertiary-bg); }
+    .topbar-menu { position: absolute; top: calc(100% + .35rem); right: 0; left: auto; z-index: 1045; min-width: 15rem; max-height: calc(100dvh - 4rem); overflow: auto; }
+    .topbar-menu .dropdown-item { display: flex; align-items: center; gap: .65rem; padding-block: .55rem; }
+    .topbar-menu .dropdown-item > .bi { width: 1.1rem; text-align: center; }
     /* The sidebar button rides just above the composer, however tall it is. */
-    .mobile-sidebar-fab { position: absolute; left: .75rem; bottom: calc(100% + .75rem); z-index: 1030; width: 2.75rem; height: 2.75rem; padding: 0; border-radius: 999px; }
     .topbar-session-edit { --bs-btn-padding-x: .2rem; --bs-btn-padding-y: .05rem; line-height: 1; color: var(--bs-secondary-color); text-decoration: none; }
     .topbar-session-edit:hover, .topbar-session-edit:focus-visible { color: var(--bs-body-color); }
     /* A list's status filter: a small toggle beside its heading that opens
@@ -497,6 +502,7 @@
     .session-results { min-height: 0; flex: 1 1 auto; overflow: auto; }
     .session-list { overflow: visible; }
     .session-selector-row { transition: opacity .2s ease; }
+    .session-selector-row > .btn-group { flex-shrink: 0; }
     @media (max-width: 760px) {
       .session-selector-filters { align-items: stretch; flex-direction: column; }
       .session-search-box { width: 100%; }
@@ -675,13 +681,15 @@
       .topbar-main .fw-semibold { font-size: .95rem; }
       .topbar-workspace { display: none; }
       .topbar-session-edit { display: none !important; }
-      .topbar-actions .badge { max-width: 5.5rem; overflow: hidden; text-overflow: ellipsis; }
-      .topbar-actions .btn { width: 2rem; height: 2rem; padding: 0; display: inline-grid; place-items: center; }
+      .topbar-actions .badge.topbar-status { max-width: 5.5rem; overflow: hidden; text-overflow: ellipsis; }
+      .topbar-actions > .btn, .topbar-more > .btn { width: 2.25rem; height: 2.25rem; padding: 0; display: inline-grid; place-items: center; }
+      .topbar-actions > .restart-needed { width: auto; padding-inline: .5rem; }
+      .topbar-wide, .topbar-build { display: none !important; }
+      .topbar-more { display: block; }
 	  .browser-preview-header { align-items: flex-start; flex-wrap: wrap; }
 	  .browser-preview-header > .d-flex { width: 100%; }
 	  .browser-preview-rate { flex: 1 1 auto; width: auto; }
       .mobile-sidebar-toggle { display: inline-flex; }
-      .mobile-sidebar-fab { display: inline-grid; place-items: center; }
       .mobile-sidebar-backdrop { position: fixed; inset: 0; z-index: 1035; display: block; background: rgba(0, 0, 0, .45); }
       .mobile-sidebar-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin: -1rem -1rem .75rem; padding: .75rem 1rem; border-bottom: 1px solid var(--bs-border-color); background: var(--bs-body-bg); }
       .sidebar-resizer { display: none; }
@@ -694,11 +702,13 @@
         width: min(88vw, 380px);
         max-width: 100vw;
         border-left: 1px solid var(--bs-border-color);
-        box-shadow: -0.75rem 0 2rem rgba(0, 0, 0, .28);
         transform: translateX(100%);
-        transition: transform .18s ease;
+        visibility: hidden;
+        transition: transform .18s ease, visibility 0s linear .18s;
+        overscroll-behavior: contain;
+        touch-action: pan-y;
       }
-      .sidebar.mobile-open { transform: translateX(0); }
+      .sidebar.mobile-open { transform: translateX(0); visibility: visible; transition: transform .18s ease; box-shadow: -0.75rem 0 2rem rgba(0, 0, 0, .28); }
       .transcript { padding: .75rem .75rem .5rem !important; }
       .transcript-turn { margin-bottom: 1rem !important; }
       .transcript-turn-continued { margin-top: -.9rem; }
@@ -737,11 +747,15 @@
     }
 	@media (max-width: 991.98px) { .settings-setup-label { display: none !important; } }
 	@media (prefers-reduced-motion: reduce) { .settings-setup-pulse { animation: none; } }
+    @media (max-width: 600px) {
+      /* The large dialogs fill the screen on a phone. */
+      .modal-backdrop-lite:has(> .settings-dialog, > .session-dialog, > .model-dialog) { padding: 0; }
+      .modal-backdrop-lite > .settings-dialog, .modal-backdrop-lite > .session-dialog, .modal-backdrop-lite > .model-dialog { width: 100%; height: 100%; max-height: none; border: 0 !important; border-radius: 0 !important; padding-bottom: env(safe-area-inset-bottom, 0px); }
+      .topbar-main > .fw-semibold { display: none; }
+      .topbar-actions .badge.topbar-status { width: .65rem; height: .65rem; min-width: .65rem; padding: 0; font-size: 0; border-radius: 50%; align-self: center; }
+      .topbar-actions > .restart-needed span { display: none; }
+    }
     @media (max-width: 420px) {
-      .topbar-actions .badge { display: none; }
-      .topbar-actions .mobile-sidebar-toggle { display: inline-grid; }
-      .topbar-actions { gap: .2rem !important; }
-      .topbar-actions .btn { width: 1.9rem; height: 1.9rem; }
       .turn-header-title { font-size: .84rem; }
       .tool-status-badge { max-width: 5rem; }
       .sidebar { width: min(94vw, 380px); }

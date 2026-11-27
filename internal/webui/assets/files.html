@@ -32,7 +32,7 @@
     <nav class="file-browser-topbar navbar bg-body-tertiary px-3">
       <div class="d-flex align-items-center gap-2 min-w-0">
         <img class="koder-logo" src="/assets/koder-logo.svg" alt="" aria-hidden="true">
-        <span class="fw-semibold">koder files</span>
+        <span class="fw-semibold text-nowrap">koder files</span>
         <span class="text-secondary small text-truncate" :title="projectRoot" x-text="projectRoot"></span>
       </div>
       <div class="d-flex align-items-center gap-2">
@@ -43,11 +43,11 @@
 
     <div class="file-browser-actions border-bottom p-2 d-flex align-items-center gap-2 flex-wrap">
       <input type="file" multiple hidden x-ref="uploadInput" data-file-upload @change="uploadFiles($event.target.files); $event.target.value = ''">
-      <button type="button" class="btn btn-sm btn-outline-primary" :disabled="mutationBusy" @click="$refs.uploadInput.click()"><i class="bi bi-upload"></i> Upload</button>
-      <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="mutationBusy" @click="beginFileDialog('mkdir')" data-file-mkdir><i class="bi bi-folder-plus"></i> New folder</button>
-      <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="mutationBusy || !selectedNode" @click="beginFileDialog('move')" data-file-move><i class="bi bi-arrows-move"></i> Rename / move</button>
-      <button type="button" class="btn btn-sm btn-outline-danger" :disabled="mutationBusy || !selectedNode" @click="beginFileDialog('delete')" data-file-delete><i class="bi bi-trash"></i> Delete</button>
-      <span class="small text-secondary text-truncate" :title="currentDir || 'Project root'" x-text="'Upload to: ' + (currentDir || 'Project root')"></span>
+      <button type="button" class="btn btn-sm btn-outline-primary" :disabled="mutationBusy" @click="$refs.uploadInput.click()"><i class="bi bi-upload"></i><span class="file-browser-action-label"> Upload</span></button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="mutationBusy" @click="beginFileDialog('mkdir')" data-file-mkdir><i class="bi bi-folder-plus"></i><span class="file-browser-action-label"> New folder</span></button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="mutationBusy || !selectedNode" @click="beginFileDialog('move')" data-file-move><i class="bi bi-arrows-move"></i><span class="file-browser-action-label"> Rename / move</span></button>
+      <button type="button" class="btn btn-sm btn-outline-danger" :disabled="mutationBusy || !selectedNode" @click="beginFileDialog('delete')" data-file-delete><i class="bi bi-trash"></i><span class="file-browser-action-label"> Delete</span></button>
+      <span class="small text-secondary text-truncate file-browser-upload-target" :title="currentDir || 'Project root'" x-text="'Upload to: ' + (currentDir || 'Project root')"></span>
       <div class="file-browser-change-controls ms-auto d-flex align-items-center gap-2">
         <label class="small text-secondary" for="file-follow-mode">Follow</label>
         <select id="file-follow-mode" class="form-select form-select-sm" :value="followMode" @change="setFollowMode($event.target.value)" data-file-follow title="Where to go when files change on disk">
@@ -55,8 +55,8 @@
           <option value="file">Edits in this file</option>
           <option value="files">Edited files</option>
         </select>
-        <button type="button" class="btn btn-sm" :class="showChanges ? 'btn-secondary' : 'btn-outline-secondary'" :aria-pressed="showChanges" @click="toggleChanges()" data-file-changes title="Mark what changed since you opened this page"><i class="bi bi-file-diff"></i> Changes</button>
-        <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!hasChanges()" @click="clearChanges()" data-file-clear-changes title="Clear the change marks and track changes from now"><i class="bi bi-eraser"></i> Clear</button>
+        <button type="button" class="btn btn-sm" :class="showChanges ? 'btn-secondary' : 'btn-outline-secondary'" :aria-pressed="showChanges" @click="toggleChanges()" data-file-changes title="Mark what changed since you opened this page"><i class="bi bi-file-diff"></i><span class="file-browser-action-label"> Changes</span></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!hasChanges()" @click="clearChanges()" data-file-clear-changes title="Clear the change marks and track changes from now"><i class="bi bi-eraser"></i><span class="file-browser-action-label"> Clear</span></button>
       </div>
     </div>
     <div class="file-browser-operation-status px-3 py-2 small border-bottom" role="status" aria-live="polite" x-show="mutationStatus || mutationError" style="display:none">
@@ -65,7 +65,7 @@
       <div class="text-danger" x-text="mutationError" style="white-space: pre-wrap"></div>
     </div>
 
-    <div class="file-browser-layout" :style="fileBrowserLayoutStyle()">
+    <div class="file-browser-layout" :class="{'file-open': selectedPath && !phoneTree}" :style="fileBrowserLayoutStyle()">
       <aside class="file-browser-tree-pane" @dragover="fileDragOver($event, currentDir)" @drop="dropFiles($event, currentDir)">
         <div class="file-browser-tree-header">
           <span class="small text-secondary">Files</span>
@@ -116,7 +116,8 @@
         <template x-if="file && !fileLoading">
           <section class="file-browser-file">
             <header class="file-browser-file-header">
-              <div class="min-w-0">
+              <button type="button" class="btn btn-sm btn-outline-secondary file-browser-back" title="Show the file tree" data-file-back @click="phoneTree = true"><i class="bi bi-chevron-left"></i><span class="visually-hidden">Show the file tree</span></button>
+              <div class="min-w-0 flex-grow-1">
                 <div class="fw-semibold text-truncate" x-text="file.path"></div>
                 <div class="small text-secondary" x-text="fileMeta()"></div>
               </div>

@@ -11,8 +11,18 @@ html, body {
 
 .file-browser-topbar {
   flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: .5rem;
   min-height: 3rem;
   border-bottom: 1px solid var(--bs-border-color);
+}
+
+.file-browser-topbar > :first-child {
+  min-width: 0;
+}
+
+.file-browser-topbar > :last-child {
+  flex: 0 0 auto;
 }
 
 .file-browser-layout {
@@ -229,10 +239,35 @@ html, body {
   pointer-events: none;
 }
 
+.file-browser-back {
+  display: none;
+  flex: 0 0 auto;
+}
+
 @media (max-width: 760px) {
+  .file-browser-shell {
+    height: 100dvh;
+  }
+
+  /* The tree and the open file take turns on a phone. */
   .file-browser-layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(12rem, 38vh) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .file-browser-layout.file-open .file-browser-tree-pane,
+  .file-browser-layout:not(.file-open) .file-browser-main {
+    display: none;
+  }
+
+  .file-browser-back {
+    display: inline-grid;
+    place-items: center;
+  }
+
+  .file-browser-action-label,
+  .file-browser-upload-target {
+    display: none;
   }
 
   .file-browser-resizer {
@@ -241,7 +276,10 @@ html, body {
 
   .file-browser-tree-pane {
     border-right: 0;
-    border-bottom: 1px solid var(--bs-border-color);
+  }
+
+  .file-browser-file-header {
+    gap: .5rem;
   }
 }
 
